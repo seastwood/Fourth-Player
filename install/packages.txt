@@ -1,0 +1,17 @@
+# Everything fourth-player needs that a desktop Linux Mint / Ubuntu does not
+# already have. gstreamer1.0-nice is the one that hurts to miss: webrtcbin
+# loads happily without it and then refuses to run, so every naive check
+# passes and the failure arrives only once a guest is waiting.
+python3-gi
+python3-evdev
+python3-websockets
+python3-cryptography
+python3-qrcode
+python3-pil
+gir1.2-gtk-3.0
+gir1.2-gst-plugins-bad-1.0
+gstreamer1.0-nice
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-vaapi
+va-driver-all

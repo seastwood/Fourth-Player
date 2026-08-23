@@ -1,0 +1,293 @@
+"""Two sockets: one the internet may reach, and one it may not.
+
+The public socket serves the join page and carries signalling. It is the only
+thing that ever needs to be exposed, and everything it will do for an anonymous
+caller is hand them a static file.
+
+The control socket -- starting sessions, reading the roster, kicking people --
+is a Unix domain socket in the user's runtime directory. That is not a check
+that administration is local; it is a transport that cannot be anything else.
+There is no header to forge and no address to spoof, and a misconfigured
+reverse proxy cannot accidentally expose it.
+"""
+
+import asyncio
+import json
+import logging
+import mimetypes
+import os
+import ssl
+from http import HTTPStatus
+
+import websockets
+
+from . import invites
+from .config import Config
+from .session import LiveSession
+from .tls import ensure_certificate
+
+log = logging.getLogger("fourthplayer.server")
+
+
+def _lan_address():
+    """The address of the interface that reaches the default route."""
+    import socket as _socket
+    try:
+        probe = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        probe.connect(("192.0.2.1", 1))       # TEST-NET-1, never routed
+        address = probe.getsockname()[0]
+        probe.close()
+        return address
+    except OSError:
+        return "127.0.0.1"
+
+WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+CONTROL_SOCKET = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
+
+# A guest is told what went wrong in the same words for every kind of failure
+# that could be probing: a wrong PIN, an unknown link and an expired one all
+# read alike, so guessing tells the guesser nothing about which half was wrong.
+REFUSED = "That link or PIN is not valid."
+
+
+class Server:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.loop = None
+        self.session = None
+        self._sockets = []
+
+    # -- public surface -----------------------------------------------------
+
+    async def _http(self, path, request_headers):
+        route = path.split("?", 1)[0]
+        if route == "/ws":
+            return None                      # let the WebSocket handshake run
+        if route == "/healthz":
+            return HTTPStatus.OK, [("content-type", "text/plain")], b"ok\n"
+        if route == "/" or route.startswith("/j/"):
+            return self._file("index.html")
+        if route.startswith("/static/"):
+            return self._file(route[len("/static/"):])
+        return HTTPStatus.NOT_FOUND, [], b"not found\n"
+
+    def _file(self, relative):
+        # Resolve and confirm the result is still inside the web root: the
+        # alternative is trusting that no arrangement of dots escapes it.
+        full = os.path.realpath(os.path.join(WEB_ROOT, relative))
+        if not full.startswith(os.path.realpath(WEB_ROOT) + os.sep):
+            return HTTPStatus.FORBIDDEN, [], b"no\n"
+        if not os.path.isfile(full):
+            return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        kind = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        with open(full, "rb") as handle:
+            body = handle.read()
+        return HTTPStatus.OK, [("content-type", kind),
+                               ("cache-control", "no-store")], body
+
+    def _address(self, socket_):
+        """Who is calling, for rate-limiting purposes.
+
+        X-Forwarded-For is trusted only when we were told we are behind a
+        proxy. Trusting it unconditionally would let any caller pick their own
+        rate-limit bucket by sending a header, which defeats the lockout
+        entirely.
+        """
+        if self.cfg.behind_proxy:
+            forwarded = socket_.request_headers.get("X-Forwarded-For", "")
+            if forwarded:
+                return forwarded.split(",")[-1].strip()
+        peer = socket_.remote_address
+        return peer[0] if peer else ""
+
+    async def _guest(self, socket_, path):
+        if path.split("?", 1)[0] != "/ws":
+            await socket_.close(1008, "unexpected path")
+            return
+
+        guest = None
+        outbox = asyncio.Queue()
+        writer = self.loop.create_task(self._drain(socket_, outbox))
+        try:
+            async for raw in socket_:
+                try:
+                    message = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                kind = message.get("t")
+
+                if kind in ("join", "resume") and guest is None:
+                    guest = await self._admit(socket_, message, outbox)
+                elif guest is None:
+                    await outbox.put({"t": "error", "message": REFUSED})
+                elif kind == "answer":
+                    guest.peer.set_remote_answer(message.get("sdp", ""))
+                elif kind == "ice" and message.get("candidate"):
+                    guest.peer.add_ice_candidate(
+                        int(message.get("sdpMLineIndex") or 0), message["candidate"])
+                elif kind == "bye":
+                    break
+        except websockets.ConnectionClosed:
+            pass
+        finally:
+            writer.cancel()
+            if guest is not None and self.session is not None:
+                self.session.drop(guest.slot, reason="disconnected")
+
+    async def _admit(self, socket_, message, outbox):
+        address = self._address(socket_)
+        if self.session is None or not self.session.open:
+            await outbox.put({"t": "error", "message": "There is no session open."})
+            return None
+        try:
+            if message.get("t") == "resume":
+                guest = self.session.resume(message.get("guest", ""), socket_)
+                guest_token = message.get("guest", "")
+            else:
+                guest, guest_token = self.session.admit(
+                    message.get("token", ""), str(message.get("pin", "")),
+                    socket_, address)
+        except invites.LockedOut as exc:
+            await outbox.put({"t": "error", "retry_after": round(exc.seconds),
+                              "message": f"Too many tries. Wait {round(exc.seconds)}s."})
+            return None
+        except invites.SessionFull:
+            await outbox.put({"t": "error", "message": "Every player slot is taken."})
+            return None
+        except invites.JoinError:
+            await outbox.put({"t": "error", "message": REFUSED})
+            return None
+
+        def on_signal(kind, payload):
+            outbox.put_nowait({"t": kind, **payload})
+
+        self.session.attach_peer(guest, on_signal)
+        await outbox.put({
+            "t": "joined", "slot": guest.slot, "label": guest.label,
+            "guest": guest_token, "remaining": round(self.session.remaining()),
+        })
+        return guest
+
+    async def _drain(self, socket_, outbox):
+        """One writer per socket, so signalling never races itself.
+
+        The offer must reach the browser before the candidates that belong to
+        it. Both arrive from the GStreamer thread, so without a single ordered
+        drain they can be sent in either order.
+        """
+        try:
+            while True:
+                message = await outbox.get()
+                await socket_.send(json.dumps(message))
+        except (asyncio.CancelledError, websockets.ConnectionClosed):
+            pass
+
+    # -- control surface ----------------------------------------------------
+
+    async def _control(self, reader, writer):
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    return
+                try:
+                    request = json.loads(line)
+                except ValueError:
+                    continue
+                reply = await self._command(request)
+                writer.write((json.dumps(reply) + "\n").encode())
+                await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            writer.close()
+
+    async def _command(self, request):
+        command = request.get("cmd")
+        try:
+            if command == "status":
+                return self._status()
+            if command == "start":
+                if self.session and self.session.open:
+                    return {"ok": False, "error": "a session is already open"}
+                minutes = int(request.get("minutes") or self.cfg.default_duration_minutes)
+                minutes = max(1, min(minutes, self.cfg.max_duration_minutes))
+                self.session = LiveSession(self.cfg, self.loop)
+                self.session.start(minutes * 60)
+                return self._status()
+            if command == "stop":
+                if self.session:
+                    self.session.stop(reason="stopped by the owner")
+                    self.session = None
+                return {"ok": True}
+            if command == "kick":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                self.session.kick(int(request.get("slot")))
+                return self._status()
+        except Exception as exc:                      # never kill the socket
+            log.exception("control command failed: %r", request)
+            return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": f"unknown command {command!r}"}
+
+    def _status(self):
+        if not (self.session and self.session.open):
+            return {"ok": True, "open": False}
+        clear = self.session.invite.clear_invite
+        return {
+            "ok": True,
+            "open": True,
+            "remaining": round(self.session.remaining()),
+            "slots": self.cfg.slots,
+            "guests": self.session.roster(),
+            "url": self.join_url(clear[0]) if clear else None,
+            "pin": clear[1] if clear else None,
+        }
+
+    def join_url(self, token):
+        base = self.cfg.public_url.rstrip("/") if self.cfg.public_url else ""
+        if not base:
+            scheme = "http" if self.cfg.behind_proxy else "https"
+            # 0.0.0.0 means "every interface", which is not somewhere a guest
+            # can go. Show the address of the one they could plausibly reach.
+            host = self.cfg.host
+            if host in ("0.0.0.0", "::", ""):
+                host = _lan_address()
+            base = f"{scheme}://{host}:{self.cfg.port}"
+        return f"{base}/j/{token}"
+
+    # -- running ------------------------------------------------------------
+
+    async def run(self):
+        self.loop = asyncio.get_running_loop()
+        context = None
+        if not self.cfg.behind_proxy:
+            ensure_certificate(self.cfg.cert_path, self.cfg.key_path)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(self.cfg.cert_path, self.cfg.key_path)
+
+        public = await websockets.serve(
+            self._guest, self.cfg.host, self.cfg.port,
+            ssl=context, process_request=self._http,
+            ping_interval=20, ping_timeout=20, max_size=64 * 1024)
+        self._sockets.append(public)
+        log.info("listening on %s:%d (%s)", self.cfg.host, self.cfg.port,
+                 "behind a proxy" if self.cfg.behind_proxy else "own TLS")
+
+        if os.path.exists(CONTROL_SOCKET):
+            os.unlink(CONTROL_SOCKET)
+        control = await asyncio.start_unix_server(self._control, path=CONTROL_SOCKET)
+        os.chmod(CONTROL_SOCKET, 0o600)
+        self._sockets.append(control)
+        log.info("control socket at %s", CONTROL_SOCKET)
+
+        try:
+            await asyncio.Future()
+        finally:
+            if self.session:
+                self.session.stop(reason="server shutting down")
+            for server in self._sockets:
+                server.close()
+            if os.path.exists(CONTROL_SOCKET):
+                os.unlink(CONTROL_SOCKET)

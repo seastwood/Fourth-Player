@@ -1,0 +1,21 @@
+#!/bin/sh
+# Raise or restore the GPU's DPM level, and nothing else.
+#
+# This exists so the server never needs general root. It accepts exactly three
+# words and writes them to exactly one kind of file, so the sudoers rule that
+# calls it without a password cannot be turned into anything more interesting.
+set -eu
+
+case "${1:-}" in
+  auto|high|low) level="$1" ;;
+  *) echo "usage: $0 auto|high|low" >&2; exit 2 ;;
+esac
+
+written=0
+for control in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+  [ -w "$control" ] || continue
+  printf '%s' "$level" > "$control"
+  written=$((written + 1))
+done
+
+[ "$written" -gt 0 ] || { echo "no amdgpu power control found" >&2; exit 1; }

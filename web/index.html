@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Fourth Player</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<main id="gate" class="gate">
+  <h1>Fourth&nbsp;Player</h1>
+  <p class="lede">Someone has opened a game for you to join.</p>
+
+  <form id="pin-form" autocomplete="off">
+    <label for="pin">Enter the PIN shown on their screen</label>
+    <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+           autocomplete="one-time-code" placeholder="000000" required>
+    <button type="submit" id="join">Join the game</button>
+  </form>
+
+  <p id="gate-error" class="error" role="alert" hidden></p>
+  <p class="footnote">You will need a controller. Keyboard and mouse are not
+     accepted &mdash; this connection can only move a gamepad.</p>
+</main>
+
+<div id="stage" class="stage" hidden>
+  <video id="screen" autoplay playsinline muted></video>
+
+  <div id="hud" class="hud">
+    <span id="slot" class="chip">&mdash;</span>
+    <span id="padstate" class="chip warn">No controller</span>
+    <span id="link" class="chip">connecting</span>
+    <span id="clock" class="chip"></span>
+    <button id="full" type="button" class="ghost">Fullscreen</button>
+  </div>
+
+  <div id="prompt" class="prompt">
+    <p><strong>Press any button on your controller.</strong></p>
+    <p class="footnote">Browsers hide gamepads until you use one.</p>
+  </div>
+</div>
+
+<script src="/static/frame.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

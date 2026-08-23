@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# Runtime state: the live session, its secrets and the self-signed certificate
+# this machine generated for itself. None of it means anything on another box.
+state/
+cert/

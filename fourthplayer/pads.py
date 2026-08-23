@@ -1,0 +1,202 @@
+"""Kernel-level virtual gamepads, one per guest.
+
+Each guest gets its own `/dev/uinput` device rather than sharing one, because
+that is the entire difference between a second player and a second hand on the
+same controller. RetroArch's udev joypad driver indexes pads by their event
+node, so a guest's pad is indistinguishable from a pad plugged into the front
+of the machine -- which is what lets kodi-retrobox's existing player picker
+handle remote guests without knowing they exist.
+
+The devices identify as an Xbox 360 pad (045e:028e) because every autoconfig
+profile, SDL mapping and libretro core already knows that layout. Announcing
+something novel would be honest and would also mean writing a mapping for it in
+every one of those places.
+
+Nothing here is privileged: the `uaccess` udev rule that JoyShockMapper already
+installs grants the logged-in user write access to /dev/uinput, and this was
+verified on the target machine before any of it was written.
+"""
+
+import time
+
+from evdev import UInput, AbsInfo, ecodes as e
+
+from . import protocol as P
+
+VENDOR, PRODUCT, BUSTYPE, VERSION = 0x045E, 0x028E, 0x0003, 0x0110
+
+# How long a pad may hear nothing before it is forced open. Short enough that a
+# dropped guest does not run into a wall for long, and long enough to survive
+# an ordinary network hiccup at the 8 ms send interval.
+DEADMAN_SECONDS = 0.25
+
+_BUTTON_MAP = [
+    (P.BTN_A, e.BTN_A), (P.BTN_B, e.BTN_B), (P.BTN_X, e.BTN_X), (P.BTN_Y, e.BTN_Y),
+    (P.BTN_LB, e.BTN_TL), (P.BTN_RB, e.BTN_TR),
+    (P.BTN_BACK, e.BTN_SELECT), (P.BTN_START, e.BTN_START), (P.BTN_GUIDE, e.BTN_MODE),
+    (P.BTN_LSTICK, e.BTN_THUMBL), (P.BTN_RSTICK, e.BTN_THUMBR),
+]
+
+# Sticks pass straight through; the trigger axes are rescaled because an Xbox
+# pad reports them in 0..255 and the protocol carries them at full precision.
+_STICK_MAP = [
+    (P.AX_LX, e.ABS_X), (P.AX_LY, e.ABS_Y),
+    (P.AX_RX, e.ABS_RX), (P.AX_RY, e.ABS_RY),
+]
+_TRIGGER_MAP = [(P.AX_LT, e.ABS_Z), (P.AX_RT, e.ABS_RZ)]
+
+TRIGGER_MAX = 255
+
+
+def capabilities():
+    """Exactly a gamepad, and deliberately nothing else.
+
+    This dict is the security boundary the whole design leans on: there is no
+    EV_KEY entry for a letter, no EV_REL for a mouse. A guest cannot type on
+    this machine because the device they are wired to cannot express a
+    keystroke -- not because a check refuses to forward one.
+    """
+    stick = AbsInfo(value=0, min=-32768, max=32767, fuzz=16, flat=128, resolution=0)
+    trigger = AbsInfo(value=0, min=0, max=TRIGGER_MAX, fuzz=0, flat=0, resolution=0)
+    hat = AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)
+    return {
+        e.EV_KEY: [code for _, code in _BUTTON_MAP],
+        e.EV_ABS: [
+            (e.ABS_X, stick), (e.ABS_Y, stick), (e.ABS_RX, stick), (e.ABS_RY, stick),
+            (e.ABS_Z, trigger), (e.ABS_RZ, trigger),
+            (e.ABS_HAT0X, hat), (e.ABS_HAT0Y, hat),
+        ],
+    }
+
+
+def to_events(state):
+    """Translate a decoded frame into (type, code, value) triples.
+
+    Split out from the device so it can be tested without a kernel: given a
+    PadState this is a pure function, and `tests/test_pads.py` leans on that.
+    """
+    out = []
+    for bit, code in _BUTTON_MAP:
+        out.append((e.EV_KEY, code, 1 if state.pressed(bit) else 0))
+    for axis, code in _STICK_MAP:
+        out.append((e.EV_ABS, code, state.axis(axis)))
+    for axis, code in _TRIGGER_MAP:
+        scaled = int(max(0, state.axis(axis)) * TRIGGER_MAX / P.TRIGGER_MAX)
+        out.append((e.EV_ABS, code, scaled))
+    # The D-pad arrives as four booleans and leaves as two signed axes. Pressing
+    # both sides of an axis at once is physically impossible on a real pad and
+    # some cores handle it badly, so opposing presses cancel rather than
+    # arbitrarily picking a winner.
+    x = state.pressed(P.BTN_RIGHT) - state.pressed(P.BTN_LEFT)
+    y = state.pressed(P.BTN_DOWN) - state.pressed(P.BTN_UP)
+    out.append((e.EV_ABS, e.ABS_HAT0X, x))
+    out.append((e.EV_ABS, e.ABS_HAT0Y, y))
+    return out
+
+
+class VirtualPad:
+    """One guest's pad. Writes only what changed, and opens on silence."""
+
+    def __init__(self, name, now=None):
+        self.name = name
+        self._ui = UInput(capabilities(), name=name, vendor=VENDOR,
+                          product=PRODUCT, version=VERSION, bustype=BUSTYPE)
+        self._last = {}
+        self._seq = None
+        self.last_seen = (now or time.monotonic)()
+        self.released = True
+
+    @property
+    def path(self):
+        """Where the kernel put this pad, or a placeholder if it will not say.
+
+        evdev locates the node by scanning /dev/input after the device is
+        created, and that lookup can come back empty on a busy machine. It is
+        only ever used for logging and for the roster, so a pad that cannot
+        name itself must not be allowed to take a whole session down -- which
+        is exactly what it did before this, from inside a log line.
+        """
+        device = getattr(self._ui, "device", None)
+        return getattr(device, "path", None) or "(node not resolved)"
+
+    def apply(self, state, now=None):
+        """Apply a frame. Returns False if it was stale and ignored."""
+        stamp = (now or time.monotonic)()
+        if self._seq is not None and not P.is_newer(state.seq, self._seq):
+            # Still proof of life: an out-of-order frame means the guest is
+            # talking, even though this particular one is not the newest truth.
+            self.last_seen = stamp
+            return False
+        self._seq = state.seq
+        self.last_seen = stamp
+        if state.release_all:
+            self.release_all()
+            return True
+        self._write(to_events(state))
+        self.released = False
+        return True
+
+    def release_all(self):
+        """Centre every axis and lift every button.
+
+        Called on a dead-man timeout, on a kick, and on shutdown. It must be
+        safe to call repeatedly, because all three can happen at once.
+        """
+        if self.released:
+            return
+        self._write(to_events(P.PadState()))
+        self.released = True
+
+    def _write(self, events):
+        changed = False
+        for etype, code, value in events:
+            key = (etype, code)
+            if self._last.get(key) == value:
+                continue
+            self._last[key] = value
+            self._ui.write(etype, code, value)
+            changed = True
+        if changed:
+            self._ui.syn()
+
+    def close(self):
+        try:
+            self.release_all()
+        finally:
+            self._ui.close()
+
+
+class PadSet:
+    """The pads for one session, and the dead-man sweep over them."""
+
+    def __init__(self, count, label="Fourth Player", now=None):
+        self._now = now or time.monotonic
+        self.pads = [VirtualPad(f"{label} {i + 1}", now=self._now) for i in range(count)]
+
+    def __len__(self):
+        return len(self.pads)
+
+    def __getitem__(self, index):
+        return self.pads[index]
+
+    def sweep(self, timeout=DEADMAN_SECONDS):
+        """Release any pad that has gone quiet. Returns the ones it opened.
+
+        This is not a nicety. Input arrives as snapshots, so a guest whose
+        connection dies mid-press leaves their pad holding whatever it held --
+        a stuck direction walks the character into a wall until someone
+        notices. Silence is the only signal that works here, because a
+        disconnected browser cannot send an apology.
+        """
+        stamp = self._now()
+        opened = []
+        for pad in self.pads:
+            if not pad.released and stamp - pad.last_seen > timeout:
+                pad.release_all()
+                opened.append(pad)
+        return opened
+
+    def close(self):
+        for pad in self.pads:
+            pad.close()
+        self.pads = []

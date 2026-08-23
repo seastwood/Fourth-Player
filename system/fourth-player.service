@@ -1,0 +1,38 @@
+[Unit]
+Description=Fourth Player -- browser guests join the game with real controllers
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/fourth-player
+ExecStart=/usr/bin/python3 -m fourthplayer serve
+Restart=on-failure
+RestartSec=3
+
+# The server needs three things from the system and nothing else: the X display
+# to capture, /dev/uinput to create pads on, and the render node to encode with.
+# Everything below removes something it has no business touching, so that a
+# remote-code-execution bug in a program that listens on the internet has as
+# little to work with as possible.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/fourth-player %h/.config/fourth-player
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+DeviceAllow=/dev/uinput rw
+DeviceAllow=/dev/dri rw
+DeviceAllow=char-input r
+
+[Install]
+WantedBy=graphical-session.target
