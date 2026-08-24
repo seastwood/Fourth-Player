@@ -208,10 +208,15 @@ el("unmute").addEventListener("click", () => {
 const LAYOUTS = {
   genesis: {
     name: "Mega Drive",
+    // Percentages inside the face box. The geometry has to close: with
+    // buttons 30% of the width across, the lowest one sits at 50% of the
+    // *height*, so the box must be no wider than about 1.5:1 or the bottom of
+    // A falls outside it -- which clipped A and B off the screen in landscape
+    // and pushed C against the edge in portrait.
     face: [
-      { id: "A", button: 2, x: 0, y: 55 },
-      { id: "B", button: 0, x: 35, y: 30 },
-      { id: "C", button: 1, x: 70, y: 5 },
+      { id: "A", button: 2, x: 0, y: 50 },
+      { id: "B", button: 0, x: 34, y: 27.5 },
+      { id: "C", button: 1, x: 68, y: 5 },
     ],
     start: 9,
   },
