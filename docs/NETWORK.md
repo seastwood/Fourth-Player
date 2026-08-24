@@ -44,7 +44,7 @@ Firewall → NAT → Port Forward
   Interface     WAN
   Protocol      UDP
   Destination   WAN address, port range 40000–40100
-  Redirect to   192.168.1.132, same range
+  Redirect to   192.168.1.50, same range      # your box
 ```
 
 > **A caveat that matters.** The server cannot currently bound that range.
@@ -114,7 +114,7 @@ signalling sockets stay open for the whole session.
 
 ```
 Name             fourthplayer
-Server           192.168.1.132:8443
+Server           192.168.1.50:8443            # your box
 Encrypt(SSL)     no      # behind_proxy = true
 Health check     HTTP, GET /healthz, expect 200
 ```

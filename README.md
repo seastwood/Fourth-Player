@@ -95,7 +95,7 @@ else you need is in `python3 -m fourthplayer --help`.
 ```
 $ python3 -m fourthplayer status
 session open, 58m 12s left
-  link: https://play.example.com/j/DXmJ0Yh5FsjGqdMZGCBFvAU_dvyGS1qFXtoCV7xOxsU
+  link: https://play.example.com/j/EXAMPLE-TOKEN-NOT-A-REAL-INVITE
   PIN:  570397
   guests: 1/3
     slot 0  Player 2   connected  8134 frames  /dev/input/event20
