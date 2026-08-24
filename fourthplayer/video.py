@@ -19,6 +19,7 @@ loop runs on its own thread and every callback is marshalled back with
 `call_soon_threadsafe`. Nothing in this module touches session state directly.
 """
 
+import concurrent.futures
 import logging
 import threading
 
@@ -61,6 +62,15 @@ class Stage:
         self._glib_loop = None
         self._thread = None
         self.has_audio = False
+        # Every add and remove of a peer goes through this one thread. Adding
+        # a peer while another is being torn down means two threads mutating
+        # one pipeline, and the symptom is the replacement refusing to reach
+        # PLAYING -- so a guest who reloaded got a black screen. One worker
+        # keeps them ordered; being a worker at all keeps them off the event
+        # loop, which is what stopped the server freezing for seconds at a
+        # time while a live peer was dismantled.
+        self.mutations = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="gst-mutate")
 
         # A keyframe a second unless told otherwise, whatever the frame rate.
         keyint = cfg.keyframe_interval or max(1, cfg.fps)
@@ -165,14 +175,22 @@ class Stage:
         self.pipeline.set_state(Gst.State.NULL)
         if self._glib_loop:
             self._glib_loop.quit()
+        self.mutations.shutdown(wait=True)
 
     # -- peers --------------------------------------------------------------
 
-    def add_peer(self, peer_id, on_signal):
-        """Attach one guest. `on_signal(kind, payload)` is called on the asyncio loop."""
+    def add_peer(self, peer_id, on_signal, configure=None):
+        """Attach one guest. `on_signal(kind, payload)` is called on the asyncio loop.
+
+        `configure` runs after the peer exists and before it is wired up, which
+        is the only window in which its callbacks can be set without racing the
+        first thing it does.
+        """
         if peer_id in self.peers:
             raise KeyError(f"peer {peer_id} is already attached")
         peer = Peer(self, peer_id, on_signal)
+        if configure is not None:
+            configure(peer)
         self.peers[peer_id] = peer
         peer.attach()
         # A guest who joins between keyframes sees nothing until the next one.
@@ -180,8 +198,17 @@ class Stage:
         self.force_keyframe()
         return peer
 
+    def take_peer(self, peer_id):
+        """Unregister a peer and hand it back, without tearing it down yet.
+
+        Freeing the name immediately matters: a guest who reloads is replaced
+        within milliseconds, and the new peer wants the same slot id while the
+        old one is still shutting down.
+        """
+        return self.peers.pop(peer_id, None)
+
     def remove_peer(self, peer_id):
-        peer = self.peers.pop(peer_id, None)
+        peer = self.take_peer(peer_id)
         if peer:
             peer.detach()
         return peer is not None

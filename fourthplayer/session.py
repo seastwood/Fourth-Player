@@ -10,6 +10,7 @@ buttons, and neither can reasonably own the other.
 """
 
 import asyncio
+import functools
 import logging
 import os
 import subprocess
@@ -254,23 +255,67 @@ class LiveSession:
         self.guests[record.slot] = guest
         return guest
 
-    def attach_peer(self, guest, on_signal):
+    async def attach_peer(self, guest, on_signal):
+        """Give a guest a peer, without blocking everybody else's video."""
         # A new peer means a new sender, whose sequence numbers start again at
         # zero. Without this the pad rejects everything they send as stale.
         guest.pad.adopt_new_sender()
-        peer = self.stage.add_peer(f"slot{guest.slot}", on_signal)
-        peer.on_input = guest.feed
-        # The media connection dying is what ends a guest -- not their
-        # signalling socket, which they only need to arrive and renegotiate.
-        peer.on_dead = lambda why: self.drop(guest.slot, reason=why)
+
+        def configure(peer):
+            peer.on_input = guest.feed
+            # The media connection dying is what ends a guest -- not their
+            # signalling socket, which they only need to arrive and
+            # renegotiate.
+            peer.on_dead = lambda why: self._peer_died(guest, peer, why)
+
+        peer = await self.loop.run_in_executor(
+            self.stage.mutations,
+            functools.partial(self.stage.add_peer,
+                              f"slot{guest.slot}", on_signal, configure))
         guest.peer = peer
         return peer
 
-    def detach_peer(self, guest):
-        if guest.peer is not None:
-            self.stage.remove_peer(guest.peer.id)
-            guest.peer = None
+    def _peer_died(self, guest, peer, why):
+        """A peer's media ended. Only act if it is still the current one.
+
+        A guest who reloads their page leaves the old peer dying while the new
+        one is already carrying them. That death arrives seconds later and used
+        to drop *the slot*, which by then belonged to the replacement -- so
+        refreshing the page reconnected you and then threw you out again, with
+        nothing to show for it but a page stuck on "rejoining".
+        """
+        if guest.peer is not peer:
+            log.debug("%s: an old peer died (%s); the current one is fine",
+                      guest.label, why)
+            return
+        if self.guests.get(guest.slot) is not guest:
+            log.debug("slot %d has moved on; ignoring a dead peer", guest.slot)
+            return
+        self.drop(guest.slot, reason=why)
+
+    def detach_peer(self, guest, background=True):
+        """Let a peer go. The slow half happens off the event loop.
+
+        Tearing down a *live* webrtcbin -- DTLS, SRTP and ICE all up -- takes
+        seconds, and doing it inline froze the whole server while a guest was
+        waiting to be let back in. Measured at 2.3 s on the target machine,
+        which is 2.3 s of every other guest's video not being served either.
+        """
+        peer, guest.peer = guest.peer, None
         guest.pad.release_all()
+        if peer is None:
+            return
+        # Its death is expected from here on, and must not be read as the
+        # guest's death -- particularly not the guest replacing them.
+        peer.on_dead = None
+        if self.stage is not None:
+            self.stage.take_peer(peer.id)
+        if background and self.stage is not None:
+            # The same single worker that adds peers, so a teardown and the
+            # attach that replaces it cannot touch the pipeline at once.
+            self.stage.mutations.submit(peer.detach)
+        else:
+            peer.detach()
 
     def drop(self, slot, reason="left"):
         """The socket went away. The slot stays theirs until kicked or expiry."""

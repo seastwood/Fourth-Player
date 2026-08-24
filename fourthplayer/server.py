@@ -192,7 +192,7 @@ class Server:
             guest.peer._on_signal = on_signal
             log.info("%s: signalling restored, stream untouched", guest.label)
         else:
-            self.session.attach_peer(guest, on_signal)
+            await self.session.attach_peer(guest, on_signal)
 
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,
