@@ -7,13 +7,32 @@ import logging
 import os
 import socket
 import sys
+import time
 
 from .config import Config, CONFIG_PATH
 from .server import Server, CONTROL_SOCKET
 
 
-def _control(request):
-    """Speak one command to a running server over its Unix socket."""
+def _control(request, wait=0.0):
+    """Speak one command to a running server over its Unix socket.
+
+    `wait` exists because the obvious way to start this is
+    `serve & fourth-player start`, and the control socket does not exist for
+    the first second or two of the server's life. Failing there sent people
+    back to the shell to run the same command again, which looked like the
+    server needed starting twice.
+    """
+    deadline = time.monotonic() + wait
+    while True:
+        reply = _control_once(request)
+        if reply.get("ok") or not reply.get("retryable"):
+            return reply
+        if time.monotonic() >= deadline:
+            return reply
+        time.sleep(0.25)
+
+
+def _control_once(request):
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(10)
@@ -26,10 +45,10 @@ def _control(request):
                     break
                 data += chunk
         return json.loads(data or b"{}")
-    except FileNotFoundError:
-        return {"ok": False, "error": "no server is running"}
-    except ConnectionRefusedError:
-        return {"ok": False, "error": "the server is not accepting commands"}
+    except (FileNotFoundError, ConnectionRefusedError):
+        return {"ok": False, "retryable": True,
+                "error": "no server is running (start it with: "
+                         "python3 -m fourthplayer serve)"}
 
 
 def main(argv=None):
@@ -41,11 +60,23 @@ def main(argv=None):
     run.add_argument("--behind-proxy", action="store_true",
                      help="plain HTTP; a reverse proxy terminates TLS")
     run.add_argument("--public-url", help="the base URL guests will use")
-    run.add_argument("--slots", type=int)
+    run.add_argument("--slots", type=int, help="how many guests may join")
+    run.add_argument("--fps", type=int, help="capture frame rate (try 30 if it lags)")
+    run.add_argument("--bitrate", type=int, metavar="KBPS",
+                     help="video bitrate ceiling in kb/s")
+    run.add_argument("--width", type=int)
+    run.add_argument("--height", type=int)
+    run.add_argument("--software", action="store_true",
+                     help="encode with x264 instead of the GPU")
     run.add_argument("--verbose", "-v", action="store_true")
 
     start = sub.add_parser("start", help="open a session")
     start.add_argument("--minutes", type=int)
+    start.add_argument("--wait", type=float, default=20.0, metavar="SECONDS",
+                       help="how long to wait for the server to come up")
+
+    extend = sub.add_parser("extend", help="add time to the open session")
+    extend.add_argument("--minutes", type=int, default=15)
 
     sub.add_parser("stop", help="close the session")
     sub.add_parser("status", help="show the session and its guests")
@@ -60,12 +91,16 @@ def main(argv=None):
     cfg = Config.load()
 
     if args.command == "serve":
-        for field in ("port", "slots", "public_url"):
+        for field in ("port", "slots", "public_url", "fps", "width", "height"):
             value = getattr(args, field, None)
             if value:
                 setattr(cfg, field, value)
+        if args.bitrate:
+            cfg.bitrate_kbps = args.bitrate
         if args.behind_proxy:
             cfg.behind_proxy = True
+        if args.software:
+            cfg.hardware_encode = False
         logging.basicConfig(
             level=logging.DEBUG if args.verbose else logging.INFO,
             format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -85,12 +120,12 @@ def main(argv=None):
         return _check(cfg)
 
     request = {"cmd": args.command}
-    if args.command == "start" and args.minutes:
+    if args.command in ("start", "extend") and args.minutes:
         request["minutes"] = args.minutes
     if args.command == "kick":
         request["slot"] = args.slot
 
-    reply = _control(request)
+    reply = _control(request, wait=getattr(args, "wait", 0.0))
     if not reply.get("ok"):
         print("error:", reply.get("error", "unknown"), file=sys.stderr)
         return 1

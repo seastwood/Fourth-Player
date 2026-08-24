@@ -58,10 +58,23 @@ function connect(hello) {
       case "ice":      return pc && pc.addIceCandidate({
                                 candidate: message.candidate,
                                 sdpMLineIndex: message.sdpMLineIndex });
+      case "ending":   return setChip("clock", timeLeft(message.remaining) + " left", "warn");
+      case "extended": return startClock(message.remaining);
+      case "closed":   return sessionOver(message.reason);
       case "error":    return gate.hidden ? setChip("link", message.message, "bad")
                                           : fail(message.message);
     }
   });
+}
+
+function sessionOver(reason) {
+  setChip("clock", "session ended", "bad");
+  setChip("link", reason || "closed", "bad");
+  el("hud").classList.add("show");
+  if (ticker) { clearInterval(ticker); ticker = null; }
+  // Nothing is coming back, so stop pretending: drop the saved credential so a
+  // reload asks for a PIN rather than silently failing to resume.
+  try { localStorage.removeItem(storageKey); } catch (_) {}
 }
 
 function joined(message) {
@@ -118,7 +131,7 @@ function startPadLoop() {
   window.addEventListener("gamepadconnected", (event) => {
     padIndex = event.gamepad.index;
     el("prompt").hidden = true;
-    setChip("padstate", event.gamepad.id.slice(0, 28), "ok");
+    describePad(event.gamepad);
   });
   window.addEventListener("gamepaddisconnected", () => {
     padIndex = null;
@@ -145,7 +158,7 @@ function tick() {
   if (pad && padIndex === null) {
     padIndex = pad.index;
     el("prompt").hidden = true;
-    setChip("padstate", pad.id.slice(0, 28), "ok");
+    describePad(pad);
   }
   sendFrame(pad, false);
 }
@@ -165,17 +178,23 @@ function setChip(id, text, kind) {
   chip.className = "chip" + (kind ? " " + kind : "");
 }
 
+function timeLeft(seconds) {
+  const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60);
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+let clockTimer = null;
 function startClock(seconds) {
   let left = seconds;
+  if (clockTimer) clearInterval(clockTimer);
   const paint = () => {
-    const m = Math.floor(left / 60), s = Math.floor(left % 60);
-    setChip("clock", `${m}:${String(s).padStart(2, "0")} left`,
+    setChip("clock", timeLeft(Math.max(0, left)) + " left",
             left < 300 ? "warn" : "");
     if (left <= 0) setChip("clock", "session ended", "bad");
     left -= 1;
   };
   paint();
-  setInterval(paint, 1000);
+  clockTimer = setInterval(paint, 1000);
 }
 
 el("full").addEventListener("click", () => {

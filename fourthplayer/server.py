@@ -57,6 +57,7 @@ class Server:
         self.loop = None
         self.session = None
         self._sockets = []
+        self._outboxes = set()
 
     # -- public surface -----------------------------------------------------
 
@@ -108,6 +109,7 @@ class Server:
 
         guest = None
         outbox = asyncio.Queue()
+        self._outboxes.add(outbox)
         writer = self.loop.create_task(self._drain(socket_, outbox))
         try:
             async for raw in socket_:
@@ -131,6 +133,7 @@ class Server:
         except websockets.ConnectionClosed:
             pass
         finally:
+            self._outboxes.discard(outbox)
             writer.cancel()
             if guest is not None and self.session is not None:
                 self.session.drop(guest.slot, reason="disconnected")
@@ -168,6 +171,11 @@ class Server:
             "guest": guest_token, "remaining": round(self.session.remaining()),
         })
         return guest
+
+    def _broadcast(self, message):
+        """Send one message to every connected guest."""
+        for outbox in list(self._outboxes):
+            outbox.put_nowait(message)
 
     async def _drain(self, socket_, outbox):
         """One writer per socket, so signalling never races itself.
@@ -214,13 +222,23 @@ class Server:
                 minutes = int(request.get("minutes") or self.cfg.default_duration_minutes)
                 minutes = max(1, min(minutes, self.cfg.max_duration_minutes))
                 self.session = LiveSession(self.cfg, self.loop)
+                self.session.on_notice = self._broadcast
                 self.session.start(minutes * 60)
                 return self._status()
             if command == "stop":
                 if self.session:
-                    self.session.stop(reason="stopped by the owner")
+                    await self.session.astop(reason="stopped by the owner")
                     self.session = None
                 return {"ok": True}
+            if command == "extend":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                minutes = max(1, int(request.get("minutes") or 15))
+                added = self.session.extend(minutes * 60)
+                if added <= 0:
+                    return {"ok": False,
+                            "error": "already at the maximum session length"}
+                return self._status()
             if command == "kick":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
@@ -267,10 +285,14 @@ class Server:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(self.cfg.cert_path, self.cfg.key_path)
 
-        public = await websockets.serve(
-            self._guest, self.cfg.host, self.cfg.port,
-            ssl=context, process_request=self._http,
-            ping_interval=20, ping_timeout=20, max_size=64 * 1024)
+        try:
+            public = await self._listen(context)
+        except OSError as exc:
+            if exc.errno == 98:      # EADDRINUSE
+                raise SystemExit(
+                    f"port {self.cfg.port} is already in use -- another "
+                    f"fourth-player is probably already running") from None
+            raise
         self._sockets.append(public)
         log.info("listening on %s:%d (%s)", self.cfg.host, self.cfg.port,
                  "behind a proxy" if self.cfg.behind_proxy else "own TLS")
@@ -286,8 +308,14 @@ class Server:
             await asyncio.Future()
         finally:
             if self.session:
-                self.session.stop(reason="server shutting down")
+                self.session.stop(reason="server shutting down")   # sync: loop is going
             for server in self._sockets:
                 server.close()
             if os.path.exists(CONTROL_SOCKET):
                 os.unlink(CONTROL_SOCKET)
+
+    async def _listen(self, context):
+        return await websockets.serve(
+            self._guest, self.cfg.host, self.cfg.port,
+            ssl=context, process_request=self._http,
+            ping_interval=20, ping_timeout=20, max_size=64 * 1024)

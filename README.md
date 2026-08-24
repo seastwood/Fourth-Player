@@ -37,6 +37,22 @@ guest 2 ─┼─► input router ─► one uinput pad each ─► /dev/input/e
 guest 3 ─┘
 ```
 
+## Why there are always three pads
+
+The pads exist for the whole session, not just while somebody is holding them,
+so an empty session still shows three controllers in a player picker. That is
+deliberate, and it is the lesser of two evils:
+
+- **A pad has to exist before the game starts.** kodi-retrobox's player picker
+  enumerates input devices when it launches. A pad created after that is a pad
+  that game will never assign to a player.
+- **A returning guest has to find the same pad.** Creating devices on demand
+  would give a guest who reloads their browser a *new* event node, which the
+  game sees as a different controller.
+
+Use `--slots 1` (or `slots` in the config) if you only ever expect one guest and
+the spare rows are in the way.
+
 ## A guest can only ever move a gamepad
 
 The single most important property here, and it is structural rather than
@@ -77,6 +93,34 @@ session open, 58m 12s left
   guests: 1/3
     slot 0  Player 2   connected  8134 frames  /dev/input/event20
 ```
+
+### If the picture lags
+
+Frame rate costs more than resolution here. The defaults are 720p30 at 6 Mb/s
+because halving the frame rate halves the encode load, and on this class of
+hardware that is what actually shortens the delay:
+
+```sh
+python3 -m fourthplayer serve --fps 60              # if the host has headroom
+python3 -m fourthplayer serve --bitrate 3000        # for a thin connection
+python3 -m fourthplayer serve --width 960 --height 540
+python3 -m fourthplayer serve --software            # no working GPU encoder
+```
+
+Everything is also settable in `~/.config/fourth-player/config.json`.
+
+### Running out of time
+
+Sessions warn their guests at five minutes, two minutes and thirty seconds, and
+the host can push the deadline back at any point:
+
+```sh
+python3 -m fourthplayer extend --minutes 30
+```
+
+Expiry tears everything down off the event loop and releases every pad *before*
+the devices disappear, so a game sees the buttons come up rather than losing a
+controller mid-press.
 
 For the internet half — the router, the DNS and the reverse proxy — see
 [docs/NETWORK.md](docs/NETWORK.md). That is the part most likely to go wrong and
@@ -174,7 +218,8 @@ which is what `test_webframe.py` and a human with a controller are for.
 Working and tested end to end on one machine: video, input, invites, expiry,
 kicking, the overlay and the Kodi add-on. Not yet done:
 
-- **no audio.** Video only. The pipeline has no Opus track yet.
+- **no audio.** Video only. The pipeline has no Opus track yet, and this is
+  the biggest remaining gap.
 - **ICE ports are ephemeral.** `webrtcbin`'s `ice-agent` cannot safely be
   touched from Python on GStreamer 1.24 — reading the property corrupts the
   agent and kills the process at negotiation — so the UDP range cannot be

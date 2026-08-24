@@ -189,7 +189,13 @@ async def run(args):
     endpoint = f"{scheme}://127.0.0.1:{cfg.port}/ws"
     async with websockets.connect(endpoint, ssl=context) as socket_:
         guest.socket = socket_
-        await socket_.send(json.dumps({"t": "join", "token": token, "pin": pin}))
+        if args.resume:
+            with open(args.token_file) as handle:
+                saved = handle.read().strip()
+            print("  resuming as a returning guest")
+            await socket_.send(json.dumps({"t": "resume", "guest": saved}))
+        else:
+            await socket_.send(json.dumps({"t": "join", "token": token, "pin": pin}))
 
         async def pump():
             async for raw in socket_:
@@ -197,6 +203,9 @@ async def run(args):
                 kind = message.get("t")
                 if kind == "joined":
                     print(f"  joined as {message['label']} (slot {message['slot']})")
+                    if message.get("guest") and args.token_file:
+                        with open(args.token_file, "w") as handle:
+                            handle.write(message["guest"])
                 elif kind == "offer":
                     guest.accept_offer(message["sdp"])
                 elif kind == "ice":
@@ -244,4 +253,9 @@ async def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=float, default=8.0)
+    parser.add_argument("--token-file", default="/tmp/fp-guest-token",
+                        help="where to keep the guest credential between runs")
+    parser.add_argument("--resume", action="store_true",
+                        help="come back as the guest from the last run, the way a "
+                             "reloaded browser does, instead of spending the PIN")
     sys.exit(asyncio.run(run(parser.parse_args())))

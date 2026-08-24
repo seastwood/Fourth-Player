@@ -136,6 +136,22 @@ class VirtualPad:
         self.released = False
         return True
 
+    def adopt_new_sender(self):
+        """Forget the sequence number, because a fresh browser restarts at zero.
+
+        This is what made a reconnecting guest able to watch but not play. The
+        pad remembers the last sequence it accepted; a reloaded page starts its
+        counter at 0 again; and `is_newer(0, 41000)` is correctly False, so
+        **every frame from the returning guest was discarded as stale** and the
+        pad never moved again for the rest of the session. Silent, total, and
+        indistinguishable from a broken controller.
+
+        Called whenever a peer attaches to this pad, which is the only moment
+        the sender can have changed.
+        """
+        self._seq = None
+        self.release_all()
+
     def release_all(self):
         """Centre every axis and lift every button.
 

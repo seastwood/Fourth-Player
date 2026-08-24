@@ -61,12 +61,14 @@ class Stage:
         self._glib_loop = None
         self._thread = None
 
+        # A keyframe a second unless told otherwise, whatever the frame rate.
+        keyint = cfg.keyframe_interval or max(1, cfg.fps)
         encoder = (
             f"vah264enc name=enc target-usage={cfg.target_usage} "
-            f"bitrate={cfg.bitrate_kbps} key-int-max={cfg.keyframe_interval} b-frames=0"
+            f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} b-frames=0"
             if cfg.hardware_encode else
             f"x264enc name=enc speed-preset=ultrafast tune=zerolatency "
-            f"bitrate={cfg.bitrate_kbps} key-int-max={cfg.keyframe_interval}"
+            f"bitrate={cfg.bitrate_kbps} key-int-max={keyint}"
         )
         convert = (f"vapostproc ! {_caps(cfg.width, cfg.height)}"
                    if cfg.hardware_encode else

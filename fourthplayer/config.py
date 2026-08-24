@@ -21,15 +21,21 @@ class Config:
     display: str = ":0"
     width: int = 1280
     height: int = 720
-    fps: int = 60
-    bitrate_kbps: int = 8000
+    # 30 rather than 60. Measured, this machine holds 54 fps at 720p60 with
+    # nothing else running -- and a game is something else running. Halving the
+    # frame rate halves the encode load, which is what actually shortens the
+    # delay between the television and the guest's screen. Set 60 if the host
+    # has the headroom.
+    fps: int = 30
+    bitrate_kbps: int = 6000
     hardware_encode: bool = True
     # target-usage 1 measured *fastest* on Polaris, which is the opposite of
     # what the name suggests; 4 and 7 both came in a third slower.
     target_usage: int = 1
-    # One second. A guest joining mid-session is sent an immediate keyframe
-    # anyway; this only bounds the wait if that request is lost.
-    keyframe_interval: int = 60
+    # 0 means "one second's worth", computed from the frame rate. A guest
+    # joining mid-session is sent an immediate keyframe anyway; this only
+    # bounds the wait if that request goes missing.
+    keyframe_interval: int = 0
 
     # -- webrtc --
     stun_server: str = "stun://stun.cloudflare.com:3478"
@@ -39,7 +45,10 @@ class Config:
     # for three guests sharing one bundled connection each.
     rtp_port_min: int = 40000
     rtp_port_max: int = 40100
-    jitter_ms: int = 40
+    # The receiver's buffer. Lower is less delay and less tolerance for a
+    # network that arrives unevenly; 30 ms is a reasonable middle for people on
+    # home connections rather than mobile data.
+    jitter_ms: int = 30
 
     # -- session --
     slots: int = 3

@@ -16,12 +16,17 @@ import subprocess
 import sys
 import time
 
-from . import gpu, invites, pads as padlib, protocol
+from . import gpu, invites, pads as padlib, protocol, retroarch
 from .video import Stage
 
 log = logging.getLogger("fourthplayer.session")
 
 SWEEP_INTERVAL = 0.05
+
+# Guests are told the session is running out at these many seconds remaining,
+# so the end is something you can see coming rather than something that happens
+# to you mid-game.
+WARN_AT = (300, 120, 30)
 
 
 class GuestConnection:
@@ -68,6 +73,8 @@ class LiveSession:
         self.guests = {}          # slot -> GuestConnection
         self._overlay = None
         self._previous_dpm = None
+        self._warned = set()
+        self.on_notice = None      # set by the server: broadcast to guests
         self._sweeper = None
         self.opened_at = None
         self._previous_dpm = None
@@ -88,9 +95,16 @@ class LiveSession:
         # picker enumerates evdev devices at launch, so a pad that appears
         # after RetroArch starts is a pad that game will never see.
         self.pads = padlib.PadSet(self.cfg.slots)
+        # Tell RetroArch what these pads are before anything can read them,
+        # or it guesses and the guest's A button ends up somewhere else.
+        retroarch.write_profiles([pad.name for pad in self.pads])
         self.stage = Stage(self.cfg, self.loop)
         self.stage.start()
         self.opened_at = now
+        # Thresholds already behind us at the start are not warnings, they are
+        # noise: a two-minute session would otherwise announce "ending in five
+        # minutes" and "ending in two minutes" the instant it opened.
+        self._warned = {w for w in WARN_AT if w >= duration_seconds}
         if self.cfg.manage_gpu_clocks:
             self._previous_dpm = gpu.current()
             gpu.set_level("high")
@@ -126,30 +140,90 @@ class LiveSession:
         self._overlay = None
 
     def stop(self, reason="closed"):
+        """Close the session. Blocks; prefer `astop` from inside the loop."""
+        parts = self._begin_stop(reason)
+        if parts:
+            self._finish_stop(*parts)
+
+    async def astop(self, reason="closed"):
+        """Close without blocking the event loop.
+
+        Tearing a VAAPI pipeline down and destroying uinput devices both take
+        real time, and doing them inline froze everything the server was
+        supposed to still be doing -- which is how a session simply running out
+        of time managed to drag the whole machine down with it.
+        """
+        parts = self._begin_stop(reason)
+        if parts:
+            await self.loop.run_in_executor(None, self._finish_stop, *parts)
+
+    def _begin_stop(self, reason):
+        """Everything that is fast, in the order that is kindest to a game."""
         if self.invite is None:
-            return
+            return None
         log.info("session closing (%s)", reason)
+        self.notify({"t": "closed", "reason": reason})
+
+        # Guests go first, and dropping them releases their pads. A game must
+        # see the buttons come up *before* the device disappears from under it,
+        # or it is left holding a direction from a controller that no longer
+        # exists.
         for slot in list(self.guests):
             self.drop(slot, reason=reason)
+
         self._stop_overlay()
-        if self._sweeper:
-            self._sweeper.cancel()
+
+        # Never cancel the sweeper from inside the sweeper.
+        if self._sweeper is not None:
+            try:
+                current = asyncio.current_task()
+            except RuntimeError:
+                current = None
+            if current is not self._sweeper:
+                self._sweeper.cancel()
             self._sweeper = None
-        if self.stage:
-            self.stage.stop()
-            self.stage = None
-        if self.pads:
-            self.pads.close()
-            self.pads = None
+
         if self.cfg.manage_gpu_clocks and self._previous_dpm:
             gpu.set_level(self._previous_dpm)
             self._previous_dpm = None
+
+        stage, pads = self.stage, self.pads
+        self.stage = self.pads = None
         self.invite.destroy()
         self.invite = None
         self.opened_at = None
+        self._warned = set()
+        return stage, pads
+
+    def _finish_stop(self, stage, pads):
+        """The slow half, run off the event loop."""
+        if stage is not None:
+            stage.stop()
+        if pads is not None:
+            # A beat between releasing and unplugging, so anything reading
+            # these devices processes the release first.
+            time.sleep(0.15)
+            pads.close()
 
     def remaining(self):
         return self.invite.remaining(self._now()) if self.invite else 0.0
+
+    def extend(self, seconds):
+        """Push the deadline back. The invite and every guest survive it."""
+        if self.invite is None:
+            raise RuntimeError("no session is open")
+        limit = self.cfg.max_duration_minutes * 60
+        total = (self.invite.expires_at - self.invite.started_at) + seconds
+        if total > limit:
+            seconds = max(0.0, limit - (self.invite.expires_at - self.invite.started_at))
+        self.invite.expires_at += seconds
+        # Warnings already given are re-armed, so a session extended past a
+        # threshold warns again when it comes back round.
+        self._warned = {w for w in self._warned if w < self.remaining()}
+        log.info("session extended by %.0f minutes, %.0f left",
+                 seconds / 60, self.remaining() / 60)
+        self.notify({"t": "extended", "remaining": round(self.remaining())})
+        return seconds
 
     # -- guests -------------------------------------------------------------
 
@@ -180,6 +254,9 @@ class LiveSession:
         return guest
 
     def attach_peer(self, guest, on_signal):
+        # A new peer means a new sender, whose sequence numbers start again at
+        # zero. Without this the pad rejects everything they send as stale.
+        guest.pad.adopt_new_sender()
         peer = self.stage.add_peer(f"slot{guest.slot}", on_signal)
         peer.on_input = guest.feed
         guest.peer = peer
@@ -220,17 +297,32 @@ class LiveSession:
 
     # -- the sweep ----------------------------------------------------------
 
+    def notify(self, message):
+        if self.on_notice is not None:
+            try:
+                self.on_notice(message)
+            except Exception:
+                log.exception("could not deliver a notice to guests")
+
     async def _sweep_forever(self):
-        """Release quiet pads, and close the session on its deadline."""
+        """Release quiet pads, warn about the deadline, and close on it."""
         try:
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL)
                 if self.pads:
                     for pad in self.pads.sweep():
                         log.debug("dead-man: released %s", pad.name)
-                if self.invite and not self.invite.alive(self._now()):
+                if not self.invite:
+                    return
+                left = self.remaining()
+                for threshold in WARN_AT:
+                    if left <= threshold and threshold not in self._warned:
+                        self._warned.add(threshold)
+                        log.info("session ends in %.0f seconds", left)
+                        self.notify({"t": "ending", "remaining": round(left)})
+                if not self.invite.alive(self._now()):
                     log.info("session reached its deadline")
-                    self.stop(reason="expired")
+                    await self.astop(reason="expired")
                     return
         except asyncio.CancelledError:
             raise

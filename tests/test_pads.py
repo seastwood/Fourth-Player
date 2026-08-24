@@ -119,6 +119,23 @@ last = dict(((t, c), v) for t, c, v in
 check(last[(e.EV_ABS, e.ABS_HAT0X)] == 0, "the stuck direction is centred")
 check(pads.sweep() == [], "sweeping again does not re-release it")
 
+print("\na reconnecting guest starts counting again from zero")
+clock[0] = 0.0
+pad = PADS.VirtualPad("rejoin", now=lambda: clock[0])
+for seq in range(1, 400):
+    pad.apply(P.PadState(seq=seq, buttons=1 << P.BTN_A), now=lambda: clock[0])
+check(pad._seq == 399, "the pad tracked the sequence up to 399")
+# The browser reloads. Its counter restarts, and every frame now looks stale.
+stale = pad.apply(P.PadState(seq=0, buttons=1 << P.BTN_B), now=lambda: clock[0])
+check(stale is False,
+      "without being told, a restarted counter reads as stale -- this is the bug")
+pad.adopt_new_sender()
+fresh = pad.apply(P.PadState(seq=0, buttons=1 << P.BTN_B), now=lambda: clock[0])
+check(fresh is True, "after adopt_new_sender the same frame is accepted")
+check(pad._ui.written, "and it actually reached the device")
+pad.adopt_new_sender()
+check(pad.released, "adopting also releases whatever the old guest was holding")
+
 print("\nrelease is idempotent and close is safe")
 pads[1].release_all()
 pads.close()

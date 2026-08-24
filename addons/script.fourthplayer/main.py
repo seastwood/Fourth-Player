@@ -22,6 +22,7 @@ CONTROL_SOCKET = os.path.join(
     "fourth-player.sock")
 
 DURATIONS = [30, 60, 120, 240]
+EXTENSIONS = [15, 30, 60]
 
 
 def ask(request, timeout=10):
@@ -104,6 +105,19 @@ def manage(status):
            else reply.get("error", "Could not remove them."))
 
 
+def extend():
+    dialog = xbmcgui.Dialog()
+    labels = ["%d more minutes" % m if m < 60 else "1 more hour" for m in EXTENSIONS]
+    choice = dialog.select("Add how much time?", labels)
+    if choice < 0:
+        return
+    reply = ask({"cmd": "extend", "minutes": EXTENSIONS[choice]})
+    if reply.get("ok"):
+        notify("Session now has %d minutes left." % (reply.get("remaining", 0) // 60))
+    else:
+        notify(reply.get("error", "Could not extend it."), xbmcgui.NOTIFICATION_ERROR)
+
+
 def stop():
     if not xbmcgui.Dialog().yesno(
             ADDON_NAME, "Close the session?\n\nEveryone is disconnected and the "
@@ -129,12 +143,15 @@ def main():
     remaining = status.get("remaining", 0)
     choice = xbmcgui.Dialog().select(
         "Session open · %d playing · %d min left" % (guests, remaining // 60),
-        ["Show the link and PIN", "Remove a player", "Close the session"])
+        ["Show the link and PIN", "Add more time", "Remove a player",
+         "Close the session"])
     if choice == 0:
         show(status)
     elif choice == 1:
-        manage(status)
+        extend()
     elif choice == 2:
+        manage(status)
+    elif choice == 3:
         stop()
 
 
