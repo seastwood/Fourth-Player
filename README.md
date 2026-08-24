@@ -182,9 +182,16 @@ Two things catch people out, and neither is a fault in the add-on:
   list somebody arranged by hand, and nothing new joins it by itself:
 
 ```sh
+# Stop Kodi first -- it writes this menu back out when it exits.
 install/add-kodi-menu.py            # add FOURTH PLAYER to the home menu
 install/add-kodi-menu.py --remove   # take it off again
 ```
+
+It refuses to run while Kodi is up, and that guard is there because the entry
+was added once, worked, and vanished an hour later with the file byte-identical
+to its backup. Kodi holds the menu in memory and writes it back on exit or on a
+skin reload, so an edit made underneath it is reverted silently and long after
+you would connect the two events.
 
 That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a

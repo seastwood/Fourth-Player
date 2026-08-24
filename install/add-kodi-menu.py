@@ -12,13 +12,21 @@ arranged, and a diff of the whole menu is a poor way to add one line to it.
 
 Safe to run twice: it looks for the entry before adding it.
 
+**Stop Kodi first.** Kodi keeps this menu in memory and writes it back out when
+it exits or reloads its skin, so an edit made underneath a running Kodi is
+quietly reverted -- which is exactly what happened the first time: the entry
+appeared, worked, and was gone an hour later with the file byte-identical to
+its backup. It refuses to run while Kodi is up unless you insist.
+
     install/add-kodi-menu.py            add it
     install/add-kodi-menu.py --remove   take it out again
+    install/add-kodi-menu.py --force    do it anyway, and restart Kodi yourself
 """
 
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -45,6 +53,14 @@ AFTER = ("RunScript(script.usbip)", "RunScript(script.bluetooth)",
          "RunScript(script.joyshock)")
 
 
+def kodi_running():
+    try:
+        return subprocess.run(["pgrep", "-x", "kodi.bin"],
+                              capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def icon():
     for candidate in ICONS:
         if candidate.startswith("special://") or os.path.exists(candidate):
@@ -56,7 +72,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--menu", default=MENU)
     parser.add_argument("--remove", action="store_true")
+    parser.add_argument("--force", action="store_true",
+                        help="edit even though Kodi is running (restart it "
+                             "immediately afterwards, or the change is lost)")
     args = parser.parse_args()
+
+    if kodi_running() and not args.force:
+        print("Kodi is running.\n", file=sys.stderr)
+        print("It holds this menu in memory and writes it back when it exits, "
+              "so an edit made now\nis reverted the next time Kodi shuts down "
+              "or reloads its skin -- silently, and\nhours later.\n",
+              file=sys.stderr)
+        print("Stop Kodi, run this again, then start Kodi. Or pass --force if "
+              "you are about to\nrestart it yourself.", file=sys.stderr)
+        return 2
 
     if not os.path.exists(args.menu):
         print(f"no skin-shortcuts menu at {args.menu}", file=sys.stderr)
@@ -94,7 +123,11 @@ def main():
         handle.write(new)
 
     print(f"menu updated (previous kept at {os.path.basename(backup)})")
-    print("Kodi caches the menu -- restart it, or reload the skin, to see it.")
+    if kodi_running():
+        print("Kodi is running: restart it NOW, or it will write this change "
+              "back out.")
+    else:
+        print("Start Kodi and the entry will be there.")
     return 0
 
 
