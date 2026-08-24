@@ -118,6 +118,51 @@ for case, raw in zip(cases, frames):
         check(all(a == 0 for a in state.axes),
               "%s: every axis is centred" % case["name"])
 
+print("\nthe on-screen d-pad points where a thumb is")
+DIRS = r"""
+const F = require(process.argv[1]);
+const cases = JSON.parse(require("fs").readFileSync(0, "utf8"));
+process.stdout.write(JSON.stringify(cases.map(c => F.direction(c[0], c[1]))));
+"""
+points = [
+    ("right",        [1, 0],        ["right"]),
+    ("left",         [-1, 0],       ["left"]),
+    ("up",           [0, -1],       ["up"]),
+    ("down",         [0, 1],        ["down"]),
+    ("down-right",   [0.7, 0.7],    ["down", "right"]),
+    ("down-left",    [-0.7, 0.7],   ["down", "left"]),
+    ("up-left",      [-0.7, -0.7],  ["up", "left"]),
+    ("up-right",     [0.7, -0.7],   ["up", "right"]),
+    ("dead centre",  [0, 0],        []),
+    ("a resting thumb", [0.15, 0.1], []),
+    ("just outside the dead zone", [0.35, 0.0], ["right"]),
+]
+result = subprocess.run(
+    [node, "-e", DIRS, "--", os.path.join(ROOT, "web", "frame.js")],
+    input=json.dumps([p for _, p, _ in points]), capture_output=True, text=True)
+if result.returncode != 0:
+    print("  FAIL  node could not run direction():\n" + result.stderr)
+    sys.exit(1)
+got = json.loads(result.stdout)
+for (name, _, want), have in zip(points, got):
+    check(sorted(have) == sorted(want),
+          "%s -> %s (expected %s)" % (name, have or "nothing", want or "nothing"))
+
+print("\nand the frame carries touch buttons the same way a pad does")
+MERGE = r"""
+const F = require(process.argv[1]);
+// A d-pad direction and a face button held together, as a thumb on each side.
+const buttons = (1 << 15) | (1 << 2);
+process.stdout.write(JSON.stringify(
+  Array.from(new Uint8Array(F.buildRaw(buttons, [0,0,0,0,0,0], 3, false)))));
+"""
+result = subprocess.run([node, "-e", MERGE, "--", os.path.join(ROOT, "web", "frame.js")],
+                        capture_output=True, text=True)
+merged = P.decode(bytes(json.loads(result.stdout)))
+check(merged.pressed(P.BTN_RIGHT) and merged.pressed(P.BTN_X),
+      "a direction and a face button survive together")
+check(not merged.pressed(P.BTN_A), "and nothing else is pressed")
+
 print("\nand a released frame produces a released pad")
 released = P.decode(bytes(frames[-1]))
 check(released.release_all and released.buttons == 0,

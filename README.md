@@ -60,6 +60,30 @@ deliberate, and it is the lesser of two evils:
 Use `--slots 1` (or `slots` in the config) if you only ever expect one guest and
 the spare rows are in the way.
 
+## Guests without a controller
+
+A phone with no pad attached gets an on-screen one, laid out as a Mega Drive /
+Genesis controller: d-pad left, **A B C** on an arc to the right, START in the
+middle. It appears by itself on a touch device with no gamepad, and there is a
+link in the prompt for anyone that guess gets wrong.
+
+Two arrangements, from the same markup:
+
+- **Portrait** — the picture on top, the pad below it. A thumb cannot reach the
+  middle of an upright phone, and covering a 16:9 video with buttons wastes the
+  half of the screen that is already letterboxed.
+- **Landscape** — no room below, so the pad floats over the two bottom corners,
+  where the thumbs already are.
+
+The d-pad is one surface read as eight directions rather than four buttons, so
+a diagonal is genuinely two directions held at once. Everything is pointer
+events with capture, so a direction and a face button work together, and a
+physical pad and the on-screen one are *merged* rather than one replacing the
+other.
+
+Which buttons exist and what they send is data (`LAYOUTS` in `web/app.js`), so
+another controller is a new entry rather than new code.
+
 ## A guest can only ever move a gamepad
 
 The single most important property here, and it is structural rather than

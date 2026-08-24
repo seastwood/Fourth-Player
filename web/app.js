@@ -197,6 +197,148 @@ el("unmute").addEventListener("click", () => {
   }).catch(() => {});
 });
 
+/* ---- on-screen controller ----
+ *
+ * Which buttons exist and what they send is data, so another pad is a new
+ * entry rather than new code. The Mega Drive's three face buttons run left to
+ * right; the standard mapping's diamond reads west, south, east across its
+ * lower half, which is the arrangement that keeps A B C under a thumb in the
+ * order the labels promise. Positions are percentages inside the face area.
+ */
+const LAYOUTS = {
+  genesis: {
+    name: "Mega Drive",
+    face: [
+      { id: "A", button: 2, x: 0, y: 55 },
+      { id: "B", button: 0, x: 35, y: 30 },
+      { id: "C", button: 1, x: 70, y: 5 },
+    ],
+    start: 9,
+  },
+};
+
+const DPAD = { up: 12, down: 13, left: 14, right: 15 };
+
+let touchOn = false;
+let touchButtons = 0;
+const pointers = new Map();
+
+function buildTouchPad(layout) {
+  const face = el("face");
+  face.innerHTML = "";
+  for (const spec of layout.face) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tbtn tbtn-face";
+    button.textContent = spec.id;
+    button.dataset.button = String(spec.button);
+    button.style.left = spec.x + "%";
+    button.style.top = spec.y + "%";
+    face.appendChild(button);
+  }
+  el("touch").querySelector(".tbtn-start").dataset.button = String(layout.start);
+  el("touch-name").textContent = layout.name;
+}
+
+function setBit(bit, down) {
+  const before = touchButtons;
+  if (down) touchButtons |= (1 << bit);
+  else touchButtons &= ~(1 << bit);
+  return touchButtons !== before;
+}
+
+function dpadDirections(event) {
+  const rect = el("dpad").getBoundingClientRect();
+  return FPFrame.direction(
+    (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2),
+    (event.clientY - (rect.top + rect.height / 2)) / (rect.height / 2));
+}
+
+function applyDpad(event) {
+  const live = dpadDirections(event);
+  for (const [name, bit] of Object.entries(DPAD)) setBit(bit, live.includes(name));
+  el("dpad").classList.toggle("live", live.length > 0);
+}
+
+function clearDpad() {
+  for (const bit of Object.values(DPAD)) setBit(bit, false);
+  el("dpad").classList.remove("live");
+}
+
+function wireTouch() {
+  const pad = el("dpad");
+
+  pad.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    pad.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, "dpad");
+    applyDpad(event);
+  });
+  pad.addEventListener("pointermove", (event) => {
+    if (pointers.get(event.pointerId) !== "dpad") return;
+    event.preventDefault();
+    applyDpad(event);          // sliding across the pad changes direction
+  });
+  const releasePad = (event) => {
+    if (pointers.get(event.pointerId) !== "dpad") return;
+    pointers.delete(event.pointerId);
+    clearDpad();
+  };
+  pad.addEventListener("pointerup", releasePad);
+  pad.addEventListener("pointercancel", releasePad);
+
+  el("touch").addEventListener("pointerdown", (event) => {
+    const button = event.target.closest(".tbtn");
+    if (!button) return;
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, button);
+    button.classList.add("live");
+    setBit(Number(button.dataset.button), true);
+    if (navigator.vibrate) navigator.vibrate(8);
+  });
+  const releaseButton = (event) => {
+    const button = pointers.get(event.pointerId);
+    if (!button || button === "dpad") return;
+    pointers.delete(event.pointerId);
+    button.classList.remove("live");
+    setBit(Number(button.dataset.button), false);
+  };
+  el("touch").addEventListener("pointerup", releaseButton);
+  el("touch").addEventListener("pointercancel", releaseButton);
+
+  // A finger still down when the page goes away must not leave a button held
+  // on somebody else's television.
+  window.addEventListener("blur", releaseAllTouch);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") releaseAllTouch();
+  });
+}
+
+function releaseAllTouch() {
+  touchButtons = 0;
+  pointers.clear();
+  clearDpad();
+  document.querySelectorAll(".tbtn.live").forEach((b) => b.classList.remove("live"));
+}
+
+function showTouch(on, layout) {
+  touchOn = on;
+  el("touch").hidden = !on;
+  if (!on) {
+    releaseAllTouch();
+    return;
+  }
+  buildTouchPad(LAYOUTS[layout || "genesis"]);
+  el("prompt").hidden = true;
+  setChip("padstate", "On-screen pad", "ok");
+}
+
+el("use-touch").addEventListener("click", (event) => {
+  event.preventDefault();
+  showTouch(true);
+});
+
 /* ---- the pad ---- */
 
 function startPadLoop() {
@@ -211,6 +353,12 @@ function startPadLoop() {
     setChip("padstate", "No controller", "warn");
   });
 
+  wireTouch();
+  // A phone with no controller gets the on-screen pad without being asked; a
+  // laptop does not, because a mouse cannot use it and it would only be in the
+  // way. The link in the prompt covers everyone this guesses wrong about.
+  if (!hasGamepad() && navigator.maxTouchPoints > 0) showTouch(true);
+
   ticker = setInterval(tick, Math.round(1000 / SEND_HZ));
 
   // Leaving must not leave a button held down on someone else's television.
@@ -222,6 +370,11 @@ function startPadLoop() {
   });
 }
 
+function hasGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  return Array.from(pads).some((p) => p && p.connected);
+}
+
 function tick() {
   if (!input || input.readyState !== "open") return;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -229,7 +382,7 @@ function tick() {
   if (!pad) pad = Array.from(pads).find((p) => p && p.connected) || null;
   if (pad && padIndex === null) {
     padIndex = pad.index;
-    el("prompt").hidden = true;
+    if (!touchOn) el("prompt").hidden = true;
     describePad(pad);
   }
   sendFrame(pad, false);
@@ -237,7 +390,11 @@ function tick() {
 
 function sendFrame(pad, releaseAll) {
   if (!input || input.readyState !== "open") return;
-  const buffer = FPFrame.buildFrame(pad, seq, releaseAll);
+  // A physical pad and the on-screen one are merged rather than one replacing
+  // the other: whichever is being touched wins by simply being pressed.
+  const state = FPFrame.padState(releaseAll ? null : pad);
+  const buttons = releaseAll ? 0 : (state.buttons | touchButtons);
+  const buffer = FPFrame.buildRaw(buttons, state.axes, seq, releaseAll);
   seq = (seq + 1) & 0xffff;
   try { input.send(buffer); } catch (_) { /* a closing channel is not news */ }
 }

@@ -39,7 +39,31 @@
 
   <div id="prompt" class="prompt">
     <p><strong>Press any button on your controller.</strong></p>
-    <p class="footnote">Browsers hide gamepads until you use one.</p>
+    <p class="footnote">Browsers hide gamepads until you use one.
+       No controller? <button type="button" id="use-touch" class="linkish">Use
+       on-screen buttons</button></p>
+  </div>
+
+  <!-- The on-screen pad. Positions come from CSS so the same markup works
+       below the picture in portrait and over it in landscape; which buttons
+       exist, and what they send, comes from LAYOUTS in app.js. -->
+  <div id="touch" class="touch" hidden aria-label="On-screen controller">
+    <div class="touch-left">
+      <div id="dpad" class="dpad" role="group" aria-label="Direction pad">
+        <div class="dpad-stem dpad-v"></div>
+        <div class="dpad-stem dpad-h"></div>
+        <div class="dpad-hat"></div>
+      </div>
+    </div>
+
+    <div class="touch-mid">
+      <button type="button" class="tbtn tbtn-start" data-face="START">START</button>
+      <span id="touch-name" class="touch-name">Mega Drive</span>
+    </div>
+
+    <div class="touch-right">
+      <div class="face" id="face"></div>
+    </div>
   </div>
 </div>
 
