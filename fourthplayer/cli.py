@@ -66,6 +66,10 @@ def main(argv=None):
                      help="video bitrate ceiling in kb/s")
     run.add_argument("--width", type=int)
     run.add_argument("--height", type=int)
+    run.add_argument("--no-audio", action="store_true", help="stream silently")
+    run.add_argument("--audio-device", metavar="SOURCE",
+                     help="PulseAudio source to capture (default: the monitor "
+                          "of whatever sink applications are using)")
     run.add_argument("--software", action="store_true",
                      help="encode with x264 instead of the GPU")
     run.add_argument("--verbose", "-v", action="store_true")
@@ -101,6 +105,10 @@ def main(argv=None):
             cfg.behind_proxy = True
         if args.software:
             cfg.hardware_encode = False
+        if args.no_audio:
+            cfg.audio = False
+        if args.audio_device:
+            cfg.audio_device = args.audio_device
         logging.basicConfig(
             level=logging.DEBUG if args.verbose else logging.INFO,
             format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -152,6 +160,18 @@ def _print_status(reply):
               f"{guest['frames']} frames  {guest['pad']}")
 
 
+def _monitor_sources():
+    """The monitor sources this machine offers, for `check` to report."""
+    try:
+        import subprocess as _sp
+        out = _sp.run(["pactl", "list", "short", "sources"],
+                      capture_output=True, text=True, timeout=5)
+        return [line.split("\t")[1] for line in out.stdout.splitlines()
+                if "\t" in line and ".monitor" in line]
+    except Exception:
+        return []
+
+
 def _check(cfg):
     """What a new machine gets wrong, reported before it wastes an evening."""
     problems, notes = [], []
@@ -189,6 +209,22 @@ def _check(cfg):
                         "(gir1.2-gst-plugins-bad-1.0 provides GstWebRTC)")
     except ImportError:
         problems.append("PyGObject is missing (python3-gi)")
+
+    if cfg.audio:
+        for element in ("pulsesrc", "opusenc", "rtpopuspay"):
+            try:
+                import gi as _gi  # noqa: F401
+                from gi.repository import Gst as _Gst
+                if not _Gst.ElementFactory.find(element):
+                    notes.append(f"{element} is missing, so sessions will be silent")
+            except Exception:
+                break
+        sources = _monitor_sources()
+        if sources:
+            notes.append("sound will come from the default sink's monitor; "
+                         "available monitors: " + ", ".join(sources[:3]))
+        else:
+            notes.append("no PulseAudio monitor sources found -- sessions may be silent")
 
     for module in ("evdev", "websockets", "cryptography"):
         try:

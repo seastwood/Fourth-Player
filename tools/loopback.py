@@ -38,7 +38,8 @@ from fourthplayer.config import Config  # noqa: E402
 from fourthplayer.server import CONTROL_SOCKET  # noqa: E402
 from fourthplayer import protocol as P  # noqa: E402
 
-counts = {"video_buffers": 0, "video_bytes": 0, "keyframes": 0}
+counts = {"video_buffers": 0, "video_bytes": 0, "keyframes": 0,
+          "audio_buffers": 0, "audio_bytes": 0}
 
 
 def control(request):
@@ -82,24 +83,45 @@ class Guest:
     def _on_pad(self, _element, pad):
         if pad.direction != Gst.PadDirection.SRC:
             return
-        depay = Gst.ElementFactory.make("rtph264depay")
-        parse = Gst.ElementFactory.make("h264parse")
+        caps = pad.get_current_caps() or pad.query_caps(None)
+        encoding = ""
+        if caps and caps.get_size():
+            encoding = (caps.get_structure(0).get_string("encoding-name") or "").upper()
+
+        if encoding == "OPUS":
+            chain = ["rtpopusdepay", "opusparse"]
+            counter = self._count_audio
+        else:
+            chain = ["rtph264depay", "h264parse"]
+            counter = self._count_video
+
+        elements = [Gst.ElementFactory.make(name) for name in chain]
         sink = Gst.ElementFactory.make("fakesink")
         sink.set_property("sync", False)
-        for element in (depay, parse, sink):
+        elements.append(sink)
+        if any(e is None for e in elements):
+            print(f"  cannot handle a {encoding or 'video'} track here")
+            return
+        for element in elements:
             self.pipeline.add(element)
             element.sync_state_with_parent()
-        depay.link(parse)
-        parse.link(sink)
-        pad.link(depay.get_static_pad("sink"))
-        parse.get_static_pad("src").add_probe(Gst.PadProbeType.BUFFER, self._count)
+        for a, b in zip(elements, elements[1:]):
+            a.link(b)
+        pad.link(elements[0].get_static_pad("sink"))
+        elements[-2].get_static_pad("src").add_probe(Gst.PadProbeType.BUFFER, counter)
+        print(f"  receiving {encoding or 'H264'}")
 
-    def _count(self, _pad, info):
+    def _count_video(self, _pad, info):
         buffer = info.get_buffer()
         counts["video_buffers"] += 1
         counts["video_bytes"] += buffer.get_size()
         if not buffer.has_flags(Gst.BufferFlags.DELTA_UNIT):
             counts["keyframes"] += 1
+        return Gst.PadProbeReturn.OK
+
+    def _count_audio(self, _pad, info):
+        counts["audio_buffers"] += 1
+        counts["audio_bytes"] += info.get_buffer().get_size()
         return Gst.PadProbeReturn.OK
 
     # -- signalling ---------------------------------------------------------
@@ -239,6 +261,8 @@ async def run(args):
     print(f"  keyframes        {counts['keyframes']}")
     print(f"  video received   {counts['video_bytes'] / 1024:.0f} kB "
           f"({counts['video_bytes'] * 8 / args.seconds / 1e6:.1f} Mb/s)")
+    print(f"  audio buffers    {counts['audio_buffers']}")
+    print(f"  audio received   {counts['audio_bytes'] / 1024:.0f} kB")
     print(f"  input frames     {guest.frames_sent}")
 
     after = control({"cmd": "status"})

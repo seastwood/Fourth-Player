@@ -16,10 +16,17 @@ Kodi add-on, and that coupling is optional.
 
 Two paths, and they are deliberately asymmetric.
 
-**Video goes out once.** The screen is captured and encoded a single time, and a
-`tee` hands the same encoded bytes to every guest. A fourth guest costs
-bandwidth and nothing else. On the hardware this was built for that is not an
-optimisation — it is the difference between working and not.
+**Video and sound go out once.** The screen is captured and encoded a single
+time, and a `tee` hands the same encoded bytes to every guest. A fourth guest
+costs bandwidth and nothing else. On the hardware this was built for that is not
+an optimisation — it is the difference between working and not.
+
+Sound comes from the monitor of whatever sink applications are actually playing
+into, rather than a fixed device, so it keeps working when the HDMI output or a
+virtual sink changes underneath. It is Opus in 10 ms frames, because every one
+of those milliseconds is added to the delay. If the machine cannot give audio at
+all, the session starts silent rather than not starting — losing sound is a
+disappointment, losing the session is a failure.
 
 **Input comes back per guest.** Every guest gets their *own* virtual gamepad,
 created through `/dev/uinput`, which the kernel presents exactly like a
@@ -28,9 +35,9 @@ second player rather than a second hand on the same pad — and it means anythin
 that reads controllers, RetroArch included, needs no idea this is happening.
 
 ```
-screen ─► capture + encode (once) ─► tee ─┬─► guest 1
-                                          ├─► guest 2
-                                          └─► guest 3
+screen ─► H.264 encode (once) ─► tee ─┬─► guest 1
+sound  ─► Opus encode  (once) ─► tee ─┼─► guest 2
+                                      └─► guest 3
 
 guest 1 ─┐
 guest 2 ─┼─► input router ─► one uinput pad each ─► /dev/input/eventN ─► the game
@@ -105,7 +112,11 @@ python3 -m fourthplayer serve --fps 60              # if the host has headroom
 python3 -m fourthplayer serve --bitrate 3000        # for a thin connection
 python3 -m fourthplayer serve --width 960 --height 540
 python3 -m fourthplayer serve --software            # no working GPU encoder
+python3 -m fourthplayer serve --no-audio           # picture only
+python3 -m fourthplayer serve --audio-device NAME  # a specific monitor source
 ```
+
+`python3 -m fourthplayer check` lists the monitor sources this machine offers.
 
 Everything is also settable in `~/.config/fourth-player/config.json`.
 
@@ -215,11 +226,10 @@ which is what `test_webframe.py` and a human with a controller are for.
 
 ## Status
 
-Working and tested end to end on one machine: video, input, invites, expiry,
-kicking, the overlay and the Kodi add-on. Not yet done:
+Played for real with two remote guests plus the host. Video, sound, input,
+invites, expiry, extension, kicking, reconnection, the overlay and the Kodi
+add-on all work. Not yet done:
 
-- **no audio.** Video only. The pipeline has no Opus track yet, and this is
-  the biggest remaining gap.
 - **ICE ports are ephemeral.** `webrtcbin`'s `ice-agent` cannot safely be
   touched from Python on GStreamer 1.24 — reading the property corrupts the
   agent and kills the process at negotiation — so the UDP range cannot be

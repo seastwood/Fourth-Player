@@ -90,11 +90,13 @@ function joined(message) {
 async function answer(message) {
   pc = new RTCPeerConnection({ iceServers: [] });
 
+  // Video and audio arrive as separate tracks. Collect them into one stream
+  // rather than replacing srcObject on the second one, which drops the first.
+  const incoming = new MediaStream();
   pc.addEventListener("track", (event) => {
-    video.srcObject = event.streams[0];
-    // Autoplay only survives muted; the join click is the gesture that lets us
-    // turn the sound back on immediately afterwards.
-    video.play().then(() => { video.muted = false; }).catch(() => {});
+    incoming.addTrack(event.track);
+    if (video.srcObject !== incoming) video.srcObject = incoming;
+    startPlayback();
   });
 
   pc.addEventListener("datachannel", (event) => {
@@ -124,6 +126,32 @@ async function answer(message) {
   await pc.setLocalDescription(local);
   socket.send(JSON.stringify({ t: "answer", sdp: local.sdp }));
 }
+
+/* Autoplay with sound needs a user gesture. Joining is one, so the ordinary
+ * path unmutes straight away -- but a guest who *resumes* never clicked
+ * anything, and the browser is right to refuse. Rather than leave them
+ * wondering why it is silent, ask. */
+function startPlayback() {
+  video.play().then(() => {
+    video.muted = false;
+    return video.play();
+  }).then(() => {
+    el("unmute").hidden = true;
+  }).catch(() => {
+    video.muted = true;
+    video.play().catch(() => {});
+    el("unmute").hidden = false;
+    el("hud").classList.add("show");
+  });
+}
+
+el("unmute").addEventListener("click", () => {
+  video.muted = false;
+  video.play().then(() => {
+    el("unmute").hidden = true;
+    el("hud").classList.remove("show");
+  }).catch(() => {});
+});
 
 /* ---- the pad ---- */
 

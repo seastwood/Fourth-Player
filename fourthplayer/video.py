@@ -60,6 +60,7 @@ class Stage:
         self.peers = {}
         self._glib_loop = None
         self._thread = None
+        self.has_audio = False
 
         # A keyframe a second unless told otherwise, whatever the frame rate.
         keyint = cfg.keyframe_interval or max(1, cfg.fps)
@@ -88,10 +89,37 @@ class Stage:
             f"! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
             f"! tee name=vtee allow-not-linked=true"
         )
+        self._description = description
+        self._audio_description = self._audio_branch() if cfg.audio else ""
+        self._build(with_audio=bool(self._audio_description))
+
+    def _audio_branch(self):
+        """The game's sound, or nothing at all if this machine cannot give it."""
+        cfg = self.cfg
+        for element in ("pulsesrc", "opusenc", "rtpopuspay"):
+            if not Gst.ElementFactory.find(element):
+                log.warning("no %s: the session will be silent", element)
+                return ""
+        return (
+            f" pulsesrc device={cfg.audio_device} provide-clock=false "
+            f"! audioconvert ! audioresample "
+            f"! audio/x-raw,rate=48000,channels=2 "
+            f"! opusenc bitrate={cfg.audio_bitrate_kbps * 1000} "
+            f"frame-size={cfg.audio_frame_ms} inband-fec=true "
+            f"! rtpopuspay pt=97 "
+            f"! application/x-rtp,media=audio,encoding-name=OPUS,payload=97,clock-rate=48000 "
+            f"! tee name=atee allow-not-linked=true")
+
+    def _build(self, with_audio):
+        description = self._description
+        if with_audio:
+            description += self._audio_description
         log.debug("pipeline: %s", description)
         self.pipeline = Gst.parse_launch(description)
         self.tee = self.pipeline.get_by_name("vtee")
+        self.audio_tee = self.pipeline.get_by_name("atee")
         self.encoder = self.pipeline.get_by_name("enc")
+        self.has_audio = self.audio_tee is not None
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
@@ -116,10 +144,20 @@ class Stage:
         change, state, _pending = self.pipeline.get_state(START_TIMEOUT)
         if change == Gst.StateChangeReturn.FAILURE or state != Gst.State.PLAYING:
             self.pipeline.set_state(Gst.State.NULL)
+            # A missing or busy sound device must not cost anybody the picture.
+            # Losing audio is a disappointment; losing the session is a
+            # failure, and one that would be hard to diagnose from a guest's
+            # black screen.
+            if self.has_audio:
+                log.warning("the pipeline would not start with audio; "
+                            "retrying without it")
+                self._build(with_audio=False)
+                return self.start()
             raise RuntimeError(
                 f"the capture pipeline stalled reaching PLAYING (got {state.value_nick})")
-        log.info("capture running: %dx%d @%d, %d kb/s",
-                 self.cfg.width, self.cfg.height, self.cfg.fps, self.cfg.bitrate_kbps)
+        log.info("capture running: %dx%d @%d, %d kb/s, audio %s",
+                 self.cfg.width, self.cfg.height, self.cfg.fps,
+                 self.cfg.bitrate_kbps, "on" if self.has_audio else "off")
 
     def stop(self):
         for peer_id in list(self.peers):
@@ -174,9 +212,8 @@ class Peer:
         self._on_signal = on_signal
         self.channel = None
         self.on_input = None          # set by the session; called with raw bytes
-        self.queue = None
         self.webrtc = None
-        self._tee_pad = None
+        self._branches = []           # (tee, tee pad, queue) per media type
         self._offered = False
         self._assembled = False
 
@@ -186,14 +223,6 @@ class Peer:
         cfg = self.stage.cfg
         pipeline = self.stage.pipeline
 
-        self.queue = Gst.ElementFactory.make("queue", f"q_{self.id}")
-        # Drop the oldest frames rather than block. One slow guest must never
-        # apply back-pressure to a tee that everybody else is reading from.
-        self.queue.set_property("leaky", 2)
-        self.queue.set_property("max-size-time", 200 * Gst.MSECOND)
-        self.queue.set_property("max-size-bytes", 0)
-        self.queue.set_property("max-size-buffers", 0)
-
         self.webrtc = Gst.ElementFactory.make("webrtcbin", f"peer_{self.id}")
         self.webrtc.set_property("bundle-policy", "max-bundle")
         self.webrtc.set_property("latency", cfg.jitter_ms)
@@ -202,7 +231,6 @@ class Peer:
         if cfg.turn_server:
             self.webrtc.set_property("turn-server", cfg.turn_server)
 
-        pipeline.add(self.queue)
         pipeline.add(self.webrtc)
 
         # Connect the signals BEFORE anything that can make webrtcbin want to
@@ -240,20 +268,23 @@ class Peer:
         # Into PLAYING first. `create-data-channel` needs the SCTP transport,
         # which does not exist while the element is still NULL -- it returns
         # None there, and the peer is dead on arrival.
-        for element in (self.queue, self.webrtc):
-            if not element.sync_state_with_parent():
-                raise RuntimeError(
-                    f"{element.get_name()} would not follow the pipeline into PLAYING")
+        if not self.webrtc.sync_state_with_parent():
+            raise RuntimeError("webrtcbin would not follow the pipeline into PLAYING")
 
-        self._tee_pad = self.stage.tee.request_pad_simple("src_%u")
-        self._tee_pad.link(self.queue.get_static_pad("sink"))
-        self.queue.get_static_pad("src").link(
-            self.webrtc.request_pad_simple("sink_%u"))
+        # Video first, then audio, so the offer's m-lines come out in that
+        # order and transceiver 0 is always the picture.
+        self._branch(self.stage.tee, "v")
+        if self.stage.has_audio:
+            self._branch(self.stage.audio_tee, "a")
 
-        transceiver = self.webrtc.emit("get-transceiver", 0)
-        if transceiver:
+        index = 0
+        while True:
+            transceiver = self.webrtc.emit("get-transceiver", index)
+            if transceiver is None:
+                break
             transceiver.set_property(
                 "direction", GstWebRTC.WebRTCRTPTransceiverDirection.SENDONLY)
+            index += 1
 
         # Unreliable and unordered on purpose: pad state is a snapshot, so a
         # retransmitted frame is always worse than the one behind it.
@@ -269,20 +300,41 @@ class Peer:
         self._assembled = True
         self._negotiate()
 
+    def _branch(self, tee, tag):
+        """One tee -> queue -> webrtcbin path, remembered so it can be undone."""
+        queue = Gst.ElementFactory.make("queue", f"q{tag}_{self.id}")
+        # Drop the oldest rather than block. One slow guest must never apply
+        # back-pressure to a tee that everybody else is reading from.
+        queue.set_property("leaky", 2)
+        queue.set_property("max-size-time", 200 * Gst.MSECOND)
+        queue.set_property("max-size-bytes", 0)
+        queue.set_property("max-size-buffers", 0)
+        self.stage.pipeline.add(queue)
+        if not queue.sync_state_with_parent():
+            raise RuntimeError(f"{queue.get_name()} would not reach PLAYING")
+
+        tee_pad = tee.request_pad_simple("src_%u")
+        tee_pad.link(queue.get_static_pad("sink"))
+        queue.get_static_pad("src").link(self.webrtc.request_pad_simple("sink_%u"))
+        self._branches.append((tee, tee_pad, queue))
+
     def detach(self):
         if self.webrtc is None:
             return
         try:
-            if self._tee_pad:
-                self._tee_pad.unlink(self.queue.get_static_pad("sink"))
-                self.stage.tee.release_request_pad(self._tee_pad)
-            for element in (self.webrtc, self.queue):
-                element.set_state(Gst.State.NULL)
-                self.stage.pipeline.remove(element)
+            for tee, tee_pad, queue in self._branches:
+                tee_pad.unlink(queue.get_static_pad("sink"))
+                tee.release_request_pad(tee_pad)
+                queue.set_state(Gst.State.NULL)
+                self.stage.pipeline.remove(queue)
+            self._branches = []
+            self.webrtc.set_state(Gst.State.NULL)
+            self.stage.pipeline.remove(self.webrtc)
         except Exception as exc:
             log.warning("peer %s did not detach cleanly: %s", self.id, exc)
         finally:
-            self.webrtc = self.queue = self._tee_pad = self.channel = None
+            self.webrtc = self.channel = None
+            self._branches = []
 
     # -- negotiation --------------------------------------------------------
 

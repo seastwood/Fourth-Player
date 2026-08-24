@@ -37,6 +37,19 @@ class Config:
     # bounds the wait if that request goes missing.
     keyframe_interval: int = 0
 
+    # -- audio --
+    audio: bool = True
+    # The monitor of whatever sink applications are actually playing into,
+    # rather than a fixed device name. Following the default is what makes this
+    # keep working when the sound card, the HDMI output or a virtual sink
+    # changes underneath -- and on the machine this was built for the default
+    # sink is one Sunshine created, not the HDMI output you would have guessed.
+    audio_device: str = "@DEFAULT_MONITOR@"
+    audio_bitrate_kbps: int = 96
+    # 10 ms frames. Opus will happily do 20 or 60, and every one of those
+    # milliseconds is added to the delay between the television and the guest.
+    audio_frame_ms: int = 10
+
     # -- webrtc --
     stun_server: str = "stun://stun.cloudflare.com:3478"
     turn_server: str = ""
