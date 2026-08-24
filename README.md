@@ -149,7 +149,22 @@ The Kodi add-on (`script.fourthplayer`) is the whole thing without a keyboard:
 - **switches picture quality** between three presets, and offers to restart the
   service so it takes effect
 
-A brand-new add-on only appears after Kodi restarts — Kodi caches the list.
+Two things catch people out, and neither is a fault in the add-on:
+
+- **A new add-on only appears after Kodi restarts.** Kodi caches its list. Until
+  then it is genuinely absent, not hidden.
+- **Kodi will not put it on a custom home menu.** After restarting, it shows up
+  under *Program add-ons* — but a skin-shortcuts menu like kodi-retrobox's is a
+  list somebody arranged by hand, and nothing new joins it by itself:
+
+```sh
+install/add-kodi-menu.py            # add FOURTH PLAYER to the home menu
+install/add-kodi-menu.py --remove   # take it off again
+```
+
+That edits the menu as text rather than through an XML parser, so the twenty-odd
+entries already there keep the formatting they were arranged in, and it keeps a
+timestamped backup. Safe to run twice.
 
 For the internet half — the router, the DNS and the reverse proxy — see
 [docs/NETWORK.md](docs/NETWORK.md). That is the part most likely to go wrong and
