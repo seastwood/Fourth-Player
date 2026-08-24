@@ -133,6 +133,24 @@ Expiry tears everything down off the event loop and releases every pad *before*
 the devices disappear, so a game sees the buttons come up rather than losing a
 controller mid-press.
 
+### From the sofa
+
+The Kodi add-on (`script.fourthplayer`) is the whole thing without a keyboard:
+
+- **starts the service** if it is not running, and stops it again
+- **opens a session** for 30 minutes to 4 hours, and closes it
+- **shows the link, the PIN and a QR code** big enough to point a phone at from
+  a sofa, with the clock and the slot count updating underneath
+- **watches who is playing** on a screen that refreshes while you look at it —
+  who is connected, who has wandered off, how much input each is sending
+- **adds time** to a session already running, so running out is not an ambush
+- **removes a player**, which burns their credential rather than just
+  disconnecting them
+- **switches picture quality** between three presets, and offers to restart the
+  service so it takes effect
+
+A brand-new add-on only appears after Kodi restarts — Kodi caches the list.
+
 For the internet half — the router, the DNS and the reverse proxy — see
 [docs/NETWORK.md](docs/NETWORK.md). That is the part most likely to go wrong and
 the part this repository cannot do for you.
@@ -193,7 +211,7 @@ fourthplayer/
   server.py     a public socket and a Unix control socket
   overlay.py    the QR card and the tally light
 web/            the guest's page: WebRTC in, Gamepad API out
-addons/         the Kodi add-on
+addons/         the Kodi add-on: menu, control client, and the QR/monitor screens
 tools/          loopback.py and padwatch.py — see below
 tests/          run them all with tests/run.sh
 ```

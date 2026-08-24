@@ -1,158 +1,247 @@
-"""The Kodi front end: open a session, show the link, see who is on, close it.
+"""Fourth Player, from the sofa.
 
-Deliberately thin. Everything here is one JSON line over the server's Unix
-socket, and every decision -- how long a session may run, who may join, when a
-pad is released -- belongs to the server, which is testable without Kodi.
+Opens and closes sessions, shows the link and QR to send people, watches who is
+connected, adds time, removes a player, and starts the service when it is not
+running.
 
-The socket is the reason this needs no authentication of its own: it is a file
-in the user's runtime directory, reachable only by processes already running as
-that user on this machine.
+Everything is one JSON line over the server's Unix socket. No decision lives
+here: how long a session may run, who may join, when a pad is released and what
+a slot means all belong to the server, which can be tested without Kodi.
 """
 
 import json
 import os
-import socket
 
 import xbmc
 import xbmcgui
 
+import fpclient as C
+import panels
+
 ADDON_NAME = "Fourth Player"
-CONTROL_SOCKET = os.path.join(
-    os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid()),
-    "fourth-player.sock")
 
 DURATIONS = [30, 60, 120, 240]
 EXTENSIONS = [15, 30, 60]
 
+CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 
-def ask(request, timeout=10):
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(timeout)
-            sock.connect(CONTROL_SOCKET)
-            sock.sendall((json.dumps(request) + "\n").encode())
-            data = b""
-            while not data.endswith(b"\n"):
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
-        return json.loads(data or b"{}")
-    except FileNotFoundError:
-        return {"ok": False, "error": "The Fourth Player service is not running."}
-    except (OSError, ValueError) as exc:
-        return {"ok": False, "error": str(exc)}
+# Frame rate costs more than resolution on the hardware this was built for, so
+# the presets trade it first.
+QUALITY = [
+    ("Smooth — 720p30, 6 Mb/s (default)", dict(width=1280, height=720, fps=30,
+                                               bitrate_kbps=6000)),
+    ("Sharper — 720p60, 8 Mb/s", dict(width=1280, height=720, fps=60,
+                                      bitrate_kbps=8000)),
+    ("Thin connection — 540p30, 3 Mb/s", dict(width=960, height=540, fps=30,
+                                              bitrate_kbps=3000)),
+]
 
 
-def notify(message, icon=xbmcgui.NOTIFICATION_INFO, seconds=4000):
-    xbmcgui.Dialog().notification(ADDON_NAME, message, icon, seconds)
+def notify(message, error=False, seconds=4000):
+    xbmcgui.Dialog().notification(
+        ADDON_NAME, message,
+        xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO,
+        seconds)
 
 
-def start():
+def duration_label(minutes):
+    if minutes < 60:
+        return "%d minutes" % minutes
+    if minutes == 60:
+        return "1 hour"
+    return "%d hours" % (minutes // 60)
+
+
+# -- the service ---------------------------------------------------------
+
+def offer_to_start_service():
     dialog = xbmcgui.Dialog()
-    labels = ["%d minutes" % m if m < 60 else
-              ("1 hour" if m == 60 else "%d hours" % (m // 60)) for m in DURATIONS]
-    choice = dialog.select("How long should the session stay open?", labels)
+    if not C.service_installed():
+        dialog.ok(ADDON_NAME,
+                  "The Fourth Player service is not running, and systemd does "
+                  "not know about it.\n\n"
+                  "Run [B]install/install.sh[/B] from the fourth-player "
+                  "repository once, then try again.")
+        return False
+    if not dialog.yesno(ADDON_NAME,
+                        "The Fourth Player service is not running.\n\n"
+                        "Start it now?"):
+        return False
+    code, output = C.start_service()
+    if code != 0:
+        dialog.ok(ADDON_NAME, "It would not start:\n\n" + (output or "no reason given"))
+        return False
+    # systemd returns as soon as it has forked; the socket appears shortly after.
+    monitor = xbmc.Monitor()
+    for _ in range(20):
+        if monitor.waitForAbort(0.5):
+            return False
+        try:
+            C.status()
+            notify("Service started.")
+            return True
+        except C.NotRunning:
+            continue
+    xbmcgui.Dialog().ok(ADDON_NAME, "It started but is not answering yet. "
+                                    "Try again in a moment.")
+    return False
+
+
+def stop_service():
+    if not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "Stop the Fourth Player service?\n\n"
+            "Any open session ends and nobody can join until it is started again."):
+        return
+    code, output = C.stop_service()
+    notify("Service stopped." if code == 0 else (output or "Could not stop it."),
+           error=code != 0)
+
+
+# -- sessions ------------------------------------------------------------
+
+def start_session():
+    dialog = xbmcgui.Dialog()
+    choice = dialog.select("How long should the session stay open?",
+                           [duration_label(m) for m in DURATIONS])
     if choice < 0:
         return
-    reply = ask({"cmd": "start", "minutes": DURATIONS[choice]})
+    reply = C.start_session(DURATIONS[choice])
     if not reply.get("ok"):
         dialog.ok(ADDON_NAME, reply.get("error", "The session would not start."))
         return
-    show(reply)
+    panels.show_invite(C.status)
 
 
-def show(status):
-    """The link and PIN, in a form that can be read off a television."""
-    if not status.get("url"):
-        xbmcgui.Dialog().ok(
-            ADDON_NAME,
-            "The session is open, but the link and PIN were forgotten when the "
-            "service restarted.\n\nClose it and open a new one to get a fresh pair.")
+def extend_session():
+    choice = xbmcgui.Dialog().select(
+        "Add how much time?", ["%s more" % duration_label(m) for m in EXTENSIONS])
+    if choice < 0:
         return
-    remaining = status.get("remaining", 0)
-    xbmcgui.Dialog().ok(
-        ADDON_NAME,
-        "Send this link to whoever is joining:\n\n"
-        "[B]%s[/B]\n\n"
-        "PIN: [B]%s[/B]\n\n"
-        "%d of %d slots free · %d minutes left\n\n"
-        "The code is on the television for as long as the session is open."
-        % (status["url"], status["pin"],
-           status.get("slots", 0) - len(status.get("guests") or []),
-           status.get("slots", 0), remaining // 60))
+    reply = C.extend(EXTENSIONS[choice])
+    if reply.get("ok"):
+        notify("%d minutes left." % (reply.get("remaining", 0) // 60))
+    else:
+        notify(reply.get("error", "Could not add time."), error=True)
 
 
-def manage(status):
+def remove_player(status):
     guests = status.get("guests") or []
     if not guests:
         notify("Nobody has joined yet.")
         return
-    labels = ["%s — %s, %d frames" % (g["label"],
-                                      "connected" if g["connected"] else "away",
-                                      g["frames"]) for g in guests]
+    labels = ["%s — %s" % (g["label"], "playing" if g["connected"] else "away")
+              for g in guests]
     choice = xbmcgui.Dialog().select("Remove which player?", labels)
     if choice < 0:
         return
     guest = guests[choice]
     if not xbmcgui.Dialog().yesno(
             ADDON_NAME,
-            "Remove %s?\n\nTheir controller stops working immediately and the "
-            "link will not let them back in." % guest["label"]):
+            "Remove %s?\n\nTheir controller stops immediately and the link will "
+            "not let them back in." % guest["label"]):
         return
-    reply = ask({"cmd": "kick", "slot": guest["slot"]})
+    reply = C.kick(guest["slot"])
     notify("%s removed." % guest["label"] if reply.get("ok")
-           else reply.get("error", "Could not remove them."))
+           else reply.get("error", "Could not remove them."),
+           error=not reply.get("ok"))
 
 
-def extend():
-    dialog = xbmcgui.Dialog()
-    labels = ["%d more minutes" % m if m < 60 else "1 more hour" for m in EXTENSIONS]
-    choice = dialog.select("Add how much time?", labels)
-    if choice < 0:
-        return
-    reply = ask({"cmd": "extend", "minutes": EXTENSIONS[choice]})
-    if reply.get("ok"):
-        notify("Session now has %d minutes left." % (reply.get("remaining", 0) // 60))
-    else:
-        notify(reply.get("error", "Could not extend it."), xbmcgui.NOTIFICATION_ERROR)
-
-
-def stop():
+def close_session():
     if not xbmcgui.Dialog().yesno(
-            ADDON_NAME, "Close the session?\n\nEveryone is disconnected and the "
-                        "link stops working."):
+            ADDON_NAME,
+            "Close the session?\n\nEveryone is disconnected and the link stops "
+            "working."):
         return
-    reply = ask({"cmd": "stop"})
+    reply = C.stop_session()
     notify("Session closed." if reply.get("ok")
            else reply.get("error", "Could not close it."),
-           xbmcgui.NOTIFICATION_INFO if reply.get("ok") else xbmcgui.NOTIFICATION_ERROR)
+           error=not reply.get("ok"))
 
+
+# -- quality -------------------------------------------------------------
+
+def set_quality(session_open):
+    dialog = xbmcgui.Dialog()
+    choice = dialog.select("Picture quality", [name for name, _ in QUALITY])
+    if choice < 0:
+        return
+    _, settings = QUALITY[choice]
+
+    config = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH) as handle:
+                config = json.load(handle)
+        except (OSError, ValueError):
+            config = {}
+    config.update(settings)
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+    except OSError as exc:
+        dialog.ok(ADDON_NAME, "Could not save it:\n\n%s" % exc)
+        return
+
+    # The pipeline is built when a session opens, so this takes effect then --
+    # and the service reads its config at startup, so it needs a restart too.
+    if not C.service_installed():
+        notify("Saved. Restart the server for it to take effect.")
+        return
+    prompt = ("Restart the service now so it takes effect?\n\n"
+              "The open session will end." if session_open else
+              "Restart the service now so it takes effect?")
+    if not dialog.yesno(ADDON_NAME, prompt):
+        notify("Saved. It applies next time the service starts.")
+        return
+    code, output = C.restart_service()
+    notify("Restarted." if code == 0 else (output or "Could not restart it."),
+           error=code != 0)
+
+
+# -- the menu ------------------------------------------------------------
 
 def main():
-    status = ask({"cmd": "status"})
+    try:
+        status = C.status()
+    except C.NotRunning:
+        if not offer_to_start_service():
+            return
+        try:
+            status = C.status()
+        except C.NotRunning:
+            return
+
     if not status.get("ok"):
         xbmcgui.Dialog().ok(ADDON_NAME, status.get("error", "No answer from the service."))
         return
 
     if not status.get("open"):
-        start()
-        return
+        entries = [
+            ("Open a session…", start_session),
+            ("Picture quality…", lambda: set_quality(False)),
+            ("Stop the service", stop_service),
+        ]
+        heading = "Fourth Player — nothing open"
+    else:
+        guests = len(status.get("guests") or [])
+        remaining = status.get("remaining", 0)
+        heading = ("Fourth Player — %d playing, %d min left"
+                   % (guests, remaining // 60))
+        entries = [
+            ("Show the link, PIN and QR code", lambda: panels.show_invite(C.status)),
+            ("Who is playing…", lambda: panels.show_monitor(C.status)),
+            ("Add more time…", extend_session),
+            ("Remove a player…", lambda: remove_player(C.status())),
+            ("Close the session", close_session),
+            ("Picture quality…", lambda: set_quality(True)),
+        ]
 
-    guests = len(status.get("guests") or [])
-    remaining = status.get("remaining", 0)
-    choice = xbmcgui.Dialog().select(
-        "Session open · %d playing · %d min left" % (guests, remaining // 60),
-        ["Show the link and PIN", "Add more time", "Remove a player",
-         "Close the session"])
-    if choice == 0:
-        show(status)
-    elif choice == 1:
-        extend()
-    elif choice == 2:
-        manage(status)
-    elif choice == 3:
-        stop()
+    choice = xbmcgui.Dialog().select(heading, [label for label, _ in entries])
+    if choice >= 0:
+        entries[choice][1]()
 
 
 if __name__ == "__main__":

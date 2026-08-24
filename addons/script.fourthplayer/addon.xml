@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.fourthplayer" name="Fourth Player" version="0.1.0" provider-name="Seth Eastwood">
+<addon id="script.fourthplayer" name="Fourth Player" version="0.2.0" provider-name="Seth Eastwood">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
   </requires>
@@ -8,7 +8,7 @@
   </extension>
   <extension point="xbmc.addon.metadata">
     <summary lang="en_GB">Open the game to friends over the internet</summary>
-    <description lang="en_GB">Opens a time-limited session that people outside the network can join from a browser link, with their own controllers. Shows the link, the PIN and a QR code on the television for as long as it is running.</description>
+    <description lang="en_GB">Opens and closes time-limited sessions that people outside the network can join from a browser link with their own controllers. Shows the link, PIN and a QR code to point a phone at, watches who is connected, adds time to a session in progress, removes a player, and starts the service when it is not running.</description>
     <license>MIT</license>
     <platform>linux</platform>
   </extension>
