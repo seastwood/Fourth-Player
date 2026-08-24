@@ -12,6 +12,25 @@
 
 const SEND_HZ = 125;
 
+/* iOS Safari zooms on a double tap and `touch-action: manipulation` does not
+ * reliably stop it -- Apple honours that property for scrolling decisions but
+ * still runs the zoom gesture on top of a page that has not consumed the
+ * second tap. Consuming it here is what actually works.
+ *
+ * Only the *second* tap of a quick pair is cancelled, so single taps, scrolls
+ * and pinch-zoom all behave normally. Pinch is left alone on purpose: taking
+ * zoom away from someone who needs it, to fix a gesture, is a poor trade. */
+let lastTapEnd = 0;
+document.addEventListener("touchend", (event) => {
+  const now = Date.now();
+  if (now - lastTapEnd <= 350) event.preventDefault();
+  lastTapEnd = now;
+}, { passive: false });
+
+// The desktop equivalent, and a belt-and-braces for Safari's own dblclick.
+document.addEventListener("dblclick", (event) => event.preventDefault(),
+                          { passive: false });
+
 const el = (id) => document.getElementById(id);
 const gate = el("gate"), stage = el("stage"), video = el("screen");
 

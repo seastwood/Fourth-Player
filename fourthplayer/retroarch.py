@@ -89,9 +89,22 @@ input_right_btn_label = "D-Pad Right"
 
 
 def profile_dir():
+    """Where RetroArch keeps udev profiles, creating it if it has to.
+
+    RetroArch files these by input driver, so the `udev` subdirectory is the
+    right place and the parent is not -- a profile dropped in the parent is
+    read by nothing.
+    """
     for candidate in AUTOCONFIG_DIRS:
         if os.path.isdir(candidate):
             return candidate
+    parent = os.path.dirname(AUTOCONFIG_DIRS[0])
+    if os.path.isdir(parent):
+        try:
+            os.makedirs(AUTOCONFIG_DIRS[0], exist_ok=True)
+            return AUTOCONFIG_DIRS[0]
+        except OSError:
+            return None
     return None
 
 
