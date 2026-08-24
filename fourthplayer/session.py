@@ -36,6 +36,7 @@ class GuestConnection:
         self.session = session
         self.slot = slot
         self.socket = socket
+        self.outbox = None      # set by the server; None while signalling is down
         self.peer = None
         self.label = f"Player {slot + 2}"   # the local player is player 1
         self.joined_at = time.monotonic()
@@ -259,6 +260,9 @@ class LiveSession:
         guest.pad.adopt_new_sender()
         peer = self.stage.add_peer(f"slot{guest.slot}", on_signal)
         peer.on_input = guest.feed
+        # The media connection dying is what ends a guest -- not their
+        # signalling socket, which they only need to arrive and renegotiate.
+        peer.on_dead = lambda why: self.drop(guest.slot, reason=why)
         guest.peer = peer
         return peer
 

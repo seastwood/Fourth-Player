@@ -242,8 +242,19 @@ async def run(args):
         # Hold a direction so the host's pad has something visible to show,
         # then let go, so the last thing this proves is that release works.
         seq = 0
-        deadline = loop.time() + args.seconds
+        started = loop.time()
+        deadline = started + args.seconds
+        dropped = False
+        halfway = {"video": 0}
         while loop.time() < deadline:
+            if (args.drop_signalling
+                    and not dropped
+                    and loop.time() - started >= args.drop_signalling):
+                dropped = True
+                halfway["video"] = counts["video_buffers"]
+                print(f"  closing the signalling socket at "
+                      f"{loop.time() - started:.1f}s -- the stream should not care")
+                await socket_.close()
             held = (loop.time() < deadline - 2)
             guest.press(seq, buttons=(1 << P.BTN_RIGHT) | (1 << P.BTN_A) if held else 0,
                         axes=[20000, 0, 0, 0, 0, 0] if held else [0] * 6)
@@ -251,6 +262,10 @@ async def run(args):
             await asyncio.sleep(1 / 125)
 
         pump_task.cancel()
+        if dropped:
+            after = counts["video_buffers"] - halfway["video"]
+            print(f"  video buffers after the socket closed: {after}")
+            counts["survived_signalling_loss"] = after > 0
 
     guest.stop()
     glib_loop.quit()
@@ -269,7 +284,13 @@ async def run(args):
     for entry in after.get("guests", []):
         print(f"  host saw slot {entry['slot']}: {entry['frames']} frames on {entry['pad']}")
 
+    if "survived_signalling_loss" in counts:
+        print(f"  survived losing signalling: "
+              f"{'yes' if counts['survived_signalling_loss'] else 'NO'}")
+
     ok = counts["video_buffers"] > 0 and guest.frames_sent > 0
+    if "survived_signalling_loss" in counts:
+        ok = ok and counts["survived_signalling_loss"]
     print("\nPASS" if ok else "\nFAIL")
     return 0 if ok else 1
 
@@ -279,6 +300,11 @@ if __name__ == "__main__":
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--token-file", default="/tmp/fp-guest-token",
                         help="where to keep the guest credential between runs")
+    parser.add_argument("--drop-signalling", type=float, default=0.0,
+                        metavar="SECONDS",
+                        help="close the WebSocket partway through but keep playing, "
+                             "the way a backgrounded tab or a network blip does. "
+                             "The picture must survive it.")
     parser.add_argument("--resume", action="store_true",
                         help="come back as the guest from the last run, the way a "
                              "reloaded browser does, instead of spending the PIN")

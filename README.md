@@ -80,7 +80,7 @@ permission flag on an ordinary guest session.
 ## Quick start
 
 ```sh
-git clone https://github.com/seastwood/fourth-player
+git clone https://github.com/seastwood/Fourth-Player
 cd fourth-player
 install/install.sh                 # packages, helper, udev, service, add-on
 python3 -m fourthplayer check      # says what this machine is still missing

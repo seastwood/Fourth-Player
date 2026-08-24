@@ -135,8 +135,18 @@ class Server:
         finally:
             self._outboxes.discard(outbox)
             writer.cancel()
-            if guest is not None and self.session is not None:
-                self.session.drop(guest.slot, reason="disconnected")
+            # Do NOT tear the guest down here. This socket carries signalling;
+            # the picture, the sound and the pad ride a WebRTC connection that
+            # does not need it once established. Ending the session because
+            # this closed meant a backgrounded tab, a moment of packet loss or
+            # a missed keepalive silently killed a game that was working --
+            # which is exactly what it did. A guest ends when their *media*
+            # ends (Peer.on_dead), when they are kicked, or when time runs out.
+            if guest is not None:
+                if guest.outbox is outbox:
+                    guest.outbox = None
+                    guest.socket = None
+                log.info("%s: signalling closed, media left alone", guest.label)
 
     async def _admit(self, socket_, message, outbox):
         address = self._address(socket_)
@@ -162,13 +172,32 @@ class Server:
             await outbox.put({"t": "error", "message": REFUSED})
             return None
 
+        # Route through whatever socket the guest currently holds, rather than
+        # capturing this one: they may reconnect their signalling several times
+        # over one media session.
         def on_signal(kind, payload):
-            outbox.put_nowait({"t": kind, **payload})
+            box = guest.outbox
+            if box is not None:
+                box.put_nowait({"t": kind, **payload})
 
-        self.session.attach_peer(guest, on_signal)
+        guest.outbox = outbox
+        guest.socket = socket_
+
+        keep_media = (message.get("t") == "resume"
+                      and message.get("media") == "live"
+                      and guest.peer is not None)
+        if keep_media:
+            # Their picture never stopped; they only lost the socket. Do not
+            # renegotiate -- a new offer here would interrupt a working stream.
+            guest.peer._on_signal = on_signal
+            log.info("%s: signalling restored, stream untouched", guest.label)
+        else:
+            self.session.attach_peer(guest, on_signal)
+
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,
             "guest": guest_token, "remaining": round(self.session.remaining()),
+            "resumed_media": keep_media,
         })
         return guest
 
@@ -318,4 +347,7 @@ class Server:
         return await websockets.serve(
             self._guest, self.cfg.host, self.cfg.port,
             ssl=context, process_request=self._http,
-            ping_interval=20, ping_timeout=20, max_size=64 * 1024)
+            # Generous, because losing this socket used to cost the session.
+            # It no longer does, but a browser that backgrounds a tab should
+            # not be dropped for it either.
+            ping_interval=30, ping_timeout=60, max_size=64 * 1024)

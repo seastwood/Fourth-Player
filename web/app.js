@@ -17,6 +17,7 @@ const gate = el("gate"), stage = el("stage"), video = el("screen");
 
 let socket = null, pc = null, input = null;
 let seq = 0, ticker = null, padIndex = null;
+let guestToken = null, ended = false, retries = 0, retryTimer = null;
 
 const token = location.pathname.startsWith("/j/")
   ? decodeURIComponent(location.pathname.slice(3))
@@ -42,13 +43,36 @@ function fail(message) {
 
 /* ---- signalling ---- */
 
+/* The signalling socket is not the stream. Losing it should cost nothing while
+ * the WebRTC connection is up -- so this reconnects quietly in the background
+ * and tells the host whether the media it set up is still running, so it knows
+ * not to renegotiate a picture that never stopped. */
+function mediaIsLive() {
+  return pc !== null && pc.connectionState === "connected";
+}
+
+function reconnectSoon() {
+  if (ended || retryTimer || !guestToken) return;
+  const delay = Math.min(15000, 1000 * Math.pow(2, retries++));
+  if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    connect({ t: "resume", guest: guestToken, media: mediaIsLive() ? "live" : "new" });
+  }, delay);
+}
+
 function connect(hello) {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${scheme}//${location.host}/ws`);
 
   socket.addEventListener("open", () => socket.send(JSON.stringify(hello)));
-  socket.addEventListener("close", () => setChip("link", "disconnected", "bad"));
-  socket.addEventListener("error", () => setChip("link", "error", "bad"));
+  socket.addEventListener("close", () => {
+    if (ended) return;
+    // Say nothing alarming if the game is still playing perfectly well.
+    if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
+    reconnectSoon();
+  });
+  socket.addEventListener("error", () => { /* close follows; handled there */ });
 
   socket.addEventListener("message", async (event) => {
     const message = JSON.parse(event.data);
@@ -61,13 +85,14 @@ function connect(hello) {
       case "ending":   return setChip("clock", timeLeft(message.remaining) + " left", "warn");
       case "extended": return startClock(message.remaining);
       case "closed":   return sessionOver(message.reason);
-      case "error":    return gate.hidden ? setChip("link", message.message, "bad")
-                                          : fail(message.message);
+      case "error":    return onError(message);
     }
   });
 }
 
 function sessionOver(reason) {
+  ended = true;
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   setChip("clock", "session ended", "bad");
   setChip("link", reason || "closed", "bad");
   el("hud").classList.add("show");
@@ -77,8 +102,26 @@ function sessionOver(reason) {
   try { localStorage.removeItem(storageKey); } catch (_) {}
 }
 
+function onError(message) {
+  if (gate.hidden) {
+    // Already playing. A refused resume means the credential is no longer
+    // good -- stop retrying with it rather than hammering the host.
+    guestToken = null;
+    setChip("link", message.message, "bad");
+  } else {
+    fail(message.message);
+  }
+}
+
 function joined(message) {
-  try { localStorage.setItem(storageKey, message.guest); } catch (_) {}
+  retries = 0;
+  if (message.guest) guestToken = message.guest;
+  try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
+  if (message.resumed_media) {
+    setChip("link", "connected", "ok");
+    startClock(message.remaining);
+    return;                      // the stream never stopped; leave it alone
+  }
   gate.hidden = true;
   stage.hidden = false;
   setChip("slot", message.label, "ok");
@@ -88,6 +131,7 @@ function joined(message) {
 }
 
 async function answer(message) {
+  if (pc) { try { pc.close(); } catch (_) {} }
   pc = new RTCPeerConnection({ iceServers: [] });
 
   // Video and audio arrive as separate tracks. Collect them into one stream
@@ -233,6 +277,7 @@ el("full").addEventListener("click", () => {
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
 if (saved) {
+  guestToken = saved;
   el("pin").placeholder = "rejoining…";
-  connect({ t: "resume", guest: saved });
+  connect({ t: "resume", guest: saved, media: "new" });
 }

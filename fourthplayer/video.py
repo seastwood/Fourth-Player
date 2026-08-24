@@ -212,6 +212,7 @@ class Peer:
         self._on_signal = on_signal
         self.channel = None
         self.on_input = None          # set by the session; called with raw bytes
+        self.on_dead = None           # called when the media connection is over
         self.webrtc = None
         self._branches = []           # (tee, tee pad, queue) per media type
         self._offered = False
@@ -380,6 +381,11 @@ class Peer:
         state = element.get_property("ice-connection-state")
         log.info("peer %s: ice %s", self.id, state.value_nick)
         self._emit("ice-state", {"state": state.value_nick})
+        # "disconnected" is recoverable and often just a moment of packet loss,
+        # so it is deliberately not in here. "failed" and "closed" are not.
+        if state.value_nick in ("failed", "closed") and self.on_dead:
+            self.stage.loop.call_soon_threadsafe(
+                self.on_dead, f"media connection {state.value_nick}")
 
     def set_remote_answer(self, sdp_text):
         ok, message = GstSdp.SDPMessage.new()
@@ -402,4 +408,7 @@ class Peer:
         self.stage.loop.call_soon_threadsafe(self.on_input, data)
 
     def _emit(self, kind, payload):
-        self.stage.loop.call_soon_threadsafe(self._on_signal, kind, payload)
+        # Read the callback at call time: the session may have re-pointed it at
+        # a new socket since this peer was created.
+        self.stage.loop.call_soon_threadsafe(
+            lambda: self._on_signal(kind, payload) if self._on_signal else None)
