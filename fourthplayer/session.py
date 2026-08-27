@@ -66,6 +66,15 @@ class GuestConnection:
     def pad(self):
         return self.session.pads[self.slot]
 
+    def has_media(self):
+        """Whether this guest currently has a connection that carries anything.
+
+        Deliberately not "do they have a peer". A peer whose ICE has gone quiet
+        is an object, not a route, and treating the two as the same is what let
+        one guest who changed network hold a slot until the session ended.
+        """
+        return self.peer is not None and getattr(self.peer, "ice_ok", False)
+
     def feed(self, data):
         """A frame off the data channel. Never raises: a guest cannot crash us."""
         try:
@@ -394,7 +403,7 @@ class LiveSession:
             rows.append({
                 "slot": g.slot,
                 "label": g.label,
-                "connected": g.peer is not None,
+                "connected": g.has_media(),
                 "seconds": round(time.monotonic() - g.joined_at),
                 "frames": g.frames,
                 "pad": g.pad.path,
@@ -406,7 +415,7 @@ class LiveSession:
 
     # -- the sweep ----------------------------------------------------------
 
-    def _reap_ghosts(self):
+    def _reap_ghosts(self, seconds=GHOST_SECONDS):
         """Free slots held by guests who have no media and are not coming back.
 
         Three slots fill up fast when nothing ever releases them. A guest whose
@@ -418,13 +427,24 @@ class LiveSession:
         """
         now = self._now()
         for slot, guest in list(self.guests.items()):
-            if guest.peer is not None:
+            if guest.has_media():
                 guest.media_since = now
                 continue
-            if now - guest.media_since > GHOST_SECONDS:
+            if now - guest.media_since > seconds:
                 log.info("%s held a slot with no video for %.0fs; freeing it",
                          guest.label, now - guest.media_since)
                 self.drop(slot, reason="gave up")
+
+    def reap_now(self, seconds=10.0):
+        """Free slots whose connection has been dead for a few seconds.
+
+        The impatient version of the sweep, for the moment a guest is being
+        refused. The ordinary grace period exists so a reconnect keeps its
+        slot; somebody actively trying to get in is better served by the slot.
+        """
+        before = len(self.guests)
+        self._reap_ghosts(seconds=seconds)
+        return before - len(self.guests)
 
     def notify(self, message):
         if self.on_notice is not None:

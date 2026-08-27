@@ -399,6 +399,12 @@ class Peer:
         self.on_input = None          # set by the session; called with raw bytes
         self.on_dead = None           # called when the media connection is over
         self.on_broken = None         # called when this peer's branch errors
+        # Whether this peer currently has a usable path. A peer *object* is not
+        # evidence of one: after a guest's network changes, the object survives
+        # with every address in it dead, and ICE settles on "disconnected"
+        # rather than "failed" -- so nothing declares it over and it sat there
+        # holding a slot for the whole session.
+        self.ice_ok = False
         self.ice = None               # held so webrtcbin's agent outlives it
         self._candidate_kinds = set()
         self._announced = set()
@@ -668,6 +674,7 @@ class Peer:
 
     def _on_ice_state(self, element, _param):
         state = element.get_property("ice-connection-state")
+        self.ice_ok = state.value_nick in ("connected", "completed")
         log.info("peer %s: ice %s", self.id, state.value_nick)
         self._emit("ice-state", {"state": state.value_nick})
         # "disconnected" is recoverable and often just a moment of packet loss,

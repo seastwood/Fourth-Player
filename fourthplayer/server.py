@@ -210,8 +210,25 @@ class Server:
                               "message": f"Too many tries. Wait {round(exc.seconds)}s."})
             return None
         except invites.SessionFull:
-            await outbox.put({"t": "error", "message": "Every player slot is taken."})
-            return None
+            # Somebody is standing at the door being told the room is full. Look
+            # at the room: a slot held by a connection that stopped working is
+            # not somebody playing, and after a network switch it looks exactly
+            # like one until it is checked.
+            freed = self.session.reap_now()
+            if freed:
+                log.info("freed %d slot(s) held by dead connections", freed)
+                try:
+                    guest, guest_token = self.session.admit(
+                        message.get("token", ""), str(message.get("pin", "")),
+                        socket_, address)
+                except invites.JoinError:
+                    await outbox.put({"t": "error",
+                                      "message": "Every player slot is taken."})
+                    return None
+            else:
+                await outbox.put({"t": "error",
+                                  "message": "Every player slot is taken."})
+                return None
         except invites.JoinError:
             await outbox.put({"t": "error", "message": REFUSED})
             return None

@@ -46,6 +46,9 @@ class FakePeer:
         self.id = peer_id
         self.on_input = None
         self.on_dead = None
+        self.on_broken = None
+        self.ice_ok = True          # a fresh peer is assumed to be working
+        self.sent = {"video_bytes": 0, "audio_bytes": 0, "video_packets": 0}
         self.detached = 0
 
     def detach(self):
@@ -155,6 +158,34 @@ check(peer.id not in session.stage.peers,
 check(session.pads[0].released > 0, "the pad is released")
 attach(session, guest)
 check(session.stage.made == 2, "a replacement peer can take the same slot")
+
+print("\na peer that stopped working does not count as a connection")
+session, guest, loop = session_with_guest()
+peer = attach(session, guest)
+check(guest.has_media(), "a peer whose ICE is up counts")
+peer.ice_ok = False
+check(not guest.has_media(),
+      "one whose ICE has gone quiet does not -- this is the network-switch case")
+check(session.roster()[0]["connected"] is False,
+      "and the roster says so rather than claiming they are playing")
+
+print("\nand such a guest is reaped, object or no object")
+clock = [500.0]
+session._now = lambda: clock[0]
+guest.media_since = clock[0]
+clock[0] += 20
+check(session.reap_now(seconds=10) == 1,
+      "the impatient sweep frees a slot held by a dead connection")
+check(0 not in session.guests, "and the guest is gone")
+
+print("\nbut it never takes a slot from somebody who is playing")
+session, guest, loop = session_with_guest()
+session._now = lambda: clock[0]
+attach(session, guest)
+clock[0] += 10000
+check(session.reap_now(seconds=1) == 0,
+      "a working connection is left alone however long it has been")
+check(session.guests.get(0) is guest, "they keep their slot")
 
 print("\na guest with no video does not keep a slot for ever")
 import fourthplayer.session as S
