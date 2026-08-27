@@ -485,11 +485,34 @@ function applyLayoutChoice(key) {
   if (key === "off") {
     el("touch").hidden = true;
     releaseAllTouch();
-    setChip("padstate", padName || "No controller", padName ? "ok" : "warn");
-    return;
+  } else {
+    el("touch").hidden = false;
+    buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
   }
-  el("touch").hidden = false;
-  buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
+  paintPicker();
+}
+
+/* One control, which is also the readout.
+ *
+ * There were two chips saying the same thing: a status one that claimed
+ * "On-screen pad" and a menu that decided which. What is switched on is
+ * evident from the buttons being on the screen, so the menu can say what is in
+ * charge and be the only thing to touch.
+ */
+function paintPicker() {
+  const picker = el("padtype");
+  const off = picker.querySelector('option[value="off"]');
+  if (off) {
+    // With a controller plugged in, the "off" choice is not an absence of
+    // anything -- it is that controller, so it says so.
+    off.textContent = padName || "No on-screen pad";
+  }
+  const usingTouch = picker.value !== "off";
+  picker.className = "chip " + (usingTouch || padName ? "ok" : "warn");
+  picker.title = usingTouch
+    ? "On-screen controller — tap to change or turn off"
+    : (padName ? padName + " — tap to add an on-screen pad"
+               : "No controller — tap to add an on-screen pad");
 }
 
 function setBit(bit, down) {
@@ -593,13 +616,13 @@ function showTouch(on, layout) {
   if (!on) {
     el("touch").hidden = true;
     releaseAllTouch();
+    paintPicker();
     return;
   }
   const key = layout || chosenLayout();
   el("padtype").value = (key === "off" || LAYOUTS[key]) ? key : DEFAULT_LAYOUT;
   applyLayoutChoice(el("padtype").value);
   el("prompt").hidden = true;
-  if (el("padtype").value !== "off") setChip("padstate", "On-screen pad", "ok");
 }
 
 el("use-touch").addEventListener("click", (event) => {
@@ -899,7 +922,7 @@ function startPadLoop() {
   window.addEventListener("gamepaddisconnected", () => {
     padIndex = null;
     padName = "";
-    setChip("padstate", "No controller", "warn");
+    paintPicker();
     // Their controller has gone; offer the on-screen one back unless they
     // turned it off deliberately.
     if (!chosenByHand && el("padtype").value !== "off") showTouch(true);

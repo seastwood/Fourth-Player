@@ -106,7 +106,11 @@ events with capture, so a direction and a face button work together, and a
 physical pad and the on-screen one are *merged* rather than one replacing the
 other.
 
-Two layouts, chosen from a dropdown in the corner and remembered per device:
+One control in the corner does all of it — it is both the readout and the
+menu, because what is switched on is evident from the buttons being on the
+screen. It shows the layout in use, or the name of a physical controller when
+there is one, or "No on-screen pad" when there is neither; tapping it changes
+which. Two layouts, remembered per device:
 
 - **Mega Drive** — d-pad, A B C across, START.
 - **Super Nintendo** — d-pad, the X/Y/A/B diamond, LB/RB and LT/RT, SELECT and
