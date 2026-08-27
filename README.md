@@ -345,6 +345,13 @@ for a congested uplink can push its SCTP association into an error state, and
 when that happens the guest's *video* dies with it while ICE still reports the
 connection as healthy. It looks exactly like a black screen with no cause.
 
+**A frozen picture is noticed, not just a broken connection.** The guest's page
+watches whether bytes are actually arriving, because connection state is not
+enough on its own: a tab that has been in the background comes back with its
+peer still reporting `connected` while nothing has moved for however long it
+was away. Six seconds of no video and it rebuilds, whatever the connection
+claims about itself.
+
 **A guest who drops gets back in on their token, not the PIN.** Their slot is
 given away immediately — somebody present beats somebody who might return — but
 the *claim* outlives it for fifteen minutes, so a browser that still has its

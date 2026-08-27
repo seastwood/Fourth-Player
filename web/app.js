@@ -233,6 +233,9 @@ async function answer(message) {
       clearMediaTimeout();
       clearRenewTimer();
       renewals = 0;
+      lastBytes = -1;
+      stalledSince = 0;
+      startWatchdog();
       setTimeout(() => report("video playing"), 5000);
     }
     // "disconnected" often mends itself in a second or two, so give it that
@@ -468,7 +471,7 @@ function clearRenewTimer() {
   if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; }
 }
 
-function renewSoon(delay) {
+function renewSoon(delay, force) {
   if (ended || renewTimer) return;
   if (renewals >= MAX_RENEWALS) {
     mediaFailed("The video connection could not be rebuilt.");
@@ -476,7 +479,11 @@ function renewSoon(delay) {
   }
   renewTimer = setTimeout(() => {
     renewTimer = null;
-    if (!pc || pc.connectionState === "connected") return;
+    // `force` is for a connection that claims to be up and is not carrying
+    // anything -- which is what iOS leaves behind after the tab has been in
+    // the background. Without it this returns here and nothing is ever
+    // rebuilt, so the picture stays frozen under a chip saying "reconnecting".
+    if (!pc || (!force && pc.connectionState === "connected")) return;
     renewals += 1;
     setChip("link", "reconnecting…", "warn");
     if (socket && socket.readyState === 1) {
@@ -496,8 +503,17 @@ window.addEventListener("online", () => {
   if (pc && pc.connectionState !== "connected") renewSoon(500);
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && pc &&
-      pc.connectionState !== "connected") renewSoon(500);
+  if (document.visibilityState !== "visible" || ended || !pc) return;
+  // Coming back to the tab. Do not trust the connection state -- check whether
+  // anything is moving, and give it a couple of seconds to prove it before
+  // rebuilding, since a brief background is often survivable.
+  stalledSince = 0;
+  lastBytes = -1;
+  setTimeout(watchMedia, 500);
+  setTimeout(() => {
+    if (!ended && pc && lastBytes < 0) renewSoon(0, true);
+  }, 3000);
+  if (pc.connectionState !== "connected") renewSoon(500);
 });
 
 let mediaTimer = null;
@@ -584,6 +600,53 @@ el("link").addEventListener("click", async () => {
   setTimeout(() => { if (mediaTimer === null && pc && pc.connectionState === "connected")
                        el("prompt").hidden = true; }, 8000);
 });
+
+/* Whether anything is actually arriving.
+ *
+ * Connection state is not enough on its own. A tab that has been in the
+ * background comes back with its RTCPeerConnection still reporting
+ * "connected" while no media has moved for however long it was away -- so
+ * nothing fires, nothing retries, and the last frame sits on the screen. The
+ * only honest measure is whether the byte count is going up.
+ */
+const STALL_LIMIT_MS = 6000;
+let lastBytes = -1, stalledSince = 0, watchdogTimer = null;
+
+async function watchMedia() {
+  if (ended || !pc) return;
+  let bytes = 0;
+  try {
+    (await pc.getStats()).forEach((r) => {
+      if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
+        bytes += r.bytesReceived || 0;
+      }
+    });
+  } catch (_) { return; }
+
+  if (bytes > lastBytes) {
+    lastBytes = bytes;
+    stalledSince = 0;
+    // Video is arriving, so whatever the chip last said is out of date. This
+    // is also what stops it sticking on "reconnecting" after a rebuild that
+    // actually worked.
+    setChip("link", "connected", "ok");
+    return;
+  }
+  if (lastBytes < 0) return;               // nothing has arrived yet at all
+
+  const now = Date.now();
+  if (!stalledSince) { stalledSince = now; return; }
+  if (now - stalledSince >= STALL_LIMIT_MS) {
+    stalledSince = 0;
+    setChip("link", "reconnecting…", "warn");
+    renewSoon(0, true);
+  }
+}
+
+function startWatchdog() {
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(watchMedia, 2000);
+}
 
 /* ---- the pad ---- */
 
