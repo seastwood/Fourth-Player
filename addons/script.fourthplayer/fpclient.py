@@ -52,6 +52,10 @@ def stop_session():
     return ask({"cmd": "stop"}, timeout=30)
 
 
+def reshare():
+    return ask({"cmd": "reshare"})
+
+
 def extend(minutes):
     return ask({"cmd": "extend", "minutes": minutes})
 

@@ -11,6 +11,7 @@ buttons, and neither can reasonably own the other.
 
 import asyncio
 import functools
+import json
 import logging
 import os
 import subprocess
@@ -23,6 +24,12 @@ from .video import Stage
 log = logging.getLogger("fourthplayer.session")
 
 SWEEP_INTERVAL = 0.05
+
+# Where a live session is written down so a restart does not end it. The
+# process has segfaulted inside the GPU's video driver more than once, and
+# systemd puts it straight back -- but everything about the session lived in
+# memory, so every guest was locked out of something that no longer existed.
+STATE_PATH = os.path.expanduser("~/.local/state/fourth-player/session.json")
 
 # How long to wait for the pipeline worker before giving up on a guest's
 # request. Every add and remove of a peer goes through one thread so they
@@ -143,12 +150,12 @@ class LiveSession:
     def open(self):
         return self.invite is not None and self.invite.alive(self._now())
 
-    def start(self, duration_seconds):
+    def start(self, duration_seconds, invite=None):
         if self.invite is not None:
             raise RuntimeError("a session is already open")
         now = self._now()
-        self.invite = invites.Session(slots=self.cfg.slots,
-                                      duration=duration_seconds, now=now)
+        self.invite = invite or invites.Session(
+            slots=self.cfg.slots, duration=duration_seconds, now=now)
         # Pads first, and before any guest can arrive. kodi-retrobox's player
         # picker enumerates evdev devices at launch, so a pad that appears
         # after RetroArch starts is a pad that game will never see.
@@ -168,6 +175,7 @@ class LiveSession:
             gpu.set_level("high")
         self._sweeper = self.loop.create_task(self._sweep_forever())
         self._start_overlay()
+        self.save()
         log.info("session open for %.0f minutes, %d slots, pads at %s",
                  duration_seconds / 60, self.cfg.slots,
                  ", ".join(p.path for p in self.pads))
@@ -291,6 +299,11 @@ class LiveSession:
                                              address=address)
         guest = GuestConnection(self, slot, socket)
         self.guests[slot] = guest
+        # Write it down now. The snapshot was only taken when a session opened
+        # or somebody left, so a guest who joined and was still playing when
+        # the process died was absent from it -- leaving the people actually
+        # in the game as the only ones unable to get back in.
+        self.save()
         log.info("%s joined from %s", guest.label, address or "unknown")
         return guest, guest_token
 
@@ -331,6 +344,7 @@ class LiveSession:
             return existing
         guest = GuestConnection(self, record.slot, socket)
         self.guests[record.slot] = guest
+        self.save()
         return guest
 
     async def attach_peer(self, guest, on_signal):
@@ -436,6 +450,7 @@ class LiveSession:
         self.detach_peer(guest)
         if self.invite is not None:
             self.invite.release(slot, now=self._now())
+            self.save()
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -500,6 +515,43 @@ class LiveSession:
         before = len(self.guests)
         self._reap_ghosts(seconds=seconds)
         return before - len(self.guests)
+
+    # -- surviving a restart -------------------------------------------------
+
+    def save(self):
+        """Write the invite down, so a crash costs a reconnect and not a session."""
+        if self.invite is None:
+            return
+        try:
+            os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+            tmp = STATE_PATH + ".new"
+            with open(tmp, "w") as handle:
+                json.dump(self.invite.snapshot(self._now()), handle)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, STATE_PATH)          # never a half-written file
+        except OSError as exc:
+            log.warning("could not save the session: %s", exc)
+
+    @staticmethod
+    def forget():
+        try:
+            os.unlink(STATE_PATH)
+        except OSError:
+            pass
+
+    @staticmethod
+    def saved_invite(now):
+        """The invite from a previous run, if it is still in date."""
+        try:
+            with open(STATE_PATH) as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        try:
+            return invites.Session.restore(data, now)
+        except (KeyError, TypeError, ValueError) as exc:
+            log.warning("the saved session could not be read: %s", exc)
+            return None
 
     def notify(self, message):
         if self.on_notice is not None:

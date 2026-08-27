@@ -162,6 +162,52 @@ try:
 except I.UnknownGuest:
     check(True, "an invented token is refused")
 
+print("\nan invite survives the process that made it")
+s, tok, pin = fresh(slots=3, duration=600.0)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=5)
+snap = s.snapshot(now=10)
+check("token" in snap and "pin" in snap, "the snapshot has what it needs")
+check(tok not in str(snap) and pin not in str(snap),
+      "and neither the link nor the PIN can be read out of it")
+
+back = I.Session.restore(snap, now=100)
+check(back is not None, "it restores")
+check(back.token_valid(tok, now=101), "the link somebody is holding still works")
+slot_b, gb = back.join(tok, pin, now=101, address="b")
+check(slot_b is not None, "and the PIN somebody is holding still admits them")
+check(back.clear_invite is None,
+      "but the owner cannot re-read the pair -- it was never written down")
+
+print("\nand somebody who was playing when it stopped is not stranded")
+s2, tok2, pin2 = fresh(slots=3, duration=600.0)
+slot_p, gp = s2.join(tok2, pin2, now=1, address="p")   # still in the session
+back2 = I.Session.restore(s2.snapshot(now=2), now=50)
+check(back2.reclaim(gp, now=51) == slot_p,
+      "a guest who never got to leave reclaims their slot -- a crash gives "
+      "nobody the chance to leave tidily")
+
+print("\nand a guest who was mid-reconnect can still reclaim")
+check(back.reclaim(ga, now=102) is not None,
+      "a claim made before the restart survives it")
+
+print("\na snapshot that has run out restores nothing")
+s, tok, pin = fresh(duration=10.0)
+snap = s.snapshot(now=9.5)
+snap["expires_in"] = 0.0
+check(I.Session.restore(snap, now=0) is None, "an expired invite does not come back")
+
+print("\nand a kicked guest stays kicked across a restart")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.kick(slot_a)
+back = I.Session.restore(s.snapshot(now=2), now=50)
+try:
+    back.reclaim(ga, now=51)
+    check(False, "a kicked guest came back after a restart")
+except I.UnknownGuest:
+    check(True, "the burned credential survives")
+
 print("\nten wrong PINs destroy the invite outright")
 s, tok, pin = fresh()
 wrong = "000000" if pin != "000000" else "111111"

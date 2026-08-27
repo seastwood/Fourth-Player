@@ -19,9 +19,11 @@ this module, which is what lets the whole expiry and lockout story be tested in
 milliseconds instead of hours.
 """
 
+import base64
 import hashlib
 import hmac
 import secrets
+import time
 from dataclasses import dataclass, field
 
 TOKEN_BYTES = 32                 # 256 bits
@@ -252,6 +254,25 @@ class Session:
             self._claims[guest.token_digest] = (slot, now)
         return True
 
+    def reshare(self):
+        """Mint a fresh link and PIN without disturbing the session.
+
+        Needed after a restart, when the clear pair is gone by design and the
+        owner has no way to read it back. Everyone already playing is
+        untouched: their slots and their claims are identified by their own
+        guest tokens, not by the invite's.
+
+        The old link stops working, which is the point -- it is the same
+        promise a re-share has always made.
+        """
+        self._token = new_token()
+        self._pin = new_pin()
+        self.token_digest = _digest(self._token)
+        self.pin_digest = _digest(self._pin)
+        self.pin_attempts = 0
+        self.limiter = RateLimiter()
+        return self._token, self._pin
+
     def reclaim(self, guest_token, now):
         """Let a guest who left back in on their token, without the PIN.
 
@@ -282,6 +303,71 @@ class Session:
         self.guests[slot] = Guest(slot=slot, token_digest=digest, joined_at=now,
                                   label=f"Player {slot + 1}")
         return slot
+
+    # -- surviving a restart -------------------------------------------------
+
+    def snapshot(self, now):
+        """Everything needed to keep this invite working across a restart.
+
+        Digests only, exactly as in memory: a stolen copy of this yields no
+        usable link and no PIN. What it does preserve is that the link and PIN
+        already in somebody's hands keep working, and that a guest can reclaim
+        their slot -- which is the difference between a crash being invisible
+        and everybody being locked out of a session that no longer exists.
+
+        Deadlines are written as wall-clock seconds because the monotonic clock
+        this runs on does not survive the process, let alone a reboot.
+        """
+        b64 = lambda raw: base64.b64encode(raw).decode()
+        return {
+            "slots": self.slots,
+            "label": self.label,
+            "token": b64(self.token_digest),
+            "pin": b64(self.pin_digest),
+            "expires_in": max(0.0, self.expires_at - now),
+            "saved_at": time.time(),
+            "pin_attempts": self.pin_attempts,
+            "burned": [b64(d) for d in self._burned],
+            "claims": {b64(d): [slot, max(0.0, now - when)]
+                       for d, (slot, when) in self._claims.items()},
+            # Everybody currently in the session counts as a claimant too. They
+            # never got the chance to leave -- that is what a crash is -- and
+            # without this the guests who were actually playing are the only
+            # ones who cannot get back in, which is precisely backwards.
+            "playing": {b64(g.token_digest): [slot, 0.0]
+                        for slot, g in self.guests.items()},
+        }
+
+    @classmethod
+    def restore(cls, data, now):
+        """Rebuild an invite from a snapshot, or None if it has run out."""
+        elapsed = max(0.0, time.time() - float(data.get("saved_at", 0)))
+        remaining = float(data.get("expires_in", 0)) - elapsed
+        if remaining <= 0:
+            return None
+
+        raw = lambda text: base64.b64decode(text)
+        invite = cls.__new__(cls)
+        invite.slots = int(data["slots"])
+        invite.label = data.get("label", "Fourth Player")
+        invite.started_at = now
+        invite.expires_at = now + remaining
+        invite.destroyed = False
+        # The clear pair is deliberately not written down, so it cannot come
+        # back. The invite still works for anybody already holding it; the
+        # owner is told to re-share if they want to read it again.
+        invite._token = invite._pin = None
+        invite.token_digest = raw(data["token"])
+        invite.pin_digest = raw(data["pin"])
+        invite.pin_attempts = int(data.get("pin_attempts", 0))
+        invite.limiter = RateLimiter()
+        invite.guests = {}
+        invite._burned = {raw(d) for d in data.get("burned", [])}
+        claims = dict(data.get("claims") or {})
+        claims.update(data.get("playing") or {})
+        invite._claims = {raw(d): (int(slot), now - float(ago))
+                          for d, (slot, ago) in claims.items()}
+        return invite
 
     def kick(self, slot):
         """Remove one guest and make sure they cannot walk back in.

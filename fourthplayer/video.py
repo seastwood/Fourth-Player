@@ -737,7 +737,25 @@ class Peer:
         except Exception as exc:
             log.debug("get-stats unavailable: %s", exc)
 
+    def on_pipeline_thread(self, fn, *args):
+        """Run something that touches webrtcbin on the one thread that may.
+
+        GStreamer is thread-safe in principle and the AMD VAAPI driver under it
+        is not, in practice: this process took two SIGSEGVs inside
+        radeonsi_drv_video.so with PyGObject on the stack, both while a peer
+        was being negotiated from the asyncio thread as the encoder ran. Every
+        add and remove already goes through one worker; the answer and the
+        candidates now go the same way, so nothing reaches webrtcbin from two
+        threads at once.
+        """
+        return self.stage.mutations.submit(fn, *args)
+
     def set_remote_answer(self, sdp_text):
+        self.on_pipeline_thread(self._set_remote_answer, sdp_text)
+
+    def _set_remote_answer(self, sdp_text):
+        if self.webrtc is None:
+            return
         ok, message = GstSdp.SDPMessage.new()
         if ok != GstSdp.SDPResult.OK:
             raise RuntimeError("could not allocate an SDP message")
@@ -747,7 +765,11 @@ class Peer:
         self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
 
     def add_ice_candidate(self, mline_index, candidate):
-        self.webrtc.emit("add-ice-candidate", mline_index, candidate)
+        self.on_pipeline_thread(self._add_ice_candidate, mline_index, candidate)
+
+    def _add_ice_candidate(self, mline_index, candidate):
+        if self.webrtc is not None:
+            self.webrtc.emit("add-ice-candidate", mline_index, candidate)
 
     # -- input --------------------------------------------------------------
 

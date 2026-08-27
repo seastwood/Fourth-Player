@@ -322,6 +322,7 @@ class Server:
             if command == "start":
                 if self.session and self.session.open:
                     return {"ok": False, "error": "a session is already open"}
+                LiveSession.forget()
                 if self.session is not None:
                     # An expired session that nothing has swept still owns its
                     # pads. Dropping the object without closing it leaks a
@@ -341,6 +342,13 @@ class Server:
                     await self.session.astop(reason="stopped by the owner")
                     self.session = None
                 return {"ok": True}
+            if command == "reshare":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                self.session.invite.reshare()
+                self.session.save()
+                log.info("re-shared: a new link and PIN, same session")
+                return self._status()
             if command == "extend":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
@@ -359,6 +367,30 @@ class Server:
             log.exception("control command failed: %r", request)
             return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": f"unknown command {command!r}"}
+
+    def _restore_session(self):
+        """Pick up a session that was running when this process last stopped.
+
+        The point is that a crash costs a reconnect rather than the evening:
+        the link and PIN already in people's hands keep working, and a guest
+        with a token walks straight back in. The clear pair is not written
+        down, so the owner is told to re-share if they want to read it again.
+        """
+        import time as _time
+        invite = LiveSession.saved_invite(_time.monotonic())
+        if invite is None:
+            return
+        try:
+            session = LiveSession(self.cfg, self.loop)
+            session.on_notice = self._broadcast
+            session.start(0, invite=invite)
+        except Exception as exc:
+            log.warning("could not restore the previous session: %s", exc)
+            LiveSession.forget()
+            return
+        self.session = session
+        log.info("restored the session that was open before; %.0f minutes left",
+                 session.remaining() / 60)
 
     def _status(self):
         if not (self.session and self.session.open):
@@ -432,6 +464,8 @@ class Server:
         os.chmod(CONTROL_SOCKET, 0o600)
         self._sockets.append(control)
         log.info("control socket at %s", CONTROL_SOCKET)
+
+        self._restore_session()
 
         try:
             await asyncio.Future()

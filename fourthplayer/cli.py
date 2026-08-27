@@ -103,6 +103,7 @@ def main(argv=None):
     extend.add_argument("--minutes", type=int, default=15)
 
     sub.add_parser("stop", help="close the session")
+    sub.add_parser("reshare", help="new link and PIN, same session and players")
     sub.add_parser("status", help="show the session and its guests")
 
     kick = sub.add_parser("kick", help="remove one guest")

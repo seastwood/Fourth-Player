@@ -210,10 +210,13 @@ async def run(args):
         print("no session is open -- start one first:\n"
               "    python3 -m fourthplayer start --minutes 5", file=sys.stderr)
         return 2
-    url, pin = status["url"], status["pin"]
-    print(f"joining {url}")
-
-    token = url.rsplit("/j/", 1)[1]
+    url, pin = status.get("url"), status.get("pin")
+    if not url and not args.resume:
+        print("the session was restored and its link is not readable; "
+              "re-share it, or use --resume with a saved token", file=sys.stderr)
+        return 2
+    token = url.rsplit("/j/", 1)[1] if url else ""
+    print(f"joining {url or 'a restored session, on a saved token'}")
     cfg = Config.load()
     scheme = "wss" if cfg.tls else "ws"
     context = None

@@ -300,6 +300,27 @@ two thirds speed. A running game is itself a 3D load and ramps the card, so this
 only bites between opening a session and starting something. `fourthplayer/gpu.py`
 raises the clocks for the life of a session and puts them back afterwards.
 
+## When the host falls over
+
+The server has segfaulted inside the GPU's video driver more than once, and
+systemd puts it straight back — but a session that lives only in memory dies
+with the process, so everybody was locked out of something that no longer
+existed. The invite is therefore written to disk, and a restarted server picks
+it up:
+
+- **The link and PIN already in people's hands keep working.** Only digests are
+  saved, exactly as in memory, so a stolen copy of the file is worth nothing.
+- **Guests reconnect on their own tokens**, including the ones who were playing
+  at the moment it died — they never got the chance to leave, which is what a
+  crash is.
+- **The owner cannot re-read the pair**, because it was never written down.
+  `fourth-player reshare` mints a new link and PIN without ending the session
+  or disturbing anybody already in it.
+
+```sh
+python3 -m fourthplayer reshare
+```
+
 ## The session
 
 An invite is two factors that travel by different routes: a 256-bit token in the
