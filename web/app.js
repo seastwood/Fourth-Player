@@ -481,15 +481,23 @@ function dpadDirections(event) {
     (event.clientY - (rect.top + rect.height / 2)) / (rect.height / 2));
 }
 
+function paintDpad(live) {
+  for (const arm of el("dpad").querySelectorAll(".dpad-arm")) {
+    arm.classList.toggle("live", live.includes(arm.dataset.dir));
+  }
+}
+
 function applyDpad(event) {
   const live = dpadDirections(event);
   for (const [name, bit] of Object.entries(DPAD)) setBit(bit, live.includes(name));
-  el("dpad").classList.toggle("live", live.length > 0);
+  // Light the arm being pressed, not the middle: a diagonal lights two, which
+  // is also the clearest way to see that diagonals work at all.
+  paintDpad(live);
 }
 
 function clearDpad() {
   for (const bit of Object.values(DPAD)) setBit(bit, false);
-  el("dpad").classList.remove("live");
+  paintDpad([]);
 }
 
 function wireTouch() {

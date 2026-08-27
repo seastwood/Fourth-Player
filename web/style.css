@@ -383,25 +383,30 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   touch-action: none;
 }
 
-.dpad-stem {
+/* Each arm carries its outer edge and its two flanks, and no inner edge --
+   twelve edges between them, which is exactly the outline of a cross. The
+   centre is then a plain fill with no border of its own. */
+.dpad-arm {
   position: absolute;
   background: var(--key);
   border: 2px solid var(--key-edge);
-  border-radius: 0;
+  transition: background .04s linear;
 }
-.dpad-v { left: 33.5%; right: 33.5%; top: 0; bottom: 0; }
-.dpad-h { top: 33.5%; bottom: 33.5%; left: 0; right: 0; }
+.dpad-up    { left: 33.5%; right: 33.5%; top: 0; height: 34%; border-bottom: 0; }
+.dpad-down  { left: 33.5%; right: 33.5%; bottom: 0; height: 34%; border-top: 0; }
+.dpad-left  { top: 33.5%; bottom: 33.5%; left: 0; width: 34%; border-right: 0; }
+.dpad-right { top: 33.5%; bottom: 33.5%; right: 0; width: 34%; border-left: 0; }
+
+.dpad-arm.live { background: var(--edge); }
 
 .dpad-hat {
   position: absolute;
-  left: 34%;
-  top: 34%;
-  width: 32%;
-  height: 32%;
-  background: var(--bg2);
-  transition: background .04s linear;
+  left: 33.5%;
+  top: 33.5%;
+  right: 33.5%;
+  bottom: 33.5%;
+  background: var(--key);
 }
-.dpad.live .dpad-hat { background: var(--edge); }
 
 .face {
   position: relative;
@@ -506,7 +511,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
   .dpad { width: min(30vh, 175px); }
   .face { width: min(40vh, 235px); }
-  .dpad-stem, .tbtn { opacity: .86; }
+  .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
 }
 

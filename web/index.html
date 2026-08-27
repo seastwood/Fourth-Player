@@ -67,9 +67,13 @@
     <div class="shoulders shoulders-right" id="shoulders-right"></div>
 
     <div class="touch-left">
+      <!-- Four arms rather than two crossed bars, so the one being pressed
+           can light on its own. -->
       <div id="dpad" class="dpad" role="group" aria-label="Direction pad">
-        <div class="dpad-stem dpad-v"></div>
-        <div class="dpad-stem dpad-h"></div>
+        <div class="dpad-arm dpad-up" data-dir="up"></div>
+        <div class="dpad-arm dpad-down" data-dir="down"></div>
+        <div class="dpad-arm dpad-left" data-dir="left"></div>
+        <div class="dpad-arm dpad-right" data-dir="right"></div>
         <div class="dpad-hat"></div>
       </div>
     </div>
