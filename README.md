@@ -60,6 +60,23 @@ deliberate, and it is the lesser of two evils:
 Use `--slots 1` (or `slots` in the config) if you only ever expect one guest and
 the spare rows are in the way.
 
+## How it looks
+
+The guest's page uses the console's own palette and typeface — the values in
+kodi-retrobox's `ra_players.py` and the Press Start 2P it sets its menus in —
+so a phone joining a game belongs to the same machine as the television rather
+than looking like a web app that happens to point at it.
+
+It commits to one dark theme on purpose. This is a games console, not a
+document: there is no light-mode version of it, so every colour is painted
+explicitly instead of inherited. Prose stays in a normal typeface, because a
+paragraph set in Press Start 2P is a wall to be decoded rather than read; the
+pixel face is for the title, the labels, the PIN and the buttons.
+
+The font is bundled (`web/fonts/`, SIL Open Font License, notice included)
+rather than fetched, so a guest with no route to the wider internet — which is
+most of the point of this project — still sees the right thing.
+
 ## Guests without a controller
 
 A phone with no pad attached gets an on-screen one, laid out as a Mega Drive /

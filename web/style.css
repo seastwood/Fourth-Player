@@ -1,36 +1,50 @@
+/* The console's own look: the palette and the typeface the Kodi front end and
+ * the player picker already use, so a guest's phone belongs to the same
+ * machine as the television.
+ *
+ * Deliberately one theme. This is a games console, not a document -- there is
+ * no light-mode version of it -- so every colour is painted explicitly rather
+ * than inherited from whatever the browser would otherwise supply.
+ */
+
+@font-face {
+  font-family: "PressStart";
+  src: url("/static/fonts/PressStart2P.ttf") format("truetype");
+  font-display: swap;           /* the page is usable before the font lands */
+}
+
 :root {
-  --bg: #101319;
-  --panel: #171b23;
-  --line: #262c37;
-  --ink: #e3e7ee;
-  --muted: #949cac;
-  --amber: #e69b40;
-  --teal: #45bdb5;
-  --red: #e0655b;
+  /* Straight from ra_players.py and ra_holdbar.py. */
+  --bg:      #100e28;
+  --bg2:     #1c1642;
+  --edge:    #ff3ea5;
+  --accent:  #ffd447;
+  --dim:     #7a6fc0;
+  --ink:     #f0eeff;
+
+  --ok:      #4bd6a0;
+  --bad:     #ff5c7a;
+
+  --pixel: "PressStart", ui-monospace, monospace;
+  /* Prose stays in a normal face. Press Start 2P is a display type: a
+     paragraph set in it is a wall somebody has to decode rather than read. */
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
 * {
   box-sizing: border-box;
-  /* Kills the double-tap-to-zoom gesture without taking pinch-zoom away from
-     anyone who needs it. Setting it only on body would not do: touch-action
-     does not inherit, so every button and input would keep its own zoom. */
+  /* Kills double-tap zoom without taking pinch away from anyone who needs it.
+     touch-action does not inherit, so it has to be said here. */
   touch-action: manipulation;
 }
 
-/* Anything with `hidden` stays hidden, whatever else claims a display value.
-   The browser's own [hidden] rule is weaker than a class selector, so
-   `.stage { display: flex }` inside a media query silently un-hid the stage --
-   which then covered the join form with a fixed, black, full-screen panel. In
-   portrait only, because that is where the rule lived. */
+/* Anything marked hidden stays hidden, whatever else claims a display value --
+   a class selector in a media query beats the browser's own [hidden] rule, and
+   that once dropped a full-screen panel over the join form. */
 [hidden] { display: none !important; }
 
 html, body {
   margin: 0;
-  /* Not height:100%. On a phone the gate's text wraps to more lines than the
-     screen is tall, and a fixed-height body cannot scroll to reach the rest --
-     which hid the PIN box entirely in portrait while landscape, being wider,
-     wrapped less and happened to fit. */
   min-height: 100%;
   background: var(--bg);
   color: var(--ink);
@@ -45,73 +59,127 @@ html, body {
 .gate {
   display: flex;
   min-height: 100vh;
-  min-height: 100dvh;          /* iOS: excludes the URL bar */
-  padding: 1.5rem 1.4rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
-  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: 1.5rem 1.2rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--bg2) 0%, var(--bg) 70%);
+  position: relative;
+  overflow: hidden;
 }
 
-/* margin:auto rather than justify-content:center. Centring a flex container
-   that overflows clips the top and makes it unreachable; auto margins centre
-   when there is room and give up gracefully when there is not. */
+/* Scanlines, on the page only -- never over the game picture, which has enough
+   to contend with. Two pixels of nothing, at low contrast. */
+.gate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px);
+  mix-blend-mode: multiply;
+}
+
+/* margin:auto rather than justify-content:center: centring a container that
+   overflows clips the top and puts it out of reach. */
 .gate-inner {
   display: flex;
   flex-direction: column;
-  gap: 1.1rem;
+  gap: 1.15rem;
   width: 100%;
-  max-width: 26rem;
+  max-width: 27rem;
   margin: auto;
+  position: relative;
+  z-index: 1;
 }
 
-.gate h1 { font-size: 1.9rem; margin: 0; letter-spacing: -.02em; }
-.lede { color: var(--muted); margin: 0; }
+.gate h1 {
+  font-family: var(--pixel);
+  font-size: clamp(1rem, 4.6vw, 1.5rem);
+  line-height: 1.5;
+  margin: 0;
+  color: var(--accent);
+  /* Enough pink to read as the console's own title, not so much that it fights
+     the yellow it sits on top of. */
+  text-shadow: 3px 3px 0 rgba(255, 62, 165, .5);
+  letter-spacing: .02em;
+}
 
-form { display: flex; flex-direction: column; gap: .7rem; margin: .6rem 0 0; }
-label { font-size: .9rem; color: var(--muted); }
+.lede { color: var(--dim); margin: 0; font-size: .95rem; }
+
+form { display: flex; flex-direction: column; gap: .8rem; margin: .4rem 0 0; }
+
+label {
+  font-family: var(--pixel);
+  font-size: .58rem;
+  line-height: 1.7;
+  letter-spacing: .04em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
 
 input {
-  font: 600 1.8rem/1 var(--sans);
-  letter-spacing: .35em;
+  font: 1.6rem/1 var(--pixel);
+  letter-spacing: .3em;
+  text-indent: .3em;              /* balances the trailing letter-space */
   text-align: center;
-  padding: .8rem .6rem;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink);
+  padding: .95rem .5rem;
+  border: 3px solid var(--edge);
+  border-radius: 0;               /* a console has corners */
+  background: var(--bg2);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
-input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+input::placeholder { color: #4a4270; }
+input:focus { outline: none; border-color: var(--accent); }
+input:focus-visible { outline: none; }
 
 button {
-  font: 600 1rem/1 var(--sans);
-  padding: .85rem 1rem;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: var(--amber);
-  color: #1a1206;
+  font: .8rem/1 var(--pixel);
+  letter-spacing: .04em;
+  padding: 1rem .9rem;
+  border: 3px solid var(--accent);
+  border-radius: 0;
+  background: var(--bg2);
+  color: var(--accent);
   cursor: pointer;
+  text-transform: uppercase;
 }
-button:disabled { opacity: .55; cursor: default; }
-button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+button:active { background: var(--accent); color: var(--bg); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
 
 .ghost {
-  background: transparent;
+  background: rgba(16, 14, 40, .8);
   color: var(--ink);
-  border-color: var(--line);
-  padding: .35rem .7rem;
-  font-size: .8rem;
+  border: 2px solid var(--dim);
+  padding: .4rem .6rem;
+  font-size: .5rem;
 }
 
 .error {
-  color: var(--red);
-  background: rgba(224, 101, 91, .1);
-  border: 1px solid rgba(224, 101, 91, .35);
-  border-radius: 8px;
-  padding: .6rem .8rem;
+  color: var(--bad);
+  background: rgba(255, 92, 122, .12);
+  border: 2px solid var(--bad);
+  padding: .7rem .8rem;
   margin: 0;
-  font-size: .92rem;
+  font-size: .88rem;
+  line-height: 1.5;
 }
 
-.footnote { color: var(--muted); font-size: .82rem; margin: 0; line-height: 1.5; }
+.footnote { color: var(--dim); font-size: .8rem; margin: 0; line-height: 1.6; }
+
+.linkish {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  padding: 0;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
 
 /* ---- the stage ---- */
 
@@ -139,13 +207,13 @@ video {
   display: flex;
   gap: .35rem;
   align-items: center;
-  /* Wrap rather than run off the side. Five chips and two buttons do not fit
-     across a phone held upright, and the ones that fell off the right edge
-     were the clock and the connection state -- the two worth reading. */
+  /* Wrap rather than run off the side: five chips and two buttons do not fit
+     across a phone held upright, and the ones that fell off were the clock and
+     the connection state. */
   flex-wrap: wrap;
   padding: .5rem calc(.6rem + env(safe-area-inset-right, 0px))
            .5rem calc(.6rem + env(safe-area-inset-left, 0px));
-  background: linear-gradient(to bottom, rgba(0,0,0,.75), transparent);
+  background: linear-gradient(to bottom, rgba(16, 14, 40, .92), transparent);
   opacity: 0;
   transition: opacity .25s ease;
   pointer-events: none;
@@ -153,27 +221,31 @@ video {
 .stage:hover .hud, .hud.show { opacity: 1; pointer-events: auto; }
 
 .chip {
-  font-size: .72rem;
-  padding: .22rem .5rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(16, 19, 25, .8);
-  color: var(--muted);
+  font-family: var(--pixel);
+  font-size: .48rem;
+  line-height: 1.5;
+  letter-spacing: .03em;
+  padding: .4rem .5rem;
+  border: 2px solid var(--dim);
+  border-radius: 0;
+  background: rgba(16, 14, 40, .9);
+  color: var(--dim);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  /* A controller's name can be long enough on its own to push everything else
-     off the screen. */
+  text-transform: uppercase;
+  /* A controller's name is long enough on its own to push everything else off
+     the screen. */
   max-width: 42vw;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 0 1 auto;
   min-width: 0;
 }
-.chip.ok { color: var(--teal); border-color: rgba(69, 189, 181, .45); }
-.chip.warn { color: var(--amber); border-color: rgba(230, 155, 64, .45); }
-.chip.bad { color: var(--red); border-color: rgba(224, 101, 91, .45); }
+.chip.ok   { color: var(--ok);     border-color: var(--ok); }
+.chip.warn { color: var(--accent); border-color: var(--accent); }
+.chip.bad  { color: var(--bad);    border-color: var(--bad); }
 
-/* The link chip reports the media route when tapped, so it has to be tappable
+/* The link chip reports the media route when tapped, so it stays tappable
    even while the rest of the overlay is not. */
 #link { pointer-events: auto; cursor: pointer; }
 
@@ -182,31 +254,32 @@ video {
   inset: auto 0 12% 0;
   text-align: center;
   color: var(--ink);
-  text-shadow: 0 2px 12px #000;
+  text-shadow: 0 2px 10px #000;
   pointer-events: none;
+  padding: 0 1rem;
 }
-.prompt p { margin: .2rem 0; }
+.prompt p { margin: .3rem 0; }
+.prompt strong {
+  font-family: var(--pixel);
+  font-size: .72rem;
+  line-height: 1.8;
+  color: var(--accent);
+  font-weight: normal;
+}
 .prompt[hidden] { display: none; }
-
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
-}
-
 
 /* ---- on-screen controller ----
  *
- * One set of markup, two arrangements. In portrait the picture sits above and
- * the pad below it, because a thumb cannot reach the middle of a phone held
- * upright and because covering a 16:9 video with buttons wastes the half of
- * the screen that is already letterboxed. In landscape there is no room below,
- * so the pad floats over the picture at the two bottom corners -- where the
+ * One set of markup, two arrangements. Portrait puts the picture above and the
+ * pad below, because a thumb cannot reach the middle of an upright phone and
+ * covering a 16:9 video wastes the half of the screen already letterboxed.
+ * Landscape has no room below, so it floats over the bottom corners where the
  * thumbs already are.
  */
 
 .touch {
-  --key: #232833;
-  --key-edge: #39404e;
-  --key-live: var(--amber);
+  --key: #241c52;
+  --key-edge: var(--dim);
   display: grid;
   gap: .5rem;
   user-select: none;
@@ -222,16 +295,15 @@ video {
 }
 .touch-left { grid-area: left; }
 .touch-right { grid-area: right; }
-.touch-mid { grid-area: mid; flex-direction: column; gap: .4rem; }
+.touch-mid { grid-area: mid; flex-direction: column; gap: .5rem; }
 
 .touch-name {
-  font-size: .62rem;
-  letter-spacing: .12em;
+  font-family: var(--pixel);
+  font-size: .45rem;
+  letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--dim);
 }
-
-/* -- the d-pad: one surface, eight directions -- */
 
 .dpad {
   position: relative;
@@ -243,8 +315,8 @@ video {
 .dpad-stem {
   position: absolute;
   background: var(--key);
-  border: 1px solid var(--key-edge);
-  border-radius: 10px;
+  border: 2px solid var(--key-edge);
+  border-radius: 0;
 }
 .dpad-v { left: 33.5%; right: 33.5%; top: 0; bottom: 0; }
 .dpad-h { top: 33.5%; bottom: 33.5%; left: 0; right: 0; }
@@ -255,13 +327,10 @@ video {
   top: 34%;
   width: 32%;
   height: 32%;
-  border-radius: 50%;
-  background: #2c323f;
-  transition: transform .04s linear;
+  background: var(--bg2);
+  transition: background .04s linear;
 }
-.dpad.live .dpad-hat { background: #3a4152; }
-
-/* -- face buttons, laid out on an arc like the real thing -- */
+.dpad.live .dpad-hat { background: var(--edge); }
 
 .face {
   position: relative;
@@ -275,42 +344,39 @@ video {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  border: 1px solid var(--key-edge);
+  border: 3px solid var(--edge);
   background: var(--key);
-  color: var(--ink);
-  font: 600 1rem/1 var(--sans);
-  letter-spacing: .02em;
+  color: var(--accent);
+  font: .9rem/1 var(--pixel);
+  letter-spacing: 0;
   padding: 0;
+  text-transform: none;
   touch-action: none;
   transition: background .05s linear, transform .05s linear;
 }
 
 .tbtn.live {
-  background: var(--key-live);
-  color: #1a1206;
+  background: var(--edge);
+  color: var(--bg);
   transform: scale(.94);
 }
 
-.tbtn-face {
-  width: 30%;
-  aspect-ratio: 1;
-}
+.tbtn-face { width: 30%; aspect-ratio: 1; }
 
 .tbtn-start {
   position: static;
   width: auto;
-  height: 2.1rem;
-  padding: 0 1.1rem;
-  border-radius: 999px;
-  font-size: .72rem;
-  letter-spacing: .14em;
+  height: auto;
+  padding: .5rem 1rem;
+  border-radius: 0;
+  border-color: var(--dim);
+  color: var(--dim);
+  font-size: .5rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
 }
+.tbtn-start.live { background: var(--dim); color: var(--bg); }
 
-/* Portrait: picture on top, pad underneath.
- *
- * Two columns, not three. A d-pad and three face buttons big enough to hit
- * already want most of the width of a phone, so START goes on its own row
- * beneath them rather than squeezing between and shrinking both. */
 @media (orientation: portrait) {
   .stage { display: flex; flex-direction: column; background: #000; }
   video { flex: 0 0 auto; max-height: 46vh; }
@@ -324,13 +390,12 @@ video {
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
     background: var(--bg);
-    border-top: 1px solid var(--line);
+    border-top: 3px solid var(--edge);
   }
   .dpad { width: min(34vw, 160px); }
   .face { width: min(42vw, 205px); }
 }
 
-/* Landscape: no room below, so float over the corners. */
 @media (orientation: landscape) {
   .touch {
     position: absolute;
@@ -345,17 +410,10 @@ video {
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
   .dpad { width: min(30vh, 175px); }
   .face { width: min(40vh, 235px); }
-  .dpad-stem, .tbtn { opacity: .82; }
+  .dpad-stem, .tbtn { opacity: .86; }
   .touch-name { display: none; }
 }
 
-.linkish {
-  background: none;
-  border: 0;
-  color: var(--amber);
-  text-decoration: underline;
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
-  pointer-events: auto;
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
 }
