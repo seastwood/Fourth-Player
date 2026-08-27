@@ -113,6 +113,15 @@ systemctl --user enable --now fourth-player
 python3 -m fourthplayer start --minutes 60
 ```
 
+The service is what the Kodi add-on drives. Until `install.sh` has been run,
+the add-on says so rather than pretending — it has no way to start something
+systemd has never heard of.
+
+```sh
+systemctl --user status fourth-player      # is it up?
+journalctl --user -u fourth-player -f      # what is it doing?
+```
+
 That prints a link and a PIN, and puts a QR code on the television. Anything
 else you need is in `python3 -m fourthplayer --help`.
 

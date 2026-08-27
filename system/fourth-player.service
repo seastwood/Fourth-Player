@@ -7,6 +7,10 @@ PartOf=graphical-session.target
 Type=simple
 Environment=DISPLAY=:0
 Environment=PYTHONUNBUFFERED=1
+# ximagesrc needs the X cookie. A user service started by the graphical session
+# usually inherits it, but "usually" is not good enough for the one thing that
+# makes the whole program work.
+Environment=XAUTHORITY=%h/.Xauthority
 WorkingDirectory=%h/fourth-player
 ExecStart=/usr/bin/python3 -m fourthplayer serve
 Restart=on-failure
@@ -21,7 +25,16 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/state/fourth-player %h/.config/fourth-player
+# The third path is not optional: the server writes a RetroArch autoconfig
+# profile per pad when a session opens, and without it RetroArch guesses at the
+# button layout -- which puts a guest's A button somewhere else entirely. Under
+# ProtectHome=read-only that write fails silently, so this works by hand and
+# breaks only under the service.
+# %t is the user runtime directory, where the control socket is bound.
+# ProtectSystem=strict makes it read-only otherwise, and the server dies at
+# startup with "Read-only file system" from sock.bind -- which reads like a
+# permissions bug in the program rather than a line missing from this file.
+ReadWritePaths=%h/.local/state/fourth-player %h/.config/fourth-player %h/.config/retroarch %t
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
