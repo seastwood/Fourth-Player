@@ -43,17 +43,39 @@ class Config:
     # delay between the television and the guest's screen. Set 60 if the host
     # has the headroom.
     fps: int = 30
-    # 3 Mb/s. Comfortable on a LAN and survivable over a VPN or a home upload,
-    # which is where this actually gets used.
-    bitrate_kbps: int = 3000
+    # 1.5 Mb/s. There is no congestion control here -- gstreamer's rtpgccbwe is
+    # not in this distribution -- so the bitrate never adapts, and a figure the
+    # link cannot carry does not degrade the picture, it queues packets and
+    # turns into delay. Conservative is therefore the low-latency choice.
+    bitrate_kbps: int = 1500
     hardware_encode: bool = True
     # target-usage 1 measured *fastest* on Polaris, which is the opposite of
     # what the name suggests; 4 and 7 both came in a third slower.
     target_usage: int = 1
-    # 0 means "one second's worth", computed from the frame rate. A guest
-    # joining mid-session is sent an immediate keyframe anyway; this only
-    # bounds the wait if that request goes missing.
+    # 0 means "two seconds' worth", computed from the frame rate. A keyframe is
+    # several times the size of the frames around it, so on a thin link one per
+    # second is a burst per second, and every burst is a delay spike. Guests
+    # joining are sent one on demand regardless, so the interval only bounds
+    # the wait when that request is lost.
     keyframe_interval: int = 0
+
+    # How much encoded video may pile up per guest before frames are dropped.
+    # This is latency, directly: when the link cannot keep up, the queue fills
+    # and everything behind it is that much further behind. It was 200 ms,
+    # which is a fifth of a second of delay handed out for free the moment a
+    # connection gets tight.
+    queue_ms: int = 60
+
+    # The encoder's own buffer, in milliseconds of bitrate. Small keeps it from
+    # smoothing bursts by holding frames back -- smoothing is exactly what adds
+    # delay here.
+    cpb_ms: int = 150
+
+    # h264 works everywhere. h265 is half the bitrate for the same picture and
+    # is refused by most browsers -- Safari on recent Apple hardware takes it,
+    # Firefox does not, Chrome mostly does not. Worth trying if every guest is
+    # on an iPhone; a black screen for anybody else.
+    codec: str = "h264"
 
     # -- audio --
     audio: bool = True

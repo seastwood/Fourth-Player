@@ -27,15 +27,21 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 
 # Frame rate costs more than resolution on the hardware this was built for, so
 # the presets trade it first.
+# Latency first: the bitrate has to fit the thinnest link in use, because
+# nothing here adapts it. Anything that does not fit becomes delay.
 QUALITY = [
-    ("Same network — 720p30, 6 Mb/s (default)",
-     dict(width=1280, height=720, fps=30, bitrate_kbps=6000, keyframe_interval=0)),
-    ("Sharper — 720p60, 8 Mb/s",
-     dict(width=1280, height=720, fps=60, bitrate_kbps=8000, keyframe_interval=0)),
-    ("Over the internet or a VPN — 540p30, 2 Mb/s",
-     dict(width=960, height=540, fps=30, bitrate_kbps=2000, keyframe_interval=60)),
-    ("As little as it can use — 480p30, 0.8 Mb/s",
-     dict(width=854, height=480, fps=30, bitrate_kbps=800, keyframe_interval=90)),
+    ("Over the internet — 720p30, 1.5 Mb/s (default)",
+     dict(width=1280, height=720, fps=30, bitrate_kbps=1500,
+          queue_ms=60, jitter_ms=30)),
+    ("Same network — 720p60, 6 Mb/s",
+     dict(width=1280, height=720, fps=60, bitrate_kbps=6000,
+          queue_ms=80, jitter_ms=25)),
+    ("Poor connection — 540p30, 0.8 Mb/s",
+     dict(width=960, height=540, fps=30, bitrate_kbps=800,
+          queue_ms=40, jitter_ms=40)),
+    ("Lowest delay — 540p30, 1.2 Mb/s, no smoothing",
+     dict(width=960, height=540, fps=30, bitrate_kbps=1200,
+          queue_ms=25, jitter_ms=10)),
 ]
 
 

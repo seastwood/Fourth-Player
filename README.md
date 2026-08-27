@@ -134,6 +134,43 @@ session open, 58m 12s left
     slot 0  Player 2   connected  8134 frames  /dev/input/event20
 ```
 
+### If it feels laggy
+
+Delay here comes from buffering far more than from picture quality, and there
+are three places it accumulates. Worth knowing which knob does what, because
+turning the wrong one costs quality for nothing:
+
+| Setting | What it does | Trade |
+|---|---|---|
+| `bitrate_kbps` | 1500 by default | **Nothing adapts this.** There is no congestion control — `rtpgccbwe` is not in this distribution — so a bitrate the link cannot carry does not soften the picture, it queues packets and becomes delay. Too low is a soft picture; too high is a laggy one |
+| `queue_ms` | 60 | How much encoded video may pile up per guest when the link is tight. This *is* delay. It was 200, which handed out a fifth of a second the moment a connection got busy |
+| `jitter_ms` | 30 | How long the guest's browser holds frames before playing them. Lower is less delay and more stutter — this is the "buffer a couple of frames" knob, and it trades the opposite way from the other two |
+
+Keyframes are every two seconds rather than every one: a keyframe is several
+times the size of the frames around it, so on a thin link one per second is a
+burst per second and every burst is a delay spike. Guests joining are sent one
+on demand anyway.
+
+```sh
+python3 -m fourthplayer serve --bitrate 1200 --queue 40 --jitter 20
+```
+
+### Trying H.265
+
+Half the bitrate for the same picture, which on a thin link means a better
+picture rather than a faster one — it does not reduce delay by itself. The
+Radeon encodes it at the same speed as H.264 here, so it costs nothing to run.
+
+The catch is the guest: **most browsers refuse it.** Safari on recent Apple
+hardware accepts it, Firefox does not, Chrome mostly does not — and a browser
+that refuses gets a black screen, which the page now says out loud.
+
+```sh
+python3 -m fourthplayer serve --codec h265
+```
+
+Worth trying if every guest is on an iPhone. Not a default.
+
 ### If the picture lags
 
 Frame rate costs more than resolution here. The defaults are 720p30 at 6 Mb/s

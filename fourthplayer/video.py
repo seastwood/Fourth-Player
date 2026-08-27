@@ -130,15 +130,23 @@ class Stage:
         self.mutations = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="gst-mutate")
 
-        # A keyframe a second unless told otherwise, whatever the frame rate.
-        keyint = cfg.keyframe_interval or max(1, cfg.fps)
-        encoder = (
-            f"vah264enc name=enc target-usage={cfg.target_usage} "
-            f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} b-frames=0"
-            if cfg.hardware_encode else
-            f"x264enc name=enc speed-preset=ultrafast tune=zerolatency "
-            f"bitrate={cfg.bitrate_kbps} key-int-max={keyint}"
-        )
+        keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
+        # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
+        cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
+        hevc = cfg.codec.lower() in ("h265", "hevc")
+        if cfg.hardware_encode:
+            element = "vah265enc" if hevc else "vah264enc"
+            encoder = (f"{element} name=enc target-usage={cfg.target_usage} "
+                       f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} "
+                       f"cpb-size={cpb} b-frames=0")
+        else:
+            element = "x265enc" if hevc else "x264enc"
+            encoder = (f"{element} name=enc speed-preset=ultrafast "
+                       f"tune=zerolatency bitrate={cfg.bitrate_kbps} "
+                       f"key-int-max={keyint}")
+        parser = "h265parse" if hevc else "h264parse"
+        payloader = "rtph265pay" if hevc else "rtph264pay"
+        encoding = "H265" if hevc else "H264"
         convert = (f"vapostproc ! {_caps(cfg.width, cfg.height)}"
                    if cfg.hardware_encode else
                    f"videoscale ! videoconvert ! video/x-raw,format=I420,"
@@ -152,10 +160,10 @@ class Stage:
             f"! video/x-raw,framerate={cfg.fps}/1 "
             f"! {convert} "
             f"! {encoder} "
-            f"! h264parse config-interval=-1 "
-            f"! rtph264pay pt=96 config-interval=-1 aggregate-mode=zero-latency "
+            f"! {parser} config-interval=-1 "
+            f"! {payloader} pt=96 config-interval=-1 aggregate-mode=zero-latency "
             f"mtu={cfg.rtp_mtu} "
-            f"! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
+            f"! application/x-rtp,media=video,encoding-name={encoding},payload=96,clock-rate=90000 "
             f"! tee name=vtee allow-not-linked=true"
         )
         self._description = description
@@ -428,7 +436,7 @@ class Peer:
         # Drop the oldest rather than block. One slow guest must never apply
         # back-pressure to a tee that everybody else is reading from.
         queue.set_property("leaky", 2)
-        queue.set_property("max-size-time", 200 * Gst.MSECOND)
+        queue.set_property("max-size-time", self.stage.cfg.queue_ms * Gst.MSECOND)
         queue.set_property("max-size-bytes", 0)
         queue.set_property("max-size-buffers", 0)
         self.stage.pipeline.add(queue)

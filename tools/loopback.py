@@ -108,6 +108,9 @@ class Guest:
         if encoding == "OPUS":
             chain = ["rtpopusdepay", "opusparse"]
             counter = self._count_audio
+        elif encoding == "H265":
+            chain = ["rtph265depay", "h265parse"]
+            counter = self._count_video
         else:
             chain = ["rtph264depay", "h264parse"]
             counter = self._count_video

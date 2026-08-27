@@ -74,6 +74,16 @@ def main(argv=None):
     run.add_argument("--preset", choices=sorted(PRESETS),
                      help="smooth (default), sharp, remote (over a VPN or the "
                           "internet), minimum (as little bandwidth as it can use)")
+    run.add_argument("--codec", choices=["h264", "h265"],
+                     help="h265 halves the bitrate for the same picture and is "
+                          "refused by most browsers; try it only if every guest "
+                          "is on recent Apple hardware")
+    run.add_argument("--jitter", type=int, metavar="MS",
+                     help="how much the guest's browser buffers before playing. "
+                          "Lower is less delay and more stutter (default 30)")
+    run.add_argument("--queue", type=int, metavar="MS",
+                     help="how much encoded video may pile up per guest when the "
+                          "link is tight. This is delay (default 60)")
     run.add_argument("--mtu", type=int, metavar="BYTES",
                      help="RTP packet size (lower it for VPNs; default 1200)")
     run.add_argument("--no-audio", action="store_true", help="stream silently")
@@ -117,6 +127,12 @@ def main(argv=None):
             cfg.bitrate_kbps = args.bitrate
         if args.mtu:
             cfg.rtp_mtu = args.mtu
+        if args.codec:
+            cfg.codec = args.codec
+        if args.jitter is not None:
+            cfg.jitter_ms = args.jitter
+        if args.queue is not None:
+            cfg.queue_ms = args.queue
         if args.behind_proxy:
             cfg.behind_proxy = True
         if args.no_tls:
