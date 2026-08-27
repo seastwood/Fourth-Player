@@ -22,6 +22,7 @@ loop runs on its own thread and every callback is marshalled back with
 import concurrent.futures
 import logging
 import threading
+import time
 
 import gi
 
@@ -330,11 +331,17 @@ class Stage:
         """
         if peer_id in self.peers:
             raise KeyError(f"peer {peer_id} is already attached")
+        started = time.monotonic()
         peer = Peer(self, peer_id, on_signal)
         if configure is not None:
             configure(peer)
         self.peers[peer_id] = peer
         peer.attach()
+        took = time.monotonic() - started
+        if took > 1.0:
+            log.warning("peer %s took %.1fs to attach", peer_id, took)
+        else:
+            log.debug("peer %s attached in %.2fs", peer_id, took)
         # A guest who joins between keyframes sees nothing until the next one.
         # At a one-second interval that is a second of black, so ask for one now.
         self.force_keyframe()
@@ -547,6 +554,7 @@ class Peer:
     def detach(self):
         if self.webrtc is None:
             return
+        started = time.monotonic()
         try:
             for tee, tee_pad, queue in self._branches:
                 tee_pad.unlink(queue.get_static_pad("sink"))
@@ -561,6 +569,10 @@ class Peer:
         finally:
             self.webrtc = self.channel = None
             self._branches = []
+            took = time.monotonic() - started
+            if took > 1.0:
+                log.warning("peer %s took %.1fs to detach -- everything queued "
+                            "behind it waited", self.id, took)
 
     # -- negotiation --------------------------------------------------------
 
