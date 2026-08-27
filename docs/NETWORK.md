@@ -229,6 +229,26 @@ not fit WireGuard's usual 1420). Lower it further if the tunnel is nested:
 python3 -m fourthplayer serve --mtu 1100
 ```
 
+## Telling one black screen from another
+
+A guest with no picture can ask their own browser which route it took: tap the
+status chip at the top of the stage, or wait for the failure message, and it
+reports the address the media actually connected to and how much arrived. That
+is the one fact the host cannot know — the host can only say what it sent, not
+whether anything landed.
+
+| What the guest sees | What it means |
+|---|---|
+| `Connected to 192.168.1.x (host), received N kB` | The LAN route. Fine at home; if they are *outside*, they are on a VPN and not testing the public path at all |
+| `Connected to <public ip> (srflx), received N kB` | The forward is working |
+| `Connected to …, received 0 kB` | The path is open but nothing is flowing — packet size, almost always. Try `--mtu 1100` |
+| `Nothing connected. The host offered: …` | No route at all. If the list contains only `192.168.x`, the host never discovered a public address; if it contains the public one, the UDP forward is not open from outside |
+
+**Testing from inside the network proves nothing about the outside.** A device on
+WireGuard is *inside*, and a device on the LAN reaching the public address gets
+there by NAT hairpin — both connect over the LAN candidate and never touch the
+forward. The only real test is a phone on mobile data with wifi off.
+
 ## If it does not connect
 
 | Symptom | Almost always |

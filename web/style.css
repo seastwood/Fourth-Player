@@ -161,6 +161,10 @@ video {
 .chip.warn { color: var(--amber); border-color: rgba(230, 155, 64, .45); }
 .chip.bad { color: var(--red); border-color: rgba(224, 101, 91, .45); }
 
+/* The link chip reports the media route when tapped, so it has to be tappable
+   even while the rest of the overlay is not. */
+#link { pointer-events: auto; cursor: pointer; }
+
 .prompt {
   position: absolute;
   inset: auto 0 12% 0;

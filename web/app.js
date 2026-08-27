@@ -389,16 +389,65 @@ function clearMediaTimeout() {
   if (mediaTimer) { clearTimeout(mediaTimer); mediaTimer = null; }
 }
 
-function mediaFailed(why) {
+async function mediaFailed(why) {
   setChip("link", "no video", "bad");
   el("hud").classList.add("show");
   el("prompt").hidden = false;
+  const route = await describeRoute();
   el("prompt").innerHTML =
     "<p><strong>" + why + "</strong></p>" +
-    "<p class=\"footnote\">You are connected and your controller works, but the " +
-    "video is not reaching you. This is almost always the host's UDP ports not " +
-    "being open &mdash; the page and the PIN come over a different one.</p>";
+    "<p class=\"footnote\">The page and the PIN reach the host over one port; " +
+    "the video takes a different, direct route, and that one is not getting " +
+    "through. Usually the host's UDP ports are not forwarded.</p>" +
+    "<p class=\"footnote\">" + route + "</p>";
 }
+
+/* Which pair of addresses the browser settled on, in words. This is the fact
+ * that tells a forwarded-port problem from a firewall problem from a codec
+ * problem, and the guest is the only one who can see it -- the host cannot
+ * tell whether the packets it sent ever arrived. */
+async function describeRoute() {
+  if (!pc || !pc.getStats) return "No connection details available.";
+  try {
+    const stats = await pc.getStats();
+    let pair = null;
+    const byId = new Map();
+    stats.forEach((r) => byId.set(r.id, r));
+    stats.forEach((r) => {
+      if (r.type === "candidate-pair" && (r.selected || r.state === "succeeded")) {
+        if (!pair || r.selected) pair = r;
+      }
+    });
+    if (!pair) {
+      const tried = [];
+      stats.forEach((r) => {
+        if (r.type === "remote-candidate" && r.address) {
+          tried.push(r.address + ":" + r.port + " (" + r.candidateType + ")");
+        }
+      });
+      return tried.length
+        ? "Nothing connected. The host offered: " + [...new Set(tried)].join(", ")
+        : "Nothing connected, and the host offered no reachable address.";
+    }
+    const remote = byId.get(pair.remoteCandidateId);
+    const bytes = pair.bytesReceived || 0;
+    return "Connected to " +
+      (remote ? remote.address + ":" + remote.port + " (" + remote.candidateType + ")"
+              : "the host") +
+      ", received " + Math.round(bytes / 1024) + " kB.";
+  } catch (_) {
+    return "No connection details available.";
+  }
+}
+
+// Same detail on demand, whether or not anything failed -- tapping the link
+// chip reports the route, which is the only way to learn it from a phone.
+el("link").addEventListener("click", async () => {
+  el("prompt").hidden = false;
+  el("prompt").innerHTML = "<p class=\"footnote\">" + (await describeRoute()) + "</p>";
+  setTimeout(() => { if (mediaTimer === null && pc && pc.connectionState === "connected")
+                       el("prompt").hidden = true; }, 8000);
+});
 
 /* ---- the pad ---- */
 

@@ -302,6 +302,7 @@ class Peer:
         self.ice = None               # held so webrtcbin's agent outlives it
         self._candidate_kinds = set()
         self._announced = set()
+        self._route_logged = False
         self.webrtc = None
         self._branches = []           # (tee, tee pad, queue) per media type
         # What we actually handed to this peer. The difference between "the
@@ -511,6 +512,9 @@ class Peer:
 
         extra = self._forwarded_candidate(parts, kind)
         if extra:
+            log.info("peer %s: also offering %s:%s at the public address",
+                     self.id, parts[4] if len(parts) > 4 else "?",
+                     parts[5] if len(parts) > 5 else "?")
             self._emit("ice", {"candidate": extra, "sdpMLineIndex": mline_index})
 
     def _forwarded_candidate(self, parts, kind):
@@ -534,6 +538,11 @@ class Peer:
             return None
         address, port = parts[4], parts[5]
         if not net.is_private(address) or ":" in address:
+            return None
+        # Port 9 is the discard port: ICE-TCP candidates use it as a
+        # placeholder for a socket that does not accept datagrams. Shadowing
+        # one produces a candidate pointing at nothing.
+        if port == "9" or (len(parts) > 2 and parts[2].upper() != "UDP"):
             return None
         if (address, port) in self._announced:
             return None
@@ -562,9 +571,63 @@ class Peer:
         self._emit("ice-state", {"state": state.value_nick})
         # "disconnected" is recoverable and often just a moment of packet loss,
         # so it is deliberately not in here. "failed" and "closed" are not.
+        if state.value_nick in ("connected", "completed"):
+            self._log_route()
         if state.value_nick in ("failed", "closed") and self.on_dead:
             self.stage.loop.call_soon_threadsafe(
                 self.on_dead, f"media connection {state.value_nick}")
+
+    def _log_route(self):
+        """Which pair of addresses the media is actually using.
+
+        The one fact worth having when a guest reports a black screen: whether
+        the stream is going over the LAN, over the public address, or through a
+        relay. Everything else -- ports forwarded, candidates gathered -- is a
+        guess about this.
+        """
+        if self._route_logged or self.webrtc is None:
+            return
+        self._route_logged = True
+
+        def report(promise, _a, _b):
+            try:
+                promise.wait()
+                stats = promise.get_reply()
+                if stats is None:
+                    return
+                pairs, locals_, remotes = {}, {}, {}
+                # Walk the fields by index. GstStructure.foreach's callback
+                # signature is awkward from Python and a mismatch there is
+                # swallowed as "could not read the route", which is how this
+                # silently produced nothing at all the first time.
+                for i in range(stats.n_fields()):
+                    name = stats.nth_field_name(i)
+                    value = stats.get_value(name)
+                    if not isinstance(value, Gst.Structure):
+                        continue
+                    kind = value.get_string("type") or ""
+                    if kind == "candidate-pair":
+                        pairs[name] = value
+                    elif kind == "local-candidate":
+                        locals_[value.get_string("id") or name] = value
+                    elif kind == "remote-candidate":
+                        remotes[value.get_string("id") or name] = value
+
+                for pair in pairs.values():
+                    ok, nominated = pair.get_boolean("nominated")
+                    if not (ok and nominated):
+                        continue
+                    log.info("peer %s: media route %s <- %s", self.id,
+                             describe(locals_, pair.get_string("local-candidate-id") or ""),
+                             describe(remotes, pair.get_string("remote-candidate-id") or ""))
+            except Exception as exc:
+                log.debug("could not read the media route: %s", exc)
+
+        try:
+            self.webrtc.emit("get-stats", None,
+                             Gst.Promise.new_with_change_func(report, None, None))
+        except Exception as exc:
+            log.debug("get-stats unavailable: %s", exc)
 
     def set_remote_answer(self, sdp_text):
         ok, message = GstSdp.SDPMessage.new()
