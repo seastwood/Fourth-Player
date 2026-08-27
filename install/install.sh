@@ -62,6 +62,18 @@ say "the Kodi add-on"
 if [ -d "$HOME/.kodi/addons" ]; then
   ln -sfn "$REPO/addons/script.fourthplayer" "$HOME/.kodi/addons/script.fourthplayer"
   echo "linked into ~/.kodi/addons"
+  # Kodi reads its add-on list once, at startup. Until it rescans, the add-on
+  # is on disk and unknown -- and a menu entry pointing at it answers with
+  # "you need to install this add-on", which sounds like a packaging fault
+  # rather than a stale cache.
+  if pgrep -x kodi.bin >/dev/null 2>&1; then
+    if [ -x /usr/bin/kodi-send ]; then
+      kodi-send --action="UpdateLocalAddons" >/dev/null 2>&1 || true
+      echo "asked the running Kodi to rescan its add-ons"
+    fi
+    echo "if the menu entry still offers to install it, restart Kodi once --"
+    echo "a rescan does not always take for a brand new add-on"
+  fi
 else
   echo "no ~/.kodi/addons -- skipping (this machine has no Kodi)"
 fi

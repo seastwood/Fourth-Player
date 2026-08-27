@@ -185,6 +185,12 @@ Two things catch people out, and neither is a fault in the add-on:
 menu (`bin/kodi_menu.py`, after every games sync) and carries a Fourth Player
 entry of its own, which appears as soon as this add-on is installed.
 
+If the entry appears but offers to *install* the add-on when chosen, Kodi has
+not rescanned: it reads its add-on list once at startup, so an add-on linked in
+underneath a running Kodi is on disk and unknown. Restart Kodi once and it is
+found. Nothing is actually missing — `Addons.GetAddonDetails` will already show
+it as enabled.
+
 Anywhere else, with a skin-shortcuts menu somebody arranged by hand:
 
 ```sh
