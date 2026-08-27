@@ -224,6 +224,17 @@ class Session:
                 return guest
         raise UnknownGuest("not a guest of this session")
 
+    def release(self, slot):
+        """Give a slot back without burning the guest's credential.
+
+        Distinct from `kick`, which is a refusal: this is for a guest who left
+        or whose connection died, and who is welcome to come back. The slot is
+        what has to return -- it is allocated here, not in the live session, and
+        a live session that forgot a guest while this still remembered them
+        reported empty slots and refused everybody who asked for one.
+        """
+        return self.guests.pop(slot, None) is not None
+
     def kick(self, slot):
         """Remove one guest and make sure they cannot walk back in.
 

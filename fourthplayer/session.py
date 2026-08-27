@@ -32,11 +32,23 @@ SWEEP_INTERVAL = 0.05
 # the guest is told, rather than left watching "rejoining" forever.
 PIPELINE_TIMEOUT = 12.0
 
-# How long a guest may hold a slot with no media connection. Long enough to
-# ride out a reconnect or a network switch, short enough that a session with
-# three slots is not permanently full of people who left. A guest reaped this
-# way can walk straight back in with the PIN.
-GHOST_SECONDS = 75.0
+# How long a guest may hold a slot with no working media. Short, because losing
+# it costs them nothing: the invite still remembers them, so a guest whose slot
+# is freed and who then reconnects is put back in the *same* slot by their own
+# token. The grace period is only there so a brief reconnect does not disturb
+# anybody, not to protect somebody who has gone.
+GHOST_SECONDS = 25.0
+
+# Once their signalling has gone too, there is nothing left to wait for.
+LEFT_SECONDS = 8.0
+
+# How long a guest may be silent before their connection is presumed dead. The
+# browser heartbeats its pad state every 50 ms whether or not anything is
+# moving, so silence is unambiguous -- and it is the only honest liveness
+# signal available. ICE is not one: when a guest simply vanishes, webrtcbin
+# leaves the connection sitting at "completed" indefinitely, because nothing
+# arrives to contradict it.
+SILENCE_SECONDS = 5.0
 
 # Guests are told the session is running out at these many seconds remaining,
 # so the end is something you can see coming rather than something that happens
@@ -59,6 +71,7 @@ class GuestConnection:
         self.peer = None
         self.label = f"Player {slot + 2}"   # the local player is player 1
         self.joined_at = time.monotonic()
+        self.last_input = 0.0
         self.frames = 0
         self.bad_frames = 0
 
@@ -66,14 +79,29 @@ class GuestConnection:
     def pad(self):
         return self.session.pads[self.slot]
 
-    def has_media(self):
-        """Whether this guest currently has a connection that carries anything.
+    def has_media(self, now=None):
+        """Whether this guest is actually there.
 
-        Deliberately not "do they have a peer". A peer whose ICE has gone quiet
-        is an object, not a route, and treating the two as the same is what let
-        one guest who changed network hold a slot until the session ended.
+        Three things have been tried for this and only the last one holds.
+        "Do they have a peer" is an object, not a route. "Is their ICE up" is
+        better but still wrong: a guest who vanishes leaves webrtcbin sitting
+        at `completed` for ever, because nothing arrives to say otherwise --
+        so the slot was held by somebody long gone.
+
+        What is left is hearing from them. Their browser sends its pad state
+        every 50 ms regardless of whether anything moved, so silence means the
+        channel is gone whatever else claims. An open signalling socket counts
+        too, for the moment between joining and the first frame.
         """
-        return self.peer is not None and getattr(self.peer, "ice_ok", False)
+        if self.peer is None or not getattr(self.peer, "ice_ok", False):
+            return False
+        stamp = now if now is not None else time.monotonic()
+        if self.last_input and stamp - self.last_input < SILENCE_SECONDS:
+            return True
+        # Nothing heard yet, or nothing recently: fall back to whether they are
+        # still holding a socket open, which covers a guest who has only just
+        # arrived.
+        return self.socket is not None and not self.last_input
 
     def feed(self, data):
         """A frame off the data channel. Never raises: a guest cannot crash us."""
@@ -86,6 +114,7 @@ class GuestConnection:
                             self.label, self.bad_frames)
             return
         self.frames += 1
+        self.last_input = time.monotonic()
         self.pad.apply(state)
 
 
@@ -383,11 +412,19 @@ class LiveSession:
             peer.detach()
 
     def drop(self, slot, reason="left"):
-        """The socket went away. The slot stays theirs until kicked or expiry."""
+        """Let a guest go, and give the slot back to the invite.
+
+        Both halves matter. Slots are allocated by the invite, not here, so a
+        guest removed from this list while the invite still held their slot
+        left a session that reported empty slots and refused everybody who
+        asked for one -- which is exactly as confusing as it sounds.
+        """
         guest = self.guests.pop(slot, None)
         if guest is None:
             return False
         self.detach_peer(guest)
+        if self.invite is not None:
+            self.invite.release(slot)
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -427,15 +464,22 @@ class LiveSession:
         """
         now = self._now()
         for slot, guest in list(self.guests.items()):
-            if guest.has_media():
+            if guest.has_media(now):
+                # The only place this is refreshed. Doing it when a connection
+                # is *attempted* made a guest who could never connect immortal:
+                # every retry pushed their deadline back, so the slot was held
+                # by somebody who had no picture and never would.
                 guest.media_since = now
                 continue
-            if now - guest.media_since > seconds:
-                log.info("%s held a slot with no video for %.0fs; freeing it",
+            # Their socket has gone as well, so they are not mid-reconnect --
+            # they closed the tab or walked out of range.
+            limit = seconds if guest.socket is not None else min(seconds, LEFT_SECONDS)
+            if now - guest.media_since > limit:
+                log.info("%s had no video for %.0fs; freeing the slot",
                          guest.label, now - guest.media_since)
-                self.drop(slot, reason="gave up")
+                self.drop(slot, reason="left")
 
-    def reap_now(self, seconds=10.0):
+    def reap_now(self, seconds=5.0):
         """Free slots whose connection has been dead for a few seconds.
 
         The impatient version of the sweep, for the moment a guest is being

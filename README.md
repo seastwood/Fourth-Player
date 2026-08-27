@@ -324,6 +324,18 @@ for a congested uplink can push its SCTP association into an error state, and
 when that happens the guest's *video* dies with it while ICE still reports the
 connection as healthy. It looks exactly like a black screen with no cause.
 
+**A slot comes back about ten seconds after somebody leaves.** Liveness is
+measured by hearing from the guest — their browser sends its pad state every
+50 ms whether or not anything moved — because nothing else is trustworthy. A
+peer *object* survives a guest vanishing, and so does its ICE state: webrtcbin
+sits at `connected` indefinitely when the other end simply stops existing,
+since nothing arrives to contradict it. Both were tried and both held slots for
+people who had gone.
+
+A guest being refused also triggers an immediate sweep before the refusal is
+believed: somebody at the door is better served by a slot than by the grace
+period, which exists only so a brief reconnect goes unnoticed.
+
 **A guest whose branch errors is rebuilt.** The host attributes a pipeline error
 to the guest it came from and re-offers to that one guest; everybody else is
 untouched, and the guest keeps their slot unless the rebuild also fails.

@@ -82,6 +82,25 @@ slot_c, gc = s.join(tok, pin, now=6, address="c")
 check(slot_c == 0, "somebody else can take the freed slot")
 check(s.kick(0) and not s.kick(0), "kicking twice is not an error the second time")
 
+print("\nreleasing a slot is not the same as kicking somebody out")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.join(tok, pin, now=1, address="b")
+check(s.free_slot() is None, "both slots are taken")
+check(s.release(slot_a) is True, "releasing reports success")
+check(s.free_slot() == slot_a, "and the slot is genuinely free again")
+check(s.release(slot_a) is False, "releasing an empty slot changes nothing")
+slot_again, _ = s.join(tok, pin, now=2, address="a")
+check(slot_again == slot_a, "somebody can take the freed slot")
+# Their old guest token stops resolving -- the record is gone -- so a released
+# guest comes back with the PIN. That is the difference from a kick, which also
+# burns the credential so the link itself stops working for them.
+try:
+    s.guest_for(ga, now=2)
+    check(False, "a released guest's old token still resolved")
+except I.UnknownGuest:
+    check(True, "a released guest rejoins with the PIN, not the old token")
+
 print("\nten wrong PINs destroy the invite outright")
 s, tok, pin = fresh()
 wrong = "000000" if pin != "000000" else "111111"

@@ -203,6 +203,7 @@ check(session.guests.get(0) is guest,
       "a guest whose media is up is never reaped, however long it has been")
 
 session.detach_peer(guest, background=False)
+guest.socket = object()          # signalling still up: they are reconnecting
 guest.media_since = clock[0]
 clock[0] += S.GHOST_SECONDS - 5
 session._reap_ghosts()
@@ -213,6 +214,31 @@ clock[0] += 10
 session._reap_ghosts()
 check(0 not in session.guests,
       "but a slot held with no video is eventually freed")
+
+print("\na guest whose socket has gone too is not waited for as long")
+session, guest, loop = session_with_guest()
+session._now = lambda: clock[0]
+guest.socket = None              # tab closed, or out of range
+guest.media_since = clock[0]
+clock[0] += S.LEFT_SECONDS + 2
+session._reap_ghosts()
+check(0 not in session.guests,
+      "somebody who left frees their slot in %.0fs, not %.0f"
+      % (S.LEFT_SECONDS, S.GHOST_SECONDS))
+
+print("\nand a freed slot is given back to the invite, not just forgotten")
+session, guest, loop = session_with_guest()
+import fourthplayer.invites as INV
+session.invite = INV.Session(slots=3, duration=600, now=0)
+tok, pin = session.invite.clear_invite
+slot, _ = session.invite.join(tok, pin, now=1, address="a")
+session.guests[slot] = guest
+guest.slot = slot
+check(session.invite.free_slot() == 1, "one slot is spoken for")
+session.drop(slot, reason="left")
+check(session.invite.free_slot() == slot,
+      "dropping a guest frees the slot in the invite as well -- the session "
+      "list and the invite are two books and both have to be written")
 
 print("\nand the freed slot can be taken again")
 check(session.invite is None or session.invite.free_slot() == 0,
