@@ -448,12 +448,18 @@ function buildTouchPad(layout) {
 function chosenLayout() {
   let saved = null;
   try { saved = localStorage.getItem(LAYOUT_KEY); } catch (_) {}
-  return LAYOUTS[saved] ? saved : DEFAULT_LAYOUT;
+  return (saved === "off" || LAYOUTS[saved]) ? saved : DEFAULT_LAYOUT;
 }
 
 function buildLayoutPicker() {
   const picker = el("padtype");
   if (picker.options.length) return;          // built once
+  // "Off" first, because somebody with a real controller in their hands wants
+  // the buttons out of the way more than they want a different set of them.
+  const none = document.createElement("option");
+  none.value = "off";
+  none.textContent = "No on-screen pad";
+  picker.appendChild(none);
   for (const [key, layout] of Object.entries(LAYOUTS)) {
     const option = document.createElement("option");
     option.value = key;
@@ -463,8 +469,23 @@ function buildLayoutPicker() {
   picker.value = chosenLayout();
   picker.addEventListener("change", () => {
     try { localStorage.setItem(LAYOUT_KEY, picker.value); } catch (_) {}
-    buildTouchPad(LAYOUTS[picker.value] || LAYOUTS[DEFAULT_LAYOUT]);
+    chosenByHand = true;              // stop guessing for them from here on
+    applyLayoutChoice(picker.value);
   });
+}
+
+let chosenByHand = false;
+let padName = "";
+
+function applyLayoutChoice(key) {
+  if (key === "off") {
+    el("touch").hidden = true;
+    releaseAllTouch();
+    setChip("padstate", padName || "No controller", padName ? "ok" : "warn");
+    return;
+  }
+  el("touch").hidden = false;
+  buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
 }
 
 function setBit(bit, down) {
@@ -560,19 +581,21 @@ function releaseAllTouch() {
 
 function showTouch(on, layout) {
   touchOn = on;
-  el("touch").hidden = !on;
-  el("padtype").hidden = !on;
+  // The picker stays available whether or not the pad is showing -- otherwise
+  // turning it off is a one-way door.
+  buildLayoutPicker();
+  el("padtype").hidden = false;
+
   if (!on) {
+    el("touch").hidden = true;
     releaseAllTouch();
     return;
   }
-  buildLayoutPicker();
   const key = layout || chosenLayout();
-  el("padtype").value = LAYOUTS[key] ? key : DEFAULT_LAYOUT;
-  buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
-  el("padtype").hidden = false;
+  el("padtype").value = (key === "off" || LAYOUTS[key]) ? key : DEFAULT_LAYOUT;
+  applyLayoutChoice(el("padtype").value);
   el("prompt").hidden = true;
-  setChip("padstate", "On-screen pad", "ok");
+  if (el("padtype").value !== "off") setChip("padstate", "On-screen pad", "ok");
 }
 
 el("use-touch").addEventListener("click", (event) => {
@@ -711,6 +734,13 @@ function hideNotice() {
 let noticeTimer = null;
 
 el("notice").addEventListener("click", hideNotice);
+
+el("hide").addEventListener("click", (event) => {
+  event.stopPropagation();
+  hideNotice();
+  el("hud").classList.remove("show");
+  if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
+});
 
 el("info").addEventListener("click", async () => {
   if (!el("notice").hidden) { hideNotice(); return; }
@@ -862,8 +892,12 @@ function startPadLoop() {
   });
   window.addEventListener("gamepaddisconnected", () => {
     padIndex = null;
-    el("prompt").hidden = false;
+    padName = "";
     setChip("padstate", "No controller", "warn");
+    // Their controller has gone; offer the on-screen one back unless they
+    // turned it off deliberately.
+    if (!chosenByHand && el("padtype").value !== "off") showTouch(true);
+    else el("prompt").hidden = false;
   });
 
   wireTouch();
@@ -895,7 +929,7 @@ function tick() {
   if (!pad) pad = Array.from(pads).find((p) => p && p.connected) || null;
   if (pad && padIndex === null) {
     padIndex = pad.index;
-    if (!touchOn) el("prompt").hidden = true;
+    el("prompt").hidden = true;
     describePad(pad);
   }
   sendFrame(pad, false);
@@ -967,9 +1001,30 @@ function startClock(seconds) {
 }
 
 el("full").addEventListener("click", () => {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else stage.requestFullscreen && stage.requestFullscreen();
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    return;
+  }
+  // iOS Safari has no Fullscreen API for ordinary elements -- only a video can
+  // go fullscreen, and only through its own webkit call. Without this the
+  // button did nothing at all on a phone, which is where it is most wanted.
+  const request = stage.requestFullscreen || stage.webkitRequestFullscreen;
+  if (request) {
+    request.call(stage).catch(() => enterVideoFullscreen());
+  } else {
+    enterVideoFullscreen();
+  }
 });
+
+function enterVideoFullscreen() {
+  // Native video fullscreen puts the picture above everything, including the
+  // on-screen pad -- fine with a real controller, and the reason this is the
+  // fallback rather than the first choice.
+  if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("fullscreen");
+  else showNotice('<p class="footnote">This browser will not let the page go '
+                  + "fullscreen. Rotating the phone usually gets the same result.</p>");
+}
 
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
