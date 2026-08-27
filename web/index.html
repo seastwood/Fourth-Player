@@ -36,6 +36,7 @@
     <span id="padstate" class="chip warn">No controller</span>
     <span id="link" class="chip">connecting</span>
     <span id="clock" class="chip"></span>
+    <select id="padtype" class="chip" aria-label="Controller layout"></select>
     <button id="unmute" type="button" class="ghost" hidden>🔇 Sound off — tap</button>
     <button id="info" type="button" class="ghost" title="What is happening">?</button>
     <button id="full" type="button" class="ghost">Fullscreen</button>
@@ -57,7 +58,14 @@
   <!-- The on-screen pad. Positions come from CSS so the same markup works
        below the picture in portrait and over it in landscape; which buttons
        exist, and what they send, comes from LAYOUTS in app.js. -->
+  <!-- The pad itself. Which buttons exist, what they send and where they sit
+       all come from LAYOUTS in app.js; everything below is the frame they are
+       hung on, so a new controller is an entry in that table rather than more
+       markup here. -->
   <div id="touch" class="touch" hidden aria-label="On-screen controller">
+    <div class="shoulders shoulders-left" id="shoulders-left"></div>
+    <div class="shoulders shoulders-right" id="shoulders-right"></div>
+
     <div class="touch-left">
       <div id="dpad" class="dpad" role="group" aria-label="Direction pad">
         <div class="dpad-stem dpad-v"></div>
@@ -67,8 +75,8 @@
     </div>
 
     <div class="touch-mid">
-      <button type="button" class="tbtn tbtn-start" data-face="START">START</button>
-      <span id="touch-name" class="touch-name">Mega Drive</span>
+      <div class="centre-row" id="centre"></div>
+      <span id="touch-name" class="touch-name"></span>
     </div>
 
     <div class="touch-right">

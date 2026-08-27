@@ -336,22 +336,59 @@ el("unmute").addEventListener("click", () => {
  * lower half, which is the arrangement that keeps A B C under a thumb in the
  * order the labels promise. Positions are percentages inside the face area.
  */
+/* Controllers, as data.
+ *
+ * Positions in `face` are percentages inside the face box, which is why its
+ * aspect ratio is stated: with buttons 30% of the width across, the lowest one
+ * sits at 50% of the height, so a box wider than about 1.5:1 pushes them off
+ * the bottom.
+ *
+ * `button` is always the W3C standard-mapping index, never the printed label.
+ * Those disagree, and disagreeing is the point: the standard mapping is
+ * Xbox-shaped -- 0 bottom, 1 right, 2 left, 3 top -- while a Nintendo pad
+ * prints B on the bottom and A on the right. Naming the position and the label
+ * separately is what lets each pad look like itself and still send what the
+ * host expects.
+ */
 const LAYOUTS = {
   genesis: {
     name: "Mega Drive",
-    // Percentages inside the face box. The geometry has to close: with
-    // buttons 30% of the width across, the lowest one sits at 50% of the
-    // *height*, so the box must be no wider than about 1.5:1 or the bottom of
-    // A falls outside it -- which clipped A and B off the screen in landscape
-    // and pushed C against the edge in portrait.
+    faceAspect: 1.55,
     face: [
       { id: "A", button: 2, x: 0, y: 50 },
       { id: "B", button: 0, x: 34, y: 27.5 },
       { id: "C", button: 1, x: 68, y: 5 },
     ],
-    start: 9,
+    centre: [{ id: "START", button: 9 }],
+  },
+
+  nintendo: {
+    name: "Super Nintendo",
+    faceAspect: 1,
+    // The diamond, by position: X on top, A right, B bottom, Y left. Each
+    // sends the standard-mapping index for the place it occupies, so the
+    // letters a guest sees match the buttons a game receives.
+    face: [
+      { id: "X", button: 3, x: 35, y: 2 },
+      { id: "Y", button: 2, x: 2, y: 35 },
+      { id: "A", button: 1, x: 68, y: 35 },
+      { id: "B", button: 0, x: 35, y: 68 },
+    ],
+    shoulders: [
+      { id: "LT", button: 6, side: "left", row: 0 },
+      { id: "RT", button: 7, side: "right", row: 0 },
+      { id: "LB", button: 4, side: "left", row: 1 },
+      { id: "RB", button: 5, side: "right", row: 1 },
+    ],
+    centre: [
+      { id: "SELECT", button: 8 },
+      { id: "START", button: 9 },
+    ],
   },
 };
+
+const DEFAULT_LAYOUT = "genesis";
+const LAYOUT_KEY = "fp:layout";
 
 const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 
@@ -359,21 +396,66 @@ let touchOn = false;
 let touchButtons = 0;
 const pointers = new Map();
 
+function makeButton(spec, className) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = spec.id;
+  button.dataset.button = String(spec.button);
+  return button;
+}
+
 function buildTouchPad(layout) {
+  releaseAllTouch();          // never carry a held button across a rebuild
+
   const face = el("face");
   face.innerHTML = "";
+  face.style.aspectRatio = String(layout.faceAspect || 1.55);
   for (const spec of layout.face) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "tbtn tbtn-face";
-    button.textContent = spec.id;
-    button.dataset.button = String(spec.button);
+    const button = makeButton(spec, "tbtn tbtn-face");
     button.style.left = spec.x + "%";
     button.style.top = spec.y + "%";
     face.appendChild(button);
   }
-  el("touch").querySelector(".tbtn-start").dataset.button = String(layout.start);
+
+  for (const side of ["left", "right"]) {
+    const box = el("shoulders-" + side);
+    box.innerHTML = "";
+    for (const spec of (layout.shoulders || []).filter((b) => b.side === side)) {
+      box.appendChild(makeButton(spec, "tbtn tbtn-shoulder row" + (spec.row || 0)));
+    }
+    box.hidden = box.children.length === 0;
+  }
+
+  const centre = el("centre");
+  centre.innerHTML = "";
+  for (const spec of layout.centre || []) {
+    centre.appendChild(makeButton(spec, "tbtn tbtn-start"));
+  }
+
   el("touch-name").textContent = layout.name;
+}
+
+function chosenLayout() {
+  let saved = null;
+  try { saved = localStorage.getItem(LAYOUT_KEY); } catch (_) {}
+  return LAYOUTS[saved] ? saved : DEFAULT_LAYOUT;
+}
+
+function buildLayoutPicker() {
+  const picker = el("padtype");
+  if (picker.options.length) return;          // built once
+  for (const [key, layout] of Object.entries(LAYOUTS)) {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = layout.name;
+    picker.appendChild(option);
+  }
+  picker.value = chosenLayout();
+  picker.addEventListener("change", () => {
+    try { localStorage.setItem(LAYOUT_KEY, picker.value); } catch (_) {}
+    buildTouchPad(LAYOUTS[picker.value] || LAYOUTS[DEFAULT_LAYOUT]);
+  });
 }
 
 function setBit(bit, down) {
@@ -462,11 +544,16 @@ function releaseAllTouch() {
 function showTouch(on, layout) {
   touchOn = on;
   el("touch").hidden = !on;
+  el("padtype").hidden = !on;
   if (!on) {
     releaseAllTouch();
     return;
   }
-  buildTouchPad(LAYOUTS[layout || "genesis"]);
+  buildLayoutPicker();
+  const key = layout || chosenLayout();
+  el("padtype").value = LAYOUTS[key] ? key : DEFAULT_LAYOUT;
+  buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
+  el("padtype").hidden = false;
   el("prompt").hidden = true;
   setChip("padstate", "On-screen pad", "ok");
 }

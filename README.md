@@ -98,8 +98,22 @@ events with capture, so a direction and a face button work together, and a
 physical pad and the on-screen one are *merged* rather than one replacing the
 other.
 
-Which buttons exist and what they send is data (`LAYOUTS` in `web/app.js`), so
-another controller is a new entry rather than new code.
+Two layouts, chosen from a dropdown in the corner and remembered per device:
+
+- **Mega Drive** — d-pad, A B C across, START.
+- **Super Nintendo** — d-pad, the X/Y/A/B diamond, LB/RB and LT/RT, SELECT and
+  START.
+
+Which buttons exist, what they send and where they sit is data (`LAYOUTS` in
+`web/app.js`), so another controller — one with sticks, say — is an entry in
+that table rather than new code.
+
+The letters are the fiddly part, and `tests/test_layouts.py` checks them rather
+than trusting them. The Gamepad API's standard mapping is Xbox-shaped, so index
+1 is the *right* face button — which Nintendo prints as A and Sega prints as C.
+Each pad therefore sends the index for the position a button occupies, not the
+letter written on it, and the test asserts both halves: that B is the bottom
+button and that B is drawn below X.
 
 ## A guest can only ever move a gamepad
 
