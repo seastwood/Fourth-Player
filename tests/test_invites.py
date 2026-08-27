@@ -101,6 +101,67 @@ try:
 except I.UnknownGuest:
     check(True, "a released guest rejoins with the PIN, not the old token")
 
+print("\na guest who left comes back on their token alone")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=10)
+check(s.free_slot() == slot_a, "their slot is free for anybody straight away")
+check(s.reclaim(ga, now=11) == slot_a,
+      "and they get it back on the token, with no PIN")
+check(s.free_slot() != slot_a, "which takes the slot again")
+
+print("\nthe same token keeps working, so a second drop is no worse")
+s.release(slot_a, now=20)
+check(s.reclaim(ga, now=21) == slot_a, "reclaimed twice with the one token")
+
+print("\nif somebody else took the slot, they get another")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=5)
+other, _ = s.join(tok, pin, now=6, address="b")
+check(other == slot_a, "the freed slot went to whoever asked first")
+check(s.reclaim(ga, now=7) != slot_a,
+      "and the returning guest is given a different one rather than evicting them")
+
+print("\nand is told honestly when there is no room")
+s, tok, pin = fresh(slots=1)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=5)
+s.join(tok, pin, now=6, address="b")
+try:
+    s.reclaim(ga, now=7)
+    check(False, "a full session let somebody reclaim anyway")
+except I.SessionFull:
+    check(True, "a full session refuses a reclaim rather than evicting")
+
+print("\na claim does not outlive the session or its welcome")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=5)
+try:
+    s.reclaim(ga, now=5 + I.CLAIM_SECONDS + 1)
+    check(False, "an ancient claim was honoured")
+except I.UnknownGuest:
+    check(True, "a claim expires after %.0f minutes" % (I.CLAIM_SECONDS / 60))
+
+print("\nand a kicked guest cannot reclaim their way back")
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.kick(slot_a)
+try:
+    s.reclaim(ga, now=2)
+    check(False, "a kicked guest reclaimed a slot")
+except I.UnknownGuest:
+    check(True, "kicking still means kicked")
+
+print("\na token nobody minted reclaims nothing")
+s, tok, pin = fresh(slots=2)
+try:
+    s.reclaim(I.new_token(), now=2)
+    check(False, "an invented token was accepted")
+except I.UnknownGuest:
+    check(True, "an invented token is refused")
+
 print("\nten wrong PINs destroy the invite outright")
 s, tok, pin = fresh()
 wrong = "000000" if pin != "000000" else "111111"

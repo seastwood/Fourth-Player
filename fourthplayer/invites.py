@@ -32,6 +32,13 @@ PIN_DIGITS = 6
 # with unlimited guesses at a six-digit number.
 MAX_PIN_ATTEMPTS = 10
 
+# How long a guest who has left may come back on their own token alone. Their
+# slot is given away immediately -- somebody present beats somebody who might
+# return -- but the claim outlives it, so a guest whose connection dropped gets
+# straight back in without hunting for the PIN, which by then is on a
+# television in another house.
+CLAIM_SECONDS = 900.0
+
 # Per-address lockout, escalating. Three strikes because typing a six-digit
 # number off a photograph goes wrong honestly about that often.
 LOCKOUT_AFTER = 3
@@ -131,6 +138,7 @@ class Session:
         self.limiter = RateLimiter()
         self.guests = {}             # slot -> Guest
         self._burned = set()         # digests of kicked guests, never readmitted
+        self._claims = {}            # digest -> (slot, when they left)
 
     # -- what the owner may read -------------------------------------------
 
@@ -224,16 +232,56 @@ class Session:
                 return guest
         raise UnknownGuest("not a guest of this session")
 
-    def release(self, slot):
-        """Give a slot back without burning the guest's credential.
+    def release(self, slot, now=None):
+        """Give a slot back, but remember who had it.
 
         Distinct from `kick`, which is a refusal: this is for a guest who left
         or whose connection died, and who is welcome to come back. The slot is
         what has to return -- it is allocated here, not in the live session, and
         a live session that forgot a guest while this still remembered them
         reported empty slots and refused everybody who asked for one.
+
+        The claim is kept so they can walk back in on their token alone. The
+        slot is not held for them: somebody present beats somebody who might
+        return, and if the room has filled by then they are told so honestly.
         """
-        return self.guests.pop(slot, None) is not None
+        guest = self.guests.pop(slot, None)
+        if guest is None:
+            return False
+        if now is not None:
+            self._claims[guest.token_digest] = (slot, now)
+        return True
+
+    def reclaim(self, guest_token, now):
+        """Let a guest who left back in on their token, without the PIN.
+
+        This is what makes a dropped connection recoverable in a second rather
+        than a scramble: the browser still holds the token, so a network switch
+        or a closed tab costs nothing. It is not a way past the PIN for anyone
+        else -- the token was minted here, is stored only as a digest, and a
+        kicked guest's is burned.
+        """
+        self.check_alive(now)
+        digest = _digest(guest_token)
+        if any(hmac.compare_digest(digest, b) for b in self._burned):
+            raise UnknownGuest("this guest was removed")
+
+        claim = self._claims.get(digest)
+        if claim is None or now - claim[1] > CLAIM_SECONDS:
+            self._claims.pop(digest, None)
+            raise UnknownGuest("nothing to reclaim")
+
+        wanted = claim[0]
+        slot = wanted if wanted not in self.guests else self.free_slot()
+        if slot is None:
+            raise SessionFull("every slot is taken")
+
+        self._claims.pop(digest, None)
+        # The same digest, so the token they are holding keeps working if they
+        # drop again -- which is the whole point.
+        self.guests[slot] = Guest(slot=slot, token_digest=digest, joined_at=now,
+                                  label=f"Player {slot + 1}")
+        return slot
 
     def kick(self, slot):
         """Remove one guest and make sure they cannot walk back in.

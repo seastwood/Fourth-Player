@@ -324,6 +324,15 @@ for a congested uplink can push its SCTP association into an error state, and
 when that happens the guest's *video* dies with it while ICE still reports the
 connection as healthy. It looks exactly like a black screen with no cause.
 
+**A guest who drops gets back in on their token, not the PIN.** Their slot is
+given away immediately — somebody present beats somebody who might return — but
+the *claim* outlives it for fifteen minutes, so a browser that still has its
+token walks straight back in and takes the next free slot. That is what makes a
+network switch cost a second instead of a scramble: by then the PIN is on a
+television in somebody else's house. A kicked guest's token is burned and
+reclaims nothing, and a genuinely full session refuses a reclaim rather than
+evicting anybody.
+
 **A slot comes back about ten seconds after somebody leaves.** Liveness is
 measured by hearing from the guest — their browser sends its pad state every
 50 ms whether or not anything moved — because nothing else is trustworthy. A

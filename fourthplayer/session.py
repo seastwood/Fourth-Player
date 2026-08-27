@@ -312,7 +312,18 @@ class LiveSession:
         making them re-enter a PIN off a television they may no longer be
         looking at is the kind of friction this project exists to remove.
         """
-        record = self.invite.guest_for(guest_token, now=self._now())
+        now = self._now()
+        try:
+            record = self.invite.guest_for(guest_token, now=now)
+        except invites.UnknownGuest:
+            # Their slot was given away while they were gone -- which is the
+            # normal outcome of a network switch, since the slot goes back the
+            # moment they stop being heard from. The token still identifies
+            # them, so they take the next free slot rather than being sent to
+            # hunt for a PIN that is on somebody else's television.
+            slot = self.invite.reclaim(guest_token, now=now)
+            record = self.invite.guests[slot]
+            log.info("a guest reclaimed slot %d on their own token", slot)
         existing = self.guests.get(record.slot)
         if existing is not None:
             self.detach_peer(existing)
@@ -424,7 +435,7 @@ class LiveSession:
             return False
         self.detach_peer(guest)
         if self.invite is not None:
-            self.invite.release(slot)
+            self.invite.release(slot, now=self._now())
         log.info("%s %s", guest.label, reason)
         return True
 
