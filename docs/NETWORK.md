@@ -31,33 +31,61 @@ connects.
 
 ### 1. Direct UDP — the default, and the best to play on
 
-pfSense forwards a UDP range straight to the box, and a **DNS-only (grey cloud)**
-hostname supplies the address that ends up in the ICE candidates. Guests connect
-to your address directly, so there is no relay in the path and no added latency.
+**Two rules, not one.** This is the single thing most likely to go wrong, and
+the symptom is always the same: the page loads, the PIN is accepted, the slot is
+taken — and the picture stays black.
 
-The cost, stated plainly: **anyone holding a live invite can see your home IP
-address.** For friends that is proportionate. For a link you would post in
-public it is not.
+| Port | Protocol | Carries | Forward it? |
+|---|---|---|---|
+| `8443` | **TCP** | The join page, the PIN, signalling | Yes |
+| `40000–40100` | **UDP** | **The video and the sound** | **Yes — this is the one people miss** |
+
+Forwarding only 8443 gets you a working join page and no video, forever. The
+media never touches that port: WebRTC negotiates its own UDP sockets, and until
+those are reachable there is nothing to show.
 
 ```
 Firewall → NAT → Port Forward
   Interface     WAN
+  Protocol      TCP
+  Destination   WAN address, port 8443
+  Redirect to   192.168.1.50, 8443            # your box
+
+Firewall → NAT → Port Forward
+  Interface     WAN
   Protocol      UDP
-  Destination   WAN address, port range 40000–40100
+  Destination   WAN address, ports 40000–40100
   Redirect to   192.168.1.50, same range      # your box
 ```
 
-> **A caveat that matters.** The server cannot currently bound that range.
-> `webrtcbin`'s `ice-agent` property cannot safely be read from Python on
-> GStreamer 1.24 — doing so corrupts the agent and the process dies the moment
-> the first guest negotiates — and the ICE agent is not reachable through
-> `GstChildProxy` either. So libnice picks ephemeral ports, and a narrow forward
-> will sometimes miss them.
->
-> Until that is fixed, either forward a wide range (`1024–65535` to the box,
-> which is a real widening of your attack surface and should be weighed), or use
-> option 2 below and forward nothing at all. `rtp_port_min` / `rtp_port_max` in
-> the config are read but not yet applied; they are there for when this is fixed.
+Keep the range identical on both sides. The address a guest is told to use
+comes from STUN, which reports the port your router mapped — if the router
+rewrites it to something outside the forwarded range, the guest is told about a
+port nothing is listening on.
+
+`rtp_port_min` / `rtp_port_max` in the config set that range, and they are
+genuinely applied now: the server builds webrtcbin's ICE agent itself and hands
+it over at construction, because reading the one webrtcbin makes for itself
+corrupts it. Verify with a guest connected:
+
+```sh
+ss -ulnpH | grep "$(pgrep -f 'fourthplayer serve')" | awk '{print $4}'
+```
+
+Two sockets per guest should land inside the range. Ports on `1900` are UPnP
+discovery and are not media.
+
+**Is it actually offering a reachable address?** The server logs every kind of
+ICE candidate it gathers:
+
+```
+peer slot0: gathered a host candidate     # a LAN address
+peer slot0: gathered a srflx candidate    # your public address, via STUN
+```
+
+A guest on the internet needs to see `srflx` (or `relay`). If only `host`
+appears, STUN is not getting out and no amount of forwarding will help — check
+that outbound UDP 3478 is allowed.
 
 ### 2. A TURN relay — nothing forwarded, nothing exposed
 
@@ -153,11 +181,27 @@ Then open the join link on a phone on mobile data, with wifi off. That is the
 only test that actually exercises the path a guest takes; a laptop on your own
 LAN will connect over the local candidates and prove nothing about the internet.
 
+## Running over a VPN
+
+WireGuard puts a guest inside the network, so nothing needs forwarding and the
+LAN candidates work directly. One thing still bites: **packet size**. A tunnel
+carries a smaller MTU than the link underneath it, and an RTP packet that does
+not fit is dropped, not fragmented — so the small audio packets arrive and the
+large video ones do not. A black picture with working sound is that, every time.
+
+`rtp_mtu` defaults to 1200 for this reason (GStreamer's own default of 1400 does
+not fit WireGuard's usual 1420). Lower it further if the tunnel is nested:
+
+```sh
+python3 -m fourthplayer serve --mtu 1100
+```
+
 ## If it does not connect
 
 | Symptom | Almost always |
 |---|---|
-| Page loads, PIN accepted, video never starts | The media path. ICE has no route — check the UDP forward, or set a TURN server |
+| Page loads, PIN accepted, video never starts | **UDP 40000–40100 is not forwarded.** This is the common one. Check the table above; forwarding 8443 alone is never enough |
+| Black over a VPN specifically | Packet size. A tunnel's MTU is smaller than a plain link's, and an RTP packet that does not fit is dropped rather than shrunk. `rtp_mtu` defaults to 1200 to survive this; lower it with `--mtu 1100` if a tunnel inside a tunnel is involved |
 | Works on the LAN, not from outside | Testing from inside the network. Use mobile data |
 | Connects, then drops after a few minutes | `timeout tunnel` missing in HAProxy |
 | `502` from Cloudflare | HAProxy cannot reach the box, or `behind_proxy` is false so the box is speaking TLS to a proxy expecting plain HTTP |

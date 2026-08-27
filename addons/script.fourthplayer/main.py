@@ -28,12 +28,14 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 # Frame rate costs more than resolution on the hardware this was built for, so
 # the presets trade it first.
 QUALITY = [
-    ("Smooth — 720p30, 6 Mb/s (default)", dict(width=1280, height=720, fps=30,
-                                               bitrate_kbps=6000)),
-    ("Sharper — 720p60, 8 Mb/s", dict(width=1280, height=720, fps=60,
-                                      bitrate_kbps=8000)),
-    ("Thin connection — 540p30, 3 Mb/s", dict(width=960, height=540, fps=30,
-                                              bitrate_kbps=3000)),
+    ("Same network — 720p30, 6 Mb/s (default)",
+     dict(width=1280, height=720, fps=30, bitrate_kbps=6000, keyframe_interval=0)),
+    ("Sharper — 720p60, 8 Mb/s",
+     dict(width=1280, height=720, fps=60, bitrate_kbps=8000, keyframe_interval=0)),
+    ("Over the internet or a VPN — 540p30, 2 Mb/s",
+     dict(width=960, height=540, fps=30, bitrate_kbps=2000, keyframe_interval=60)),
+    ("As little as it can use — 480p30, 0.8 Mb/s",
+     dict(width=854, height=480, fps=30, bitrate_kbps=800, keyframe_interval=90)),
 ]
 
 

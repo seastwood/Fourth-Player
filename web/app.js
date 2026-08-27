@@ -180,9 +180,21 @@ async function answer(message) {
   });
 
   pc.addEventListener("connectionstatechange", () => {
-    if (pc.connectionState === "connected") setChip("link", "connected", "ok");
-    if (pc.connectionState === "failed") setChip("link", "connection failed", "bad");
+    if (pc.connectionState === "connected") {
+      setChip("link", "connected", "ok");
+      clearMediaTimeout();
+    }
+    if (pc.connectionState === "failed") {
+      clearMediaTimeout();
+      mediaFailed("The video could not get through.");
+    }
   });
+
+  // A picture that never arrives has to say so. Signalling succeeds, the PIN
+  // is accepted, the slot is taken -- and then nothing, because the media
+  // ports are not reachable. Left alone that is a black screen with no
+  // explanation, which is exactly how this failed from outside the network.
+  armMediaTimeout();
 
   await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
   const local = await pc.createAnswer();
@@ -362,6 +374,31 @@ el("use-touch").addEventListener("click", (event) => {
   event.preventDefault();
   showTouch(true);
 });
+
+let mediaTimer = null;
+
+function armMediaTimeout() {
+  clearMediaTimeout();
+  mediaTimer = setTimeout(() => {
+    if (pc && pc.connectionState === "connected") return;
+    mediaFailed("No video after 20 seconds.");
+  }, 20000);
+}
+
+function clearMediaTimeout() {
+  if (mediaTimer) { clearTimeout(mediaTimer); mediaTimer = null; }
+}
+
+function mediaFailed(why) {
+  setChip("link", "no video", "bad");
+  el("hud").classList.add("show");
+  el("prompt").hidden = false;
+  el("prompt").innerHTML =
+    "<p><strong>" + why + "</strong></p>" +
+    "<p class=\"footnote\">You are connected and your controller works, but the " +
+    "video is not reaching you. This is almost always the host's UDP ports not " +
+    "being open &mdash; the page and the PIN come over a different one.</p>";
+}
 
 /* ---- the pad ---- */
 

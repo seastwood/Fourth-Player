@@ -157,13 +157,21 @@ for wanted in ("link, PIN and QR", "Who is playing", "Add more time",
 print("\nquality presets are written where the server reads them")
 config_path = os.path.join(tempfile.mkdtemp(), "config.json")
 main.CONFIG_PATH = config_path
-chosen["select"] = 2                # the thin-connection preset
+chosen["select"] = 2                # the over-the-internet preset
 chosen["yesno"] = False             # do not restart anything
 main.set_quality(False)
 with open(config_path) as handle:
     written = json.load(handle)
-check(written["fps"] == 30 and written["width"] == 960 and written["bitrate_kbps"] == 3000,
+wanted = main.QUALITY[2][1]
+check(all(written.get(k) == v for k, v in wanted.items()),
       "the chosen preset lands in the config: %r" % written)
+check(written["bitrate_kbps"] < 3000,
+      "and the remote preset really is thinner than the default")
+
+print("\nevery preset is complete, so switching cannot leave a stale field")
+keys = [set(settings) for _, settings in main.QUALITY]
+check(all(k == keys[0] for k in keys),
+      "all presets set the same fields: %r" % [sorted(k) for k in keys])
 
 existing = {"public_url": "https://play.example.com", "slots": 2}
 with open(config_path, "w") as handle:

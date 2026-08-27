@@ -332,17 +332,21 @@ class LiveSession:
         return self.invite.kick(slot)
 
     def roster(self):
-        return [
-            {
+        rows = []
+        for g in sorted(self.guests.values(), key=lambda g: g.slot):
+            sent = g.peer.sent if g.peer is not None else {}
+            rows.append({
                 "slot": g.slot,
                 "label": g.label,
                 "connected": g.peer is not None,
                 "seconds": round(time.monotonic() - g.joined_at),
                 "frames": g.frames,
                 "pad": g.pad.path,
-            }
-            for g in sorted(self.guests.values(), key=lambda g: g.slot)
-        ]
+                "video_kb": round(sent.get("video_bytes", 0) / 1024),
+                "audio_kb": round(sent.get("audio_bytes", 0) / 1024),
+                "video_packets": sent.get("video_packets", 0),
+            })
+        return rows
 
     # -- the sweep ----------------------------------------------------------
 

@@ -197,9 +197,27 @@ That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a
 timestamped backup. Safe to run twice.
 
-For the internet half — the router, the DNS and the reverse proxy — see
-[docs/NETWORK.md](docs/NETWORK.md). That is the part most likely to go wrong and
-the part this repository cannot do for you.
+### Reaching it from outside
+
+**Two ports, not one.** TCP `8443` carries the join page and the PIN; the video
+and sound are WebRTC media on **UDP `40000–40100`**. Forwarding only 8443 gives
+a working join page and a permanently black picture, which is the single most
+common way this fails.
+
+Behind a symmetric NAT — most home routers — a forward is not enough on its own
+either, because the address STUN discovers uses a port the router allocated for
+talking to STUN and nobody else. The server therefore announces each of its
+local sockets a second time at the public address on the *same* port, which is
+what the forward actually maps. That is on by default; `advertise_public_ip` and
+`public_ip` control it.
+
+Over a VPN none of that applies — a guest on WireGuard is already inside the
+network — but packet size does: a tunnel's MTU is smaller, and an RTP packet
+that does not fit is dropped rather than split. `rtp_mtu` defaults to 1200 for
+that reason. A black picture *with working sound* is almost always this.
+
+Full details, with the pfSense and HAProxy configuration, in
+[docs/NETWORK.md](docs/NETWORK.md).
 
 ## What it costs to run
 

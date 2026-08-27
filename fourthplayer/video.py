@@ -29,7 +29,9 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstWebRTC", "1.0")
 gi.require_version("GstSdp", "1.0")
 gi.require_version("GstVideo", "1.0")
-from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib  # noqa: E402
+from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib, GObject  # noqa: E402
+
+from . import net  # noqa: E402
 
 log = logging.getLogger("fourthplayer.video")
 
@@ -47,6 +49,50 @@ def init():
         _initialised = True
 
 
+def _nice_type():
+    """The GType of webrtcbin's ICE agent, or None if it cannot be had.
+
+    It is registered by the webrtc plugin rather than published in a typelib,
+    and only once something has actually instantiated it -- so a throwaway
+    webrtcbin has to exist before the name resolves.
+    """
+    try:
+        Gst.ElementFactory.make("webrtcbin", None)
+        return GObject.type_from_name("GstWebRTCNice")
+    except Exception:
+        return None
+
+
+def make_ice_agent(cfg):
+    """An ICE agent whose UDP ports fall in a range a router can forward.
+
+    This is what makes fourth-player reachable from outside at all. Left to
+    itself webrtcbin takes ephemeral ports -- eight of them, scattered across
+    the whole range -- so there is nothing to write a firewall rule about, and
+    a guest outside the network gets a black picture however much is forwarded.
+
+    It has to be built here and passed to webrtcbin at construction: `ice-agent`
+    is construct-only, and *reading* the one webrtcbin makes for itself
+    corrupts it (`g_object_get_qdata: assertion G_IS_OBJECT (object) failed`,
+    then a crash at negotiation). Returns None if any of that fails, which
+    costs the port range and nothing else.
+    """
+    gtype = _nice_type()
+    if gtype is None:
+        log.warning("could not reach the ICE agent's type; ports will be "
+                    "ephemeral and cannot be forwarded")
+        return None
+    try:
+        ice = GObject.new(gtype)
+        ice.set_property("min-rtp-port", cfg.rtp_port_min)
+        ice.set_property("max-rtp-port", cfg.rtp_port_max)
+        return ice
+    except Exception as exc:
+        log.warning("could not bound the ICE port range (%s); ports will be "
+                    "ephemeral", exc)
+        return None
+
+
 def _caps(width, height):
     return f"video/x-raw(memory:VAMemory),format=NV12,width={width},height={height}"
 
@@ -62,6 +108,18 @@ class Stage:
         self._glib_loop = None
         self._thread = None
         self.has_audio = False
+        # Where this machine is reachable from outside, discovered once. Only
+        # the address is used; see fourthplayer/net.py for why not the port.
+        self.public_ip = cfg.public_ip
+        if cfg.advertise_public_ip and not self.public_ip:
+            found = net.public_address()
+            if found:
+                self.public_ip = found[0]
+                log.info("public address is %s; guests outside the network will "
+                         "be offered it on the forwarded ports", self.public_ip)
+            else:
+                log.info("could not discover a public address; only guests on "
+                         "this network will be able to connect")
         # Every add and remove of a peer goes through this one thread. Adding
         # a peer while another is being torn down means two threads mutating
         # one pipeline, and the symptom is the replacement refusing to reach
@@ -96,6 +154,7 @@ class Stage:
             f"! {encoder} "
             f"! h264parse config-interval=-1 "
             f"! rtph264pay pt=96 config-interval=-1 aggregate-mode=zero-latency "
+            f"mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
             f"! tee name=vtee allow-not-linked=true"
         )
@@ -116,7 +175,7 @@ class Stage:
             f"! audio/x-raw,rate=48000,channels=2 "
             f"! opusenc bitrate={cfg.audio_bitrate_kbps * 1000} "
             f"frame-size={cfg.audio_frame_ms} inband-fec=true "
-            f"! rtpopuspay pt=97 "
+            f"! rtpopuspay pt=97 mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=audio,encoding-name=OPUS,payload=97,clock-rate=48000 "
             f"! tee name=atee allow-not-linked=true")
 
@@ -240,8 +299,17 @@ class Peer:
         self.channel = None
         self.on_input = None          # set by the session; called with raw bytes
         self.on_dead = None           # called when the media connection is over
+        self.ice = None               # held so webrtcbin's agent outlives it
+        self._candidate_kinds = set()
+        self._announced = set()
         self.webrtc = None
         self._branches = []           # (tee, tee pad, queue) per media type
+        # What we actually handed to this peer. The difference between "the
+        # server sent nothing" and "the network ate it" is the first question
+        # to ask about a black picture, and without this it cannot be answered
+        # from the host at all.
+        self.sent = {"video_bytes": 0, "video_packets": 0,
+                     "audio_bytes": 0, "audio_packets": 0}
         self._offered = False
         self._assembled = False
 
@@ -251,7 +319,19 @@ class Peer:
         cfg = self.stage.cfg
         pipeline = self.stage.pipeline
 
-        self.webrtc = Gst.ElementFactory.make("webrtcbin", f"peer_{self.id}")
+        # The agent is kept on the peer for its whole life: webrtcbin does not
+        # take a reference that survives our own, and letting it go early
+        # produces a refcount assertion at teardown.
+        self.ice = make_ice_agent(cfg)
+        if self.ice is not None:
+            self.webrtc = Gst.ElementFactory.make_with_properties(
+                "webrtcbin", ["ice-agent"], [self.ice])
+            if self.webrtc is not None:
+                self.webrtc.set_property("name", f"peer_{self.id}")
+        else:
+            self.webrtc = None
+        if self.webrtc is None:
+            self.webrtc = Gst.ElementFactory.make("webrtcbin", f"peer_{self.id}")
         self.webrtc.set_property("bundle-policy", "max-bundle")
         self.webrtc.set_property("latency", cfg.jitter_ms)
         if cfg.stun_server:
@@ -343,8 +423,19 @@ class Peer:
 
         tee_pad = tee.request_pad_simple("src_%u")
         tee_pad.link(queue.get_static_pad("sink"))
-        queue.get_static_pad("src").link(self.webrtc.request_pad_simple("sink_%u"))
+        src = queue.get_static_pad("src")
+        src.link(self.webrtc.request_pad_simple("sink_%u"))
+        kind = "video" if tag == "v" else "audio"
+        src.add_probe(Gst.PadProbeType.BUFFER,
+                      lambda _pad, info, k=kind: self._count(k, info))
         self._branches.append((tee, tee_pad, queue))
+
+    def _count(self, kind, info):
+        buffer = info.get_buffer()
+        if buffer is not None:
+            self.sent[f"{kind}_bytes"] += buffer.get_size()
+            self.sent[f"{kind}_packets"] += 1
+        return Gst.PadProbeReturn.OK
 
     def detach(self):
         if self.webrtc is None:
@@ -402,7 +493,68 @@ class Peer:
         self._emit("offer", {"sdp": offer.sdp.as_text(), "type": "offer"})
 
     def _on_ice_candidate(self, _element, mline_index, candidate):
+        # Candidate types decide whether anybody outside can reach us at all:
+        # `host` is a LAN address, `srflx` is what STUN discovered our public
+        # address to be, `relay` came from a TURN server. A guest on the
+        # internet with only host candidates offered will connect, negotiate,
+        # and show a black screen forever.
+        parts = candidate.split()
+        kind = ""
+        if "typ" in parts:
+            index = parts.index("typ")
+            if index + 1 < len(parts):
+                kind = parts[index + 1]
+        if kind and kind not in self._candidate_kinds:
+            self._candidate_kinds.add(kind)
+            log.info("peer %s: gathered a %s candidate", self.id, kind)
         self._emit("ice", {"candidate": candidate, "sdpMLineIndex": mline_index})
+
+        extra = self._forwarded_candidate(parts, kind)
+        if extra:
+            self._emit("ice", {"candidate": extra, "sdpMLineIndex": mline_index})
+
+    def _forwarded_candidate(self, parts, kind):
+        """The same socket, announced at the public address and *same port*.
+
+        Without this, port forwarding cannot work behind a symmetric NAT --
+        which is most home routers. STUN reports the external port the router
+        happened to allocate for talking to the STUN server, and that mapping
+        is per-destination: no guest can use it. The forward, meanwhile, sends
+        WAN 40005 straight to this machine's 40005 and works for everybody --
+        and ICE never discovers it, because nothing on this machine can observe
+        a static rule in the router.
+
+        So we say it ourselves: for each LAN candidate, an identical one at the
+        public address. It is exactly what a 1:1 NAT address is for in every
+        other WebRTC server. A guest that cannot reach it simply loses that
+        candidate; the LAN ones still work for people in the house.
+        """
+        public = self.stage.public_ip
+        if not public or kind != "host" or len(parts) < 6:
+            return None
+        address, port = parts[4], parts[5]
+        if not net.is_private(address) or ":" in address:
+            return None
+        if (address, port) in self._announced:
+            return None
+        self._announced.add((address, port))
+
+        fields = list(parts)
+        fields[4] = public
+        # Foundation and priority must differ from the candidate it shadows, or
+        # a browser treats it as a duplicate and ignores it.
+        if fields[0].startswith("candidate:"):
+            fields[0] = "candidate:" + fields[0].split(":", 1)[1] + "9"
+        try:
+            fields[3] = str(max(1, int(fields[3]) - 100))
+        except ValueError:
+            pass
+        # srflx, with the local socket recorded as its base, which is what a
+        # reflexive candidate means and what browsers expect to parse.
+        typ = fields.index("typ")
+        fields[typ + 1] = "srflx"
+        fields = fields[:typ + 2] + ["raddr", address, "rport", port]
+        return " ".join(fields)
 
     def _on_ice_state(self, element, _param):
         state = element.get_property("ice-connection-state")

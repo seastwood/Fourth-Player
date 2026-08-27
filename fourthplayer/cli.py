@@ -9,7 +9,7 @@ import socket
 import sys
 import time
 
-from .config import Config, CONFIG_PATH
+from .config import Config, CONFIG_PATH, PRESETS
 from .server import Server, CONTROL_SOCKET
 
 
@@ -66,6 +66,11 @@ def main(argv=None):
                      help="video bitrate ceiling in kb/s")
     run.add_argument("--width", type=int)
     run.add_argument("--height", type=int)
+    run.add_argument("--preset", choices=sorted(PRESETS),
+                     help="smooth (default), sharp, remote (over a VPN or the "
+                          "internet), minimum (as little bandwidth as it can use)")
+    run.add_argument("--mtu", type=int, metavar="BYTES",
+                     help="RTP packet size (lower it for VPNs; default 1200)")
     run.add_argument("--no-audio", action="store_true", help="stream silently")
     run.add_argument("--audio-device", metavar="SOURCE",
                      help="PulseAudio source to capture (default: the monitor "
@@ -95,12 +100,18 @@ def main(argv=None):
     cfg = Config.load()
 
     if args.command == "serve":
+        # A preset first, so the individual flags can still override parts of it.
+        if args.preset:
+            for key, value in PRESETS[args.preset].items():
+                setattr(cfg, key, value)
         for field in ("port", "slots", "public_url", "fps", "width", "height"):
             value = getattr(args, field, None)
             if value:
                 setattr(cfg, field, value)
         if args.bitrate:
             cfg.bitrate_kbps = args.bitrate
+        if args.mtu:
+            cfg.rtp_mtu = args.mtu
         if args.behind_proxy:
             cfg.behind_proxy = True
         if args.software:
@@ -157,7 +168,10 @@ def _print_status(reply):
     for guest in guests:
         state = "connected" if guest["connected"] else "away"
         print(f"    slot {guest['slot']}  {guest['label']:<10} {state:<10} "
-              f"{guest['frames']} frames  {guest['pad']}")
+              f"{guest['frames']} inputs  {guest['pad']}")
+        print(f"      sent to them: {guest.get('video_kb', 0)} kB video "
+              f"({guest.get('video_packets', 0)} packets), "
+              f"{guest.get('audio_kb', 0)} kB audio")
 
 
 def _monitor_sources():

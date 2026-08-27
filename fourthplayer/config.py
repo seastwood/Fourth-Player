@@ -15,6 +15,22 @@ STATE_DIR = os.path.expanduser("~/.local/state/fourth-player")
 CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 
 
+# Named starting points. Frame rate and resolution are traded before bitrate,
+# because on a thin link a smaller sharp picture beats a bigger smeared one,
+# and keyframes are spaced further apart when there is less budget to spend on
+# them -- a guest joining is sent one on demand anyway.
+PRESETS = {
+    "smooth":  dict(width=1280, height=720, fps=30, bitrate_kbps=3000,
+                    keyframe_interval=0),
+    "sharp":   dict(width=1280, height=720, fps=60, bitrate_kbps=8000,
+                    keyframe_interval=0),
+    "remote":  dict(width=960, height=540, fps=30, bitrate_kbps=2000,
+                    keyframe_interval=60),
+    "minimum": dict(width=854, height=480, fps=30, bitrate_kbps=800,
+                    keyframe_interval=90),
+}
+
+
 @dataclass
 class Config:
     # -- capture and encode --
@@ -27,7 +43,9 @@ class Config:
     # delay between the television and the guest's screen. Set 60 if the host
     # has the headroom.
     fps: int = 30
-    bitrate_kbps: int = 6000
+    # 3 Mb/s. Comfortable on a LAN and survivable over a VPN or a home upload,
+    # which is where this actually gets used.
+    bitrate_kbps: int = 3000
     hardware_encode: bool = True
     # target-usage 1 measured *fastest* on Polaris, which is the opposite of
     # what the name suggests; 4 and 7 both came in a third slower.
@@ -49,6 +67,23 @@ class Config:
     # 10 ms frames. Opus will happily do 20 or 60, and every one of those
     # milliseconds is added to the delay between the television and the guest.
     audio_frame_ms: int = 10
+
+    # -- packet size --
+    # The RTP packet, before DTLS-SRTP (~16 bytes), UDP (8) and IP (20) are
+    # added. GStreamer defaults to 1400, which puts ~1444 bytes on the wire and
+    # does not fit a WireGuard tunnel's usual 1420 MTU: every video packet is
+    # fragmented or dropped, while the tiny audio packets sail through. The
+    # symptom is a black picture with sound, from outside the network only.
+    # Sunshine ships 1392 for the same reason; 1200 is the value most WebRTC
+    # stacks settle on and survives a tunnel inside a tunnel.
+    rtp_mtu: int = 1200
+
+    # -- reaching us from outside --
+    # Announce each LAN socket a second time at the public address, same port,
+    # so a static port forward is usable. Needed because a symmetric NAT makes
+    # STUN's reported port worthless -- see fourthplayer/net.py.
+    advertise_public_ip: bool = True
+    public_ip: str = ""            # blank: discover it with STUN at startup
 
     # -- webrtc --
     stun_server: str = "stun://stun.cloudflare.com:3478"
