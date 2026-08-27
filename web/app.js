@@ -76,8 +76,16 @@ function fail(message) {
  * the WebRTC connection is up -- so this reconnects quietly in the background
  * and tells the host whether the media it set up is still running, so it knows
  * not to renegotiate a picture that never stopped. */
+/* Whether media is genuinely flowing, which is not the same as the connection
+ * saying it is up. After the tab has been in the background for a while, iOS
+ * hands back an RTCPeerConnection still reporting "connected" over a path that
+ * has carried nothing for minutes. Telling the host that is live makes it keep
+ * the dead peer and re-point signalling at it, so the picture never comes
+ * back -- which is exactly what "I had to enter the PIN again" was. */
+let mediaFresh = false;
+
 function mediaIsLive() {
-  return pc !== null && pc.connectionState === "connected";
+  return pc !== null && pc.connectionState === "connected" && mediaFresh;
 }
 
 function reconnectSoon() {
@@ -235,6 +243,7 @@ async function answer(message) {
       renewals = 0;
       lastBytes = -1;
       stalledSince = 0;
+      mediaFresh = false;
       startWatchdog();
       setTimeout(() => report("video playing"), 5000);
     }
@@ -447,13 +456,11 @@ el("use-touch").addEventListener("click", (event) => {
 
 function videoRefused() {
   setChip("link", "no H.264", "bad");
-  el("hud").classList.add("show");
-  el("prompt").hidden = false;
-  el("prompt").innerHTML =
-    "<p><strong>This browser will not accept the video.</strong></p>" +
+  showNotice(
+    "<strong>This browser will not accept the video.</strong>" +
     "<p class=\"footnote\">It refused the H.264 stream, so the picture cannot " +
     "start &mdash; your controller and the sound still work. Safari and Chrome " +
-    "handle it; a Firefox without its H.264 plug-in does not.</p>";
+    "handle it; a Firefox without its H.264 plug-in does not.</p>", true);
   report("browser refused the video format");
 }
 
@@ -503,17 +510,54 @@ window.addEventListener("online", () => {
   if (pc && pc.connectionState !== "connected") renewSoon(500);
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible" || ended || !pc) return;
+  if (document.visibilityState === "hidden") {
+    // Nothing can be assumed about what survives being in the background.
+    mediaFresh = false;
+    return;
+  }
+  if (ended || !pc) return;
   // Coming back to the tab. Do not trust the connection state -- check whether
   // anything is moving, and give it a couple of seconds to prove it before
   // rebuilding, since a brief background is often survivable.
   stalledSince = 0;
   lastBytes = -1;
+  mediaFresh = false;
   setTimeout(watchMedia, 500);
   setTimeout(() => {
     if (!ended && pc && lastBytes < 0) renewSoon(0, true);
   }, 3000);
   if (pc.connectionState !== "connected") renewSoon(500);
+});
+
+/* Everything the page has to say goes through here, so it always lands
+ * somewhere readable and can be asked for again later. */
+let lastNotice = "";
+
+function showNotice(html, sticky) {
+  lastNotice = html;
+  const box = el("notice");
+  box.innerHTML = html;
+  box.hidden = false;
+  el("hud").classList.add("show");
+  if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+  if (!sticky) noticeTimer = setTimeout(hideNotice, 9000);
+}
+
+function hideNotice() {
+  if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+  el("notice").hidden = true;
+}
+
+let noticeTimer = null;
+
+el("notice").addEventListener("click", hideNotice);
+
+el("info").addEventListener("click", async () => {
+  if (!el("notice").hidden) { hideNotice(); return; }
+  const route = await describeRoute();
+  showNotice(lastNotice
+    ? lastNotice + '<p class="footnote">' + route + "</p>"
+    : '<p class="footnote">' + route + "</p>", true);
 });
 
 let mediaTimer = null;
@@ -595,10 +639,7 @@ async function describeRoute() {
 // Same detail on demand, whether or not anything failed -- tapping the link
 // chip reports the route, which is the only way to learn it from a phone.
 el("link").addEventListener("click", async () => {
-  el("prompt").hidden = false;
-  el("prompt").innerHTML = "<p class=\"footnote\">" + (await describeRoute()) + "</p>";
-  setTimeout(() => { if (mediaTimer === null && pc && pc.connectionState === "connected")
-                       el("prompt").hidden = true; }, 8000);
+  showNotice('<p class="footnote">' + (await describeRoute()) + "</p>");
 });
 
 /* Whether anything is actually arriving.
@@ -626,10 +667,12 @@ async function watchMedia() {
   if (bytes > lastBytes) {
     lastBytes = bytes;
     stalledSince = 0;
+    mediaFresh = true;
     // Video is arriving, so whatever the chip last said is out of date. This
     // is also what stops it sticking on "reconnecting" after a rebuild that
     // actually worked.
     setChip("link", "connected", "ok");
+    if (!el("notice").hidden && lastNotice.includes("could not")) hideNotice();
     return;
   }
   if (lastBytes < 0) return;               // nothing has arrived yet at all
@@ -638,6 +681,7 @@ async function watchMedia() {
   if (!stalledSince) { stalledSince = now; return; }
   if (now - stalledSince >= STALL_LIMIT_MS) {
     stalledSince = 0;
+    mediaFresh = false;
     setChip("link", "reconnecting…", "warn");
     renewSoon(0, true);
   }
