@@ -811,8 +811,9 @@ async function describeRoute() {
     if (!pair) {
       const tried = [];
       stats.forEach((r) => {
-        if (r.type === "remote-candidate" && r.address) {
-          tried.push(r.address + ":" + r.port + " (" + r.candidateType + ")");
+        if (r.type === "remote-candidate" && (r.address || r.ip)) {
+          tried.push((r.address || r.ip) + ":" + r.port
+                     + " (" + r.candidateType + ")");
         }
       });
       return tried.length
@@ -822,7 +823,8 @@ async function describeRoute() {
     const remote = byId.get(pair.remoteCandidateId);
     const bytes = pair.bytesReceived || 0;
     return "Connected to " +
-      (remote ? remote.address + ":" + remote.port + " (" + remote.candidateType + ")"
+      (remote ? (remote.address || remote.ip || "?") + ":" + remote.port
+                + " (" + remote.candidateType + ")"
               : "the host") +
       ", received " + Math.round(bytes / 1024) + " kB.";
   } catch (_) {

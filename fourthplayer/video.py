@@ -277,7 +277,8 @@ class Stage:
             f"mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=video,encoding-name={encoding},"
             f"payload=96,clock-rate=90000 "
-            f"! tee name=vtee allow-not-linked=true"
+            f"! appsink name=vsink emit-signals=true sync=false "
+            f"max-buffers=4 drop=true"
         )
         # Named so they can be found and silenced directly when stopping.
         description = description.replace("ximagesrc ", "ximagesrc name=capture ")
@@ -300,7 +301,8 @@ class Stage:
             f"frame-size={cfg.audio_frame_ms} inband-fec=true "
             f"! rtpopuspay pt=97 mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=audio,encoding-name=OPUS,payload=97,clock-rate=48000 "
-            f"! tee name=atee allow-not-linked=true")
+            f"! appsink name=asink emit-signals=true sync=false "
+            f"max-buffers=16 drop=true")
 
     def _build(self, with_audio):
         description = self._description
@@ -308,10 +310,17 @@ class Stage:
             description += self._audio_description
         log.debug("pipeline: %s", description)
         self.pipeline = Gst.parse_launch(description)
-        self.tee = self.pipeline.get_by_name("vtee")
-        self.audio_tee = self.pipeline.get_by_name("atee")
         self.encoder = self.pipeline.get_by_name("enc")
-        self.has_audio = self.audio_tee is not None
+        self.vsink = self.pipeline.get_by_name("vsink")
+        self.asink = self.pipeline.get_by_name("asink")
+        self.has_audio = self.asink is not None
+        # The caps the guests' pipelines have to be told about. They are not
+        # known until the first buffer arrives.
+        self.video_caps = None
+        self.audio_caps = None
+        self.vsink.connect("new-sample", self._on_video)
+        if self.asink is not None:
+            self.asink.connect("new-sample", self._on_audio)
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
@@ -476,8 +485,9 @@ class Stage:
             except Exception:
                 pass
 
-        # A dead pipeline cannot take a new peer, and refusing without trying
-        # to revive it is how one failure became every failure.
+        # The capture still has to be running to have anything to hand out.
+        # It is no longer at the mercy of the guests, though: their pipelines
+        # are their own, so this is now only about the capture itself.
         if not self.ensure_playing():
             raise RuntimeError("the capture pipeline is not running")
 
@@ -532,19 +542,44 @@ class Stage:
     def _on_error(self, _bus, message):
         err, debug = message.parse_error()
         log.error("pipeline error: %s (%s)", err.message, debug)
-        # An error inside one guest's branch is one guest's problem. The usual
-        # one is the data channel: "SCTP association went into error state",
-        # which kills that peer's video too and leaves them staring at black
-        # while everybody else carries on. Nothing else notices -- ICE stays
-        # connected, so no failure handler fires -- so it has to be spotted
-        # here and the peer rebuilt.
-        blamed = self._peer_named(f"{message.src}") or self._peer_named(debug or "")
-        if blamed is not None and blamed.on_broken is not None:
-            log.warning("peer %s: its branch failed; rebuilding it", blamed.id)
-            self.loop.call_soon_threadsafe(blamed.on_broken, err.message)
-        # Whatever raised it, the pipeline may have stopped. Get it running
-        # again before the next guest arrives and is told it cannot join.
+        # This bus carries the capture only. A guest's pipeline has its own bus
+        # and its own errors, which is the point of them being separate.
         self.worker.submit(self.ensure_playing)
+
+    # -- fanning the encoded stream out to the guests ------------------------
+
+    def _on_video(self, sink):
+        return self._forward(sink, "video")
+
+    def _on_audio(self, sink):
+        return self._forward(sink, "audio")
+
+    def _forward(self, sink, kind):
+        """Hand one encoded packet to every guest.
+
+        This is where the guests stop sharing anything. Each one has its own
+        pipeline, so a failure inside theirs -- a data channel giving up, a
+        transport erroring -- is theirs alone. It used to be a `tee` inside one
+        pipeline, and a GStreamer error belongs to the pipeline rather than the
+        branch that raised it: one guest's SCTP association failing therefore
+        stopped the capture and ended the session for everybody.
+        """
+        sample = sink.emit("pull-sample")
+        if sample is None:
+            return Gst.FlowReturn.OK
+        buffer = sample.get_buffer()
+        caps = sample.get_caps()
+        if kind == "video":
+            self.video_caps = caps
+        else:
+            self.audio_caps = caps
+        for peer in list(self.peers.values()):
+            try:
+                peer.push(kind, buffer, caps)
+            except Exception as exc:
+                log.debug("peer %s would not take a %s buffer: %s",
+                          peer.id, kind, exc)
+        return Gst.FlowReturn.OK
 
     def _peer_named(self, text):
         for peer_id, peer in self.peers.items():
@@ -579,7 +614,9 @@ class Peer:
         self._announced = set()
         self._route_logged = False
         self.webrtc = None
-        self._branches = []           # (tee, tee pad, queue) per media type
+        self.pipeline = None          # this guest's own pipeline
+        self._sources = {}            # kind -> appsrc
+        self._caps = {}               # kind -> caps last set
         # What we actually handed to this peer. The difference between "the
         # server sent nothing" and "the network ate it" is the first question
         # to ask about a black picture, and without this it cannot be answered
@@ -599,74 +636,45 @@ class Peer:
     # -- wiring -------------------------------------------------------------
 
     def attach(self):
+        """Build this guest's own pipeline: appsrc in, webrtcbin out."""
         cfg = self.stage.cfg
-        pipeline = self.stage.pipeline
 
-        # The agent is kept on the peer for its whole life: webrtcbin does not
-        # take a reference that survives our own, and letting it go early
-        # produces a refcount assertion at teardown.
+        # A pipeline of their own. Everything that can go wrong for this guest
+        # now goes wrong in here, where it reaches nobody else.
+        self.pipeline = Gst.Pipeline.new(f"guest_{self.id}")
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        self._connect(bus, "message::error", self._on_own_error)
+
         self.ice = make_ice_agent(cfg)
         if self.ice is not None:
             self.webrtc = Gst.ElementFactory.make_with_properties(
                 "webrtcbin", ["ice-agent"], [self.ice])
-            if self.webrtc is not None:
-                self.webrtc.set_property("name", f"peer_{self.id}")
         else:
             self.webrtc = None
         if self.webrtc is None:
-            self.webrtc = Gst.ElementFactory.make("webrtcbin", f"peer_{self.id}")
+            self.webrtc = Gst.ElementFactory.make("webrtcbin", None)
+        self.webrtc.set_property("name", f"peer_{self.id}")
         self.webrtc.set_property("bundle-policy", "max-bundle")
         self.webrtc.set_property("latency", cfg.jitter_ms)
         if cfg.stun_server:
             self.webrtc.set_property("stun-server", cfg.stun_server)
         if cfg.turn_server:
             self.webrtc.set_property("turn-server", cfg.turn_server)
+        self.pipeline.add(self.webrtc)
 
-        pipeline.add(self.webrtc)
-
-        # Connect the signals BEFORE anything that can make webrtcbin want to
-        # negotiate. Creating the data channel and following the pipeline into
-        # PLAYING both emit on-negotiation-needed, and they can do it
-        # synchronously -- so connecting afterwards loses the signal outright
-        # whenever it wins the race. The symptom is the nastiest kind: the
-        # guest joins successfully, no offer is ever made, no error is logged
-        # anywhere, and they sit on a black screen. It reproduced roughly one
-        # join in three.
         self._connect(self.webrtc, "on-negotiation-needed", self._on_negotiation_needed)
         self._connect(self.webrtc, "on-ice-candidate", self._on_ice_candidate)
         self._connect(self.webrtc, "notify::ice-connection-state", self._on_ice_state)
-        # `on-negotiation-needed` is connected purely so an early one is not
-        # lost; it cannot make the offer, because it fires the moment the
-        # element reaches PLAYING -- before the track is linked and before the
-        # data channel exists. Offering there produces a valid but *empty*
-        # description, the guest answers it agreeably, and nothing ever flows.
-        # The offer is made explicitly at the end of assembly instead.
 
-        # NOTE: do not reach for webrtcbin's "ice-agent" here to bound the UDP
-        # port range. On GStreamer 1.24 with this PyGObject, simply *reading*
-        # that property corrupts the agent -- `g_object_get_qdata: assertion
-        # G_IS_OBJECT (object) failed` fires immediately, and the process then
-        # dies at negotiation with `gst_webrtc_ice_add_stream: assertion
-        # GST_IS_WEBRTC_ICE (ice) failed`. It takes the whole server down the
-        # moment the first guest joins, which is the worst possible time.
-        #
-        # gst_child_proxy is not a way around it either: the agent is not
-        # registered as a child at NULL, READY or PAUSED, so the lookup fails.
-        # Ports are therefore ephemeral, and `docs/NETWORK.md` says what that
-        # means for the firewall rule. Revisit if webrtcbin gains real port
-        # properties.
-
-        # Into PLAYING first. `create-data-channel` needs the SCTP transport,
-        # which does not exist while the element is still NULL -- it returns
-        # None there, and the peer is dead on arrival.
-        if not self.webrtc.sync_state_with_parent():
-            raise RuntimeError("webrtcbin would not follow the pipeline into PLAYING")
-
-        # Video first, then audio, so the offer's m-lines come out in that
-        # order and transceiver 0 is always the picture.
-        self._branch(self.stage.tee, "v")
+        # Video first so the offer's m-lines come out in that order and
+        # transceiver 0 is always the picture.
+        self._feed("video", None)
         if self.stage.has_audio:
-            self._branch(self.stage.audio_tee, "a")
+            self._feed("audio", None)
+
+        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("this guest's pipeline would not start")
 
         index = 0
         while True:
@@ -693,6 +701,96 @@ class Peer:
         self._assembled = True
         self._negotiate()
 
+    def _rtp_caps(self, kind):
+        """The caps this guest's appsrc announces, stated rather than waited for.
+
+        webrtcbin builds the offer from whatever the source claims the moment
+        it is asked, and a sample from the capture may not have arrived yet --
+        so an appsrc left to learn its caps from the first buffer produced an
+        offer with no video in it at all. The guest negotiated audio, took
+        input, and never got a picture.
+
+        These are known: this program built the pipeline that produces them.
+        """
+        if kind == "audio":
+            return Gst.Caps.from_string(
+                "application/x-rtp,media=(string)audio,encoding-name=(string)OPUS,"
+                "payload=(int)97,clock-rate=(int)48000")
+        encoding = "H265" if self.stage.cfg.codec.lower() in ("h265", "hevc") else "H264"
+        return Gst.Caps.from_string(
+            f"application/x-rtp,media=(string)video,encoding-name=(string){encoding},"
+            f"payload=(int)96,clock-rate=(int)90000")
+
+    def _feed(self, kind, caps):
+        """One appsrc carrying the encoded stream into this guest's webrtcbin."""
+        caps = caps or self._rtp_caps(kind)
+        src = Gst.ElementFactory.make("appsrc", f"{kind}src_{self.id}")
+        src.set_property("is-live", True)
+        src.set_property("format", Gst.Format.TIME)
+        src.set_property("emit-signals", False)
+        # Never block the capture thread, and never grow without limit: a guest
+        # whose connection has stalled drops packets instead of holding the
+        # encoder up or eating memory.
+        src.set_property("block", False)
+        # The buffers come from another pipeline with its own clock and base
+        # time, so their timestamps mean nothing here. Let the source stamp
+        # them on arrival instead of handing webrtcbin times it cannot place.
+        src.set_property("do-timestamp", True)
+        src.set_property("max-bytes", 2 * 1024 * 1024)
+        try:
+            src.set_property("leaky-type", 2)      # drop the oldest
+        except Exception:
+            pass                                    # older GStreamer: fine
+        src.set_property("caps", caps)
+        self._caps[kind] = caps
+        self.pipeline.add(src)
+        src.link_pads("src", self.webrtc, "sink_%u")
+        self._sources[kind] = src
+
+    def push(self, kind, buffer, caps):
+        """Take one encoded packet from the capture."""
+        src = self._sources.get(kind)
+        if src is None or self.webrtc is None:
+            return
+        # The caps were stated when the source was made and are not changed
+        # here: renegotiating mid-stream on a cosmetic difference would
+        # interrupt a picture that is working.
+        #
+        # A shallow copy per guest, with the capture's timestamps cleared: the
+        # same buffer goes to several pipelines, so it must not be written to,
+        # and the times on it belong to a clock this pipeline has never seen.
+        outgoing = buffer.copy()
+        outgoing.pts = Gst.CLOCK_TIME_NONE
+        outgoing.dts = Gst.CLOCK_TIME_NONE
+        outgoing.duration = Gst.CLOCK_TIME_NONE
+        src.emit("push-buffer", outgoing)
+        self.sent[f"{kind}_bytes"] += buffer.get_size()
+        self.sent[f"{kind}_packets"] += 1
+
+    def _on_own_error(self, _bus, message):
+        """An error inside this guest's pipeline, and nobody else's."""
+        err, debug = message.parse_error()
+        log.warning("peer %s: %s (%s)", self.id, err.message, debug)
+        if self.on_broken is not None:
+            self.stage.loop.call_soon_threadsafe(self.on_broken, err.message)
+
+    def detach(self):
+        if self.pipeline is None:
+            return
+        started = time.monotonic()
+        self._disconnect_all()
+        self.on_dead = self.on_broken = self.on_input = None
+        pipeline, self.pipeline = self.pipeline, None
+        self.webrtc = self.channel = None
+        self._sources = {}
+        try:
+            pipeline.set_state(Gst.State.NULL)
+        except Exception as exc:
+            log.warning("peer %s did not stop cleanly: %s", self.id, exc)
+        took = time.monotonic() - started
+        if took > 1.0:
+            log.warning("peer %s took %.1fs to detach", self.id, took)
+
     def _connect(self, obj, signal, handler):
         self._handlers.append((obj, obj.connect(signal, handler)))
 
@@ -710,65 +808,6 @@ class Peer:
             except Exception:
                 pass                    # already gone is the outcome we wanted
         self._handlers = []
-
-    def _branch(self, tee, tag):
-        """One tee -> queue -> webrtcbin path, remembered so it can be undone."""
-        queue = Gst.ElementFactory.make("queue", f"q{tag}_{self.id}")
-        # Drop the oldest rather than block. One slow guest must never apply
-        # back-pressure to a tee that everybody else is reading from.
-        queue.set_property("leaky", 2)
-        queue.set_property("max-size-time", self.stage.cfg.queue_ms * Gst.MSECOND)
-        queue.set_property("max-size-bytes", 0)
-        queue.set_property("max-size-buffers", 0)
-        self.stage.pipeline.add(queue)
-        if not queue.sync_state_with_parent():
-            raise RuntimeError(f"{queue.get_name()} would not reach PLAYING")
-
-        tee_pad = tee.request_pad_simple("src_%u")
-        tee_pad.link(queue.get_static_pad("sink"))
-        src = queue.get_static_pad("src")
-        src.link(self.webrtc.request_pad_simple("sink_%u"))
-        kind = "video" if tag == "v" else "audio"
-        src.add_probe(Gst.PadProbeType.BUFFER,
-                      lambda _pad, info, k=kind: self._count(k, info))
-        self._branches.append((tee, tee_pad, queue))
-
-    def _count(self, kind, info):
-        if self.webrtc is None:
-            return Gst.PadProbeReturn.REMOVE
-        buffer = info.get_buffer()
-        if buffer is not None:
-            self.sent[f"{kind}_bytes"] += buffer.get_size()
-            self.sent[f"{kind}_packets"] += 1
-        return Gst.PadProbeReturn.OK
-
-    def detach(self):
-        if self.webrtc is None:
-            return
-        started = time.monotonic()
-        # Before anything else, and before any state change.
-        self._disconnect_all()
-        self.on_dead = self.on_broken = self.on_input = None
-        try:
-            for tee, tee_pad, queue in self._branches:
-                tee_pad.unlink(queue.get_static_pad("sink"))
-                tee.release_request_pad(tee_pad)
-                queue.set_state(Gst.State.NULL)
-                self.stage.pipeline.remove(queue)
-            self._branches = []
-            self.webrtc.set_state(Gst.State.NULL)
-            self.stage.pipeline.remove(self.webrtc)
-        except Exception as exc:
-            log.warning("peer %s did not detach cleanly: %s", self.id, exc)
-        finally:
-            self.webrtc = self.channel = None
-            self._branches = []
-            took = time.monotonic() - started
-            if took > 1.0:
-                log.warning("peer %s took %.1fs to detach -- everything queued "
-                            "behind it waited", self.id, took)
-
-    # -- negotiation --------------------------------------------------------
 
     def _on_negotiation_needed(self, _element):
         if self.webrtc is None:

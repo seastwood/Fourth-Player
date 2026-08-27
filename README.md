@@ -16,9 +16,17 @@ Kodi add-on, and that coupling is optional.
 
 Two paths, and they are deliberately asymmetric.
 
-**Video and sound go out once.** The screen is captured and encoded a single
-time, and a `tee` hands the same encoded bytes to every guest. A fourth guest
-costs bandwidth and nothing else. On the hardware this was built for that is not
+**Video and sound are encoded once and handed to each guest separately.** The
+screen is captured and encoded a single time — a fourth guest costs bandwidth
+and nothing else — and the encoded packets are then pushed into a *separate
+pipeline per guest*.
+
+That separation is not tidiness. A GStreamer error belongs to the pipeline
+rather than the element that raised it, so while the guests shared one, a
+single guest's data channel failing stopped the capture and ended the session
+for everybody. It happened repeatedly. Now each guest's failure is contained
+in their own pipeline: verified by killing one guest mid-stream and watching
+the other carry on. On the hardware this was built for that is not
 an optimisation — it is the difference between working and not.
 
 Sound comes from the monitor of whatever sink applications are actually playing
