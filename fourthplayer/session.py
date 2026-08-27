@@ -24,6 +24,14 @@ log = logging.getLogger("fourthplayer.session")
 
 SWEEP_INTERVAL = 0.05
 
+# How long to wait for the pipeline worker before giving up on a guest's
+# request. Every add and remove of a peer goes through one thread so they
+# cannot race; the cost is that one slow teardown delays everybody behind it.
+# Tearing down a peer whose network vanished is exactly that slow case, and a
+# guest reconnecting is exactly who is behind it -- so the wait is bounded and
+# the guest is told, rather than left watching "rejoining" forever.
+PIPELINE_TIMEOUT = 12.0
+
 # Guests are told the session is running out at these many seconds remaining,
 # so the end is something you can see coming rather than something that happens
 # to you mid-game.
@@ -238,6 +246,17 @@ class LiveSession:
         log.info("%s joined from %s", guest.label, address or "unknown")
         return guest, guest_token
 
+    async def renew(self, guest, on_signal):
+        """Give a guest a fresh media connection without a fresh invite.
+
+        What a phone needs when it moves between mobile data and wifi: every
+        address it had is gone, so the old connection can only ever be
+        declared dead. Re-offering is the whole recovery, and it costs the
+        guest nothing -- they keep their slot, their pad and their session.
+        """
+        self.detach_peer(guest)
+        return await self.attach_peer(guest, on_signal)
+
     def resume(self, guest_token, socket):
         """A guest whose socket dropped, coming back without the PIN.
 
@@ -268,10 +287,12 @@ class LiveSession:
             # renegotiate.
             peer.on_dead = lambda why: self._peer_died(guest, peer, why)
 
-        peer = await self.loop.run_in_executor(
-            self.stage.mutations,
-            functools.partial(self.stage.add_peer,
-                              f"slot{guest.slot}", on_signal, configure))
+        peer = await asyncio.wait_for(
+            self.loop.run_in_executor(
+                self.stage.mutations,
+                functools.partial(self.stage.add_peer,
+                                  f"slot{guest.slot}", on_signal, configure)),
+            timeout=PIPELINE_TIMEOUT)
         guest.peer = peer
         return peer
 

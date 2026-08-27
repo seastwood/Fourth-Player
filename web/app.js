@@ -121,6 +121,34 @@ function sessionOver(reason) {
   try { localStorage.removeItem(storageKey); } catch (_) {}
 }
 
+/* A resume that is never answered must not leave the page saying "rejoining"
+ * forever. The credential may be stale, the session may have ended, or the
+ * host may be wedged -- from here they are indistinguishable, and all three
+ * have the same remedy: ask for the PIN again. */
+let rejoinTimer = null;
+
+function clearRejoinTimer() {
+  if (rejoinTimer) { clearTimeout(rejoinTimer); rejoinTimer = null; }
+}
+
+function armRejoinTimer() {
+  clearRejoinTimer();
+  rejoinTimer = setTimeout(() => {
+    rejoinTimer = null;
+    if (!gate.hidden) askForPin("That did not get you back in.");
+  }, 12000);
+}
+
+function askForPin(why) {
+  guestToken = null;
+  try { localStorage.removeItem(storageKey); } catch (_) {}
+  clearRejoinTimer();
+  el("pin").placeholder = "000000";
+  el("pin").value = "";
+  el("join").disabled = false;
+  fail(why + " Enter the PIN to join again.");
+}
+
 function onError(message) {
   if (gate.hidden) {
     // Already playing. A refused resume means the credential is no longer
@@ -128,12 +156,13 @@ function onError(message) {
     guestToken = null;
     setChip("link", message.message, "bad");
   } else {
-    fail(message.message);
+    askForPin(message.message);
   }
 }
 
 function joined(message) {
   retries = 0;
+  clearRejoinTimer();
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
   if (message.resumed_media) {
@@ -183,12 +212,19 @@ async function answer(message) {
     if (pc.connectionState === "connected") {
       setChip("link", "connected", "ok");
       clearMediaTimeout();
-      // A moment later, so there is something to count.
+      clearRenewTimer();
+      renewals = 0;
       setTimeout(() => report("video playing"), 5000);
+    }
+    // "disconnected" often mends itself in a second or two, so give it that
+    // long. "failed" never does: the addresses it was using are gone.
+    if (pc.connectionState === "disconnected") {
+      setChip("link", "reconnecting…", "warn");
+      renewSoon(4000);
     }
     if (pc.connectionState === "failed") {
       clearMediaTimeout();
-      mediaFailed("The video could not get through.");
+      renewSoon(0);
     }
   });
 
@@ -398,6 +434,52 @@ function videoRefused() {
   report("browser refused the video format");
 }
 
+/* Moving between mobile data and wifi replaces every address this device had,
+ * so the connection cannot recover on its own -- it can only be rebuilt. The
+ * host re-offers on request, and the guest keeps their slot, their pad and
+ * their session, so the only visible cost is a second of "reconnecting".
+ *
+ * Attempts are capped and spaced: if the host is genuinely unreachable this
+ * must not turn into a page hammering it forever. */
+const MAX_RENEWALS = 6;
+let renewals = 0, renewTimer = null;
+
+function clearRenewTimer() {
+  if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; }
+}
+
+function renewSoon(delay) {
+  if (ended || renewTimer) return;
+  if (renewals >= MAX_RENEWALS) {
+    mediaFailed("The video connection could not be rebuilt.");
+    return;
+  }
+  renewTimer = setTimeout(() => {
+    renewTimer = null;
+    if (!pc || pc.connectionState === "connected") return;
+    renewals += 1;
+    setChip("link", "reconnecting…", "warn");
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ t: "renew" }));
+      armMediaTimeout();
+    } else {
+      // The socket went with the network. Get it back first; the resume
+      // handshake brings a fresh offer with it.
+      reconnectSoon();
+    }
+  }, delay);
+}
+
+// The browser tells us when the network comes back, and when the user returns
+// to the tab -- both are exactly when a stale connection needs rebuilding.
+window.addEventListener("online", () => {
+  if (pc && pc.connectionState !== "connected") renewSoon(500);
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && pc &&
+      pc.connectionState !== "connected") renewSoon(500);
+});
+
 let mediaTimer = null;
 
 function armMediaTimeout() {
@@ -580,5 +662,7 @@ const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_
 if (saved) {
   guestToken = saved;
   el("pin").placeholder = "rejoining…";
+  el("join").disabled = true;
+  armRejoinTimer();
   connect({ t: "resume", guest: saved, media: "new" });
 }

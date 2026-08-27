@@ -150,6 +150,21 @@ class Server:
                     # somebody else's house.
                     log.info("%s reports: %s", guest.label,
                              str(message.get("detail", ""))[:300])
+                elif kind == "renew" and guest is not None:
+                    # Their network changed under them. Everything negotiated
+                    # before refers to addresses that no longer exist.
+                    log.info("%s: asked for a fresh media connection", guest.label)
+
+                    def on_signal(sig, payload, box=outbox):
+                        box.put_nowait({"t": sig, **payload})
+
+                    try:
+                        await self.session.renew(guest, on_signal)
+                    except asyncio.TimeoutError:
+                        await outbox.put({
+                            "t": "error",
+                            "message": "The host could not restart your video. "
+                                       "Try again in a moment."})
                 elif kind == "bye":
                     break
         except websockets.ConnectionClosed:
@@ -192,6 +207,14 @@ class Server:
             return None
         except invites.JoinError:
             await outbox.put({"t": "error", "message": REFUSED})
+            return None
+        except asyncio.TimeoutError:
+            # The pipeline worker is wedged behind a teardown that will not
+            # finish. Saying so beats leaving them on "rejoining" forever.
+            log.error("timed out attaching a peer; the guest was told")
+            await outbox.put({"t": "error",
+                              "message": "The host could not start your video. "
+                                         "Try again in a moment."})
             return None
 
         # Route through whatever socket the guest currently holds, rather than

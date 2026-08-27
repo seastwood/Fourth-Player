@@ -72,6 +72,23 @@ class Guest:
         self.webrtc.connect("notify::ice-connection-state", self._on_ice_state)
         self.ice_state = "new"
 
+    def reset(self):
+        """Throw the peer away and build a new one, as a browser does when it
+        closes its RTCPeerConnection and answers a fresh offer."""
+        old = self.webrtc
+        self.webrtc = Gst.ElementFactory.make("webrtcbin", None)
+        self.webrtc.set_property("bundle-policy", "max-bundle")
+        self.pipeline.add(self.webrtc)
+        self.webrtc.connect("pad-added", self._on_pad)
+        self.webrtc.connect("on-ice-candidate", self._on_ice)
+        self.webrtc.connect("on-data-channel", self._on_data_channel)
+        self.webrtc.connect("notify::ice-connection-state", self._on_ice_state)
+        self.webrtc.sync_state_with_parent()
+        self.channel = None
+        if old is not None:
+            old.set_state(Gst.State.NULL)
+            self.pipeline.remove(old)
+
     def start(self):
         self.pipeline.set_state(Gst.State.PLAYING)
 
@@ -242,11 +259,24 @@ async def run(args):
         # Hold a direction so the host's pad has something visible to show,
         # then let go, so the last thing this proves is that release works.
         seq = 0
+        renewed = False
+        renew_mark = {"video": 0, "at": 0.0}
         started = loop.time()
         deadline = started + args.seconds
         dropped = False
         halfway = {"video": 0}
         while loop.time() < deadline:
+            if (args.renew_at and not renewed
+                    and loop.time() - started >= args.renew_at):
+                renewed = True
+                renew_mark["video"] = counts["video_buffers"]
+                renew_mark["at"] = loop.time()
+                print(f"  asking for a fresh media connection at "
+                      f"{loop.time() - started:.1f}s")
+                # A new offer arrives, so the old peer must go.
+                guest.reset()
+                await socket_.send(json.dumps({"t": "renew"}))
+
             if (args.drop_signalling
                     and not dropped
                     and loop.time() - started >= args.drop_signalling):
@@ -262,6 +292,10 @@ async def run(args):
             await asyncio.sleep(1 / 125)
 
         pump_task.cancel()
+        if renewed:
+            after = counts["video_buffers"] - renew_mark["video"]
+            print(f"  video buffers after the rebuild: {after}")
+            counts["survived_renew"] = after > 0
         if dropped:
             after = counts["video_buffers"] - halfway["video"]
             print(f"  video buffers after the socket closed: {after}")
@@ -284,6 +318,9 @@ async def run(args):
     for entry in after.get("guests", []):
         print(f"  host saw slot {entry['slot']}: {entry['frames']} frames on {entry['pad']}")
 
+    if "survived_renew" in counts:
+        print(f"  video came back after a rebuild: "
+              f"{'yes' if counts['survived_renew'] else 'NO'}")
     if "survived_signalling_loss" in counts:
         print(f"  survived losing signalling: "
               f"{'yes' if counts['survived_signalling_loss'] else 'NO'}")
@@ -291,6 +328,8 @@ async def run(args):
     ok = counts["video_buffers"] > 0 and guest.frames_sent > 0
     if "survived_signalling_loss" in counts:
         ok = ok and counts["survived_signalling_loss"]
+    if "survived_renew" in counts:
+        ok = ok and counts["survived_renew"]
     print("\nPASS" if ok else "\nFAIL")
     return 0 if ok else 1
 
@@ -300,6 +339,11 @@ if __name__ == "__main__":
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--token-file", default="/tmp/fp-guest-token",
                         help="where to keep the guest credential between runs")
+    parser.add_argument("--renew-at", type=float, default=0.0, metavar="SECONDS",
+                        help="ask the host to rebuild the media connection "
+                             "partway through, the way a phone does when it "
+                             "moves between mobile data and wifi. Video must "
+                             "come back afterwards.")
     parser.add_argument("--drop-signalling", type=float, default=0.0,
                         metavar="SECONDS",
                         help="close the WebSocket partway through but keep playing, "

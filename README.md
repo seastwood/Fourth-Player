@@ -279,6 +279,14 @@ Sessions carry the duration you chose, checked both at join and by a sweep, so
 an open tab cannot outlive it. Kicking a guest burns their credential, so the
 freed slot cannot be retaken by the person you just removed.
 
+**A guest who changes network keeps their slot.** Moving a phone between mobile
+data and wifi replaces every address it had, so the connection cannot recover on
+its own — it can only be rebuilt. The browser notices, asks the host to re-offer,
+and keeps its slot, its pad and its session; the visible cost is a second of
+"reconnecting". Attempts are capped and spaced so an unreachable host is not
+hammered, and a rejoin that goes unanswered falls back to asking for the PIN
+rather than sitting on "rejoining" forever.
+
 **A dropped guest releases their buttons.** Pad state is sent as a complete
 snapshot 125 times a second rather than as press and release events, so a lost
 packet self-heals on the next one and silence is unambiguous. After 250 ms of it,
