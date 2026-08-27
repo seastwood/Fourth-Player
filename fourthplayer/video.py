@@ -279,6 +279,8 @@ class Stage:
             f"payload=96,clock-rate=90000 "
             f"! tee name=vtee allow-not-linked=true"
         )
+        # Named so they can be found and silenced directly when stopping.
+        description = description.replace("ximagesrc ", "ximagesrc name=capture ")
         self._description = description
         self._audio_description = self._audio_branch() if cfg.audio else ""
         self._build(with_audio=bool(self._audio_description))
@@ -291,7 +293,7 @@ class Stage:
                 log.warning("no %s: the session will be silent", element)
                 return ""
         return (
-            f" pulsesrc device={cfg.audio_device} provide-clock=false "
+            f" pulsesrc name=sound device={cfg.audio_device} provide-clock=false "
             f"! audioconvert ! audioresample "
             f"! audio/x-raw,rate=48000,channels=2 "
             f"! opusenc bitrate={cfg.audio_bitrate_kbps * 1000} "
@@ -397,6 +399,24 @@ class Stage:
         replacements piled up. Five ximagesrc threads were found running at
         once, which is five screen captures competing for one GPU.
         """
+        # Silence the sources first. Taking a whole pipeline to NULL can block
+        # for a long time when webrtcbin has live transports in it, and an
+        # abandoned pipeline that is still capturing costs a screen grab and an
+        # encode for as long as the process lives. Stopping ximagesrc and
+        # pulsesrc is immediate and ends that cost even if the rest hangs.
+        for name in ("capture", "sound"):
+            element = self.pipeline.get_by_name(name)
+            if element is not None:
+                try:
+                    element.set_state(Gst.State.NULL)
+                except Exception:
+                    pass
+        for element in (self.encoder,):
+            if element is not None:
+                try:
+                    element.set_state(Gst.State.NULL)
+                except Exception:
+                    pass
         try:
             self.pipeline.set_state(Gst.State.NULL)
         except Exception as exc:
