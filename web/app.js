@@ -150,10 +150,10 @@ function connect(hello) {
 
 function sessionOver(reason) {
   ended = true;
+  showHud(true);
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   setChip("clock", "session ended", "bad");
   setChip("link", reason || "closed", "bad");
-  el("hud").classList.add("show");
   if (ticker) { clearInterval(ticker); ticker = null; }
   // Nothing is coming back, so stop pretending: drop the saved credential so a
   // reload asks for a PIN rather than silently failing to resume.
@@ -214,6 +214,7 @@ function joined(message) {
   stage.hidden = false;
   setChip("slot", message.label, "ok");
   setChip("link", "connecting", "");
+  showHud();
   startClock(message.remaining);
   startPadLoop();
 }
@@ -316,7 +317,7 @@ function startPlayback() {
     video.muted = true;
     video.play().catch(() => {});
     el("unmute").hidden = false;
-    el("hud").classList.add("show");
+    showHud(true);          // stays until they tap it, then behaves normally
   });
 }
 
@@ -324,7 +325,7 @@ el("unmute").addEventListener("click", () => {
   video.muted = false;
   video.play().then(() => {
     el("unmute").hidden = true;
-    el("hud").classList.remove("show");
+    hideHud();
   }).catch(() => {});
 });
 
@@ -565,6 +566,7 @@ el("use-touch").addEventListener("click", (event) => {
 
 function videoRefused() {
   setChip("link", "no H.264", "bad");
+  showHud(true);
   showNotice(
     "<strong>This browser will not accept the video.</strong>" +
     "<p class=\"footnote\">It refused the H.264 stream, so the picture cannot " +
@@ -642,12 +644,44 @@ document.addEventListener("visibilitychange", () => {
  * somewhere readable and can be asked for again later. */
 let lastNotice = "";
 
+/* The chips are over the picture in landscape, where there is nowhere else for
+ * them to be, so they must not stay there. Anything that shows them starts a
+ * timer that takes them away again, and a tap on the picture brings them back.
+ * They used to be revealed by a message and never hidden, so they simply sat
+ * on top of the game. */
+const HUD_SECONDS = 5;
+let hudTimer = null;
+
+function showHud(persist) {
+  el("hud").classList.add("show");
+  if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
+  if (!persist) hudTimer = setTimeout(hideHud, HUD_SECONDS * 1000);
+}
+
+function hideHud() {
+  if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
+  // Nothing is hidden while there is something to read.
+  if (el("notice").hidden) el("hud").classList.remove("show");
+  else hudTimer = setTimeout(hideHud, HUD_SECONDS * 1000);
+}
+
+// Tapping the picture asks for the chips, and asks again to dismiss them.
+el("screen").addEventListener("click", () => {
+  if (el("hud").classList.contains("show")) {
+    hideNotice();
+    el("hud").classList.remove("show");
+    if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
+  } else {
+    showHud();
+  }
+});
+
 function showNotice(html, sticky) {
   lastNotice = html;
   const box = el("notice");
   box.innerHTML = html;
   box.hidden = false;
-  el("hud").classList.add("show");
+  showHud();
   if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
   if (!sticky) noticeTimer = setTimeout(hideNotice, 9000);
 }
@@ -655,6 +689,7 @@ function showNotice(html, sticky) {
 function hideNotice() {
   if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
   el("notice").hidden = true;
+  hideHud();
 }
 
 let noticeTimer = null;
@@ -695,7 +730,7 @@ async function report(what) {
 
 async function mediaFailed(why) {
   setChip("link", "no video", "bad");
-  el("hud").classList.add("show");
+  showHud(true);
   el("prompt").hidden = false;
   const route = await describeRoute();
   report(why);

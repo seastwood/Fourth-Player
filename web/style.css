@@ -273,7 +273,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    the one thing you could not read. */
 .notice {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 2.8rem);
+  top: calc(env(safe-area-inset-top, 0px) + 3.2rem);
   left: .6rem;
   right: .6rem;
   z-index: 6;
@@ -506,4 +506,33 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* Portrait has room the picture is not using -- a 16:9 video on an upright
+   phone is letterboxed either way -- so the chips get a strip of their own
+   above it and cover nothing. */
+@media (orientation: portrait) {
+  .hud {
+    position: static;
+    order: -1;                    /* the video comes first in the markup */
+    opacity: 1;
+    pointer-events: auto;
+    background: var(--bg);
+    border-bottom: 2px solid var(--bg2);
+    transition: none;
+  }
+  /* Messages join the flow as well, directly under the chips. Left floating
+     they would sit on top of that strip, which is the problem this whole
+     arrangement exists to avoid. */
+  .notice {
+    position: static;
+    order: -1;
+    margin: 0;
+    border-left: 0;
+    border-right: 0;
+    /* A flex item shrinks below its content unless told not to, and the
+       second line of the message is the half that explains anything. */
+    flex: 0 0 auto;
+    max-height: none;
+  }
 }
