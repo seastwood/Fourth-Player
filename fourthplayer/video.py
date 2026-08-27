@@ -501,6 +501,13 @@ class Peer:
                      "audio_bytes": 0, "audio_packets": 0}
         self._offered = False
         self._assembled = False
+        # Every signal we connect, so all of them can be disconnected before
+        # the elements are destroyed. A handler that fires during teardown
+        # reaches into a GObject whose C half is already gone, and PyGObject
+        # follows it straight into a segfault:
+        #   g_object_get_qdata -> g_type_check_instance_is_fundamentally_a
+        # This process died that way three times in twenty minutes.
+        self._handlers = []
 
     # -- wiring -------------------------------------------------------------
 
@@ -538,9 +545,9 @@ class Peer:
         # guest joins successfully, no offer is ever made, no error is logged
         # anywhere, and they sit on a black screen. It reproduced roughly one
         # join in three.
-        self.webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
-        self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
-        self.webrtc.connect("notify::ice-connection-state", self._on_ice_state)
+        self._connect(self.webrtc, "on-negotiation-needed", self._on_negotiation_needed)
+        self._connect(self.webrtc, "on-ice-candidate", self._on_ice_candidate)
+        self._connect(self.webrtc, "notify::ice-connection-state", self._on_ice_state)
         # `on-negotiation-needed` is connected purely so an early one is not
         # lost; it cannot make the offer, because it fires the moment the
         # element reaches PLAYING -- before the track is linked and before the
@@ -590,12 +597,32 @@ class Peer:
         self.channel = self.webrtc.emit("create-data-channel", "input", options)
         if self.channel is None:
             raise RuntimeError("webrtcbin would not create the input channel")
-        self.channel.connect("on-message-data", self._on_channel_data)
-        self.channel.connect("on-open", lambda _c: log.info("peer %s: input open", self.id))
-        self.channel.connect("on-close", lambda _c: log.info("peer %s: input closed", self.id))
+        self._connect(self.channel, "on-message-data", self._on_channel_data)
+        self._connect(self.channel, "on-open",
+                      lambda _c: log.info("peer %s: input open", self.id))
+        self._connect(self.channel, "on-close",
+                      lambda _c: log.info("peer %s: input closed", self.id))
 
         self._assembled = True
         self._negotiate()
+
+    def _connect(self, obj, signal, handler):
+        self._handlers.append((obj, obj.connect(signal, handler)))
+
+    def _disconnect_all(self):
+        """Take our callbacks off before anything is destroyed.
+
+        Order matters more than it looks: tearing down a webrtcbin makes it
+        emit -- ICE state changes, a data channel closing -- and by then the
+        Python side is halfway through dismantling the very objects those
+        handlers reach for.
+        """
+        for obj, handler_id in self._handlers:
+            try:
+                obj.disconnect(handler_id)
+            except Exception:
+                pass                    # already gone is the outcome we wanted
+        self._handlers = []
 
     def _branch(self, tee, tag):
         """One tee -> queue -> webrtcbin path, remembered so it can be undone."""
@@ -620,6 +647,8 @@ class Peer:
         self._branches.append((tee, tee_pad, queue))
 
     def _count(self, kind, info):
+        if self.webrtc is None:
+            return Gst.PadProbeReturn.REMOVE
         buffer = info.get_buffer()
         if buffer is not None:
             self.sent[f"{kind}_bytes"] += buffer.get_size()
@@ -630,6 +659,9 @@ class Peer:
         if self.webrtc is None:
             return
         started = time.monotonic()
+        # Before anything else, and before any state change.
+        self._disconnect_all()
+        self.on_dead = self.on_broken = self.on_input = None
         try:
             for tee, tee_pad, queue in self._branches:
                 tee_pad.unlink(queue.get_static_pad("sink"))
@@ -652,6 +684,8 @@ class Peer:
     # -- negotiation --------------------------------------------------------
 
     def _on_negotiation_needed(self, _element):
+        if self.webrtc is None:
+            return
         self._negotiate()
 
     def _negotiate(self):
@@ -670,6 +704,8 @@ class Peer:
         self.webrtc.emit("create-offer", None, promise)
 
     def _on_offer_created(self, promise, element, _data):
+        if self.webrtc is None:
+            return
         # wait() before get_reply(). The change callback can run before the
         # promise has actually settled, and the reply then carries a NULL
         # description -- which surfaces much later as an AttributeError on
@@ -760,6 +796,8 @@ class Peer:
         return " ".join(fields)
 
     def _on_ice_state(self, element, _param):
+        if self.webrtc is None:
+            return                      # torn down while this was in flight
         state = element.get_property("ice-connection-state")
         self.ice_ok = state.value_nick in ("connected", "completed")
         log.info("peer %s: ice %s", self.id, state.value_nick)
@@ -861,7 +899,7 @@ class Peer:
     # -- input --------------------------------------------------------------
 
     def _on_channel_data(self, _channel, glib_bytes):
-        if self.on_input is None:
+        if self.on_input is None or self.webrtc is None:
             return
         data = glib_bytes.get_data() if hasattr(glib_bytes, "get_data") else bytes(glib_bytes)
         self.stage.loop.call_soon_threadsafe(self.on_input, data)
