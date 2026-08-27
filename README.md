@@ -181,17 +181,24 @@ Two things catch people out, and neither is a fault in the add-on:
   under *Program add-ons* — but a skin-shortcuts menu like kodi-retrobox's is a
   list somebody arranged by hand, and nothing new joins it by itself:
 
+**On kodi-retrobox there is nothing to do.** That project generates its home
+menu (`bin/kodi_menu.py`, after every games sync) and carries a Fourth Player
+entry of its own, which appears as soon as this add-on is installed.
+
+Anywhere else, with a skin-shortcuts menu somebody arranged by hand:
+
 ```sh
 # Stop Kodi first -- it writes this menu back out when it exits.
 install/add-kodi-menu.py            # add FOURTH PLAYER to the home menu
 install/add-kodi-menu.py --remove   # take it off again
 ```
 
-It refuses to run while Kodi is up, and that guard is there because the entry
-was added once, worked, and vanished an hour later with the file byte-identical
-to its backup. Kodi holds the menu in memory and writes it back on exit or on a
-skin reload, so an edit made underneath it is reverted silently and long after
-you would connect the two events.
+It refuses to run in two situations, and both guards were paid for. It stops
+when Kodi is running, because Kodi holds the menu in memory and writes it back
+on exit — the entry appeared, worked, and was gone an hour later with the file
+byte-identical to its backup. And it stops when a generator is installed,
+because an entry added by hand to a file that is rebuilt every ten minutes
+lasts about ten minutes.
 
 That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a
