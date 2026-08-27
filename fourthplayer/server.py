@@ -16,6 +16,8 @@ import json
 import logging
 import mimetypes
 import os
+import re
+import socket
 import ssl
 from http import HTTPStatus
 
@@ -41,7 +43,11 @@ def _lan_address():
     except OSError:
         return "127.0.0.1"
 
-WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+# FP_WEB_ROOT lets a test serve a modified copy of the page from this same
+# server, which is the only way to exercise the real client against real
+# signalling: the WebSocket has to be same-origin.
+WEB_ROOT = os.environ.get("FP_WEB_ROOT") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 CONTROL_SOCKET = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
 
@@ -124,10 +130,26 @@ class Server:
                 elif guest is None:
                     await outbox.put({"t": "error", "message": REFUSED})
                 elif kind == "answer":
-                    guest.peer.set_remote_answer(message.get("sdp", ""))
+                    sdp = message.get("sdp", "")
+                    # Port 0 on the video section is a refusal. Worth a line in
+                    # the log, because from the host everything else looks
+                    # perfect: the peer connects, input flows, and the guest
+                    # sits in front of a black screen.
+                    if re.search(r"^m=video 0[ ]", sdp, re.M):
+                        log.warning("%s: their browser refused the video "
+                                    "(no H.264?) -- they will see black",
+                                    guest.label)
+                    guest.peer.set_remote_answer(sdp)
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
                         int(message.get("sdpMLineIndex") or 0), message["candidate"])
+                elif kind == "report":
+                    # What the guest's own browser sees. The host can only
+                    # know what it sent; whether any of it arrived is visible
+                    # from one side only, and that side is usually a phone in
+                    # somebody else's house.
+                    log.info("%s reports: %s", guest.label,
+                             str(message.get("detail", ""))[:300])
                 elif kind == "bye":
                     break
         except websockets.ConnectionClosed:
@@ -329,7 +351,23 @@ class Server:
                  else "peer address")
 
         if os.path.exists(CONTROL_SOCKET):
-            os.unlink(CONTROL_SOCKET)
+            # Only a leftover may be removed. A live one belongs to another
+            # server, and taking it makes that server unreachable without
+            # either of them noticing -- its own `status` then answers "no
+            # server is running" while it happily keeps streaming.
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            probe.settimeout(2)
+            try:
+                probe.connect(CONTROL_SOCKET)
+            except OSError:
+                os.unlink(CONTROL_SOCKET)
+            else:
+                raise SystemExit(
+                    f"another fourth-player is already using {CONTROL_SOCKET}.\n"
+                    f"Stop it first, or set XDG_RUNTIME_DIR to give this one its "
+                    f"own.")
+            finally:
+                probe.close()
         control = await asyncio.start_unix_server(self._control, path=CONTROL_SOCKET)
         os.chmod(CONTROL_SOCKET, 0o600)
         self._sockets.append(control)

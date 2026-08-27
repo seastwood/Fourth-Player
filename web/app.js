@@ -183,6 +183,8 @@ async function answer(message) {
     if (pc.connectionState === "connected") {
       setChip("link", "connected", "ok");
       clearMediaTimeout();
+      // A moment later, so there is something to count.
+      setTimeout(() => report("video playing"), 5000);
     }
     if (pc.connectionState === "failed") {
       clearMediaTimeout();
@@ -200,6 +202,15 @@ async function answer(message) {
   const local = await pc.createAnswer();
   await pc.setLocalDescription(local);
   socket.send(JSON.stringify({ t: "answer", sdp: local.sdp }));
+
+  // A video section answered with port 0 is a refusal, and it is worth saying
+  // so out loud: everything else works -- the connection, the controller, the
+  // sound -- and the screen simply stays black with nothing to suggest why.
+  // The usual cause is a browser built without H.264.
+  if (/^m=video 0[ ]/m.test(local.sdp)) {
+    clearMediaTimeout();
+    videoRefused();
+  }
 }
 
 /* Autoplay with sound needs a user gesture. Joining is one, so the ordinary
@@ -375,6 +386,18 @@ el("use-touch").addEventListener("click", (event) => {
   showTouch(true);
 });
 
+function videoRefused() {
+  setChip("link", "no H.264", "bad");
+  el("hud").classList.add("show");
+  el("prompt").hidden = false;
+  el("prompt").innerHTML =
+    "<p><strong>This browser will not accept the video.</strong></p>" +
+    "<p class=\"footnote\">It refused the H.264 stream, so the picture cannot " +
+    "start &mdash; your controller and the sound still work. Safari and Chrome " +
+    "handle it; a Firefox without its H.264 plug-in does not.</p>";
+  report("browser refused the video format");
+}
+
 let mediaTimer = null;
 
 function armMediaTimeout() {
@@ -389,11 +412,22 @@ function clearMediaTimeout() {
   if (mediaTimer) { clearTimeout(mediaTimer); mediaTimer = null; }
 }
 
+/* Tell the host what actually happened here. It is the only way the person
+ * running the box can tell a closed port from a dropped packet from a codec
+ * it cannot decode -- everything else they can see stops at "I sent it". */
+async function report(what) {
+  try {
+    if (!socket || socket.readyState !== 1) return;
+    socket.send(JSON.stringify({ t: "report", detail: what + " — " + (await describeRoute()) }));
+  } catch (_) { /* reporting must never break anything */ }
+}
+
 async function mediaFailed(why) {
   setChip("link", "no video", "bad");
   el("hud").classList.add("show");
   el("prompt").hidden = false;
   const route = await describeRoute();
+  report(why);
   el("prompt").innerHTML =
     "<p><strong>" + why + "</strong></p>" +
     "<p class=\"footnote\">The page and the PIN reach the host over one port; " +

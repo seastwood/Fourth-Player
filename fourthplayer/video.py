@@ -203,6 +203,19 @@ class Stage:
                                         name="gst-mainloop", daemon=True)
         self._thread.start()
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            # Refused outright, which is what a missing or busy sound server
+            # produces: pulsesrc answers "Connection refused" and takes the
+            # whole pipeline down with it. Losing sound must not cost the
+            # picture, and this branch is the one that actually fires -- the
+            # retry below only ever covered a pipeline that stalled on its way
+            # to PLAYING, so an audio device that failed immediately killed the
+            # session and the session was the thing everybody wanted.
+            if self.has_audio:
+                log.warning("the pipeline refused to start with audio; "
+                            "retrying without it")
+                self.pipeline.set_state(Gst.State.NULL)
+                self._build(with_audio=False)
+                return self.start()
             raise RuntimeError("the capture pipeline refused to start")
         # set_state is asynchronous: it returns ASYNC while the pipeline is
         # still getting there. Returning here would let a guest who joins a
