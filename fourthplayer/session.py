@@ -406,6 +406,11 @@ class LiveSession:
         """
         if guest.peer is not peer or self.guests.get(guest.slot) is not guest:
             return
+        # Get the failed elements out of the pipeline first and without delay:
+        # while they are still in it, the error they raised is the pipeline's
+        # problem too, and the next guest to arrive finds a capture that will
+        # not take them.
+        self.detach_peer(guest)
         if guest.on_signal is None:
             self.drop(guest.slot, reason="its connection broke")
             return

@@ -21,6 +21,10 @@ const HEARTBEAT_MS = 50;
 // Sticks jitter by a count or two at rest. Without this, "changed" is always
 // true and the saving disappears.
 const AXIS_EPSILON = 600;
+// Bytes already queued on the input channel before we stop adding to it. A pad
+// frame is 20 bytes, so this is a couple of hundred frames -- far more than a
+// healthy channel ever holds, and far less than it takes to fail.
+const BACKLOG_LIMIT = 4096;
 
 /* iOS Safari zooms on a double tap and `touch-action: manipulation` does not
  * reliably stop it -- Apple honours that property for scrolling decisions but
@@ -959,10 +963,20 @@ function sendFrame(pad, releaseAll) {
               (now - lastSentAt) >= HEARTBEAT_MS;
   if (!due) return;
 
-  // A backed-up channel is the thing to avoid; skip a heartbeat rather than
-  // add to the queue. A real change still goes, because dropping input is
-  // worse than a slightly deeper queue.
-  if (!releaseAll && input.bufferedAmount > 8192 && !changed(buttons, axes)) return;
+  // Never add to a channel that is already backed up, even for real input.
+  //
+  // This was the other way round -- heartbeats were skipped but changes always
+  // sent -- on the reasoning that losing input is worse than a deeper queue.
+  // It is not: the queue is an SCTP association, and when it overflows the
+  // association fails outright, which takes the guest's whole connection with
+  // it and, on this GStreamer, the host's capture pipeline as well. One
+  // guest's stuck data channel ended the session for everybody.
+  //
+  // Dropping a frame costs nothing, because every frame is a complete snapshot
+  // of the pad: the next one supersedes whatever was lost. A release is the
+  // exception and always goes, because a button left down is the one state
+  // that does not correct itself.
+  if (!releaseAll && input.bufferedAmount > BACKLOG_LIMIT) return;
 
   const buffer = FPFrame.buildRaw(buttons, axes, seq, releaseAll);
   seq = (seq + 1) & 0xffff;
