@@ -50,6 +50,57 @@ def init():
         _initialised = True
 
 
+class PipelineWorker:
+    """The one thread allowed to change the pipeline, and a way to replace it.
+
+    Serialising every add and remove keeps the GPU driver from being used from
+    two places at once, which this process has segfaulted over. The cost is a
+    single point of failure: if that thread stops making progress -- wedged in
+    a driver call, or gone entirely, which is what happened -- then every later
+    job queues behind nothing and nothing works again until a restart. So it
+    can be thrown away and replaced.
+    """
+
+    def __init__(self, name="gst-mutate"):
+        self._name = name
+        self._pool = self._make()
+
+    def _make(self):
+        return concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=self._name)
+
+    @property
+    def executor(self):
+        return self._pool
+
+    def submit(self, fn, *args):
+        return self._pool.submit(fn, *args)
+
+    def alive(self, timeout=5.0):
+        """Whether it is still doing what it is given."""
+        try:
+            self._pool.submit(lambda: None).result(timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    def reset(self):
+        """Abandon the current thread and start a fresh one.
+
+        The old executor is not waited for: waiting is precisely the thing that
+        does not finish when a worker has wedged.
+        """
+        old, self._pool = self._pool, self._make()
+        try:
+            old.shutdown(wait=False, cancel_futures=True)
+        except TypeError:                       # older Python
+            old.shutdown(wait=False)
+        return old
+
+    def shutdown(self, wait=True):
+        self._pool.shutdown(wait=wait)
+
+
 def _nice_type():
     """The GType of webrtcbin's ICE agent, or None if it cannot be had.
 
@@ -181,8 +232,7 @@ class Stage:
         # keeps them ordered; being a worker at all keeps them off the event
         # loop, which is what stopped the server freezing for seconds at a
         # time while a live peer was dismantled.
-        self.mutations = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="gst-mutate")
+        self.worker = PipelineWorker()
 
         keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
@@ -266,6 +316,31 @@ class Stage:
         bus.connect("message::error", self._on_error)
         bus.connect("message::warning", self._on_warning)
 
+    @property
+    def mutations(self):
+        """The executor to hand to run_in_executor. Always the current one."""
+        return self.worker.executor
+
+    def reset_worker(self, why="it stopped responding"):
+        """Replace the pipeline worker after it has stopped making progress.
+
+        One thread owns every change to the pipeline, which is what keeps the
+        GPU driver from being used from two places at once. The cost is that if
+        that thread ever stops -- wedged in a driver call, or gone altogether,
+        which is what happened here: the process was left with no worker at all
+        and every later job queued behind nothing for ever -- then nothing
+        works again until a restart. It "worked initially" and never after.
+
+        A queue nobody is serving is worth abandoning. The old executor is left
+        to its fate rather than waited for, precisely because waiting is the
+        thing that does not finish.
+        """
+        log.warning("replacing the pipeline worker: %s", why)
+        self.worker.reset()
+
+    def worker_alive(self, timeout=5.0):
+        return self.worker.alive(timeout)
+
     # -- lifecycle ----------------------------------------------------------
 
     def start(self):
@@ -318,7 +393,7 @@ class Stage:
         self.pipeline.set_state(Gst.State.NULL)
         if self._glib_loop:
             self._glib_loop.quit()
-        self.mutations.shutdown(wait=True)
+        self.worker.shutdown(wait=True)
 
     # -- peers --------------------------------------------------------------
 
@@ -760,7 +835,7 @@ class Peer:
         candidates now go the same way, so nothing reaches webrtcbin from two
         threads at once.
         """
-        return self.stage.mutations.submit(fn, *args)
+        return self.stage.worker.submit(fn, *args)
 
     def set_remote_answer(self, sdp_text):
         self.on_pipeline_thread(self._set_remote_answer, sdp_text)

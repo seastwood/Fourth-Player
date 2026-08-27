@@ -139,6 +139,7 @@ class LiveSession:
         self._overlay = None
         self._previous_dpm = None
         self._warned = set()
+        self._ticks = 0
         self.on_notice = None      # set by the server: broadcast to guests
         self._sweeper = None
         self.opened_at = None
@@ -361,12 +362,21 @@ class LiveSession:
             # renegotiate.
             peer.on_dead = lambda why: self._peer_died(guest, peer, why)
 
-        peer = await asyncio.wait_for(
-            self.loop.run_in_executor(
-                self.stage.mutations,
-                functools.partial(self.stage.add_peer,
-                                  f"slot{guest.slot}", on_signal, configure)),
-            timeout=PIPELINE_TIMEOUT)
+        job = functools.partial(self.stage.add_peer,
+                                f"slot{guest.slot}", on_signal, configure)
+        try:
+            peer = await asyncio.wait_for(
+                self.loop.run_in_executor(self.stage.mutations, job),
+                timeout=PIPELINE_TIMEOUT)
+        except asyncio.TimeoutError:
+            # The worker is not serving its queue. Give it a fresh one and try
+            # once more, because otherwise this guest -- and every guest after
+            # them -- is refused until somebody restarts the service.
+            self.stage.reset_worker("an attach did not finish in %.0fs"
+                                    % PIPELINE_TIMEOUT)
+            peer = await asyncio.wait_for(
+                self.loop.run_in_executor(self.stage.mutations, job),
+                timeout=PIPELINE_TIMEOUT)
         guest.peer = peer
         return peer
 
@@ -568,6 +578,14 @@ class LiveSession:
                 if self.pads:
                     for pad in self.pads.sweep():
                         log.debug("dead-man: released %s", pad.name)
+                self._ticks += 1
+                # Roughly every ten seconds, make sure the thread that owns the
+                # pipeline is still answering. A wedge is otherwise invisible
+                # until somebody tries to join and is refused.
+                if self._ticks % 200 == 0 and self.stage is not None:
+                    if not await self.loop.run_in_executor(
+                            None, self.stage.worker_alive):
+                        self.stage.reset_worker("it stopped answering a health check")
                 if not self.invite:
                     return
                 self._reap_ghosts()
