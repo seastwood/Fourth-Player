@@ -156,5 +156,36 @@ check(session.pads[0].released > 0, "the pad is released")
 attach(session, guest)
 check(session.stage.made == 2, "a replacement peer can take the same slot")
 
+print("\na guest with no video does not keep a slot for ever")
+import fourthplayer.session as S
+
+clock = [1000.0]
+session, guest, loop = session_with_guest()
+session._now = lambda: clock[0]
+session.invite = None            # the sweeper checks this; reap directly instead
+peer = attach(session, guest)
+check(session.guests.get(0) is guest, "the guest holds slot 0")
+
+clock[0] += S.GHOST_SECONDS + 10
+session._reap_ghosts()
+check(session.guests.get(0) is guest,
+      "a guest whose media is up is never reaped, however long it has been")
+
+session.detach_peer(guest, background=False)
+guest.media_since = clock[0]
+clock[0] += S.GHOST_SECONDS - 5
+session._reap_ghosts()
+check(session.guests.get(0) is guest,
+      "and one that just lost it is given time to come back")
+
+clock[0] += 10
+session._reap_ghosts()
+check(0 not in session.guests,
+      "but a slot held with no video is eventually freed")
+
+print("\nand the freed slot can be taken again")
+check(session.invite is None or session.invite.free_slot() == 0,
+      "the slot is available")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

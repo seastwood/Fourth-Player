@@ -210,8 +210,13 @@ class Server:
             return None
         except asyncio.TimeoutError:
             # The pipeline worker is wedged behind a teardown that will not
-            # finish. Saying so beats leaving them on "rejoining" forever.
-            log.error("timed out attaching a peer; the guest was told")
+            # finish. Saying so beats leaving them on "rejoining" forever --
+            # and the slot has to go back, or a few timeouts fill the session
+            # with people who never got a picture.
+            log.error("timed out attaching a peer for %s; freeing the slot",
+                      getattr(guest, "label", "a guest"))
+            if guest is not None and self.session is not None:
+                self.session.drop(guest.slot, reason="could not be given video")
             await outbox.put({"t": "error",
                               "message": "The host could not start your video. "
                                          "Try again in a moment."})
@@ -293,6 +298,14 @@ class Server:
             if command == "start":
                 if self.session and self.session.open:
                     return {"ok": False, "error": "a session is already open"}
+                if self.session is not None:
+                    # An expired session that nothing has swept still owns its
+                    # pads. Dropping the object without closing it leaks a
+                    # uinput device per slot, and they accumulate in this
+                    # process until it exits -- six pads in a picker built for
+                    # three.
+                    await self.session.astop(reason="replaced")
+                    self.session = None
                 minutes = int(request.get("minutes") or self.cfg.default_duration_minutes)
                 minutes = max(1, min(minutes, self.cfg.max_duration_minutes))
                 self.session = LiveSession(self.cfg, self.loop)

@@ -32,6 +32,12 @@ SWEEP_INTERVAL = 0.05
 # the guest is told, rather than left watching "rejoining" forever.
 PIPELINE_TIMEOUT = 12.0
 
+# How long a guest may hold a slot with no media connection. Long enough to
+# ride out a reconnect or a network switch, short enough that a session with
+# three slots is not permanently full of people who left. A guest reaped this
+# way can walk straight back in with the PIN.
+GHOST_SECONDS = 75.0
+
 # Guests are told the session is running out at these many seconds remaining,
 # so the end is something you can see coming rather than something that happens
 # to you mid-game.
@@ -45,6 +51,9 @@ class GuestConnection:
         self.session = session
         self.slot = slot
         self.socket = socket
+        # When they last had a working media connection. A guest is only ever
+        # reaped for having none, so this starts now rather than at zero.
+        self.media_since = time.monotonic()
         self.outbox = None      # set by the server; None while signalling is down
         self.peer = None
         self.label = f"Player {slot + 2}"   # the local player is player 1
@@ -371,6 +380,26 @@ class LiveSession:
 
     # -- the sweep ----------------------------------------------------------
 
+    def _reap_ghosts(self):
+        """Free slots held by guests who have no media and are not coming back.
+
+        Three slots fill up fast when nothing ever releases them. A guest whose
+        connection failed -- or whose attach timed out, or who closed the tab
+        while their peer was already gone -- was keeping their slot for the
+        whole session, so a couple of failed attempts left the session
+        permanently full and everybody afterwards locked out of a session that
+        looked open.
+        """
+        now = self._now()
+        for slot, guest in list(self.guests.items()):
+            if guest.peer is not None:
+                guest.media_since = now
+                continue
+            if now - guest.media_since > GHOST_SECONDS:
+                log.info("%s held a slot with no video for %.0fs; freeing it",
+                         guest.label, now - guest.media_since)
+                self.drop(slot, reason="gave up")
+
     def notify(self, message):
         if self.on_notice is not None:
             try:
@@ -388,6 +417,7 @@ class LiveSession:
                         log.debug("dead-man: released %s", pad.name)
                 if not self.invite:
                     return
+                self._reap_ghosts()
                 left = self.remaining()
                 for threshold in WARN_AT:
                     if left <= threshold and threshold not in self._warned:
