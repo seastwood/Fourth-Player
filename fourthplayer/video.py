@@ -404,14 +404,35 @@ class Stage:
         is the only window in which its callbacks can be set without racing the
         first thing it does.
         """
-        if peer_id in self.peers:
-            raise KeyError(f"peer {peer_id} is already attached")
         started = time.monotonic()
+        # A peer left over under this name is wreckage, not a guest: the only
+        # way one survives is an attach that failed partway. Clear it out
+        # rather than refusing, because refusing makes the slot unusable for
+        # the rest of the session -- every later guest met
+        # "peer slot0 is already attached" and got nothing.
+        stale = self.peers.pop(peer_id, None)
+        if stale is not None:
+            log.warning("peer %s was still registered; discarding it", peer_id)
+            try:
+                stale.detach()
+            except Exception:
+                pass
+
         peer = Peer(self, peer_id, on_signal)
         if configure is not None:
             configure(peer)
+        try:
+            peer.attach()
+        except Exception:
+            # Registered only once it is genuinely attached. Doing it first
+            # meant a failure here left the name taken by something that had
+            # never worked and would never be cleaned up.
+            try:
+                peer.detach()
+            except Exception:
+                pass
+            raise
         self.peers[peer_id] = peer
-        peer.attach()
         took = time.monotonic() - started
         if took > 1.0:
             log.warning("peer %s took %.1fs to attach", peer_id, took)

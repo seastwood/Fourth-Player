@@ -55,19 +55,32 @@ const storageKey = "fp:" + token.slice(0, 16);
 
 /* ---- the gate ---- */
 
+let joinTimer = null;
+
 el("pin-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const pin = el("pin").value.trim();
   if (pin.length < 4) return;
   el("join").disabled = true;
+  el("join").textContent = "Joining…";
+  // A join that is never answered must not leave a dead button and no
+  // explanation. The socket can fail to open, or open and close without a
+  // word, and both used to look identical to nothing happening at all.
+  clearTimeout(joinTimer);
+  joinTimer = setTimeout(() => {
+    if (!gate.hidden) fail("The host did not answer. Try again.");
+  }, 12000);
   connect({ t: "join", token, pin });
 });
 
 function fail(message) {
+  clearTimeout(joinTimer);
   const box = el("gate-error");
   box.textContent = message;
   box.hidden = false;
   el("join").disabled = false;
+  el("join").textContent = "Join the game";
+  el("pin").placeholder = "000000";
 }
 
 /* ---- signalling ---- */
@@ -105,11 +118,19 @@ function connect(hello) {
   socket.addEventListener("open", () => socket.send(JSON.stringify(hello)));
   socket.addEventListener("close", () => {
     if (ended) return;
+    // Closed before we were ever let in: say so, rather than leaving a
+    // disabled button and a page that appears to have stopped caring.
+    if (!gate.hidden) {
+      fail("Lost contact with the host before joining. Try again.");
+      return;
+    }
     // Say nothing alarming if the game is still playing perfectly well.
     if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
     reconnectSoon();
   });
-  socket.addEventListener("error", () => { /* close follows; handled there */ });
+  socket.addEventListener("error", () => {
+    if (!gate.hidden) fail("Could not reach the host. Try again.");
+  });
 
   socket.addEventListener("message", async (event) => {
     const message = JSON.parse(event.data);
@@ -180,6 +201,7 @@ function onError(message) {
 
 function joined(message) {
   retries = 0;
+  clearTimeout(joinTimer);
   clearRejoinTimer();
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
