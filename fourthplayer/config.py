@@ -71,6 +71,14 @@ class Config:
     # delay here.
     cpb_ms: int = 150
 
+    # constrained-baseline is the one every browser accepts. The encoder
+    # defaults to high, and webrtcbin sends no a=fmtp line at all, so a guest
+    # applies the spec default -- constrained baseline, single-NAL -- and a
+    # strict browser rejects the high-profile stream it actually receives.
+    # Safari does exactly that, intermittently enough to look like a network
+    # fault. main or high look slightly better and are a gamble.
+    h264_profile: str = "constrained-baseline"
+
     # h264 works everywhere. h265 is half the bitrate for the same picture and
     # is refused by most browsers -- Safari on recent Apple hardware takes it,
     # Firefox does not, Chrome mostly does not. Worth trying if every guest is

@@ -93,6 +93,59 @@ def make_ice_agent(cfg):
         return None
 
 
+# profile_idc + constraint flags, per RFC 6184. The level is appended.
+_H264_PROFILE_IDC = {
+    "constrained-baseline": "42e0",
+    "baseline": "4200",
+    "main": "4d00",
+    "high": "6400",
+}
+
+
+def h264_profile_level_id(profile, height):
+    """The profile-level-id a guest's browser will check us against.
+
+    webrtcbin builds `a=fmtp` from the payloader's caps, and the payloader only
+    learns the profile once it has seen an SPS -- which happens after the offer
+    is made. So the offer went out with no fmtp at all, every browser applied
+    the spec default of constrained baseline, and the ones that check properly
+    refused the high-profile stream that then arrived. Stating it up front is
+    the fix, and it is only honest because the encoder's profile is pinned.
+
+    The level is rounded up to cover the frame size; advertising a level above
+    what is sent is allowed, the reverse is not.
+    """
+    idc = _H264_PROFILE_IDC.get(profile, _H264_PROFILE_IDC["constrained-baseline"])
+    level = "1e" if height <= 480 else "1f" if height <= 720 else "28"
+    return idc + level
+
+
+def with_fmtp(sdp, fmtp):
+    """Add the H.264 parameters a browser needs, if webrtcbin left them out.
+
+    It leaves them out every time: the payloader learns the profile from the
+    stream's first SPS, and the offer is written before a single frame has
+    flowed. So every offer went out with no `a=fmtp` at all, browsers applied
+    the spec default of constrained baseline with single-NAL packetisation, and
+    the strict ones refused the high-profile stream that arrived instead.
+
+    Done here rather than by forcing the payloader's caps, because a capsfilter
+    is a filter: one that names a profile-level-id the payloader does not
+    produce matches nothing and passes nothing, which turns a picture that was
+    merely refused by some browsers into no picture for anybody.
+    """
+    if not fmtp or "a=fmtp:96" in sdp:
+        return sdp
+    out, added = [], False
+    for line in sdp.splitlines(True):
+        out.append(line)
+        if not added and line.startswith("a=rtpmap:96 H264"):
+            ending = "\r\n" if line.endswith("\r\n") else "\n"
+            out.append(f"a=fmtp:96 {fmtp}{ending}")
+            added = True
+    return "".join(out)
+
+
 def _caps(width, height):
     return f"video/x-raw(memory:VAMemory),format=NV12,width={width},height={height}"
 
@@ -144,6 +197,13 @@ class Stage:
             encoder = (f"{element} name=enc speed-preset=ultrafast "
                        f"tune=zerolatency bitrate={cfg.bitrate_kbps} "
                        f"key-int-max={keyint}")
+        # Pin the profile between encoder and parser: the payloader reads it
+        # from these caps to build profile-level-id, and without it a browser
+        # is guessing.
+        profile = "" if hevc else f"! video/x-h264,profile={cfg.h264_profile} "
+        self._fmtp = "" if hevc else (
+            f"profile-level-id={h264_profile_level_id(cfg.h264_profile, cfg.height)};"
+            f"packetization-mode=1;level-asymmetry-allowed=1")
         parser = "h265parse" if hevc else "h264parse"
         payloader = "rtph265pay" if hevc else "rtph264pay"
         encoding = "H265" if hevc else "H264"
@@ -160,10 +220,12 @@ class Stage:
             f"! video/x-raw,framerate={cfg.fps}/1 "
             f"! {convert} "
             f"! {encoder} "
+            f"{profile}"
             f"! {parser} config-interval=-1 "
             f"! {payloader} pt=96 config-interval=-1 aggregate-mode=zero-latency "
             f"mtu={cfg.rtp_mtu} "
-            f"! application/x-rtp,media=video,encoding-name={encoding},payload=96,clock-rate=90000 "
+            f"! application/x-rtp,media=video,encoding-name={encoding},"
+            f"payload=96,clock-rate=90000 "
             f"! tee name=vtee allow-not-linked=true"
         )
         self._description = description
@@ -512,7 +574,8 @@ class Peer:
             log.error("peer %s: create-offer produced an empty description", self.id)
             return
         element.emit("set-local-description", offer, Gst.Promise.new())
-        self._emit("offer", {"sdp": offer.sdp.as_text(), "type": "offer"})
+        self._emit("offer", {"sdp": with_fmtp(offer.sdp.as_text(), self.stage._fmtp),
+                             "type": "offer"})
 
     def _on_ice_candidate(self, _element, mline_index, candidate):
         # Candidate types decide whether anybody outside can reach us at all:

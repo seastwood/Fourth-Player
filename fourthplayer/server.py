@@ -137,8 +137,15 @@ class Server:
                     # sits in front of a black screen.
                     if re.search(r"^m=video 0[ ]", sdp, re.M):
                         log.warning("%s: their browser refused the video "
-                                    "(no H.264?) -- they will see black",
-                                    guest.label)
+                                    "-- freeing the slot", guest.label)
+                        # They will never see a picture, so holding the slot
+                        # only locks the next person out -- including this one
+                        # after they reload. Give the page a moment to say what
+                        # happened, then let go.
+                        slot = guest.slot
+                        self.loop.call_later(
+                            5.0, lambda s=slot: self.session
+                            and self.session.drop(s, reason="could not take the video"))
                     guest.peer.set_remote_answer(sdp)
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
