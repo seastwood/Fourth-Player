@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
+    import fourthplayer.session as S
     from fourthplayer.config import Config
     from fourthplayer.session import LiveSession, GuestConnection
 except ImportError as exc:
@@ -162,6 +163,7 @@ check(session.stage.made == 2, "a replacement peer can take the same slot")
 print("\na peer that stopped working does not count as a connection")
 session, guest, loop = session_with_guest()
 peer = attach(session, guest)
+guest.socket = object()          # signalling up, no input yet: freshly joined
 check(guest.has_media(), "a peer whose ICE is up counts")
 peer.ice_ok = False
 check(not guest.has_media(),
@@ -182,14 +184,26 @@ print("\nbut it never takes a slot from somebody who is playing")
 session, guest, loop = session_with_guest()
 session._now = lambda: clock[0]
 attach(session, guest)
+# Somebody playing is heard from constantly: their browser sends its pad state
+# every 50 ms whether or not anything moved. Timestamps must come from the same
+# clock the session reads -- comparing a fake clock against time.monotonic()
+# makes the result depend on how long the machine has been up, which is how
+# this suite came to pass and fail on identical code.
 clock[0] += 10000
+guest.last_input = clock[0]
 check(session.reap_now(seconds=1) == 0,
       "a working connection is left alone however long it has been")
 check(session.guests.get(0) is guest, "they keep their slot")
 
-print("\na guest with no video does not keep a slot for ever")
-import fourthplayer.session as S
+print("\nand silence is what ends it, not the clock")
+guest.socket = None
+guest.last_input = clock[0] - (S.SILENCE_SECONDS + 1)
+check(not guest.has_media(clock[0]),
+      "a guest heard from %.0fs ago is not connected" % (S.SILENCE_SECONDS + 1))
+guest.last_input = clock[0]
+check(guest.has_media(clock[0]), "and one heard from just now is")
 
+print("\na guest with no video does not keep a slot for ever")
 clock = [1000.0]
 session, guest, loop = session_with_guest()
 session._now = lambda: clock[0]
