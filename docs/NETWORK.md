@@ -8,7 +8,30 @@ The deployment this was written against is **pfSense running HAProxy, with
 Cloudflare in front**. That combination has one constraint that shapes
 everything below.
 
-## The constraint
+## Do not put Cloudflare's proxy in front of it
+
+**Use a DNS-only record (grey cloud).** This was found the hard way: with the
+orange cloud on, the join page loads, the PIN is accepted by the look of it,
+and then nothing happens — the socket never answers and the page sits there.
+Turning the proxy off fixed it outright.
+
+Why it does not work is less certain than the fact that it does not. The
+signalling is a long-lived WebSocket carrying an SDP offer and a stream of ICE
+candidates, and a proxy in the middle can buffer it, time it out, or interfere
+with the upgrade; Cloudflare also imposes its own idle limits. The honest
+summary is that this needs a transparent path and the proxy is not one.
+
+The important part is that **proxying buys nothing here anyway**. The video and
+the sound never go through Cloudflare — they are UDP, direct to the box — so
+your address is already in the ICE candidates that every guest receives. A
+proxied record hides an address that the media hands out regardless, at the
+cost of a class of failures that look exactly like the software being broken.
+
+If you want to try it anyway, the symptom to watch for is a join that is never
+answered, and the thing to check first is whether the WebSocket upgrade on
+`/ws` survives the proxy.
+
+## The other constraint
 
 **Cloudflare's proxy carries HTTP and WebSocket. It will not carry WebRTC's UDP
 media.**
@@ -115,11 +138,10 @@ Two names, and the difference between them is the whole point:
 
 | Name | Cloudflare | Points at | Carries |
 |---|---|---|---|
-| `play.example.com` | Proxied (orange) | your WAN address | the page and signalling |
-| `media.example.com` | **DNS only (grey)** | your WAN address | nothing directly — it is what the ICE candidates resolve to |
+| `play.example.com` | **DNS only (grey)** | your WAN address | the page, the PIN and the signalling |
 
-The grey record is what stops Cloudflare being asked to do something it cannot.
-If you use option 2 you do not need it.
+One record, unproxied. An orange-cloud record breaks the signalling — see the
+section above — and cannot carry the media in any case.
 
 Set `public_url` so the printed link and the QR code use the proxied name:
 
@@ -257,6 +279,7 @@ forward. The only real test is a phone on mobile data with wifi off.
 | Black over a VPN specifically | Packet size. A tunnel's MTU is smaller than a plain link's, and an RTP packet that does not fit is dropped rather than shrunk. `rtp_mtu` defaults to 1200 to survive this; lower it with `--mtu 1100` if a tunnel inside a tunnel is involved |
 | Works on the LAN, not from outside | Testing from inside the network. Use mobile data |
 | Connects, then drops after a few minutes | `timeout tunnel` missing in HAProxy |
+| The page loads, the join is never answered | **Cloudflare's proxy is on.** Set the record to DNS only (grey cloud). The signalling WebSocket does not survive the proxy |
 | `502` through the domain, while the raw IP works | The backend is set to plain HTTP against a TLS port. Turn **Encrypt(SSL)** on for the backend and leave certificate verification off. This is the usual cause |
 | `503` through the domain | No backend matched — the frontend ACL does not match the hostname |
 | Page loads on the domain, video black | The UDP forward, not the proxy — media never touches HAProxy |

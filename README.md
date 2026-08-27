@@ -280,6 +280,11 @@ and sound are WebRTC media on **UDP `40000–40100`**. Forwarding only 8443 give
 a working join page and a permanently black picture, which is the single most
 common way this fails.
 
+Point the hostname at the box with a **DNS-only record**. A proxy in front of
+the signalling — Cloudflare's orange cloud, for one — leaves the page loading
+and the join never answered, and it cannot carry the media in any case, so it
+protects an address the ICE candidates hand out regardless.
+
 Behind a symmetric NAT — most home routers — a forward is not enough on its own
 either, because the address STUN discovers uses a port the router allocated for
 talking to STUN and nobody else. The server therefore announces each of its
