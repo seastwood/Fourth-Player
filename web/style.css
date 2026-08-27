@@ -188,6 +188,7 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
   inset: 0;
   background: #000;
   touch-action: manipulation;
+  overflow: hidden;             /* nothing here is ever reached by scrolling */
 }
 
 video {
@@ -465,9 +466,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 
 @media (orientation: portrait) {
   .stage { display: flex; flex-direction: column; background: #000; }
-  video { flex: 0 0 auto; max-height: 46vh; }
+  /* The controller takes the height it needs and the picture gets whatever is
+     left, rather than the picture claiming a fixed share and pushing the last
+     row of buttons off the bottom of the phone. Nothing scrolls: a control you
+     have to scroll to reach is not a control. */
+  video { flex: 1 1 auto; min-height: 0; max-height: none; }
   .touch {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
       "lsh  rsh"
@@ -479,8 +484,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     background: var(--bg);
     border-top: 3px solid var(--edge);
   }
-  .dpad { width: min(34vw, 160px); }
-  .face { width: min(42vw, 205px); }
+  .dpad { width: min(32vw, 150px); }
+  .face { width: min(40vw, 190px); }
+  .tbtn-shoulder { width: min(24vw, 105px); padding: .45rem 0; }
 }
 
 @media (orientation: landscape) {
