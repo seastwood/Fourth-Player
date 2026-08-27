@@ -308,6 +308,25 @@ class LiveSession:
         log.info("%s joined from %s", guest.label, address or "unknown")
         return guest, guest_token
 
+    async def rebuild_stage(self):
+        """Replace the capture pipeline, keeping the session and its guests.
+
+        Everybody's peer goes with the old pipeline, so everybody has to
+        renegotiate -- which their browsers do on their own once the video
+        stops arriving. That is a second of black for the people already
+        watching, against a session that otherwise stays open and works for
+        nobody.
+        """
+        old, self.stage = self.stage, None
+        for guest in self.guests.values():
+            guest.peer = None
+        if old is not None:
+            self.loop.run_in_executor(None, old.stop)
+
+        self.stage = Stage(self.cfg, self.loop)
+        self.stage.start()
+        log.info("capture rebuilt; %d guest(s) will renegotiate", len(self.guests))
+
     async def renew(self, guest, on_signal):
         """Give a guest a fresh media connection without a fresh invite.
 
@@ -374,6 +393,17 @@ class LiveSession:
             # them -- is refused until somebody restarts the service.
             self.stage.reset_worker("an attach did not finish in %.0fs"
                                     % PIPELINE_TIMEOUT)
+            peer = await asyncio.wait_for(
+                self.loop.run_in_executor(self.stage.mutations, job),
+                timeout=PIPELINE_TIMEOUT)
+        except RuntimeError as exc:
+            # The pipeline itself is not running and would not restart. A
+            # capture that cannot be revived serves nobody, so build a new one
+            # rather than leave an open session that refuses everybody.
+            log.warning("%s; rebuilding the capture", exc)
+            await self.rebuild_stage()
+            job = functools.partial(self.stage.add_peer,
+                                    f"slot{guest.slot}", on_signal, configure)
             peer = await asyncio.wait_for(
                 self.loop.run_in_executor(self.stage.mutations, job),
                 timeout=PIPELINE_TIMEOUT)

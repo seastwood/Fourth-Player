@@ -121,7 +121,15 @@ function connect(hello) {
     // Closed before we were ever let in: say so, rather than leaving a
     // disabled button and a page that appears to have stopped caring.
     if (!gate.hidden) {
-      fail("Lost contact with the host before joining. Try again.");
+      // Only if nothing more useful has already been said: the host usually
+      // sends a reason and then closes, and a generic line arriving second
+      // would replace the explanation with a shrug.
+      if (el("gate-error").hidden) {
+        fail("Lost contact with the host before joining. Try again.");
+      } else {
+        el("join").disabled = false;
+        el("join").textContent = "Join the game";
+      }
       return;
     }
     // Say nothing alarming if the game is still playing perfectly well.

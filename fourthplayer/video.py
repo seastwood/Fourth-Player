@@ -395,6 +395,27 @@ class Stage:
             self._glib_loop.quit()
         self.worker.shutdown(wait=True)
 
+    def ensure_playing(self, timeout=5 * Gst.SECOND):
+        """Put the pipeline back to PLAYING if something knocked it out.
+
+        A GStreamer error is posted against the whole pipeline, not the branch
+        that raised it -- so one guest's data channel failing left the capture
+        stopped, and every later guest was refused with "webrtcbin would not
+        follow the pipeline into PLAYING". The session stayed open and served
+        nobody.
+        """
+        _change, state, _pending = self.pipeline.get_state(0)
+        if state == Gst.State.PLAYING:
+            return True
+        log.warning("pipeline is %s; putting it back to PLAYING",
+                    state.value_nick)
+        self.pipeline.set_state(Gst.State.PLAYING)
+        _change, state, _pending = self.pipeline.get_state(timeout)
+        if state != Gst.State.PLAYING:
+            log.error("pipeline would not return to PLAYING (%s)", state.value_nick)
+            return False
+        return True
+
     # -- peers --------------------------------------------------------------
 
     def add_peer(self, peer_id, on_signal, configure=None):
@@ -417,6 +438,11 @@ class Stage:
                 stale.detach()
             except Exception:
                 pass
+
+        # A dead pipeline cannot take a new peer, and refusing without trying
+        # to revive it is how one failure became every failure.
+        if not self.ensure_playing():
+            raise RuntimeError("the capture pipeline is not running")
 
         peer = Peer(self, peer_id, on_signal)
         if configure is not None:
@@ -479,6 +505,9 @@ class Stage:
         if blamed is not None and blamed.on_broken is not None:
             log.warning("peer %s: its branch failed; rebuilding it", blamed.id)
             self.loop.call_soon_threadsafe(blamed.on_broken, err.message)
+        # Whatever raised it, the pipeline may have stopped. Get it running
+        # again before the next guest arrives and is told it cannot join.
+        self.worker.submit(self.ensure_playing)
 
     def _peer_named(self, text):
         for peer_id, peer in self.peers.items():
