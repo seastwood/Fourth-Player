@@ -55,6 +55,7 @@ class GuestConnection:
         # reaped for having none, so this starts now rather than at zero.
         self.media_since = time.monotonic()
         self.outbox = None      # set by the server; None while signalling is down
+        self.on_signal = None   # how to reach them, so a rebuild needs no help
         self.peer = None
         self.label = f"Player {slot + 2}"   # the local player is player 1
         self.joined_at = time.monotonic()
@@ -291,6 +292,7 @@ class LiveSession:
 
         def configure(peer):
             peer.on_input = guest.feed
+            peer.on_broken = lambda why: self._peer_broke(guest, peer, why)
             # The media connection dying is what ends a guest -- not their
             # signalling socket, which they only need to arrive and
             # renegotiate.
@@ -304,6 +306,30 @@ class LiveSession:
             timeout=PIPELINE_TIMEOUT)
         guest.peer = peer
         return peer
+
+    def _peer_broke(self, guest, peer, why):
+        """Rebuild a guest's connection after its branch errored.
+
+        Distinct from dying: nothing has told the guest anything, and their
+        browser still believes the connection is up. Re-offering is the only
+        thing that gets them a picture back, and it costs them their slot only
+        if it fails.
+        """
+        if guest.peer is not peer or self.guests.get(guest.slot) is not guest:
+            return
+        if guest.on_signal is None:
+            self.drop(guest.slot, reason="its connection broke")
+            return
+        self.loop.create_task(self._rebuild(guest, why))
+
+    async def _rebuild(self, guest, why):
+        try:
+            await self.renew(guest, guest.on_signal)
+            log.info("%s: connection rebuilt after %s", guest.label, why)
+        except Exception as exc:
+            log.warning("%s: could not be rebuilt (%s); freeing the slot",
+                        guest.label, exc)
+            self.drop(guest.slot, reason="its connection could not be rebuilt")
 
     def _peer_died(self, guest, peer, why):
         """A peer's media ended. Only act if it is still the current one.

@@ -11,6 +11,16 @@
  */
 
 const SEND_HZ = 125;
+// Idle heartbeat. The host releases a pad after 250 ms of silence, so anything
+// well inside that keeps a held button held -- and sending only when something
+// changes takes an idle guest from 125 messages a second to 20. That matters:
+// the data channel sharing a congested link with the video is what pushed the
+// SCTP association into an error state, which killed the whole peer and left
+// the guest black while everything else looked healthy.
+const HEARTBEAT_MS = 50;
+// Sticks jitter by a count or two at rest. Without this, "changed" is always
+// true and the saving disappears.
+const AXIS_EPSILON = 600;
 
 /* iOS Safari zooms on a double tap and `touch-action: manipulation` does not
  * reliably stop it -- Apple honours that property for scrolling decisions but
@@ -195,7 +205,16 @@ async function answer(message) {
     input = event.channel;
     input.binaryType = "arraybuffer";
     input.addEventListener("open", () => setChip("link", "connected", "ok"));
-    input.addEventListener("close", () => setChip("link", "input closed", "bad"));
+    input.addEventListener("close", () => {
+      setChip("link", "controller offline", "bad");
+      lastSent = null;
+      // The channel can die on its own -- a congested link can push the SCTP
+      // association into an error state while ICE still says connected, so
+      // nothing else will notice. Without this the video stops and the page
+      // sits there looking fine.
+      if (!ended && pc && pc.connectionState !== "closed") renewSoon(1000);
+    });
+    input.addEventListener("error", () => renewSoon(500));
   });
 
   pc.addEventListener("icecandidate", (event) => {
@@ -399,6 +418,7 @@ function wireTouch() {
 }
 
 function releaseAllTouch() {
+  lastSent = null;          // the next frame must go, whatever it says
   touchButtons = 0;
   pointers.clear();
   clearDpad();
@@ -614,15 +634,42 @@ function tick() {
   sendFrame(pad, false);
 }
 
+let lastSent = null, lastSentAt = 0;
+
+function changed(buttons, axes) {
+  if (!lastSent) return true;
+  if (lastSent.buttons !== buttons) return true;
+  for (let i = 0; i < axes.length; i++) {
+    if (Math.abs(axes[i] - lastSent.axes[i]) > AXIS_EPSILON) return true;
+  }
+  return false;
+}
+
 function sendFrame(pad, releaseAll) {
   if (!input || input.readyState !== "open") return;
   // A physical pad and the on-screen one are merged rather than one replacing
   // the other: whichever is being touched wins by simply being pressed.
   const state = FPFrame.padState(releaseAll ? null : pad);
   const buttons = releaseAll ? 0 : (state.buttons | touchButtons);
-  const buffer = FPFrame.buildRaw(buttons, state.axes, seq, releaseAll);
+  const axes = releaseAll ? [0, 0, 0, 0, 0, 0] : state.axes;
+
+  const now = Date.now();
+  const due = releaseAll || changed(buttons, axes) ||
+              (now - lastSentAt) >= HEARTBEAT_MS;
+  if (!due) return;
+
+  // A backed-up channel is the thing to avoid; skip a heartbeat rather than
+  // add to the queue. A real change still goes, because dropping input is
+  // worse than a slightly deeper queue.
+  if (!releaseAll && input.bufferedAmount > 8192 && !changed(buttons, axes)) return;
+
+  const buffer = FPFrame.buildRaw(buttons, axes, seq, releaseAll);
   seq = (seq + 1) & 0xffff;
-  try { input.send(buffer); } catch (_) { /* a closing channel is not news */ }
+  try {
+    input.send(buffer);
+    lastSent = { buttons, axes: axes.slice() };
+    lastSentAt = now;
+  } catch (_) { /* a closing channel is not news */ }
 }
 
 /* ---- chrome ---- */

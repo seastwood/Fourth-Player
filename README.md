@@ -316,6 +316,18 @@ Sessions carry the duration you chose, checked both at join and by a sweep, so
 an open tab cannot outlive it. Kicking a guest burns their credential, so the
 freed slot cannot be retaken by the person you just removed.
 
+**Input is sent when it changes, not on a metronome.** A held button is
+re-sent every 50 ms so the host's dead-man switch never fires, and anything that
+moves goes immediately — so an idle guest costs 20 messages a second instead of
+125. That is not a micro-optimisation: a data channel competing with the video
+for a congested uplink can push its SCTP association into an error state, and
+when that happens the guest's *video* dies with it while ICE still reports the
+connection as healthy. It looks exactly like a black screen with no cause.
+
+**A guest whose branch errors is rebuilt.** The host attributes a pipeline error
+to the guest it came from and re-offers to that one guest; everybody else is
+untouched, and the guest keeps their slot unless the rebuild also fails.
+
 **A guest who changes network keeps their slot.** Moving a phone between mobile
 data and wifi replaces every address it had, so the connection cannot recover on
 its own — it can only be rebuilt. The browser notices, asks the host to re-offer,

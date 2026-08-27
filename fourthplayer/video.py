@@ -366,6 +366,22 @@ class Stage:
     def _on_error(self, _bus, message):
         err, debug = message.parse_error()
         log.error("pipeline error: %s (%s)", err.message, debug)
+        # An error inside one guest's branch is one guest's problem. The usual
+        # one is the data channel: "SCTP association went into error state",
+        # which kills that peer's video too and leaves them staring at black
+        # while everybody else carries on. Nothing else notices -- ICE stays
+        # connected, so no failure handler fires -- so it has to be spotted
+        # here and the peer rebuilt.
+        blamed = self._peer_named(f"{message.src}") or self._peer_named(debug or "")
+        if blamed is not None and blamed.on_broken is not None:
+            log.warning("peer %s: its branch failed; rebuilding it", blamed.id)
+            self.loop.call_soon_threadsafe(blamed.on_broken, err.message)
+
+    def _peer_named(self, text):
+        for peer_id, peer in self.peers.items():
+            if f"peer_{peer_id}" in text or f"_{peer_id}" in text:
+                return peer
+        return None
 
     def _on_warning(self, _bus, message):
         err, debug = message.parse_warning()
@@ -382,6 +398,7 @@ class Peer:
         self.channel = None
         self.on_input = None          # set by the session; called with raw bytes
         self.on_dead = None           # called when the media connection is over
+        self.on_broken = None         # called when this peer's branch errors
         self.ice = None               # held so webrtcbin's agent outlives it
         self._candidate_kinds = set()
         self._announced = set()
