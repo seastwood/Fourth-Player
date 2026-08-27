@@ -295,7 +295,7 @@ class Server:
     def join_url(self, token):
         base = self.cfg.public_url.rstrip("/") if self.cfg.public_url else ""
         if not base:
-            scheme = "http" if self.cfg.behind_proxy else "https"
+            scheme = "https" if self.cfg.tls else "http"
             # 0.0.0.0 means "every interface", which is not somewhere a guest
             # can go. Show the address of the one they could plausibly reach.
             host = self.cfg.host
@@ -309,7 +309,7 @@ class Server:
     async def run(self):
         self.loop = asyncio.get_running_loop()
         context = None
-        if not self.cfg.behind_proxy:
+        if self.cfg.tls:
             ensure_certificate(self.cfg.cert_path, self.cfg.key_path)
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(self.cfg.cert_path, self.cfg.key_path)
@@ -323,8 +323,10 @@ class Server:
                     f"fourth-player is probably already running") from None
             raise
         self._sockets.append(public)
-        log.info("listening on %s:%d (%s)", self.cfg.host, self.cfg.port,
-                 "behind a proxy" if self.cfg.behind_proxy else "own TLS")
+        log.info("listening on %s:%d (%s, %s)", self.cfg.host, self.cfg.port,
+                 "https" if self.cfg.tls else "http -- plain",
+                 "trusting X-Forwarded-For" if self.cfg.behind_proxy
+                 else "peer address")
 
         if os.path.exists(CONTROL_SOCKET):
             os.unlink(CONTROL_SOCKET)

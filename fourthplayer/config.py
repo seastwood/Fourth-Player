@@ -106,6 +106,15 @@ class Config:
     # -- server --
     host: str = "0.0.0.0"
     port: int = 8443
+    # Serve TLS ourselves. Keep this on even behind a reverse proxy unless the
+    # proxy really is speaking plain HTTP to us: the browser needs a secure
+    # context or it will not hand out the Gamepad API at all, so anybody
+    # reaching the box directly over http:// gets a picture and no controller.
+    tls: bool = True
+    # Trust X-Forwarded-For. Separate from `tls` on purpose -- a proxy that
+    # terminates its own TLS and one that re-encrypts to us are both proxies,
+    # and both need this, or every guest shares one rate-limit bucket and one
+    # person's failed PINs lock out the rest.
     behind_proxy: bool = False
     cert_path: str = os.path.join(STATE_DIR, "cert", "server.pem")
     key_path: str = os.path.join(STATE_DIR, "cert", "server.key")

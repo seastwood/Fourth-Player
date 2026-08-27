@@ -195,7 +195,7 @@ async def run(args):
 
     token = url.rsplit("/j/", 1)[1]
     cfg = Config.load()
-    scheme = "ws" if cfg.behind_proxy else "wss"
+    scheme = "wss" if cfg.tls else "ws"
     context = None
     if scheme == "wss":
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

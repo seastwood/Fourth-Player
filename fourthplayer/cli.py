@@ -58,7 +58,12 @@ def main(argv=None):
     run = sub.add_parser("serve", help="run the server")
     run.add_argument("--port", type=int)
     run.add_argument("--behind-proxy", action="store_true",
-                     help="plain HTTP; a reverse proxy terminates TLS")
+                     help="trust X-Forwarded-For, so rate limiting sees each "
+                          "guest rather than the proxy")
+    run.add_argument("--no-tls", action="store_true",
+                     help="serve plain HTTP. Only when a proxy re-encrypts in "
+                          "front: browsers withhold the Gamepad API from pages "
+                          "that are not a secure context")
     run.add_argument("--public-url", help="the base URL guests will use")
     run.add_argument("--slots", type=int, help="how many guests may join")
     run.add_argument("--fps", type=int, help="capture frame rate (try 30 if it lags)")
@@ -114,6 +119,8 @@ def main(argv=None):
             cfg.rtp_mtu = args.mtu
         if args.behind_proxy:
             cfg.behind_proxy = True
+        if args.no_tls:
+            cfg.tls = False
         if args.software:
             cfg.hardware_encode = False
         if args.no_audio:

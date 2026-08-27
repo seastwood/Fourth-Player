@@ -134,24 +134,36 @@ rate-limit bucket by sending a header, and the lockout would stop working.
 
 ## HAProxy on pfSense
 
-One backend, one frontend rule. The only thing to get right is the WebSocket
-upgrade, which HAProxy handles natively as long as the timeout is not short —
-signalling sockets stay open for the whole session.
+One backend, one frontend rule, and one setting that decides whether it works
+at all.
+
+**The backend must speak TLS to the box.** fourth-player serves HTTPS with its
+own self-signed certificate, and it should keep doing so even behind a proxy:
+browsers withhold the Gamepad API from any page that is not a secure context,
+so a guest reaching the box over plain `http://` would get a picture and no
+controller. A backend configured for plain HTTP against a TLS port gets its
+connection reset, and HAProxy turns that into **502 Bad Gateway** — which is
+the single most likely reason a domain 502s while the raw IP works.
 
 **Backend**
 
 ```
 Name             fourthplayer
-Server           192.168.1.50:8443            # your box
-Encrypt(SSL)     no      # behind_proxy = true
+Server           192.168.1.50:8443        # your box
+Encrypt(SSL)     YES                      # <- the one that causes 502 if wrong
+SSL checks       do NOT verify            # the certificate is self-signed
 Health check     HTTP, GET /healthz, expect 200
 ```
+
+pfSense calls the verification checkbox *"Verify SSL Certificate"* or offers a
+CA to check against; leave it off, or trust the box's own certificate from
+`~/.local/state/fourth-player/cert/server.pem`.
 
 **Frontend** — an ACL on the hostname, pointing at that backend:
 
 ```
 Type                        http / https(offloading)
-ACL: Host matches           play.example.com
+ACL: Host matches           fourthplayer.example.com
 Action                      Use Backend → fourthplayer
 ```
 
@@ -163,23 +175,44 @@ timeout client  1h
 timeout server  1h
 ```
 
-Without `timeout tunnel`, HAProxy closes the signalling socket after the default
-idle timeout and a guest silently loses the ability to renegotiate — the video
-keeps playing, which makes it look like nothing is wrong.
+Without `timeout tunnel`, HAProxy closes the signalling socket after the
+default idle timeout. That no longer ends a session — the media survives it —
+but it does stop a guest renegotiating, so a reconnect that should be invisible
+turns into a reload.
 
-Do **not** add a rule for anything but the hostname above. The control socket is
-a Unix socket and is not reachable over the network at all; there is no admin
-HTTP route to protect, and there should never be one.
+**On the box**, tell it the name guests will use, and that a proxy is in front:
 
-## Checking it from outside
-
-```sh
-curl -sS https://play.example.com/healthz          # expect: ok
+```json
+{
+  "public_url": "https://fourthplayer.example.com",
+  "behind_proxy": true,
+  "tls": true
+}
 ```
 
-Then open the join link on a phone on mobile data, with wifi off. That is the
-only test that actually exercises the path a guest takes; a laptop on your own
-LAN will connect over the local candidates and prove nothing about the internet.
+`public_url` is what the printed link and the QR code use. `behind_proxy` makes
+the server trust `X-Forwarded-For`, so rate limiting sees each guest instead of
+bucketing every one of them under the proxy's address — one person fumbling
+their PIN would otherwise lock out everybody. It is deliberately separate from
+`tls`: a proxy that re-encrypts to the backend is still a proxy.
+
+Only set `tls: false` (or `--no-tls`) if HAProxy really is speaking plain HTTP
+to the box, and then nobody may reach it directly by address.
+
+**What the proxy must be able to reach**, all on the one port:
+
+```
+GET  /healthz          200      health check
+GET  /j/<token>        200      the join page
+GET  /static/*         200      its script and stylesheet
+     /ws               101      the signalling WebSocket -- upgrade must pass
+```
+
+**The media does not go through any of this.** Video and sound are UDP direct
+to the box, so the Cloudflare and HAProxy path carries the page and the
+signalling only, and the UDP forward from §1 is still required. A domain that
+loads the page but shows a black picture is that forward missing, not the
+proxy.
 
 ## Running over a VPN
 
@@ -204,5 +237,7 @@ python3 -m fourthplayer serve --mtu 1100
 | Black over a VPN specifically | Packet size. A tunnel's MTU is smaller than a plain link's, and an RTP packet that does not fit is dropped rather than shrunk. `rtp_mtu` defaults to 1200 to survive this; lower it with `--mtu 1100` if a tunnel inside a tunnel is involved |
 | Works on the LAN, not from outside | Testing from inside the network. Use mobile data |
 | Connects, then drops after a few minutes | `timeout tunnel` missing in HAProxy |
-| `502` from Cloudflare | HAProxy cannot reach the box, or `behind_proxy` is false so the box is speaking TLS to a proxy expecting plain HTTP |
+| `502` through the domain, while the raw IP works | The backend is set to plain HTTP against a TLS port. Turn **Encrypt(SSL)** on for the backend and leave certificate verification off. This is the usual cause |
+| `503` through the domain | No backend matched — the frontend ACL does not match the hostname |
+| Page loads on the domain, video black | The UDP forward, not the proxy — media never touches HAProxy |
 | Video plays, controller does nothing | The data channel, not the video. Check the browser console; the pad must be pressed once before a browser reveals it |
