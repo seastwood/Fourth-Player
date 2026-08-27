@@ -388,12 +388,29 @@ class Stage:
                  self.cfg.bitrate_kbps, "on" if self.has_audio else "off")
 
     def stop(self):
+        """Stop capturing. Must not block, whatever state anything is in.
+
+        The pipeline is silenced first and the worker is never waited for. It
+        used to be waited for, and the case that matters is precisely the one
+        where it will not answer: a stage is replaced *because* its worker
+        wedged, so stopping it hung, the old pipeline kept capturing, and the
+        replacements piled up. Five ximagesrc threads were found running at
+        once, which is five screen captures competing for one GPU.
+        """
+        try:
+            self.pipeline.set_state(Gst.State.NULL)
+        except Exception as exc:
+            log.warning("could not stop the pipeline cleanly: %s", exc)
         for peer_id in list(self.peers):
-            self.remove_peer(peer_id)
-        self.pipeline.set_state(Gst.State.NULL)
+            peer = self.peers.pop(peer_id, None)
+            if peer is not None:
+                try:
+                    peer.detach()
+                except Exception:
+                    pass
         if self._glib_loop:
             self._glib_loop.quit()
-        self.worker.shutdown(wait=True)
+        self.worker.shutdown(wait=False)
 
     def ensure_playing(self, timeout=5 * Gst.SECOND):
         """Put the pipeline back to PLAYING if something knocked it out.

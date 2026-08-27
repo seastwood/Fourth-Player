@@ -25,6 +25,11 @@ log = logging.getLogger("fourthplayer.session")
 
 SWEEP_INTERVAL = 0.05
 
+# A capture is rebuilt only this often. Without a floor, a fault that survives
+# the rebuild is rebuilt again by the next guest, and the pipelines accumulate
+# rather than replace each other.
+REBUILD_COOLDOWN = 45.0
+
 # Where a live session is written down so a restart does not end it. The
 # process has segfaulted inside the GPU's video driver more than once, and
 # systemd puts it straight back -- but everything about the session lived in
@@ -140,6 +145,7 @@ class LiveSession:
         self._previous_dpm = None
         self._warned = set()
         self._ticks = 0
+        self._last_rebuild = 0.0
         self.on_notice = None      # set by the server: broadcast to guests
         self._sweeper = None
         self.opened_at = None
@@ -317,11 +323,26 @@ class LiveSession:
         watching, against a session that otherwise stays open and works for
         nobody.
         """
+        now = self._now()
+        if now - self._last_rebuild < REBUILD_COOLDOWN:
+            raise RuntimeError("the capture was rebuilt moments ago and is "
+                               "still not working")
+        self._last_rebuild = now
+
         old, self.stage = self.stage, None
         for guest in self.guests.values():
             guest.peer = None
+
         if old is not None:
-            self.loop.run_in_executor(None, old.stop)
+            # Bounded, and the old stage is abandoned rather than waited on if
+            # it will not go quietly. An abandoned pipeline that has been set
+            # to NULL is inert; one that is still being waited for is not.
+            try:
+                await asyncio.wait_for(
+                    self.loop.run_in_executor(None, old.stop), timeout=10)
+            except (asyncio.TimeoutError, Exception) as exc:
+                log.warning("the old capture would not stop (%s); abandoning it",
+                            exc)
 
         self.stage = Stage(self.cfg, self.loop)
         self.stage.start()
