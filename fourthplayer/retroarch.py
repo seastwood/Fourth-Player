@@ -64,14 +64,28 @@ input_r_x_minus_axis = "-3"
 input_r_y_plus_axis = "+4"
 input_r_y_minus_axis = "-4"
 
-# The labels matter as much as the numbers. kodi-retrobox's picker decides
-# which button confirms from `input_a_btn_label`: anything other than "a" means
-# an Xbox-style layout, where the bottom button is `input_b_btn`. Label these
-# the way an Xbox pad does and the bottom button confirms, as a guest expects.
-input_b_btn_label = "A"
-input_a_btn_label = "B"
-input_y_btn_label = "X"
-input_x_btn_label = "Y"
+# Nintendo labels, deliberately, even though the ids say Xbox.
+#
+# The numbers above are positions and are not in question. The labels decide
+# one thing only: which button kodi-retrobox's picker treats as confirm. It
+# reads `input_a_btn_label` -- "a" means a Nintendo-style pad, where the
+# right-hand button confirms; anything else means Xbox, where the bottom one
+# does.
+#
+# Labelled as an Xbox pad, the picker put confirm on the bottom button and back
+# on the right. That is correct for an Xbox pad and wrong for every on-screen
+# controller here: the Nintendo layout prints A on the right, so a guest
+# pressing A backed out of the picker and pressing B claimed a slot. Exactly
+# the wrong way round, and reported as such.
+#
+# With these labels the right-hand button confirms and the bottom one goes
+# back, which is right for the Nintendo layout. It also still suits the Mega
+# Drive layout: its A is the west button, which the picker accepts as a second
+# confirm, and its C is the right-hand one, which is the first.
+input_b_btn_label = "B"
+input_a_btn_label = "A"
+input_y_btn_label = "Y"
+input_x_btn_label = "X"
 input_l_btn_label = "LB"
 input_r_btn_label = "RB"
 input_l2_axis_label = "LT"
