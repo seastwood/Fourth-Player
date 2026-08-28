@@ -198,6 +198,19 @@ on demand anyway.
 python3 -m fourthplayer serve --bitrate 1200 --queue 40 --jitter 20
 ```
 
+### Which codec, and who decides
+
+The guest's browser reports what it can decode when it joins, and the host
+picks the best encoding both ends manage — H.265 where it is available at both
+ends, H.264 otherwise. A browser that says nothing gets H.264, because guessing
+better than that on no information is how a black screen happens.
+
+It is settled once, while nobody else is connected, because the picture is
+encoded a single time for everybody: a guest arriving later who cannot decode
+what is already running is told so plainly rather than having it changed
+underneath the people already playing. `codec` in the config pins it instead if
+you would rather decide yourself.
+
 ### Trying H.265
 
 Half the bitrate for the same picture, which on a thin link means a better
@@ -212,7 +225,8 @@ that refuses gets a black screen, which the page now says out loud.
 python3 -m fourthplayer serve --codec h265
 ```
 
-Worth trying if every guest is on an iPhone. Not a default.
+Worth pinning if every guest is on an iPhone; otherwise leave `codec` on
+`auto` and it will be chosen when it can be.
 
 ### If the picture lags
 

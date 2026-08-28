@@ -240,7 +240,10 @@ async def run(args):
             print("  resuming as a returning guest")
             await socket_.send(json.dumps({"t": "resume", "guest": saved}))
         else:
-            await socket_.send(json.dumps({"t": "join", "token": token, "pin": pin}))
+            hello = {"t": "join", "token": token, "pin": pin}
+            if args.codecs:
+                hello["codecs"] = [c.strip() for c in args.codecs.split(",") if c.strip()]
+            await socket_.send(json.dumps(hello))
 
         async def pump():
             async for raw in socket_:
@@ -345,6 +348,9 @@ if __name__ == "__main__":
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--token-file", default="/tmp/fp-guest-token",
                         help="where to keep the guest credential between runs")
+    parser.add_argument("--codecs", default="",
+                        help="what this stand-in claims it can decode, comma "
+                             "separated, as a browser reports it (h264,h265)")
     parser.add_argument("--renew-at", type=float, default=0.0, metavar="SECONDS",
                         help="ask the host to rebuild the media connection "
                              "partway through, the way a phone does when it "

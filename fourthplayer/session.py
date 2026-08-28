@@ -19,7 +19,7 @@ import sys
 import time
 
 from . import gpu, invites, pads as padlib, protocol, retroarch
-from .video import Stage
+from .video import Stage, best_shared_codec
 
 log = logging.getLogger("fourthplayer.session")
 
@@ -160,11 +160,13 @@ class LiveSession:
         # Pads first, and before any guest can arrive. kodi-retrobox's player
         # picker enumerates evdev devices at launch, so a pad that appears
         # after RetroArch starts is a pad that game will never see.
+        self.codec = (self.cfg.codec or "auto").lower()
         self.pads = padlib.PadSet(self.cfg.slots)
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
         retroarch.write_profiles([pad.name for pad in self.pads])
-        self.stage = Stage(self.cfg, self.loop)
+        self.stage = Stage(self.cfg, self.loop,
+                           codec=None if self.codec == "auto" else self.codec)
         self.stage.start()
         self.opened_at = now
         # Thresholds already behind us at the start are not warnings, they are
@@ -307,6 +309,37 @@ class LiveSession:
         self.save()
         log.info("%s joined from %s", guest.label, address or "unknown")
         return guest, guest_token
+
+    async def agree_codec(self, guest_codecs):
+        """Settle on the best encoding this host and this guest both manage.
+
+        Only while nobody else is connected. The picture is encoded once for
+        everybody, so changing it means rebuilding the capture -- harmless with
+        no guests on it, and rude with. A guest who arrives later and cannot
+        decode what is already running is told so rather than having it changed
+        underneath the people already playing.
+        """
+        if self.cfg.codec.lower() != "auto" or self.stage is None:
+            return self.stage.codec if self.stage else None
+        wanted = best_shared_codec(guest_codecs, self.cfg.hardware_encode)
+        if wanted == self.stage.codec:
+            return wanted
+        if len(self.guests) > 1:
+            log.info("keeping %s: somebody else is already watching",
+                     self.stage.codec)
+            return self.stage.codec
+
+        log.info("agreeing on %s with the first guest (they offered: %s)",
+                 wanted, ", ".join(guest_codecs or ["nothing"]))
+        old, self.stage = self.stage, None
+        try:
+            await asyncio.wait_for(
+                self.loop.run_in_executor(None, old.stop), timeout=10)
+        except Exception as exc:
+            log.warning("the previous capture would not stop (%s)", exc)
+        self.stage = Stage(self.cfg, self.loop, codec=wanted)
+        self.stage.start()
+        return wanted
 
     async def renew(self, guest, on_signal):
         """Give a guest a fresh media connection without a fresh invite.

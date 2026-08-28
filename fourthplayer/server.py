@@ -257,6 +257,14 @@ class Server:
         guest.outbox = outbox
         guest.socket = socket_
 
+        # What this browser says it can decode. Settled before their peer is
+        # built, because the offer has to describe what they will actually be
+        # sent.
+        try:
+            await self.session.agree_codec(message.get("codecs") or [])
+        except Exception as exc:
+            log.warning("could not settle on a codec (%s); carrying on", exc)
+
         keep_media = (message.get("t") == "resume"
                       and message.get("media") == "live"
                       and guest.peer is not None)

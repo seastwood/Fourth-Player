@@ -101,6 +101,61 @@ class PipelineWorker:
         self._pool.shutdown(wait=wait)
 
 
+# What this machine can produce, in the order we would prefer it. H.265 is
+# roughly half the bitrate for the same picture, which on a thin link is a
+# better picture rather than a faster one.
+CODEC_PREFERENCE = ("h265", "h264")
+
+_ELEMENTS = {
+    "h264": ("vah264enc", "x264enc", "h264parse", "rtph264pay"),
+    "h265": ("vah265enc", "x265enc", "h265parse", "rtph265pay"),
+}
+
+_host_codecs = None
+
+
+def host_codecs(hardware=True):
+    """The codecs this host can actually encode, best first.
+
+    Probed once and remembered. Presence of an element is not quite proof it
+    will run, but it is what can be known without building a pipeline, and a
+    codec that then fails to start is caught by the usual fallback.
+    """
+    global _host_codecs
+    if _host_codecs is not None:
+        return _host_codecs
+    init()
+    found = []
+    for codec in CODEC_PREFERENCE:
+        va, sw, parser, payloader = _ELEMENTS[codec]
+        encoder = va if hardware else sw
+        if (Gst.ElementFactory.find(encoder)
+                and Gst.ElementFactory.find(parser)
+                and Gst.ElementFactory.find(payloader)):
+            found.append(codec)
+    if not found:
+        found = ["h264"]
+    _host_codecs = found
+    log.info("this host can encode: %s", ", ".join(found))
+    return found
+
+
+def best_shared_codec(guest_codecs, hardware=True):
+    """The best codec both ends can manage, or h264 if they cannot agree.
+
+    A guest that tells us nothing gets H.264, which every browser decodes --
+    guessing better than that on no information is how a black screen happens.
+    """
+    ours = host_codecs(hardware)
+    theirs = {str(c).lower().replace("video/", "") for c in (guest_codecs or [])}
+    if not theirs:
+        return "h264" if "h264" in ours else ours[0]
+    for codec in ours:
+        if codec in theirs:
+            return codec
+    return "h264"
+
+
 def _nice_type():
     """The GType of webrtcbin's ICE agent, or None if it cannot be had.
 
@@ -205,9 +260,12 @@ def _caps(width, height):
 class Stage:
     """Capture, encode once, and fan the result out."""
 
-    def __init__(self, cfg, loop):
+    def __init__(self, cfg, loop, codec=None):
         init()
         self.cfg = cfg
+        # The codec for this capture, which may differ from the configured one
+        # when it was negotiated with a guest.
+        self.codec = (codec or cfg.codec or "h264").lower()
         self.loop = loop
         self.peers = {}
         self._glib_loop = None
@@ -237,7 +295,7 @@ class Stage:
         keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
         cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
-        hevc = cfg.codec.lower() in ("h265", "hevc")
+        hevc = self.codec in ("h265", "hevc")
         if cfg.hardware_encode:
             element = "vah265enc" if hevc else "vah264enc"
             encoder = (f"{element} name=enc target-usage={cfg.target_usage} "
@@ -258,6 +316,7 @@ class Stage:
         parser = "h265parse" if hevc else "h264parse"
         payloader = "rtph265pay" if hevc else "rtph264pay"
         encoding = "H265" if hevc else "H264"
+        self.encoding = encoding
         convert = (f"vapostproc ! {_caps(cfg.width, cfg.height)}"
                    if cfg.hardware_encode else
                    f"videoscale ! videoconvert ! video/x-raw,format=I420,"
@@ -721,7 +780,7 @@ class Peer:
             return Gst.Caps.from_string(
                 "application/x-rtp,media=(string)audio,encoding-name=(string)OPUS,"
                 "payload=(int)97,clock-rate=(int)48000,encoding-params=(string)2")
-        encoding = "H265" if self.stage.cfg.codec.lower() in ("h265", "hevc") else "H264"
+        encoding = self.stage.encoding
         return Gst.Caps.from_string(
             f"application/x-rtp,media=(string)video,encoding-name=(string){encoding},"
             f"payload=(int)96,clock-rate=(int)90000")

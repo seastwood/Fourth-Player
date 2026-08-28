@@ -61,6 +61,24 @@ const storageKey = "fp:" + token.slice(0, 16);
 
 let joinTimer = null;
 
+/* What this browser can actually decode, so the host can encode the best thing
+ * both ends manage rather than guessing. Safari takes H.265 and most others do
+ * not, and the difference at 1.5 Mb/s is worth asking about. */
+function videoCodecs() {
+  try {
+    const caps = RTCRtpReceiver.getCapabilities("video");
+    if (!caps) return [];
+    const seen = new Set();
+    for (const codec of caps.codecs) {
+      const name = (codec.mimeType || "").split("/")[1];
+      if (name) seen.add(name.toLowerCase());
+    }
+    return [...seen];
+  } catch (_) {
+    return [];                    // saying nothing gets H.264, which is safe
+  }
+}
+
 el("pin-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const pin = el("pin").value.trim();
@@ -74,7 +92,7 @@ el("pin-form").addEventListener("submit", (event) => {
   joinTimer = setTimeout(() => {
     if (!gate.hidden) fail("The host did not answer. Try again.");
   }, 12000);
-  connect({ t: "join", token, pin });
+  connect({ t: "join", token, pin, codecs: videoCodecs() });
 });
 
 function fail(message) {
@@ -111,7 +129,8 @@ function reconnectSoon() {
   if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    connect({ t: "resume", guest: guestToken, media: mediaIsLive() ? "live" : "new" });
+    connect({ t: "resume", guest: guestToken, codecs: videoCodecs(),
+              media: mediaIsLive() ? "live" : "new" });
   }, delay);
 }
 
@@ -1072,5 +1091,5 @@ if (saved) {
   el("pin").placeholder = "rejoining…";
   el("join").disabled = true;
   armRejoinTimer();
-  connect({ t: "resume", guest: saved, media: "new" });
+  connect({ t: "resume", guest: saved, codecs: videoCodecs(), media: "new" });
 }

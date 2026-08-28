@@ -79,11 +79,16 @@ class Config:
     # fault. main or high look slightly better and are a gamble.
     h264_profile: str = "constrained-baseline"
 
-    # h264 works everywhere. h265 is half the bitrate for the same picture and
-    # is refused by most browsers -- Safari on recent Apple hardware takes it,
-    # Firefox does not, Chrome mostly does not. Worth trying if every guest is
-    # on an iPhone; a black screen for anybody else.
-    codec: str = "h264"
+    # "auto" asks the first guest what it can decode and picks the best codec
+    # both ends manage; naming one pins it instead. H.265 is about half the
+    # bitrate for the same picture and is refused by most browsers -- Safari on
+    # recent Apple hardware takes it, Firefox does not, Chrome mostly does not
+    # -- which is exactly why it is worth asking rather than assuming.
+    #
+    # The picture is encoded once for everybody, so this is a property of the
+    # session and not of each guest: it is settled while nobody else is
+    # connected, and a later guest that cannot decode it is told so plainly.
+    codec: str = "auto"
 
     # -- audio --
     audio: bool = True
