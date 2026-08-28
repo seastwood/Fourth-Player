@@ -107,6 +107,14 @@ class GuestConnection:
         self.on_signal = None   # how to reach them, so a rebuild needs no help
         self.codecs = []        # what their browser said it can decode
         self.peer = None
+        # Only one attach for this slot at a time. Two can be asked for at
+        # once -- the host rebuilding a peer whose branch errored, and the
+        # browser reconnecting after noticing the same failure. The pipeline
+        # half of that is already serialised by the single-threaded worker that
+        # owns it; what is not is everything around it, including which peer
+        # this ends up pointing at. Belt and braces on a slot that has already
+        # produced one connection nobody was feeding.
+        self.attaching = asyncio.Lock()
         self.label = f"Player {slot + 2}"   # the local player is player 1
         self.joined_at = time.monotonic()
         self.last_input = 0.0
@@ -470,6 +478,10 @@ class LiveSession:
 
     async def attach_peer(self, guest, on_signal):
         """Give a guest a peer, without blocking everybody else's video."""
+        async with guest.attaching:
+            return await self._attach_peer(guest, on_signal)
+
+    async def _attach_peer(self, guest, on_signal):
         # Remembered so the host can re-offer to them later without being
         # asked -- a codec change, or a connection rebuilt after a failure.
         # Losing this line meant those guests were silently skipped: the
@@ -539,6 +551,17 @@ class LiveSession:
         self.detach_peer(guest)
         if guest.on_signal is None:
             self.drop(guest.slot, reason="its connection broke")
+            return
+        if guest.outbox is None:
+            # Their signalling went with the media -- both ends of the same
+            # network event, which is the usual way this happens. An offer now
+            # would go into a queue nobody is draining, and worse: the browser
+            # is reconnecting as we speak, so building a peer here means two
+            # peers for one slot and a coin-toss over which one the guest ends
+            # up answering. Their resume brings a fresh one along with it.
+            log.info("%s: %s, and their signalling is down; waiting for them "
+                     "to come back rather than offering into the dark",
+                     guest.label, why)
             return
         self.loop.create_task(self._rebuild(guest, why))
 

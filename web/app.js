@@ -314,6 +314,7 @@ async function answer(message) {
       clearRenewTimer();
       renewals = 0;
       lastBytes = -1;
+      connectedAt = Date.now();          // it now has to prove it carries something
       stalledSince = 0;
       mediaFresh = false;
       startWatchdog();
@@ -825,7 +826,9 @@ let mediaTimer = null;
 function armMediaTimeout() {
   clearMediaTimeout();
   mediaTimer = setTimeout(() => {
-    if (pc && pc.connectionState === "connected") return;
+    // Connected is not the same as carrying anything, which is the mistake
+    // that let a silent connection sit there for ever.
+    if (pc && pc.connectionState === "connected" && lastBytes > 0) return;
     mediaFailed("No video after 20 seconds.");
   }, 20000);
 }
@@ -913,7 +916,13 @@ el("link").addEventListener("click", async () => {
  * only honest measure is whether the byte count is going up.
  */
 const STALL_LIMIT_MS = 6000;
-let lastBytes = -1, stalledSince = 0, watchdogTimer = null;
+/* How long a connection that says it is up has to produce a single video byte
+   before it is treated as broken. Longer than STALL_LIMIT_MS because a fresh
+   connection has DTLS and a first keyframe to get through, and shorter than
+   the twenty seconds the old media timeout waited, which never fired anyway --
+   it gave up only when the connection was *not* connected, and this one is. */
+const SILENT_LIMIT_MS = 9000;
+let lastBytes = -1, stalledSince = 0, watchdogTimer = null, connectedAt = 0;
 
 async function watchMedia() {
   if (ended || !pc) return;
@@ -929,6 +938,7 @@ async function watchMedia() {
   if (bytes > lastBytes) {
     lastBytes = bytes;
     stalledSince = 0;
+    connectedAt = 0;                     // it proved itself
     mediaFresh = true;
     // Video is arriving, so whatever the chip last said is out of date. This
     // is also what stops it sticking on "reconnecting" after a rebuild that
@@ -937,7 +947,22 @@ async function watchMedia() {
     if (!el("notice").hidden && lastNotice.includes("could not")) hideNotice();
     return;
   }
-  if (lastBytes < 0) return;               // nothing has arrived yet at all
+  if (lastBytes < 0) {
+    /* Not one byte has arrived on this connection yet. This used to return
+       here for ever, which is the whole of why a guest had to reload the page
+       after starting a game: the rebuilt connection came up, said "connected",
+       opened its data channel so the buttons still worked, and carried no
+       video -- and nothing was watching for a connection that never starts, as
+       opposed to one that stops. */
+    if (connectedAt && Date.now() - connectedAt >= SILENT_LIMIT_MS) {
+      connectedAt = 0;
+      mediaFresh = false;
+      setChip("link", "reconnecting…", "warn");
+      report("connected but no video arrived; rebuilding");
+      renewSoon(0, true);
+    }
+    return;
+  }
 
   const now = Date.now();
   if (!stalledSince) { stalledSince = now; return; }
