@@ -404,7 +404,7 @@ class Server:
                     seconds = minutes * 60
                 self.session = LiveSession(self.cfg, self.loop)
                 self.session.on_notice = self._broadcast
-                self.session.start(seconds)
+                self.session.start(seconds, slots=self._slots(request))
                 return self._status()
             if command == "stop":
                 if self.session:
@@ -429,6 +429,16 @@ class Server:
                 if added <= 0:
                     return {"ok": False,
                             "error": "already at the maximum session length"}
+                return self._status()
+            if command == "slots":
+                if request.get("set") is not None:
+                    self.cfg.slots = self._slots({"slots": request["set"]},
+                                                 fallback=self.cfg.slots)
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the slot count: %s", exc)
+                    log.info("sessions will open with %d slots", self.cfg.slots)
                 return self._status()
             if command == "policy":
                 if request.get("set"):
@@ -468,6 +478,13 @@ class Server:
             return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": f"unknown command {command!r}"}
 
+    def _slots(self, request, fallback=None):
+        """How many may join, clamped to what this machine will lay out."""
+        asked = request.get("slots")
+        if asked in (None, ""):
+            return fallback if fallback is not None else self.cfg.slots
+        return max(1, min(int(asked), self.cfg.max_slots))
+
     def _restore_session(self):
         """Pick up a session that was running when this process last stopped.
 
@@ -498,6 +515,8 @@ class Server:
             # The remembered setting travels with a closed status too, so the
             # add-on can offer last time's answer when opening the next one.
             return {"ok": True, "open": False,
+                    "slots": self.cfg.slots,
+                    "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None}}
         clear = self.session.invite.clear_invite
         return {
@@ -508,7 +527,8 @@ class Server:
             "remaining": None if self.session.unlimited
                          else round(self.session.remaining()),
             "unlimited": self.session.unlimited,
-            "slots": self.cfg.slots,
+            "slots": self.session.slots,
+            "max_slots": self.cfg.max_slots,
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,

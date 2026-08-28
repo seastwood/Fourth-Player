@@ -52,6 +52,27 @@ guest 2 ─┼─► input router ─► one uinput pad each ─► /dev/input/e
 guest 3 ─┘
 ```
 
+## How many can join
+
+Three by default -- a fourth player for a sofa that already has three on it,
+which is where the name comes from. From Kodi (**How many can join?**), or:
+
+```sh
+python3 -m fourthplayer slots        # what is it now
+python3 -m fourthplayer slots 4
+python3 -m fourthplayer start --slots 4 --minutes 120   # just this one
+```
+
+It applies to the next session, not the one open now, and the add-on says so
+when it is changed mid-session. That is not laziness about plumbing: pads are
+created when a session opens and kodi-retrobox's picker reads the input devices
+at launch, so a pad that appeared later would be a controller the running game
+never sees -- a setting that looked like it worked and did nothing.
+
+Numbers above `max_slots` are clamped rather than refused. The default ceiling
+is eight, which is where the picker stops being able to lay the players out and
+past which none of this has been run.
+
 ## Why there are always three pads
 
 The pads exist for the whole session, not just while somebody is holding them,

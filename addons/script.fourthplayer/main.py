@@ -287,6 +287,35 @@ POLICIES = [
 ]
 
 
+def choose_slots(status):
+    """How many can join at once.
+
+    A setting rather than a question at the start, because it is decided once
+    and then left. It applies to the next session: pads are made when a session
+    opens and the player picker reads the devices at launch, so one that turned
+    up later would be a controller the running game never sees.
+    """
+    current = status.get("slots", 3)
+    most = status.get("max_slots", 8)
+    labels = []
+    for count in range(1, most + 1):
+        label = "%d %s" % (count, "player" if count == 1 else "players")
+        if count == 3:
+            label += "  (default)"
+        labels.append(("> " if count == current else "  ") + label)
+    choice = xbmcgui.Dialog().select("How many can join at once?", labels)
+    if choice < 0:
+        return
+    reply = C.set_slots(choice + 1)
+    if not reply.get("ok"):
+        notify(reply.get("error", "Could not change that."), error=True)
+    elif status.get("open"):
+        notify("The session open now keeps %d. The next one holds %d."
+               % (current, choice + 1), seconds=6000)
+    else:
+        notify("The next session will hold %d." % (choice + 1))
+
+
 def choose_policy(status):
     current = (status.get("launch") or {}).get("policy", "off")
     labels = []
@@ -344,6 +373,7 @@ def main():
             ("Open a session…",
              lambda: start_session((status.get("launch") or {}).get("policy", "off"))),
             ("Can guests start games?…", lambda: choose_policy(status)),
+            ("How many can join?…", lambda: choose_slots(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
         ]
@@ -360,6 +390,7 @@ def main():
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
             ("Add more time…", lambda: extend_session(status)),
             ("Remove a player…", lambda: remove_player(C.status())),
+            ("How many can join?…", lambda: choose_slots(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),
         ]

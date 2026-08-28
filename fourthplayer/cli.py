@@ -100,6 +100,8 @@ def main(argv=None):
                        help="how long, in minutes. 0 for no time limit.")
     start.add_argument("--unlimited", action="store_true",
                        help="open with no deadline; it runs until stopped")
+    start.add_argument("--slots", type=int,
+                       help="how many can join at once (default 3)")
     start.add_argument("--wait", type=float, default=20.0, metavar="SECONDS",
                        help="how long to wait for the server to come up")
 
@@ -117,6 +119,11 @@ def main(argv=None):
                              "whatever is playing. idle: only when nothing is "
                              "running. approve: ask, and answer within 30s. "
                              "Omit to read the current setting.")
+    slots = sub.add_parser(
+        "slots", help="how many can join at once, from the next session on")
+    slots.add_argument("set", nargs="?", type=int,
+                       help="omit to read the current setting")
+
     sub.add_parser("approve", help="say yes to the waiting launch request")
     deny = sub.add_parser("deny", help="say no to the waiting launch request")
     deny.add_argument("--reason", default="the owner said no")
@@ -186,6 +193,10 @@ def main(argv=None):
         request["slot"] = args.slot
     if args.command == "policy" and args.set:
         request["set"] = args.set
+    if args.command == "slots" and args.set is not None:
+        request["set"] = args.set
+    if args.command == "start" and args.slots:
+        request["slots"] = args.slots
     if args.command == "deny":
         request["reason"] = args.reason
 
@@ -204,6 +215,9 @@ def main(argv=None):
 def _print_status(reply):
     if not reply.get("open"):
         print("no session is open")
+        if reply.get("slots"):
+            print(f"  the next one will hold {reply['slots']} "
+                  f"(up to {reply.get('max_slots', '?')})")
         return
     if reply.get("unlimited") or reply.get("remaining") is None:
         print("session open, no time limit")

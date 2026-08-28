@@ -138,7 +138,12 @@ class Config:
     # session.LAUNCH_POLICIES. Off unless deliberately turned on: everything
     # else here affects a picture, and this one affects somebody's television.
     guest_launch: str = "off"
+    # How many can join at once. Three by default -- a fourth player for a
+    # sofa that already has three on it, which is where the name comes from.
     slots: int = 3
+    # Where the picker kodi-retrobox shows stops being able to lay the players
+    # out, and past which nothing here has been run.
+    max_slots: int = 8
     default_duration_minutes: int = 120
     max_duration_minutes: int = 480
 

@@ -176,6 +176,11 @@ class LiveSession:
         self.opened_at = None
         self._previous_dpm = None
         self.launch_policy = "off"
+        # Fixed for the life of the session. Pads are created when it opens and
+        # RetroArch's picker reads the devices at launch, so a pad that appears
+        # later is a pad the running game will never see -- which makes
+        # changing this mid-session a setting that silently does nothing.
+        self.slots = cfg.slots
         self.catalogue = cataloguelib.Catalogue()
         # The one launch request waiting on the owner, if any. Only ever one:
         # a queue of these is a queue of interruptions.
@@ -187,19 +192,23 @@ class LiveSession:
     def open(self):
         return self.invite is not None and self.invite.alive(self._now())
 
-    def start(self, duration_seconds, invite=None):
+    def start(self, duration_seconds, invite=None, slots=None):
         if self.invite is not None:
             raise RuntimeError("a session is already open")
         now = self._now()
+        self.slots = int(slots or self.cfg.slots)
         self.invite = invite or invites.Session(
-            slots=self.cfg.slots, duration=duration_seconds, now=now)
+            slots=self.slots, duration=duration_seconds, now=now)
+        # A restored invite brings its own count: the pads have to match the
+        # slots the people already holding the link were given.
+        self.slots = self.invite.slots
         # Pads first, and before any guest can arrive. kodi-retrobox's player
         # picker enumerates evdev devices at launch, so a pad that appears
         # after RetroArch starts is a pad that game will never see.
         self.codec = (self.cfg.codec or "auto").lower()
         policy = (getattr(self.cfg, "guest_launch", "off") or "off").lower()
         self.launch_policy = policy if policy in LAUNCH_POLICIES else "off"
-        self.pads = padlib.PadSet(self.cfg.slots)
+        self.pads = padlib.PadSet(self.slots)
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
         retroarch.write_profiles([pad.name for pad in self.pads])
@@ -219,7 +228,7 @@ class LiveSession:
         self.save()
         log.info("session open for %s, %d slots, pads at %s",
                  "no fixed time" if math.isinf(duration_seconds)
-                 else "%.0f minutes" % (duration_seconds / 60), self.cfg.slots,
+                 else "%.0f minutes" % (duration_seconds / 60), self.slots,
                  ", ".join(p.path for p in self.pads))
         return self.invite
 

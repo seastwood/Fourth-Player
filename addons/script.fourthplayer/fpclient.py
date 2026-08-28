@@ -48,6 +48,10 @@ def start_session(minutes):
     return ask({"cmd": "start", "minutes": minutes}, timeout=30)
 
 
+def set_slots(count):
+    return ask({"cmd": "slots", "set": count})
+
+
 def set_policy(policy):
     return ask({"cmd": "policy", "set": policy})
 

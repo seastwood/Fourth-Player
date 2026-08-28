@@ -71,5 +71,18 @@ timed_snapshot["saved_at"] = time.time() - 100000
 check(invites.Session.restore(timed_snapshot, now=5000.0) is None,
       "and one that ran out while away does not come back at all")
 
+print("how many can join is a setting, clamped to what can be laid out")
+from fourthplayer.config import Config
+from fourthplayer.server import Server
+
+server = Server(Config())
+check(server._slots({}) == 3, "three by default, which is where the name comes from")
+check(server._slots({"slots": 4}) == 4, "four if asked for")
+check(server._slots({"slots": 99}) == server.cfg.max_slots,
+      "more than the picker can lay out is clamped, not refused")
+check(server._slots({"slots": 0}) == 1, "and a session for nobody is not a session")
+check(server._slots({"slots": None}, fallback=6) == 6,
+      "saying nothing keeps what was there")
+
 print(("FAILED: %d" % len(fails)) if fails else "test_duration: all ok")
 sys.exit(1 if fails else 0)
