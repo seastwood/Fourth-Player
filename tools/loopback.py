@@ -66,6 +66,7 @@ class Guest:
         self.channel = None
         self.socket = None
         self.frames_sent = 0
+        self.offers = 0
         self.webrtc.connect("pad-added", self._on_pad)
         self.webrtc.connect("on-ice-candidate", self._on_ice)
         self.webrtc.connect("on-data-channel", self._on_data_channel)
@@ -255,6 +256,14 @@ async def run(args):
                         with open(args.token_file, "w") as handle:
                             handle.write(message["guest"])
                 elif kind == "offer":
+                    # A second offer means the host has rebuilt this guest's
+                    # media -- a codec change, or a renegotiation. A browser
+                    # closes its peer connection and answers afresh, so this
+                    # stand-in has to as well or it looks like the host failed.
+                    if guest.offers:
+                        print("  a fresh offer arrived; rebuilding")
+                        guest.reset()
+                    guest.offers += 1
                     guest.accept_offer(message["sdp"])
                 elif kind == "ice":
                     guest.add_ice(int(message.get("sdpMLineIndex") or 0),

@@ -506,16 +506,23 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     position: absolute;
     inset: auto 0 0 0;
     grid-template-columns: 1fr auto 1fr;
-    /* Two rows only. The shoulders are pinned to the top corners instead of
-       stacked above the pad: the pad is anchored to the bottom and grows
-       upwards, so a third row pushed the triggers off the top of the screen on
-       a short one. Anchored to the top they cannot go anywhere. */
+    /* Fill the screen rather than hang off the bottom of it.
+       The pad used to be anchored to the bottom with an automatic height, so
+       every row added grew it upwards and the top one -- the triggers -- went
+       off the edge on a short screen. Filling the stage and giving the middle
+       row all the slack puts the shoulders at the top, the pad and buttons at
+       the height of the thumbs, and select and start at the bottom, none of
+       which can be pushed anywhere. */
+    inset: 0;
+    grid-template-rows: auto 1fr auto;
     grid-template-areas:
+      "lsh   .    rsh"
       "left  .    right"
       "mid   mid  mid";
-    align-items: end;
-    row-gap: .5rem;
-    padding: 0 clamp(.6rem, 3vw, 2rem)
+    align-items: center;
+    row-gap: .4rem;
+    padding: calc(env(safe-area-inset-top, 0px) + 2.9rem)
+             clamp(.6rem, 3vw, 2rem)
              calc(clamp(.6rem, 3vh, 1.4rem) + env(safe-area-inset-bottom, 0px));
     pointer-events: none;
   }
@@ -528,15 +535,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-mid { width: 100%; align-items: stretch; }
   .centre-row { width: 100%; justify-content: space-between; }
 
-  .shoulders {
-    position: absolute;
-    /* Below the chips, so the two never fight for the same tap. */
-    top: calc(env(safe-area-inset-top, 0px) + 3rem);
-    pointer-events: auto;
-  }
-  .shoulders-left { left: clamp(.6rem, 3vw, 2rem); }
-  .shoulders-right { right: clamp(.6rem, 3vw, 2rem); }
-  .tbtn-shoulder { width: min(22vw, 100px); padding: .4rem 0; }
+  /* Back in the grid, at the top corners, where the padding above keeps them
+     clear of the chips. */
+  .shoulders { align-self: start; }
+  .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
 }

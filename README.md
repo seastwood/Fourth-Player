@@ -205,11 +205,20 @@ picks the best encoding both ends manage — H.265 where it is available at both
 ends, H.264 otherwise. A browser that says nothing gets H.264, because guessing
 better than that on no information is how a black screen happens.
 
-It is settled once, while nobody else is connected, because the picture is
-encoded a single time for everybody: a guest arriving later who cannot decode
-what is already running is told so plainly rather than having it changed
-underneath the people already playing. `codec` in the config pins it instead if
-you would rather decide yourself.
+The picture is encoded once for everybody, so the codec belongs to the session
+rather than to each guest — and it moves in two directions, which are not
+symmetric:
+
+- **Upwards** — to something better — only while nobody else is connected,
+  because there is nobody to disturb.
+- **Downwards** whenever somebody arrives who cannot decode what is running.
+  Everyone already watching is re-offered the new encoding and loses about a
+  second of picture, which is a much smaller thing than a guest who cannot join
+  at all.
+
+So an iPhone joining an empty session gets H.265, and a friend on Chrome
+arriving later moves everybody to H.264 without anyone having to do anything.
+`codec` in the config pins it if you would rather decide yourself.
 
 ### Trying H.265
 

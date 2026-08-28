@@ -261,7 +261,7 @@ class Server:
         # built, because the offer has to describe what they will actually be
         # sent.
         try:
-            await self.session.agree_codec(message.get("codecs") or [])
+            await self.session.agree_codec(guest, message.get("codecs") or [])
         except Exception as exc:
             log.warning("could not settle on a codec (%s); carrying on", exc)
 

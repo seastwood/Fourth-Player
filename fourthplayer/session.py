@@ -19,7 +19,25 @@ import sys
 import time
 
 from . import gpu, invites, pads as padlib, protocol, retroarch
-from .video import Stage, best_shared_codec
+from .video import Stage, best_shared_codec, CODEC_PREFERENCE
+
+# Better first, so "is this a step down" is a comparison rather than a guess.
+CODEC_RANK = {name: len(CODEC_PREFERENCE) - i
+              for i, name in enumerate(CODEC_PREFERENCE)}
+
+
+def _common(guests):
+    """The codecs every one of these guests can decode.
+
+    A guest that told us nothing constrains nobody: they are sent H.264, which
+    they would have been anyway.
+    """
+    stated = [set(c.lower().replace("video/", "") for c in g.codecs)
+              for g in guests if g.codecs]
+    if not stated:
+        return []
+    shared = set.intersection(*stated)
+    return sorted(shared)
 
 log = logging.getLogger("fourthplayer.session")
 
@@ -75,6 +93,7 @@ class GuestConnection:
         self.media_since = time.monotonic()
         self.outbox = None      # set by the server; None while signalling is down
         self.on_signal = None   # how to reach them, so a rebuild needs no help
+        self.codecs = []        # what their browser said it can decode
         self.peer = None
         self.label = f"Player {slot + 2}"   # the local player is player 1
         self.joined_at = time.monotonic()
@@ -310,36 +329,67 @@ class LiveSession:
         log.info("%s joined from %s", guest.label, address or "unknown")
         return guest, guest_token
 
-    async def agree_codec(self, guest_codecs):
-        """Settle on the best encoding this host and this guest both manage.
+    async def agree_codec(self, guest, guest_codecs):
+        """Settle on an encoding everybody watching can decode.
 
-        Only while nobody else is connected. The picture is encoded once for
-        everybody, so changing it means rebuilding the capture -- harmless with
-        no guests on it, and rude with. A guest who arrives later and cannot
-        decode what is already running is told so rather than having it changed
-        underneath the people already playing.
+        The picture is encoded once for everybody, so this belongs to the
+        session rather than to each guest. Two directions, and they are not
+        symmetric:
+
+        Upwards -- to something better -- only while nobody else is connected,
+        because there is nobody to disturb.
+
+        Downwards, whenever somebody arrives who cannot decode what is running.
+        Everybody already watching renegotiates and loses a second of picture,
+        which is a far smaller thing than a guest who cannot join at all. The
+        alternative was telling them their browser refused the video and
+        leaving them out of the game.
         """
+        guest.codecs = list(guest_codecs or [])
         if self.cfg.codec.lower() != "auto" or self.stage is None:
             return self.stage.codec if self.stage else None
-        wanted = best_shared_codec(guest_codecs, self.cfg.hardware_encode)
-        if wanted == self.stage.codec:
-            return wanted
-        if len(self.guests) > 1:
+
+        # What every guest in the session -- this one included -- can take.
+        everyone = [g for g in self.guests.values()]
+        shared = best_shared_codec(_common(everyone), self.cfg.hardware_encode)
+        if shared == self.stage.codec:
+            return shared
+
+        going_down = CODEC_RANK.get(shared, 0) < CODEC_RANK.get(self.stage.codec, 0)
+        if len(everyone) > 1 and not going_down:
             log.info("keeping %s: somebody else is already watching",
                      self.stage.codec)
             return self.stage.codec
 
-        log.info("agreeing on %s with the first guest (they offered: %s)",
-                 wanted, ", ".join(guest_codecs or ["nothing"]))
+        log.info("%s %s (%d guest(s) already watching)",
+                 "dropping to" if going_down else "agreeing on", shared,
+                 max(0, len(everyone) - 1))
+        await self._recapture(shared)
+        return shared
+
+    async def _recapture(self, codec):
+        """Restart the capture in a different codec and re-offer to everybody."""
         old, self.stage = self.stage, None
+        others = [g for g in self.guests.values() if g.peer is not None]
+        log.info("recapture: re-offering to %d guest(s)", len(others))
+        for other in others:
+            other.peer = None
         try:
             await asyncio.wait_for(
                 self.loop.run_in_executor(None, old.stop), timeout=10)
         except Exception as exc:
             log.warning("the previous capture would not stop (%s)", exc)
-        self.stage = Stage(self.cfg, self.loop, codec=wanted)
+        self.stage = Stage(self.cfg, self.loop, codec=codec)
         self.stage.start()
-        return wanted
+        # Anybody who was watching needs a fresh offer describing the new
+        # encoding; their browsers answer it without being asked twice.
+        for other in others:
+            if other.on_signal is not None:
+                try:
+                    await self.attach_peer(other, other.on_signal)
+                except Exception as exc:
+                    log.warning("%s could not be re-offered (%s)",
+                                other.label, exc)
 
     async def renew(self, guest, on_signal):
         """Give a guest a fresh media connection without a fresh invite.
@@ -383,6 +433,12 @@ class LiveSession:
 
     async def attach_peer(self, guest, on_signal):
         """Give a guest a peer, without blocking everybody else's video."""
+        # Remembered so the host can re-offer to them later without being
+        # asked -- a codec change, or a connection rebuilt after a failure.
+        # Losing this line meant those guests were silently skipped: the
+        # capture restarted around them and they were left with a peer that no
+        # longer had anything behind it.
+        guest.on_signal = on_signal
         # A new peer means a new sender, whose sequence numbers start again at
         # zero. Without this the pad rejects everything they send as stale.
         guest.pad.adopt_new_sender()
