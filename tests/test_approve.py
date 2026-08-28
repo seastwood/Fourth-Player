@@ -38,7 +38,12 @@ from fourthplayer import pads as padlib
 try:
     theirs = UInput(padlib.capabilities(), name="Fourth Player 1",
                     vendor=padlib.VENDOR, product=padlib.PRODUCT)
-    mine = UInput(padlib.capabilities(), name="Synthetic Test Pad",
+    # Our own pads report triggers as axes. A Sunshine virtual pad reports
+    # them as buttons, and a uinput device only emits codes it declared, so
+    # the stand-in has to declare them or the test proves nothing.
+    with_triggers = dict(padlib.capabilities())
+    with_triggers[e.EV_KEY] = list(with_triggers[e.EV_KEY]) + [e.BTN_TL2, e.BTN_TR2]
+    mine = UInput(with_triggers, name="Synthetic Test Pad",
                   vendor=padlib.VENDOR, product=padlib.PRODUCT)
 except Exception as exc:                       # no /dev/uinput on this machine
     print("SKIPPED: could not open uinput (%s)" % exc)
@@ -54,9 +59,9 @@ try:
     check(not any(n.startswith("Fourth Player") for n in names),
           "a guest's own pad is not: they must not approve their own request")
 
-    def press(device, down):
-        device.write(e.EV_KEY, e.BTN_TL, 1 if down else 0)
-        device.write(e.EV_KEY, e.BTN_TR, 1 if down else 0)
+    def press(device, down, codes=(e.BTN_TL, e.BTN_TR)):
+        for code in codes:
+            device.write(e.EV_KEY, code, 1 if down else 0)
         device.syn()
         time.sleep(0.15)
 
@@ -110,6 +115,33 @@ try:
     reader.progress(time.monotonic())
     check(not reader.holding, "letting go is what arms it")
 
+    print("triggers count too, not only bumpers")
+    # A Sunshine virtual pad reports its triggers as BTN_TL2/BTN_TR2. The
+    # prompt says "shoulders", which on a pad in someone's hands means either
+    # pair, so listening for only one of them is a gesture that does nothing
+    # for half the people who make it.
+    press(mine, True, (e.BTN_TL2, e.BTN_TR2))
+    start = time.monotonic()
+    reader.progress(start)
+    check(reader.holding, "both triggers held is a hold")
+    check(reader.progress(start + Shoulders.HOLD_SECONDS + 0.01) >= 1.0,
+          "and fills up the same way")
+    press(mine, False, (e.BTN_TL2, e.BTN_TR2))
+    reader.progress(time.monotonic())
+
+    print("one of each is not a gesture")
+    mine.write(e.EV_KEY, e.BTN_TL, 1)
+    mine.write(e.EV_KEY, e.BTN_TR2, 1)
+    mine.syn()
+    time.sleep(0.15)
+    reader.progress(time.monotonic())
+    check(not reader.holding, "a bumper and a trigger together do nothing")
+    mine.write(e.EV_KEY, e.BTN_TL, 0)
+    mine.write(e.EV_KEY, e.BTN_TR2, 0)
+    mine.syn()
+    time.sleep(0.15)
+    reader.progress(time.monotonic())
+
 finally:
     for device in (mine, theirs):
         try:
@@ -156,6 +188,17 @@ else:
         card.get_window = window.get_window
         card.get_allocated_width = lambda: O.Overlay.ASK_WIDTH
         card.get_allocated_height = lambda: O.Overlay.ASK_HEIGHT
+        # The region has to cover the buttons, which is the whole point of it.
+        import cairo
+        shape = cairo.Region(cairo.RectangleInt(
+            0, 0, O.Overlay.ASK_WIDTH, O.Overlay.ASK_HEIGHT))
+        for name, x, y, w, h in O.Overlay.ask_buttons(
+                O.Overlay, O.Overlay.ASK_WIDTH, O.Overlay.ASK_HEIGHT):
+            corners = [(x, y), (x + w - 1, y), (x, y + h - 1),
+                       (x + w - 1, y + h - 1)]
+            check(all(shape.contains_point(int(px), int(py)) for px, py in corners),
+                  "every corner of %s is inside the clickable region" % name)
+
         for wanted in (True, False, True):
             try:
                 O.Overlay.set_clickable(card, wanted)

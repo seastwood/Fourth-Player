@@ -202,7 +202,10 @@ so save memory is written, but it is still someone else ending your game.
 overlay is the same override-redirect window the join card uses — with who
 asked, what for, and a countdown.
 
-**Answer it by holding both bumpers (L + R) on the controller in your hand.**
+**Answer it by holding both shoulders on the controller in your hand** --
+either the two bumpers or the two triggers, whichever your pad has under your
+fingers. Triggers are reported as buttons on some pads and as axes on others;
+both count.
 That is the only answer reachable mid-game: Kodi is behind a fullscreen
 emulator and the overlay is click-through on purpose, so every other route
 means quitting the game the request is about. A second and a half, because the

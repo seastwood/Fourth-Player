@@ -279,7 +279,7 @@ POLICIES = [
     ("off", "No — only I start games",
      "Guests can play what is already running, and nothing else."),
     ("approve", "Ask me first (30 seconds to answer)",
-     "Hold L + R on your controller to allow it. No answer means no."),
+     "Hold both shoulder buttons to allow it. No answer means no."),
     ("idle", "Yes, when nothing is playing",
      "Guests can start a game once the screen is free."),
     ("open", "Yes, any time",

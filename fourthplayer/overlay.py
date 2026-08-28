@@ -235,10 +235,16 @@ class Overlay(Gtk.Window):
         # means "the whole window"; the binding says "Argument 1 does not allow
         # None as a value" and raises -- which killed the callback that was
         # asking, and with it every update this window makes.
+        #
+        # Sized from the prompt's own dimensions rather than from the current
+        # allocation. This is called as the request arrives, when the window is
+        # still the small badge and has not been resized yet, so asking what it
+        # is allocated right now gives a region that covers a corner -- with
+        # both buttons outside it, and every click on them landing in whatever
+        # is behind.
         if yes:
             shape = cairo.Region(cairo.RectangleInt(
-                0, 0, max(1, self.get_allocated_width()),
-                max(1, self.get_allocated_height())))
+                0, 0, self.ASK_WIDTH, self.ASK_HEIGHT))
         else:
             shape = cairo.Region()
         window.input_shape_combine_region(shape, 0, 0)
@@ -289,6 +295,7 @@ class Overlay(Gtk.Window):
     def reposition(self):
         if self.pending:
             self.resize(self.ASK_WIDTH, self.ASK_HEIGHT)
+            self.set_clickable(True)           # again, now it is this size
             display = Gdk.Display.get_default()
             monitor = display.get_primary_monitor() or display.get_monitor(0)
             area = monitor.get_geometry()
@@ -370,7 +377,7 @@ class Overlay(Gtk.Window):
 
         if self.shoulders.ok:
             text(ctx, CARD_PAD, height - 68,
-                 "Hold L + R on your controller to start it. Do nothing to refuse.",
+                 "Hold both shoulders \u2014 bumpers or triggers \u2014 to start it.",
                  11, (0.62, 0.66, 0.72))
             # The hold, drawn filling up, so it is obvious it is working before
             # it finishes rather than only after.
