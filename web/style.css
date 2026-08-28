@@ -784,8 +784,15 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   height: 1.75rem;
   padding-block: 0;
 }
+/* The buttons, and the chips that are spans. Giving a span a fixed height puts
+   its text against the top edge -- the height is the box, not the line -- so
+   anything with a height here has to say where the line sits inside it.
+   Selects are left alone: they centre their own text, and telling one to be a
+   flex container is asking for a different bug on every engine. */
 .hud .ghost,
-.browser-bar .ghost {
+.browser-bar .ghost,
+.hud .chip:not(select),
+.browser-bar .chip:not(select) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
