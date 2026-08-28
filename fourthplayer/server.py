@@ -20,6 +20,7 @@ import os
 import re
 import socket
 import ssl
+import urllib.parse
 from http import HTTPStatus
 
 import websockets
@@ -430,6 +431,19 @@ class Server:
                     return {"ok": False,
                             "error": "already at the maximum session length"}
                 return self._status()
+            if command == "url":
+                if "set" in request:
+                    try:
+                        self.cfg.public_url = self.clean_url(request["set"])
+                    except ValueError as exc:
+                        return {"ok": False, "error": str(exc)}
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the address: %s", exc)
+                    log.info("links will be built on %s",
+                             self.cfg.public_url or "the address on this network")
+                return self._status()
             if command == "slots":
                 if request.get("set") is not None:
                     self.cfg.slots = self._slots({"slots": request["set"]},
@@ -478,6 +492,32 @@ class Server:
             return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": f"unknown command {command!r}"}
 
+    @staticmethod
+    def clean_url(text):
+        """Tidy what somebody typed into a base a link can be built on.
+
+        Forgiving about the scheme, because "fourthplayer.example.com" is what
+        a person types and a bare host is not a URL. Strict about the rest: a
+        base that is quietly wrong produces links that look right and go
+        nowhere, which is the worst way for this to fail -- the owner sends
+        them to a friend and hears back that it does not work.
+        """
+        text = (text or "").strip().rstrip("/")
+        if not text:
+            return ""                          # back to the address on the LAN
+        if "://" not in text:
+            text = "https://" + text
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("the address has to start with http:// or https://")
+        if not parsed.netloc or " " in parsed.netloc:
+            raise ValueError("that does not look like a web address")
+        if parsed.query or parsed.fragment:
+            raise ValueError("leave off anything after the path")
+        # The path is kept: a reverse proxy may serve this under a prefix.
+        return urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
     def _slots(self, request, fallback=None):
         """How many may join, clamped to what this machine will lay out."""
         asked = request.get("slots")
@@ -515,6 +555,8 @@ class Server:
             # The remembered setting travels with a closed status too, so the
             # add-on can offer last time's answer when opening the next one.
             return {"ok": True, "open": False,
+                    "public_url": self.cfg.public_url,
+                    "example_url": self.join_url("EXAMPLE"),
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None}}
@@ -529,6 +571,8 @@ class Server:
             "unlimited": self.session.unlimited,
             "slots": self.session.slots,
             "max_slots": self.cfg.max_slots,
+            "public_url": self.cfg.public_url,
+            "example_url": self.join_url("EXAMPLE"),
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,

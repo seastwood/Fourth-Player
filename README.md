@@ -453,6 +453,27 @@ That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a
 timestamped backup. Safe to run twice.
 
+### The address links are built on
+
+Set it in Kodi under **Address for links**, or:
+
+```sh
+python3 -m fourthplayer url                              # what is it now
+python3 -m fourthplayer url fourthplayer.example.com     # the scheme is optional
+python3 -m fourthplayer url ""                           # back to this machine
+```
+
+With nothing set, links point at this machine's address on the local network,
+which works from the sofa and nowhere else. That failure is silent in the worst
+way -- the link looks right, gets sent to a friend, and goes nowhere -- so the
+status line says which of the two it is doing, and Kodi shows what a link will
+look like after the change.
+
+A bare host gets `https://` put in front of it, because that is what a person
+types. A path is kept, for a reverse proxy serving this under a prefix.
+Anything that cannot be a base -- another scheme, a space in the host, a query
+string -- is refused rather than guessed at. `tests/test_address.py`.
+
 ### Reaching it from outside
 
 **Two ports, not one.** TCP `8443` carries the join page and the PIN; the video

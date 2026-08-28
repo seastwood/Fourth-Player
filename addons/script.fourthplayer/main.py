@@ -287,6 +287,44 @@ POLICIES = [
 ]
 
 
+def choose_url(status):
+    """The address guests' links are built on.
+
+    Without this the link points at this machine's address on the local
+    network, which works from the sofa and nowhere else -- and the failure is
+    silent in the worst way: the link looks right, gets sent to a friend, and
+    does nothing. So the current setting is shown, and what a link will look
+    like afterwards.
+    """
+    dialog = xbmcgui.Dialog()
+    current = status.get("public_url", "")
+    typed = dialog.input("Address for guests' links",
+                         defaultt=current or "https://",
+                         type=xbmcgui.INPUT_ALPHANUM)
+    if typed is None:
+        return                                 # backed out; nothing changes
+    typed = typed.strip()
+    if typed in ("https://", "http://"):
+        typed = ""                             # left as the prompt: clear it
+    if typed == current:
+        return
+    if not typed and not dialog.yesno(
+            ADDON_NAME,
+            "Clear the address?\n\nLinks will point at this machine on the "
+            "local network, which only works for people in the house.",
+            nolabel="Keep it", yeslabel="Clear"):
+        return
+    reply = C.set_url(typed)
+    if not reply.get("ok"):
+        dialog.ok(ADDON_NAME, reply.get("error", "That address was not accepted."))
+        return
+    example = reply.get("example_url", "")
+    if reply.get("public_url"):
+        dialog.ok(ADDON_NAME, "Links will look like:\n\n%s" % example)
+    else:
+        notify("Links now point at this machine on the network.")
+
+
 def choose_slots(status):
     """How many can join at once.
 
@@ -374,6 +412,7 @@ def main():
              lambda: start_session((status.get("launch") or {}).get("policy", "off"))),
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("How many can join?…", lambda: choose_slots(status)),
+            ("Address for links…", lambda: choose_url(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
         ]
@@ -391,6 +430,7 @@ def main():
             ("Add more time…", lambda: extend_session(status)),
             ("Remove a player…", lambda: remove_player(C.status())),
             ("How many can join?…", lambda: choose_slots(status)),
+            ("Address for links…", lambda: choose_url(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),
         ]

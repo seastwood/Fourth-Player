@@ -119,6 +119,13 @@ def main(argv=None):
                              "whatever is playing. idle: only when nothing is "
                              "running. approve: ask, and answer within 30s. "
                              "Omit to read the current setting.")
+    address = sub.add_parser(
+        "url", help="the address guests' links are built on")
+    address.add_argument("set", nargs="?",
+                         help="e.g. https://fourthplayer.example.com. Pass an "
+                              "empty string to go back to this machine's "
+                              "address on the network. Omit to read it.")
+
     slots = sub.add_parser(
         "slots", help="how many can join at once, from the next session on")
     slots.add_argument("set", nargs="?", type=int,
@@ -193,6 +200,8 @@ def main(argv=None):
         request["slot"] = args.slot
     if args.command == "policy" and args.set:
         request["set"] = args.set
+    if args.command == "url" and args.set is not None:
+        request["set"] = args.set
     if args.command == "slots" and args.set is not None:
         request["set"] = args.set
     if args.command == "start" and args.slots:
@@ -212,12 +221,23 @@ def main(argv=None):
     return 0
 
 
+def _print_address(reply):
+    if reply.get("public_url"):
+        print(f"  links are built on {reply['public_url']}")
+    elif reply.get("example_url"):
+        # No public address set, so links point at this machine on the LAN --
+        # which works from the sofa and nowhere else.
+        print(f"  no address set; links point at "
+              f"{reply['example_url'].split('/j/')[0]} (this network only)")
+
+
 def _print_status(reply):
     if not reply.get("open"):
         print("no session is open")
         if reply.get("slots"):
             print(f"  the next one will hold {reply['slots']} "
                   f"(up to {reply.get('max_slots', '?')})")
+        _print_address(reply)
         return
     if reply.get("unlimited") or reply.get("remaining") is None:
         print("session open, no time limit")
@@ -242,6 +262,7 @@ def _print_status(reply):
             waiting = launch["pending"]
             print(f"    WAITING: {waiting['who']} wants {waiting['label']} "
                   f"({waiting['seconds']}s left) -- approve or deny")
+    _print_address(reply)
     guests = reply.get("guests") or []
     print(f"  guests: {len(guests)}/{reply.get('slots')}")
     for guest in guests:
