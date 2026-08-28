@@ -537,8 +537,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
       "mid   mid  mid";
     align-items: center;
     row-gap: .4rem;
+    --side: clamp(.6rem, 3vw, 2rem);
     padding: calc(env(safe-area-inset-top, 0px) + 2.9rem)
-             clamp(.6rem, 3vw, 2rem)
+             var(--side)
              calc(.7rem + env(safe-area-inset-bottom, 0px));
     pointer-events: none;
   }
@@ -556,13 +557,31 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-mid { width: 100%; align-items: stretch; }
   .centre-row { width: 100%; justify-content: space-between; }
 
-  /* Out to the edges, off the picture. Centred in their half of the grid, the
-     d-pad and the face buttons sat on top of the game -- the stream is
-     letterboxed in the middle of a much wider screen, and the black either
-     side of it is exactly the room these want. This also lines them up under
-     the shoulders, which are already in the corners. */
-  .touch-left { justify-content: flex-start; }
-  .touch-right { justify-content: flex-end; }
+  /* Centred in the black beside the picture, rather than in the whole half of
+     the screen (which put them on the game) or hard against the edge (which
+     was further out than necessary). fitGutter() measures the letterbox and
+     writes it into --gutter; the floor keeps the buttons their own size when
+     the picture is wide enough to leave almost no bar, and the fallback is a
+     reasonable guess for the moment before the first frame arrives. */
+  .touch-left, .touch-right { justify-content: center; }
+  /* The floor is the cluster's own width, repeated from the rules below --
+     max() takes lengths, so `min-content` cannot go here, and a bad value
+     would throw the whole declaration away. */
+  /* These two reach back out through the padding to the edge of the stage, so
+     that a column one gutter wide lands exactly on the letterbox. Inset by the
+     padding like everything else, it started a few pixels inside the picture
+     on a 16:9 stream, where the bar is barely wider than the buttons. The
+     padding still applies to the shoulders and to select and start. */
+  .touch-left {
+    justify-self: start;
+    margin-left: calc(-1 * var(--side));
+    width: max(var(--gutter, 30%), min(30 * var(--sh), 175px));
+  }
+  .touch-right {
+    justify-self: end;
+    margin-right: calc(-1 * var(--side));
+    width: max(var(--gutter, 30%), min(40 * var(--sh), 235px));
+  }
 
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */

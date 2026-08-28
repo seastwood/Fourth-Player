@@ -938,15 +938,7 @@ function startPadLoop() {
     el("prompt").hidden = true;
     describePad(event.gamepad);
   });
-  window.addEventListener("gamepaddisconnected", () => {
-    padIndex = null;
-    padName = "";
-    paintPicker();
-    // Their controller has gone; offer the on-screen one back unless they
-    // turned it off deliberately.
-    if (!chosenByHand && el("padtype").value !== "off") showTouch(true);
-    else el("prompt").hidden = false;
-  });
+  window.addEventListener("gamepaddisconnected", forgetPad);
 
   wireTouch();
   // A phone with no controller gets the on-screen pad without being asked; a
@@ -965,21 +957,61 @@ function startPadLoop() {
   });
 }
 
+function describePad(pad) {
+  /* Name the controller in the chip. This function was called from two places
+     and defined in none, so every call threw and padName stayed empty: on a
+     desktop the "press any button" prompt still disappeared, which looks like
+     detection, and on a phone that prompt is never shown in the first place,
+     so a connected controller produced no sign of itself anywhere. */
+  const raw = (pad && pad.id) || "";
+  // Ids carry vendor and product codes and, in Chrome, the words STANDARD
+  // GAMEPAD. None of that means anything to the person holding the thing.
+  let name = raw.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  // Firefox prefixes the vendor and product as hex, e.g. 054c-05c4-Wireless
+  // Controller, which is four useless words' worth of the room in the chip.
+  name = name.replace(/^[0-9a-f]{4}-[0-9a-f]{4}-\s*/i, "");
+  if (!name) name = raw.trim();
+  if (!name) name = "Controller";
+  if (name.length > 28) name = name.slice(0, 27).trimEnd() + "\u2026";
+  padName = name;
+  paintPicker();
+}
+
+function forgetPad() {
+  padIndex = null;
+  padName = "";
+  paintPicker();
+  // Their controller has gone; offer the on-screen one back unless they
+  // turned it off deliberately.
+  if (!chosenByHand && el("padtype").value !== "off") showTouch(true);
+  else el("prompt").hidden = false;
+}
+
 function hasGamepad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   return Array.from(pads).some((p) => p && p.connected);
 }
 
 function tick() {
-  if (!input || input.readyState !== "open") return;
+  /* Deliberately before the channel check below. Which controller is attached
+     is worth showing whether or not there is anywhere to send its buttons yet,
+     and polling rather than trusting the events matters on iOS, where
+     gamepadconnected arrives late, once, or not at all. */
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let pad = padIndex !== null ? pads[padIndex] : null;
+  if (pad && !pad.connected) pad = null;
   if (!pad) pad = Array.from(pads).find((p) => p && p.connected) || null;
   if (pad && padIndex === null) {
     padIndex = pad.index;
     el("prompt").hidden = true;
     describePad(pad);
+  } else if (pad && !padName) {
+    describePad(pad);                  // named late, after a reconnect
+  } else if (!pad && padIndex !== null) {
+    forgetPad();                       // gone without an event, which iOS does
   }
+
+  if (!input || input.readyState !== "open") return;
   sendFrame(pad, false);
 }
 
@@ -1098,6 +1130,23 @@ function fitStage() {
   style.setProperty("--vv-width", vv.width + "px");
   style.setProperty("--vv-top", vv.offsetTop + "px");
   style.setProperty("--vv-left", vv.offsetLeft + "px");
+  fitGutter();
+}
+
+/* How much black there is beside the picture.
+   The stream is letterboxed -- a 4:3 game on a wide phone leaves a wide bar
+   either side, a 16:9 one leaves a narrow bar -- and that bar is where the
+   d-pad and face buttons belong: off the game, but no further out than they
+   have to be. Pinned to the screen edge they were too far out; centred in
+   their half of the grid they sat on the picture. Centred in the bar is both,
+   and it follows whatever is actually being played. */
+function fitGutter() {
+  const box = stage.getBoundingClientRect();
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!box.width || !box.height || !w || !h) return;
+  const shown = Math.min(box.width, box.height * (w / h));
+  document.documentElement.style.setProperty(
+    "--gutter", Math.max(0, (box.width - shown) / 2) + "px");
 }
 
 if (window.visualViewport) {
@@ -1113,6 +1162,12 @@ if (window.visualViewport) {
   window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
   fitStage();
 }
+
+// The picture's shape is only known once there is a picture, and it changes
+// when the host switches console or resolution.
+video.addEventListener("loadedmetadata", fitGutter);
+video.addEventListener("resize", fitGutter);
+window.addEventListener("resize", fitGutter);
 
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
