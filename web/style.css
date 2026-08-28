@@ -507,8 +507,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     inset: auto 0 0 0;
     grid-template-columns: 1fr auto 1fr;
     grid-template-areas:
-      "lsh  .    rsh"
-      "left mid  right";
+      "lsh   .    rsh"
+      "left  .    right"
+      "mid   mid  mid";
     align-items: end;
     row-gap: .5rem;
     padding: 0 clamp(.6rem, 3vw, 2rem)
@@ -518,6 +519,11 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
   .dpad { width: min(30vh, 175px); }
   .face { width: min(40vh, 235px); }
+  /* Select and start go to the far corners rather than the middle: in
+     landscape the middle of the screen is the picture, and the corners are
+     where the thumbs already are. */
+  .touch-mid { width: 100%; align-items: stretch; }
+  .centre-row { width: 100%; justify-content: space-between; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
 }
