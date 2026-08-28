@@ -921,7 +921,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-28c";
+const CLIENT_BUILD = "2026-08-28d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1300,6 +1300,41 @@ function countdown(what, seconds) {
   askTimer = setInterval(paint, 1000);
 }
 
+/* A video nobody can see is a video the browser may stop.
+
+   Safari pauses playback it decides is not being watched -- fully obscured,
+   backgrounded, off screen -- and nothing here ever listened for that, so a
+   paused picture stayed paused for ever and reloading the page was the only
+   way back. Which is exactly what a guest reported after opening the game list
+   over the top of the picture and picking something.
+
+   So: say so, and start it again. The report goes to the host log, because
+   this is otherwise invisible from the only side that keeps records. */
+video.addEventListener("pause", () => {
+  if (ended || video.ended) return;
+  report("the browser paused the video; starting it again");
+  resumeVideo();
+});
+
+// Coming back to the tab is the other half of the same thing.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") resumeVideo();
+});
+
+function resumeVideo() {
+  if (ended) return;
+  const attempt = video.play();
+  if (attempt && attempt.catch) {
+    attempt.catch(() => {
+      // Autoplay rules can refuse a silent restart. Muting is allowed, and a
+      // muted picture beats a frozen one; the sound button gets it back.
+      video.muted = true;
+      el("unmute").hidden = false;
+      video.play().catch(() => {});
+    });
+  }
+}
+
 function openBrowser() {
   el("browser").hidden = false;
   // Asked for every time it opens: games get added to the box, and a list
@@ -1310,6 +1345,8 @@ function openBrowser() {
 
 function closeBrowser() {
   el("browser").hidden = true;
+  // Whatever the browser decided while the picture was behind the list.
+  resumeVideo();
 }
 
 function paintShelf(message) {
