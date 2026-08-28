@@ -15,11 +15,17 @@ Writing to `power_dpm_force_performance_level` needs root, so `install.sh`
 drops a sudoers rule for one fixed script and nothing else. If that is not set
 up, this degrades to a log line: the session still works, it is just slower
 until a game starts.
+
+The rule is necessary and was not sufficient. The service unit sets
+NoNewPrivileges, under which sudo refuses to do anything at all -- so for as
+long as that hardening has been there, this has failed at every session start,
+logged one warning, and been ignored. See `_privileged`.
 """
 
 import glob
 import logging
 import os
+import shutil
 import subprocess
 
 log = logging.getLogger("fourthplayer.gpu")
@@ -39,6 +45,34 @@ def current():
         except OSError:
             continue
     return None
+
+
+def _privileged(level):
+    """Ways to run the helper, best first.
+
+    Straight sudo does not work from inside this service. The unit sets
+    NoNewPrivileges, which is the whole point of it, and sudo refuses outright:
+    "the no new privileges flag is set, which prevents sudo from running as
+    root", exit status 1. That had been logged as a warning at every session
+    start and otherwise ignored, so the clocks had never once been set -- and
+    the card idles at 300 MHz, where the same encode runs at 23 fps instead of
+    36. It shows up as the picture stalling the moment a game takes the GPU.
+
+    So the helper is handed to the service manager instead, as its own
+    transient unit outside this one's confinement -- the same escape the
+    launcher uses to start games, for the same reason.
+    """
+    ways = []
+    runner = shutil.which("systemd-run")
+    if runner:
+        ways.append(("a transient unit", [
+            runner, "--user", "--wait", "--collect", "--quiet",
+            "--unit", "fourth-player-clocks",
+            "--", "sudo", "-n", HELPER, level]))
+    # Still worth trying directly: outside a sandbox it is one process instead
+    # of three, and it is what runs when this is used from a shell.
+    ways.append(("sudo", ["sudo", "-n", HELPER, level]))
+    return ways
 
 
 def set_level(level):
@@ -65,13 +99,16 @@ def set_level(level):
         return True
 
     if os.path.exists(HELPER):
-        try:
-            subprocess.run(["sudo", "-n", HELPER, level], check=True,
-                           capture_output=True, timeout=10)
-            log.info("GPU power level set to %s via the helper", level)
-            return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            log.warning("the clock helper refused: %s", exc)
+        for describe, argv in _privileged(level):
+            try:
+                subprocess.run(argv, check=True, capture_output=True, timeout=20)
+                log.info("GPU power level set to %s (%s)", level, describe)
+                return True
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                    OSError) as exc:
+                log.debug("clock helper via %s did not work: %s", describe, exc)
+        log.warning("the clock helper would not run; the GPU stays on whatever "
+                    "the governor decides, and encoding is slower for it")
     else:
         log.info("no clock helper installed; leaving the GPU governor alone "
                  "(encoding will be slower until a game ramps the card)")
