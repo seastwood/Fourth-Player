@@ -506,8 +506,11 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     position: absolute;
     inset: auto 0 0 0;
     grid-template-columns: 1fr auto 1fr;
+    /* Two rows only. The shoulders are pinned to the top corners instead of
+       stacked above the pad: the pad is anchored to the bottom and grows
+       upwards, so a third row pushed the triggers off the top of the screen on
+       a short one. Anchored to the top they cannot go anywhere. */
     grid-template-areas:
-      "lsh   .    rsh"
       "left  .    right"
       "mid   mid  mid";
     align-items: end;
@@ -524,6 +527,16 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      where the thumbs already are. */
   .touch-mid { width: 100%; align-items: stretch; }
   .centre-row { width: 100%; justify-content: space-between; }
+
+  .shoulders {
+    position: absolute;
+    /* Below the chips, so the two never fight for the same tap. */
+    top: calc(env(safe-area-inset-top, 0px) + 3rem);
+    pointer-events: auto;
+  }
+  .shoulders-left { left: clamp(.6rem, 3vw, 2rem); }
+  .shoulders-right { right: clamp(.6rem, 3vw, 2rem); }
+  .tbtn-shoulder { width: min(22vw, 100px); padding: .4rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
 }
