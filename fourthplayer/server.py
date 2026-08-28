@@ -25,7 +25,7 @@ import websockets
 
 from . import invites
 from .config import Config
-from .session import LiveSession
+from .session import LAUNCH_POLICIES, LiveSession
 from .tls import ensure_certificate
 
 log = logging.getLogger("fourthplayer.server")
@@ -414,10 +414,23 @@ class Server:
                             "error": "already at the maximum session length"}
                 return self._status()
             if command == "policy":
-                if not (self.session and self.session.open):
-                    return {"ok": False, "error": "no session"}
                 if request.get("set"):
-                    self.session.set_policy(str(request["set"]))
+                    wanted = str(request["set"])
+                    if wanted not in LAUNCH_POLICIES:
+                        return {"ok": False,
+                                "error": "unknown setting %r" % wanted}
+                    # Settable with nothing open, in which case it is only the
+                    # answer the next session will start with.
+                    chosen = (self.session.set_policy(wanted)
+                              if self.session and self.session.open else wanted)
+                    # Remembered, so the next session starts the way the last
+                    # one ended rather than silently back at off -- which read
+                    # as the feature being broken.
+                    self.cfg.guest_launch = chosen
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the launch policy: %s", exc)
                 return self._status()
             if command == "approve":
                 if not (self.session and self.session.open):
@@ -464,7 +477,10 @@ class Server:
 
     def _status(self):
         if not (self.session and self.session.open):
-            return {"ok": True, "open": False}
+            # The remembered setting travels with a closed status too, so the
+            # add-on can offer last time's answer when opening the next one.
+            return {"ok": True, "open": False,
+                    "launch": {"policy": self.cfg.guest_launch, "pending": None}}
         clear = self.session.invite.clear_invite
         return {
             "ok": True,

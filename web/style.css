@@ -753,3 +753,24 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   color: var(--dim);
   font-size: .85rem;
 }
+
+/* A button that is an icon rather than a word. Sized in ems so it matches the
+   chips beside it whatever the root size works out to. */
+.ghost.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: .38rem;
+  line-height: 0;
+}
+.ghost.icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+}
+
+/* Stripped back to the picture. The stage is already exactly the visible
+   viewport, so this only takes away the chips -- and only the chips: the
+   on-screen pad is the controls for anyone without a controller, and hiding it
+   to make the picture bigger would leave them unable to play. */
+.stage.immersive .hud { display: none !important; }

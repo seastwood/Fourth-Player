@@ -108,16 +108,31 @@ def stop_service():
 
 # -- sessions ------------------------------------------------------------
 
-def start_session():
+def start_session(previous="off"):
+    # POLICIES is defined further down this file; module level, so it is there
+    # by the time anything calls this.
     dialog = xbmcgui.Dialog()
     choice = dialog.select("How long should the session stay open?",
                            [duration_label(m) for m in DURATIONS])
     if choice < 0:
         return
+    # Asked here rather than left to be found in the menu. A session started
+    # with this off looks, from the guest's phone, exactly like a feature that
+    # does not exist: there is no button, and nothing to explain its absence.
+    # Last time's answer is marked, so the usual case is two taps.
+    labels = [("> " if value == previous else "  ") + label
+              for value, label, _ in POLICIES]
+    picked = dialog.select("Can guests start games?", labels)
+    if picked < 0:
+        return
     reply = C.start_session(DURATIONS[choice])
     if not reply.get("ok"):
         dialog.ok(ADDON_NAME, reply.get("error", "The session would not start."))
         return
+    if POLICIES[picked][0] != "off":
+        answer = C.set_policy(POLICIES[picked][0])
+        if not answer.get("ok"):
+            notify(answer.get("error", "Could not set that."), error=True)
     panels.show_invite(C.status)
 
 
@@ -282,7 +297,9 @@ def main():
 
     if not status.get("open"):
         entries = [
-            ("Open a session…", start_session),
+            ("Open a session…",
+             lambda: start_session((status.get("launch") or {}).get("policy", "off"))),
+            ("Can guests start games?…", lambda: choose_policy(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
         ]

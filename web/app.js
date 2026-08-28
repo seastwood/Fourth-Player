@@ -754,6 +754,12 @@ const HUD_SECONDS = 5;
 let hudTimer = null;
 
 function showHud(persist) {
+  // Asking for the chips back is asking to leave the stripped-back view.
+  if (immersive) {
+    immersive = false;
+    stage.classList.remove("immersive");
+    el("full").setAttribute("aria-label", "Fullscreen");
+  }
   el("hud").classList.add("show");
   if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
   if (!persist) hudTimer = setTimeout(hideHud, HUD_SECONDS * 1000);
@@ -1111,6 +1117,7 @@ el("full").addEventListener("click", () => {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
     return;
   }
+  if (immersive) { toggleImmersive(false); return; }
   // iOS Safari has no Fullscreen API for ordinary elements -- only a video can
   // go fullscreen, and only through its own webkit call. Without this the
   // button did nothing at all on a phone, which is where it is most wanted.
@@ -1122,14 +1129,38 @@ el("full").addEventListener("click", () => {
   }
 });
 
+/* Fullscreen where the page keeps running.
+
+   Native video fullscreen -- webkitEnterFullscreen, the only kind iOS Safari
+   offers a page that is not a video -- hands the picture to the system player.
+   The page behind it is no longer the thing on screen, and a page that is not
+   on screen does not reliably get gamepad readings or timers, so the
+   controller stops working exactly when someone has made the picture as big as
+   possible. It also covers the on-screen pad, which was already a known cost.
+
+   So this is the fallback instead: strip the page back to the picture, which
+   is most of what fullscreen was wanted for, and keep the page alive and
+   holding the controller. For an actually chrome-free screen on iOS, the
+   answer is Add to Home Screen -- the manifest and meta tags are there for it. */
+let immersive = false;
+
+function toggleImmersive(on) {
+  const wanted = on === undefined ? !immersive : on;
+  if (!wanted) { showHud(); return; }          // showHud clears the class
+  immersive = true;
+  stage.classList.add("immersive");
+  el("full").setAttribute("aria-label", "Leave fullscreen");
+  hideHud();
+  fitStage();
+}
+
 function enterVideoFullscreen() {
-  // Native video fullscreen puts the picture above everything, including the
-  // on-screen pad -- fine with a real controller, and the reason this is the
-  // fallback rather than the first choice.
-  if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
-  else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("fullscreen");
-  else showNotice('<p class="footnote">This browser will not let the page go '
-                  + "fullscreen. Rotating the phone usually gets the same result.</p>");
+  toggleImmersive();
+  if (immersive) {
+    showNotice('<p class="footnote">Tap the screen to bring the buttons back. '
+               + "For a proper fullscreen with no address bar, add this page to "
+               + "your home screen.</p>", false);
+  }
 }
 
 /* Keep the stage inside the part of the window you can actually see.

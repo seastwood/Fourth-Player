@@ -53,7 +53,14 @@
     <button id="games" type="button" class="ghost" hidden>Games</button>
     <button id="unmute" type="button" class="ghost" hidden>🔇 Sound off — tap</button>
     <button id="info" type="button" class="ghost" title="What is happening">?</button>
-    <button id="full" type="button" class="ghost">Fullscreen</button>
+    <button id="full" type="button" class="ghost icon" aria-label="Fullscreen"
+            title="Fullscreen">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"
+              fill="none" stroke="currentColor" stroke-width="2.4"
+              stroke-linecap="square"/>
+      </svg>
+    </button>
     <button id="hide" type="button" class="ghost" title="Hide these">&times;</button>
   </div>
 

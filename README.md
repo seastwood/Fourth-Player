@@ -542,6 +542,21 @@ packet self-heals on the next one and silence is unambiguous. After 250 ms of it
 the pad is opened. Without that, a guest whose connection dies mid-press leaves
 their character walking into a wall until somebody notices.
 
+## The fullscreen button does not use native fullscreen
+
+On a desktop it asks for real fullscreen and gets it. On iOS Safari there is no
+fullscreen for anything that is not a video, and the one call that does work --
+`webkitEnterFullscreen` -- hands the picture to the system player. The page
+behind it stops being the thing on screen, and a page that is not on screen
+does not reliably get gamepad readings or timers, so the controller goes dead
+exactly when someone has made the picture as big as they can. It covers the
+on-screen pad too.
+
+So on iOS the button strips the page back to the picture instead and leaves the
+page running and holding the controller. Tapping the screen brings the chips
+back. For a genuinely chrome-free screen, add the page to the home screen --
+the manifest and the apple-mobile-web-app meta are there for exactly that.
+
 ## Layout
 
 ```
