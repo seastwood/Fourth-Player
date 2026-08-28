@@ -219,7 +219,14 @@ video {
   transition: opacity .25s ease;
   pointer-events: none;
 }
-.stage:hover .hud, .hud.show { opacity: 1; pointer-events: auto; }
+.hud.show { opacity: 1; pointer-events: auto; }
+
+/* Hover reveals them only where hovering is a thing. A phone applies :hover to
+   whatever was last tapped and keeps it there, so this rule held the chips on
+   screen no matter what closed them -- the x appeared to do nothing. */
+@media (hover: hover) and (pointer: fine) {
+  .stage:hover .hud { opacity: 1; pointer-events: auto; }
+}
 
 .chip {
   font-family: var(--pixel);

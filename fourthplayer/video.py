@@ -713,9 +713,14 @@ class Peer:
         These are known: this program built the pipeline that produces them.
         """
         if kind == "audio":
+            # encoding-params is the channel count, and leaving it out is not
+            # cosmetic: it becomes "a=rtpmap:97 OPUS/48000" in the offer, where
+            # every browser expects "opus/48000/2". Stating the caps by hand
+            # dropped it, and the sound went with it -- the GStreamer test
+            # guest accepts either, so nothing caught it.
             return Gst.Caps.from_string(
                 "application/x-rtp,media=(string)audio,encoding-name=(string)OPUS,"
-                "payload=(int)97,clock-rate=(int)48000")
+                "payload=(int)97,clock-rate=(int)48000,encoding-params=(string)2")
         encoding = "H265" if self.stage.cfg.codec.lower() in ("h265", "hevc") else "H264"
         return Gst.Caps.from_string(
             f"application/x-rtp,media=(string)video,encoding-name=(string){encoding},"
