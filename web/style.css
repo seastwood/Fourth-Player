@@ -186,6 +186,12 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
 .stage {
   position: fixed;
   inset: 0;
+  /* The dynamic viewport, not the large one. A phone reports 100vh as the
+     height the page would have if the browser's bars were gone, so anything
+     positioned against the bottom edge -- select and start -- was laid out
+     below the part of the screen you can actually see. dvh is the height that
+     is really there. */
+  height: 100dvh;
   background: #000;
   touch-action: manipulation;
   overflow: hidden;             /* nothing here is ever reached by scrolling */
@@ -523,7 +529,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     row-gap: .4rem;
     padding: calc(env(safe-area-inset-top, 0px) + 2.9rem)
              clamp(.6rem, 3vw, 2rem)
-             calc(clamp(.6rem, 3vh, 1.4rem) + env(safe-area-inset-bottom, 0px));
+             calc(.7rem + env(safe-area-inset-bottom, 0px));
     pointer-events: none;
   }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
@@ -538,6 +544,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
   .shoulders { align-self: start; }
+  /* Pinned to the ends of their row so they cannot drift inward as the middle
+     row takes up slack. */
+  .touch-mid { align-self: end; }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
