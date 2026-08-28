@@ -340,6 +340,29 @@ python3 -m fourthplayer serve --audio-device NAME  # a specific monitor source
 
 Everything is also settable in `~/.config/fourth-player/config.json`.
 
+### How long a session lasts
+
+Thirty minutes, an hour, two, four, a number you type, or none at all -- from
+Kodi, or:
+
+```sh
+python3 -m fourthplayer start --minutes 90
+python3 -m fourthplayer start --unlimited     # runs until you close it
+```
+
+No deadline is held as an infinite expiry rather than a flag, so every
+comparison that asks whether the session is still alive keeps working without
+knowing about it. The one place infinity must not reach is a wire: JSON has no
+representation for it, and `JSON.parse("Infinity")` is an error in a browser.
+So anything leaving the process sends `null` for the remaining time, and the
+page shows "no time limit" instead of counting down. `tests/test_duration.py`
+holds that down, including that an unlimited session comes back unlimited after
+a restart.
+
+`max_duration_minutes` caps a number of minutes. It does not override a
+deliberate decision to have no limit -- that is a different kind of answer, and
+Kodi asks a second time before taking it.
+
 ### Running out of time
 
 Sessions warn their guests at five minutes, two minutes and thirty seconds, and

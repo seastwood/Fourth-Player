@@ -13,6 +13,7 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -216,8 +217,9 @@ class LiveSession:
         self._sweeper = self.loop.create_task(self._sweep_forever())
         self._start_overlay()
         self.save()
-        log.info("session open for %.0f minutes, %d slots, pads at %s",
-                 duration_seconds / 60, self.cfg.slots,
+        log.info("session open for %s, %d slots, pads at %s",
+                 "no fixed time" if math.isinf(duration_seconds)
+                 else "%.0f minutes" % (duration_seconds / 60), self.cfg.slots,
                  ", ".join(p.path for p in self.pads))
         return self.invite
 
@@ -313,6 +315,10 @@ class LiveSession:
 
     def remaining(self):
         return self.invite.remaining(self._now()) if self.invite else 0.0
+
+    @property
+    def unlimited(self):
+        return self.invite is not None and self.invite.unlimited
 
     def extend(self, seconds):
         """Push the deadline back. The invite and every guest survive it."""

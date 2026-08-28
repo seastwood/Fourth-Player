@@ -374,9 +374,11 @@ class Overlay(Gtk.Window):
         text(ctx, 32, height / 2 - 9, self.summary(), 12, (0.89, 0.91, 0.95))
 
     def summary(self):
-        remaining = self.status.get("remaining", 0)
+        remaining = self.status.get("remaining")
         guests = len(self.status.get("guests") or [])
         slots = self.status.get("slots", 0)
+        if remaining is None:                  # a session with no deadline
+            return f"Sharing · {guests}/{slots} · no time limit"
         return f"Sharing · {guests}/{slots} · {remaining // 60}:{remaining % 60:02d} left"
 
 

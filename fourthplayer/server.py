@@ -14,6 +14,7 @@ reverse proxy cannot accidentally expose it.
 import asyncio
 import json
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -322,7 +323,9 @@ class Server:
 
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,
-            "guest": guest_token, "remaining": round(self.session.remaining()),
+            "guest": guest_token,
+            "remaining": None if self.session.unlimited
+                         else round(self.session.remaining()),
             "resumed_media": keep_media,
             # So the page knows whether to offer a game list at all, rather
             # than showing a button that always refuses.
@@ -386,11 +389,22 @@ class Server:
                     # three.
                     await self.session.astop(reason="replaced")
                     self.session = None
-                minutes = int(request.get("minutes") or self.cfg.default_duration_minutes)
-                minutes = max(1, min(minutes, self.cfg.max_duration_minutes))
+                # Zero means no deadline, which is why it cannot go through
+                # the `or default` below: a falsy minutes is a real answer.
+                asked = request.get("minutes")
+                if asked is None:
+                    asked = self.cfg.default_duration_minutes
+                minutes = int(asked)
+                if minutes <= 0:
+                    seconds = math.inf
+                else:
+                    # The cap applies to a number of minutes, not to a
+                    # deliberate decision to have no limit.
+                    minutes = max(1, min(minutes, self.cfg.max_duration_minutes))
+                    seconds = minutes * 60
                 self.session = LiveSession(self.cfg, self.loop)
                 self.session.on_notice = self._broadcast
-                self.session.start(minutes * 60)
+                self.session.start(seconds)
                 return self._status()
             if command == "stop":
                 if self.session:
@@ -407,6 +421,9 @@ class Server:
             if command == "extend":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
+                if self.session.unlimited:
+                    return {"ok": False,
+                            "error": "this session has no time limit to extend"}
                 minutes = max(1, int(request.get("minutes") or 15))
                 added = self.session.extend(minutes * 60)
                 if added <= 0:
@@ -472,8 +489,9 @@ class Server:
             LiveSession.forget()
             return
         self.session = session
-        log.info("restored the session that was open before; %.0f minutes left",
-                 session.remaining() / 60)
+        log.info("restored the session that was open before; %s",
+                 "no time limit" if session.unlimited
+                 else "%.0f minutes left" % (session.remaining() / 60))
 
     def _status(self):
         if not (self.session and self.session.open):
@@ -485,7 +503,11 @@ class Server:
         return {
             "ok": True,
             "open": True,
-            "remaining": round(self.session.remaining()),
+            # null rather than a number when there is no deadline: JSON has no
+            # infinity, and a browser refuses to parse one.
+            "remaining": None if self.session.unlimited
+                         else round(self.session.remaining()),
+            "unlimited": self.session.unlimited,
             "slots": self.cfg.slots,
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,

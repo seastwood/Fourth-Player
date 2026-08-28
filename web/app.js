@@ -172,6 +172,8 @@ function connect(hello) {
                                 candidate: message.candidate,
                                 sdpMLineIndex: message.sdpMLineIndex });
       case "ending":   return setChip("clock", timeLeft(message.remaining) + " left", "warn");
+      // "extended" carries the new remaining, which is null if the owner
+      // turned the deadline off entirely.
       case "extended": return startClock(message.remaining);
       case "closed":   return sessionOver(message.reason);
       case "error":    return onError(message);
@@ -1100,8 +1102,14 @@ function timeLeft(seconds) {
 
 let clockTimer = null;
 function startClock(seconds) {
-  let left = seconds;
   if (clockTimer) clearInterval(clockTimer);
+  // null is a session with no deadline -- not zero, and not an error. There is
+  // nothing to count down, so the chip says so once and stops.
+  if (seconds === null || seconds === undefined) {
+    setChip("clock", "no time limit", "ok");
+    return;
+  }
+  let left = seconds;
   const paint = () => {
     setChip("clock", timeLeft(Math.max(0, left)) + " left",
             left < 300 ? "warn" : "");

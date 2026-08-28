@@ -29,6 +29,19 @@ CLOSE_ACTIONS = {
 }
 
 
+
+def time_left(status):
+    """How much is left, or that there is no such thing.
+
+    A session with no deadline reports null rather than a number -- JSON has no
+    infinity -- and formatting that as 0:00 would read as one about to close.
+    """
+    remaining = status.get("remaining")
+    if remaining is None:
+        return "no time limit"
+    return "%d:%02d left" % (remaining // 60, remaining % 60)
+
+
 def _profile():
     import xbmcaddon
     path = xbmcvfs.translatePath(xbmcaddon.Addon().getAddonInfo("profile"))
@@ -171,10 +184,9 @@ def show_invite(get_status):
                 break
             if url:
                 guests = len(status.get("guests") or [])
-                remaining = status.get("remaining", 0)
-                clock.setLabel("%d of %d playing  ·  %d:%02d left"
+                clock.setLabel("%d of %d playing  ·  %s"
                                % (guests, status.get("slots", 0),
-                                  remaining // 60, remaining % 60))
+                                  time_left(status)))
             if monitor.waitForAbort(1):
                 break
     finally:
@@ -220,10 +232,9 @@ def show_monitor(get_status):
                     row.setLabel("")
             else:
                 guests = status.get("guests") or []
-                remaining = status.get("remaining", 0)
-                clock.setLabel("%d of %d slots  ·  %d:%02d left  ·  back to close"
+                clock.setLabel("%d of %d slots  ·  %s  ·  back to close"
                                % (len(guests), status.get("slots", 0),
-                                  remaining // 60, remaining % 60))
+                                  time_left(status)))
                 for index, row in enumerate(rows):
                     if index < len(guests):
                         guest = guests[index]

@@ -21,6 +21,11 @@ import panels
 ADDON_NAME = "Fourth Player"
 
 DURATIONS = [30, 60, 120, 240]
+# Two answers that are not a number of minutes from the list: type your own,
+# and don't have one. Both are still a number of minutes on the wire -- zero
+# means no deadline.
+CUSTOM = "custom"
+NO_LIMIT = "unlimited"
 EXTENSIONS = [15, 30, 60]
 
 CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
@@ -108,13 +113,47 @@ def stop_service():
 
 # -- sessions ------------------------------------------------------------
 
+def ask_minutes():
+    """How long, including answers that are not on the list.
+
+    Returns minutes, 0 for no limit, or None if they backed out.
+    """
+    dialog = xbmcgui.Dialog()
+    options = [duration_label(m) for m in DURATIONS]
+    options.append("Something else…")
+    options.append("No time limit")
+    choice = dialog.select("How long should the session stay open?", options)
+    if choice < 0:
+        return None
+    if choice < len(DURATIONS):
+        return DURATIONS[choice]
+    if options[choice] == "No time limit":
+        # Worth a second question. Every other answer here ends by itself; this
+        # one stays open until somebody remembers to close it.
+        if not dialog.yesno(
+                ADDON_NAME,
+                "The session will stay open until you close it — through "
+                "reboots, and whether or not anyone is playing.\n\nOpen it "
+                "with no time limit?",
+                nolabel="Cancel", yeslabel="No limit"):
+            return None
+        return 0
+    typed = dialog.numeric(0, "Minutes", str(DURATIONS[1]))
+    if not typed:
+        return None
+    try:
+        minutes = int(typed)
+    except ValueError:
+        return None
+    return minutes if minutes > 0 else None
+
+
 def start_session(previous="off"):
     # POLICIES is defined further down this file; module level, so it is there
     # by the time anything calls this.
     dialog = xbmcgui.Dialog()
-    choice = dialog.select("How long should the session stay open?",
-                           [duration_label(m) for m in DURATIONS])
-    if choice < 0:
+    minutes = ask_minutes()
+    if minutes is None:
         return
     # Asked here rather than left to be found in the menu. A session started
     # with this off looks, from the guest's phone, exactly like a feature that
@@ -125,7 +164,7 @@ def start_session(previous="off"):
     picked = dialog.select("Can guests start games?", labels)
     if picked < 0:
         return
-    reply = C.start_session(DURATIONS[choice])
+    reply = C.start_session(minutes)
     if not reply.get("ok"):
         dialog.ok(ADDON_NAME, reply.get("error", "The session would not start."))
         return
@@ -136,7 +175,12 @@ def start_session(previous="off"):
     panels.show_invite(C.status)
 
 
-def extend_session():
+def extend_session(status=None):
+    if (status or {}).get("unlimited"):
+        xbmcgui.Dialog().ok(ADDON_NAME,
+                            "This session has no time limit, so there is "
+                            "nothing to add to.")
+        return
     choice = xbmcgui.Dialog().select(
         "Add how much time?", ["%s more" % duration_label(m) for m in EXTENSIONS])
     if choice < 0:
@@ -306,14 +350,15 @@ def main():
         heading = "Fourth Player — nothing open"
     else:
         guests = len(status.get("guests") or [])
-        remaining = status.get("remaining", 0)
-        heading = ("Fourth Player — %d playing, %d min left"
-                   % (guests, remaining // 60))
+        remaining = status.get("remaining")
+        heading = ("Fourth Player — %d playing, %s"
+                   % (guests, "no time limit" if remaining is None
+                      else "%d min left" % (remaining // 60)))
         entries = [
             ("Show the link, PIN and QR code", lambda: panels.show_invite(C.status)),
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
-            ("Add more time…", extend_session),
+            ("Add more time…", lambda: extend_session(status)),
             ("Remove a player…", lambda: remove_player(C.status())),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),

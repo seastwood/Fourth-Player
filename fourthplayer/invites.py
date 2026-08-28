@@ -22,6 +22,7 @@ milliseconds instead of hours.
 import base64
 import hashlib
 import hmac
+import math
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -150,6 +151,18 @@ class Session:
         if self._token is None:
             return None
         return self._token, self._pin
+
+    @property
+    def unlimited(self):
+        """A session with no deadline at all.
+
+        Held as an infinite expiry rather than a flag, so every comparison that
+        asks whether this is still alive keeps working without knowing about
+        it. What it must not do is reach a wire: JSON has no infinity, and
+        `JSON.parse("Infinity")` is an error in a browser -- so the places that
+        serialise a remaining time send null instead.
+        """
+        return math.isinf(self.expires_at)
 
     def remaining(self, now):
         return max(0.0, self.expires_at - now)
@@ -324,7 +337,7 @@ class Session:
             "label": self.label,
             "token": b64(self.token_digest),
             "pin": b64(self.pin_digest),
-            "expires_in": max(0.0, self.expires_at - now),
+            "expires_in": None if self.unlimited else max(0.0, self.expires_at - now),
             "saved_at": time.time(),
             "pin_attempts": self.pin_attempts,
             "burned": [b64(d) for d in self._burned],
@@ -342,9 +355,13 @@ class Session:
     def restore(cls, data, now):
         """Rebuild an invite from a snapshot, or None if it has run out."""
         elapsed = max(0.0, time.time() - float(data.get("saved_at", 0)))
-        remaining = float(data.get("expires_in", 0)) - elapsed
-        if remaining <= 0:
-            return None
+        written = data.get("expires_in", 0)
+        if written is None:
+            remaining = math.inf              # a session with no deadline
+        else:
+            remaining = float(written) - elapsed
+            if remaining <= 0:
+                return None
 
         raw = lambda text: base64.b64decode(text)
         invite = cls.__new__(cls)

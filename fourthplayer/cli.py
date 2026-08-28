@@ -96,7 +96,10 @@ def main(argv=None):
     run.add_argument("--verbose", "-v", action="store_true")
 
     start = sub.add_parser("start", help="open a session")
-    start.add_argument("--minutes", type=int)
+    start.add_argument("--minutes", type=int,
+                       help="how long, in minutes. 0 for no time limit.")
+    start.add_argument("--unlimited", action="store_true",
+                       help="open with no deadline; it runs until stopped")
     start.add_argument("--wait", type=float, default=20.0, metavar="SECONDS",
                        help="how long to wait for the server to come up")
 
@@ -175,7 +178,9 @@ def main(argv=None):
         return _check(cfg)
 
     request = {"cmd": args.command}
-    if args.command in ("start", "extend") and args.minutes:
+    if args.command == "start" and getattr(args, "unlimited", False):
+        request["minutes"] = 0
+    elif args.command in ("start", "extend") and args.minutes is not None:
         request["minutes"] = args.minutes
     if args.command == "kick":
         request["slot"] = args.slot
@@ -200,8 +205,11 @@ def _print_status(reply):
     if not reply.get("open"):
         print("no session is open")
         return
-    minutes, seconds = divmod(reply["remaining"], 60)
-    print(f"session open, {minutes}m {seconds}s left")
+    if reply.get("unlimited") or reply.get("remaining") is None:
+        print("session open, no time limit")
+    else:
+        minutes, seconds = divmod(reply["remaining"], 60)
+        print(f"session open, {minutes}m {seconds}s left")
     if reply.get("url"):
         print(f"  link: {reply['url']}")
         print(f"  PIN:  {reply['pin']}")
