@@ -56,6 +56,12 @@ SWEEP_INTERVAL = 0.05
 #   open     start anything, including over whatever is playing now
 #   idle     start anything, but only when the screen is free
 #   approve  ask, and the owner has APPROVAL_SECONDS to answer
+# How long to wait before rebuilding a guest's connection ourselves. Long
+# enough for a browser that noticed the same failure to reconnect and ask for
+# one, short enough that a guest whose browser did not notice is not left
+# staring at a frozen picture.
+REBUILD_GRACE = 2.0
+
 LAUNCH_POLICIES = ("off", "open", "idle", "approve")
 APPROVAL_SECONDS = 30.0
 
@@ -552,18 +558,35 @@ class LiveSession:
         if guest.on_signal is None:
             self.drop(guest.slot, reason="its connection broke")
             return
-        if guest.outbox is None:
-            # Their signalling went with the media -- both ends of the same
-            # network event, which is the usual way this happens. An offer now
-            # would go into a queue nobody is draining, and worse: the browser
-            # is reconnecting as we speak, so building a peer here means two
-            # peers for one slot and a coin-toss over which one the guest ends
-            # up answering. Their resume brings a fresh one along with it.
-            log.info("%s: %s, and their signalling is down; waiting for them "
-                     "to come back rather than offering into the dark",
-                     guest.label, why)
+        # Not immediately. The media and the signalling usually fail together
+        # -- two ends of one network event -- and the browser reacts to the
+        # same failure by reconnecting and asking for a fresh connection. Both
+        # sides then build a peer for this slot, a second apart, with nothing
+        # in the log to say so: detach_peer frees the name before add_peer
+        # takes it, so neither is ever seen as stale. The guest answers one of
+        # them and the capture feeds the other, which is a connection where ICE
+        # completes, the data channel opens, the buttons work and no video ever
+        # arrives -- and only reloading the page gets out of it.
+        #
+        # So wait a moment and see whether they sort it out themselves, which
+        # is the outcome that needs no offer from here at all.
+        self.loop.create_task(self._rebuild_later(guest, why))
+
+    async def _rebuild_later(self, guest, why, grace=REBUILD_GRACE):
+        await asyncio.sleep(grace)
+        if self.guests.get(guest.slot) is not guest:
+            return                             # they are gone; nothing to fix
+        if guest.peer is not None:
+            log.info("%s: %s, and they reconnected on their own; leaving their "
+                     "new connection alone", guest.label, why)
             return
-        self.loop.create_task(self._rebuild(guest, why))
+        if guest.outbox is None:
+            # No way to reach them. An offer would go into a queue nobody
+            # drains, and they will resume when their network comes back.
+            log.info("%s: %s, and their signalling is still down; waiting for "
+                     "them rather than offering into the dark", guest.label, why)
+            return
+        await self._rebuild(guest, why)
 
     async def _rebuild(self, guest, why):
         try:

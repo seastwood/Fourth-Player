@@ -843,7 +843,9 @@ function clearMediaTimeout() {
 async function report(what) {
   try {
     if (!socket || socket.readyState !== 1) return;
-    socket.send(JSON.stringify({ t: "report", detail: what + " — " + (await describeRoute()) }));
+    socket.send(JSON.stringify({
+      t: "report",
+      detail: "[" + CLIENT_BUILD + "] " + what + " — " + (await describeRoute()) }));
   } catch (_) { /* reporting must never break anything */ }
 }
 
@@ -915,6 +917,12 @@ el("link").addEventListener("click", async () => {
  * nothing fires, nothing retries, and the last frame sits on the screen. The
  * only honest measure is whether the byte count is going up.
  */
+/* Bumped whenever the client changes in a way a stale page would hide. It goes
+   out with every report, so the host log says which page is actually running
+   rather than which one was deployed -- a browser holding an old one looks
+   exactly like a fix that did not work. */
+const CLIENT_BUILD = "2026-08-28c";
+
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
    before it is treated as broken. Longer than STALL_LIMIT_MS because a fresh

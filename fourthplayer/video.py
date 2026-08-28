@@ -227,6 +227,25 @@ def h264_profile_level_id(profile, height):
     return idc + level
 
 
+def describe_sdp(text):
+    """The shape of an SDP in one line, for the log.
+
+    Whether the two sides bundled decides how many transports have to connect,
+    and a session that bundles on the first connection and not on the rebuilt
+    one is two different connections wearing the same name -- which is not
+    visible from anything else that gets logged.
+    """
+    kinds = [line.split()[0][2:] for line in text.splitlines()
+             if line.startswith("m=")]
+    ports = [line.split()[1] for line in text.splitlines() if line.startswith("m=")]
+    bundled = any(line.startswith("a=group:BUNDLE") for line in text.splitlines())
+    refused = [k for k, port in zip(kinds, ports) if port == "0"]
+    return "%d m-line(s) [%s]%s%s" % (
+        len(kinds), ", ".join(kinds),
+        ", bundled" if bundled else ", NOT bundled",
+        ", refused: " + ",".join(refused) if refused else "")
+
+
 def with_fmtp(sdp, fmtp):
     """Add the H.264 parameters a browser needs, if webrtcbin left them out.
 
@@ -910,8 +929,9 @@ class Peer:
             log.error("peer %s: create-offer produced an empty description", self.id)
             return
         element.emit("set-local-description", offer, Gst.Promise.new())
-        self._emit("offer", {"sdp": with_fmtp(offer.sdp.as_text(), self.stage._fmtp),
-                             "type": "offer"})
+        text = with_fmtp(offer.sdp.as_text(), self.stage._fmtp)
+        log.info("peer %s: offering %s", self.id, describe_sdp(text))
+        self._emit("offer", {"sdp": text, "type": "offer"})
 
     def _on_ice_candidate(self, _element, mline_index, candidate):
         # Candidate types decide whether anybody outside can reach us at all:
@@ -1075,6 +1095,7 @@ class Peer:
         if ok != GstSdp.SDPResult.OK:
             raise RuntimeError("could not allocate an SDP message")
         GstSdp.sdp_message_parse_buffer(sdp_text.encode(), message)
+        log.info("peer %s: answered with %s", self.id, describe_sdp(sdp_text))
         answer = GstWebRTC.WebRTCSessionDescription.new(
             GstWebRTC.WebRTCSDPType.ANSWER, message)
         self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
