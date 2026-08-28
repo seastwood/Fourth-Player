@@ -184,6 +184,21 @@ crosses the wire in either direction, so the worst a tampered-with page can ask
 for is a game that was already in the list. `tests/test_launch.py` holds that
 down.
 
+The game list is drawn at 94% opacity rather than opaque, and the page listens
+for the video being paused. Both are load-bearing and neither looks it.
+
+A browser is entitled to pause a video it considers completely obscured, and
+Safari does. Nothing here listened for `pause`, so the picture stayed paused
+for ever and reloading was the only way back -- and on iOS the same judgement
+about the page not being watched throttles the timers, which takes the input
+loop and eventually the socket with it. From the host that reads as a guest
+going quiet a few seconds after picking a game, with nothing broken on this
+side at all.
+
+So the list leaves the video being composited, and a pause is reported and
+undone rather than accepted. Making that panel opaque again, or dropping the
+`pause` listener as redundant, brings the whole thing back.
+
 Four settings, from Kodi (**Can guests start games?**) or the command line:
 
 ```sh
