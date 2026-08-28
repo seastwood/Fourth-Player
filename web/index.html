@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>Fourth Player</title>
+<!-- Added to the home screen, the page opens without Safari's address bar
+     and tab strip, which is the only way to get that space back: a page cannot
+     hide browser chrome from inside the tab. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fourth Player">
+<!-- Draws under the clock and battery rather than beside them; the layout
+     already keeps its distance with env(safe-area-inset-*). -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/static/icons/pad-180.png">
+<link rel="icon" href="/static/icons/pad-180.png" sizes="180x180">
+<!-- No start_url on purpose: it then defaults to whatever page installed it,
+     so the home-screen icon keeps the invite token it was added with. -->
+<link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

@@ -1,0 +1,11 @@
+{
+  "name": "Fourth Player",
+  "short_name": "Fourth Player",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#100e28",
+  "theme_color": "#100e28",
+  "icons": [
+    { "src": "/static/icons/pad-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}

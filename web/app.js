@@ -1084,6 +1084,36 @@ function enterVideoFullscreen() {
                   + "fullscreen. Rotating the phone usually gets the same result.</p>");
 }
 
+/* Keep the stage inside the part of the window you can actually see.
+   Safari's address bar and tab strip shrink the visual viewport without
+   shrinking the layout viewport that `position: fixed` is measured against,
+   so anything anchored to the bottom -- select and start -- gets laid out
+   behind them. visualViewport reports what is really on screen, including
+   while the bars slide in and out and while the page is pinch-zoomed. */
+function fitStage() {
+  const vv = window.visualViewport;
+  if (!vv) return;                       // the dvh fallback in the CSS applies
+  const style = document.documentElement.style;
+  style.setProperty("--vv-height", vv.height + "px");
+  style.setProperty("--vv-width", vv.width + "px");
+  style.setProperty("--vv-top", vv.offsetTop + "px");
+  style.setProperty("--vv-left", vv.offsetLeft + "px");
+}
+
+if (window.visualViewport) {
+  let pending = false;
+  const schedule = () => {
+    // resize and scroll both fire in bursts while the bars animate.
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; fitStage(); });
+  };
+  window.visualViewport.addEventListener("resize", schedule);
+  window.visualViewport.addEventListener("scroll", schedule);
+  window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
+  fitStage();
+}
+
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
 if (saved) {

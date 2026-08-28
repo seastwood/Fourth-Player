@@ -30,6 +30,10 @@ from .tls import ensure_certificate
 
 log = logging.getLogger("fourthplayer.server")
 
+# Not in the system table on every host, and a manifest served as
+# octet-stream is ignored by the browser reading it.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
 
 def _lan_address():
     """The address of the interface that reaches the default route."""

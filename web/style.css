@@ -184,14 +184,24 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
 /* ---- the stage ---- */
 
 .stage {
+  /* Positioned and sized from the visual viewport, which fitStage() measures
+     and writes into these variables -- the only number that accounts for the
+     address bar and tab strip actually on screen right now. A fixed element is
+     otherwise laid out against the layout viewport, which is the whole window
+     as if that furniture were not there, so the bottom row lands underneath
+     it. The dvh fallback is for anything without visualViewport; it is close,
+     but it is not what the phone with the bars showing reports. */
   position: fixed;
-  inset: 0;
-  /* The dynamic viewport, not the large one. A phone reports 100vh as the
-     height the page would have if the browser's bars were gone, so anything
-     positioned against the bottom edge -- select and start -- was laid out
-     below the part of the screen you can actually see. dvh is the height that
-     is really there. */
-  height: 100dvh;
+  top: var(--vv-top, 0px);
+  left: var(--vv-left, 0px);
+  right: 0;
+  width: var(--vv-width, auto);
+  height: var(--vv-height, 100dvh);
+  /* One hundredth of the stage, for anything inside it that wants to
+     size itself as a fraction of the height. vh is the wrong unit
+     here: it measures the window, which is taller than the stage by
+     however much browser furniture is on screen. */
+  --sh: calc(var(--vv-height, 100dvh) / 100);
   background: #000;
   touch-action: manipulation;
   overflow: hidden;             /* nothing here is ever reached by scrolling */
@@ -533,8 +543,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     pointer-events: none;
   }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
-  .dpad { width: min(30vh, 175px); }
-  .face { width: min(40vh, 235px); }
+  /* Sized against the stage, not the window. These were 30vh and 40vh, which
+     on a phone measure the window as if the address bar and tab strip were not
+     there -- so on a 390-tall phone showing 300, the pad sized itself for 390,
+     the middle row grew past the space available, and select and start were
+     pushed off the bottom. */
+  .dpad { width: min(calc(30 * var(--sh)), 175px); }
+  .face { width: min(calc(40 * var(--sh)), 235px); }
   /* Select and start go to the far corners rather than the middle: in
      landscape the middle of the screen is the picture, and the corners are
      where the thumbs already are. */

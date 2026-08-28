@@ -642,6 +642,19 @@ class LiveSession:
         """Write the invite down, so a crash costs a reconnect and not a session."""
         if self.invite is None:
             return
+        # A snapshot that says no time is left is worse than no snapshot: it
+        # replaces a good one, and the session that was open at the restart is
+        # then declined on the way back in. This has been seen once -- a state
+        # file written with expires_in 0.0 while the session still had three and
+        # a half hours on it -- and never reproduced, over restarts with and
+        # without a guest attached. Whatever produces it, refusing to write it
+        # costs nothing: a session really out of time is closing anyway, and
+        # `forget` is how a finished session clears its state on purpose.
+        left = self.invite.remaining(self._now())
+        if left <= 0:
+            log.warning("declining to save a session with no time left "
+                        "(the file on disk is left alone)")
+            return
         try:
             os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
             tmp = STATE_PATH + ".new"
@@ -668,10 +681,19 @@ class LiveSession:
         except (OSError, ValueError):
             return None
         try:
-            return invites.Session.restore(data, now)
+            invite = invites.Session.restore(data, now)
         except (KeyError, TypeError, ValueError) as exc:
             log.warning("the saved session could not be read: %s", exc)
             return None
+        if invite is None:
+            # Said out loud, because the alternative -- what happened here for
+            # weeks -- is a session that silently does not come back and no
+            # record anywhere of what the file said.
+            log.info("the saved session had run out: %.0fs left when it was "
+                     "written, %.0fs ago",
+                     float(data.get("expires_in", 0)),
+                     max(0.0, time.time() - float(data.get("saved_at", 0))))
+        return invite
 
     def notify(self, message):
         if self.on_notice is not None:
