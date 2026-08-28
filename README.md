@@ -192,7 +192,11 @@ guests' own pads are excluded by name, or the person asking could approve
 themselves.
 
 There is deliberately no gesture for refusing, because refusing is what happens
-when nobody does anything.
+when nobody does anything. The prompt also carries **START IT** and **NO**
+buttons for a mouse; the overlay takes clicks only while a request is up, and
+goes back to click-through the moment it is answered -- it sits over a
+fullscreen game, and a window that swallows a click is a window that swallows a
+shot.
 
 The other two routes still work when you can reach them — Kodi offers the
 request instead of its usual menu while one is waiting, or:

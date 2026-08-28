@@ -117,5 +117,21 @@ finally:
         except Exception:
             pass
 
+print("the buttons are where they can be pressed")
+try:
+    from fourthplayer import overlay as O
+except Exception as exc:                       # no GTK on this machine
+    print("  --   the overlay needs GTK, which is not here (%s)" % exc)
+else:
+    w, h = O.Overlay.ASK_WIDTH, O.Overlay.ASK_HEIGHT
+    boxes = O.Overlay.ask_buttons(O.Overlay, w, h)
+    check(len(boxes) == 2 and {b[0] for b in boxes} == {"approve", "deny"},
+          "there is one to allow and one to refuse")
+    for name, x, y, bw, bh in boxes:
+        check(0 <= x and x + bw <= w and 0 <= y and y + bh <= h,
+              "%s is inside the window" % name)
+    (_, ax, ay, aw, ah), (_, dx, dy, dw, dh) = boxes
+    check(ax + aw <= dx, "and they do not overlap each other")
+
 print(("FAILED: %d" % len(fails)) if fails else "test_approve: all ok")
 sys.exit(1 if fails else 0)

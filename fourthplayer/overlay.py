@@ -120,6 +120,8 @@ class Overlay(Gtk.Window):
         if visual:
             self.set_visual(visual)
 
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.connect("button-press-event", self.on_click)
         self.connect("draw", self.on_draw)
         self.connect("realize", self.on_realize)
         self.connect("destroy", Gtk.main_quit)
@@ -153,8 +155,13 @@ class Overlay(Gtk.Window):
         self.pending = (status.get("launch") or {}).get("pending")
         if self.pending and not was:
             self.shoulders.forget()
+            # A controller that slept since the last request is on a different
+            # node now, so look again rather than watch one that has gone.
+            self.shoulders.rescan()
             self.armed = False
             self.hold = 0.0
+        if bool(self.pending) != bool(was):
+            self.set_clickable(bool(self.pending))
 
         full = status.get("guests") and len(status["guests"]) >= status.get("slots", 3)
         if self.expanded and (self.elapsed > self.card_seconds or full):
@@ -162,6 +169,53 @@ class Overlay(Gtk.Window):
         self.reposition()
         self.queue_draw()
         return True
+
+    ASK_WIDTH, ASK_HEIGHT = 470, 156
+    BUTTON_W, BUTTON_H = 104, 28
+
+    def ask_buttons(self, width, height):
+        """Where the two buttons are.
+
+        One function so that what is drawn and what is clickable cannot drift
+        apart -- a button that is painted somewhere it cannot be pressed is
+        worse than no button.
+        """
+        y = height - self.BUTTON_H - 12
+        right = width - CARD_PAD - self.BUTTON_W
+        return [
+            ("approve", right - self.BUTTON_W - 8, y, self.BUTTON_W, self.BUTTON_H),
+            ("deny", right, y, self.BUTTON_W, self.BUTTON_H),
+        ]
+
+    def on_click(self, _widget, event):
+        if not self.pending:
+            return False
+        for name, x, y, w, h in self.ask_buttons(self.get_allocated_width(),
+                                                 self.get_allocated_height()):
+            if x <= event.x <= x + w and y <= event.y <= y + h:
+                waiting, self.pending = self.pending, None
+                reply = ask({"cmd": name}) if name == "approve" else ask(
+                    {"cmd": "deny", "reason": "the owner said no"})
+                if not reply.get("ok") and name == "approve":
+                    self.pending = waiting      # let the countdown carry on
+                self.set_clickable(bool(self.pending))
+                self.reposition()
+                self.queue_draw()
+                return True
+        return False
+
+    def set_clickable(self, yes):
+        """Take clicks only while something is being asked.
+
+        The rest of the time this window is click-through, which is not a
+        detail: it sits over a fullscreen game, and a window that swallows a
+        click is a window that swallows a shot.
+        """
+        window = self.get_window()
+        if window is None:
+            return
+        window.input_shape_combine_region(
+            None if yes else cairo.Region(), 0, 0)
 
     def watch_pad(self):
         """Twenty times a second: is the owner holding both bumpers?"""
@@ -200,13 +254,13 @@ class Overlay(Gtk.Window):
 
     def reposition(self):
         if self.pending:
-            self.resize(460, 132)
+            self.resize(self.ASK_WIDTH, self.ASK_HEIGHT)
             display = Gdk.Display.get_default()
             monitor = display.get_primary_monitor() or display.get_monitor(0)
             area = monitor.get_geometry()
             # Middle of the top edge, not a corner: this one is asking for
             # something, so it is allowed to be in the way.
-            self.move(area.x + (area.width - 460) // 2, area.y + MARGIN)
+            self.move(area.x + (area.width - self.ASK_WIDTH) // 2, area.y + MARGIN)
             return
         width, height = (400, 300) if self.expanded else (168, 44)
         if not self.expanded or not self.status.get("url"):
@@ -262,13 +316,31 @@ class Overlay(Gtk.Window):
              (0.62, 0.66, 0.72))
         text(ctx, CARD_PAD, CARD_PAD + 46, (ask.get("label") or "")[:46], 15,
              (0.89, 0.91, 0.95), bold=True)
+        for name, x, y, w, h in self.ask_buttons(width, height):
+            allow = name == "approve"
+            ctx.set_source_rgba(0.29, 0.84, 0.63, 0.18) if allow else \
+                ctx.set_source_rgba(1, 1, 1, 0.08)
+            ctx.rectangle(x, y, w, h)
+            ctx.fill_preserve()
+            ctx.set_source_rgb(*((0.29, 0.84, 0.63) if allow else (0.62, 0.66, 0.72)))
+            ctx.set_line_width(1.5)
+            ctx.stroke()
+            label = "START IT" if allow else "NO"
+            # Centred by measuring, not by guessing at the string width.
+            layout = PangoCairo.create_layout(ctx)
+            layout.set_font_description(Pango.FontDescription("Sans Bold 11"))
+            layout.set_text(label, -1)
+            tw, th = layout.get_pixel_size()
+            ctx.move_to(x + (w - tw) / 2, y + (h - th) / 2)
+            PangoCairo.show_layout(ctx, layout)
+
         if self.shoulders.ok:
-            text(ctx, CARD_PAD, height - 44,
+            text(ctx, CARD_PAD, height - 68,
                  "Hold L + R on your controller to start it. Do nothing to refuse.",
                  11, (0.62, 0.66, 0.72))
             # The hold, drawn filling up, so it is obvious it is working before
             # it finishes rather than only after.
-            bar_x, bar_y = CARD_PAD, height - 20
+            bar_x, bar_y = CARD_PAD, height - 48
             bar_w, bar_h = width - CARD_PAD * 2, 6
             ctx.set_source_rgba(1, 1, 1, 0.12)
             ctx.rectangle(bar_x, bar_y, bar_w, bar_h)
@@ -278,7 +350,7 @@ class Overlay(Gtk.Window):
                 ctx.rectangle(bar_x, bar_y, bar_w * self.hold, bar_h)
                 ctx.fill()
         else:
-            text(ctx, CARD_PAD, height - 32,
+            text(ctx, CARD_PAD, height - 68,
                  "Fourth Player in Kodi \u2192 Approve, or: fourthplayer approve",
                  11, (0.62, 0.66, 0.72))
 

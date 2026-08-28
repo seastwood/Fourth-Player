@@ -1359,6 +1359,27 @@ function launchResult(message) {
              + "</strong> is starting&hellip;</p>", false);
 }
 
+/* The search box lives behind its own icon: the bar has room for the filters
+   or a search field on a phone, not both, and the filters are what is usually
+   wanted. Clicking the magnifier opens it; closing it clears the query, since
+   a hidden filter still filtering is a list that looks broken. */
+function toggleFind(open) {
+  const bar = el("q").parentElement;
+  const wanted = open === undefined ? !bar.classList.contains("searching") : open;
+  bar.classList.toggle("searching", wanted);
+  if (wanted) {
+    el("q").focus();
+  } else if (el("q").value) {
+    el("q").value = "";
+    filterShelf();
+  }
+}
+
+el("find-open").addEventListener("click", () => toggleFind());
+el("q").addEventListener("blur", () => {
+  if (!el("q").value) toggleFind(false);
+});
+
 el("games").addEventListener("click", openBrowser);
 el("browse-close").addEventListener("click", closeBrowser);
 for (const id of ("q fsystem fplayers").split(" ")) {

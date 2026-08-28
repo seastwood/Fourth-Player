@@ -10,6 +10,7 @@ without GTK. The overlay draws it; this decides it.
 """
 
 import os
+import time
 
 class Shoulders:
     """Both bumpers, held, on a controller that is in the room.
@@ -32,6 +33,10 @@ class Shoulders:
 
     HOLD_SECONDS = 1.5
     OURS = "Fourth Player"
+    # A wireless pad that sleeps and wakes comes back on a different event
+    # node, and a device opened once and never looked at again is a gesture
+    # that works exactly until the first time the controller reconnects.
+    RESCAN_SECONDS = 5.0
 
     def __init__(self):
         self.devices = []
@@ -43,6 +48,7 @@ class Shoulders:
         # request arrived must not count -- and at the first instant of a fresh
         # hold, progress is legitimately 0.0 too.
         self.holding = False
+        self.scanned = 0.0
         self.ok = True
         try:
             import evdev
@@ -53,9 +59,14 @@ class Shoulders:
             self.evdev = evdev
             self.rescan()
 
-    def rescan(self):
+    def rescan(self, now=None):
         if not self.evdev:
             return
+        self.scanned = now if now is not None else time.monotonic()
+        # Whatever was held belonged to the devices being replaced.
+        self.down.clear()
+        self.since = None
+        self.holding = False
         wanted = {self.evdev.ecodes.BTN_TL, self.evdev.ecodes.BTN_TR}
         found = []
         for path in self.evdev.list_devices():
@@ -84,6 +95,11 @@ class Shoulders:
         """How far through the hold we are, 0 to 1."""
         if not self.evdev:
             return 0.0
+        # Never mid-hold: re-opening the devices forgets which buttons are
+        # down, and doing that under someone's thumb would restart the count
+        # they are halfway through.
+        if not self.holding and now - self.scanned > self.RESCAN_SECONDS:
+            self.rescan(now)
         for device in list(self.devices):
             try:
                 # read() drains what is buffered and raises when there is

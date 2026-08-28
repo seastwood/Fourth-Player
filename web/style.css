@@ -650,14 +650,15 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   border-bottom: 2px solid var(--bg2);
 }
 
+/* Collapsed to its icon until asked for. A phone in landscape has room for
+   the filters or a search box, not both, and most of the time the filters are
+   what is wanted. */
 .find {
-  flex: 1 1 8rem;
-  min-width: 5rem;
-  font-family: var(--sans);
-  font-size: 1rem;                /* under 16px, iOS zooms the page on focus */
   /* The bare `input` rule dresses the PIN box: pixel type, centred, widely
      letter-spaced. Right for six digits, wrong for a search field, and
      inherited here because both are inputs. */
+  font-family: var(--sans);
+  font-size: 1rem;                /* under 16px, iOS zooms the page on focus */
   letter-spacing: normal;
   text-indent: 0;
   text-align: left;
@@ -665,7 +666,25 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   background: var(--bg2);
   border: 2px solid var(--dim);
   border-radius: 0;               /* the console has no rounded corners */
-  padding: .5rem .6rem;
+  height: 1.75rem;                /* the height of everything else in the row */
+  padding: 0 .6rem;
+
+  /* Closed by default. */
+  flex: 0 1 0;
+  min-width: 0;
+  padding-inline: 0;
+  border-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: flex-basis .18s ease, opacity .15s ease,
+              padding .18s ease, border-width .18s ease;
+}
+.browser-bar.searching .find {
+  flex: 1 1 8rem;
+  min-width: 5rem;
+  padding-inline: .6rem;
+  border-width: 2px;
+  opacity: 1;
 }
 .find:focus-visible, .chip:focus-visible, .card:focus-visible {
   outline: 2px solid var(--accent);
@@ -754,18 +773,32 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   font-size: .85rem;
 }
 
-/* A button that is an icon rather than a word. Sized in ems so it matches the
-   chips beside it whatever the root size works out to. */
-.ghost.icon {
+/* One height for everything in a row of controls, rather than four heights
+   that come out of four different paddings and font sizes. Measured before
+   choosing: the chips were 28.3px, the word buttons 24.8 and 26.4, and the
+   icon 33 -- which is what made it look wrong beside the others. */
+.hud .chip,
+.hud .ghost,
+.browser-bar .chip,
+.browser-bar .ghost {
+  height: 1.75rem;
+  padding-block: 0;
+}
+.hud .ghost,
+.browser-bar .ghost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: .38rem;
+}
+/* An icon button is square: the same height as the row, and as wide. */
+.ghost.icon {
+  width: 1.75rem;
+  padding-inline: 0;
   line-height: 0;
 }
 .ghost.icon svg {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: .95rem;
+  height: .95rem;
   display: block;
 }
 

@@ -75,6 +75,15 @@
        session, and a game not in this list cannot be asked for. -->
   <div id="browser" class="browser" hidden>
     <div class="browser-bar">
+      <button id="find-open" type="button" class="ghost icon"
+              aria-label="Search games" title="Search games">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="10.5" cy="10.5" r="6.5" fill="none"
+                  stroke="currentColor" stroke-width="2.4"/>
+          <path d="M15.5 15.5 21 21" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="square"/>
+        </svg>
+      </button>
       <input id="q" class="find" type="search" placeholder="Search games"
              autocomplete="off" aria-label="Search games">
       <select id="fsystem" class="chip" aria-label="Console"></select>
