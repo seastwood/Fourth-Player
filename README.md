@@ -179,8 +179,23 @@ so save memory is written, but it is still someone else ending your game.
 
 `approve` puts the request on the television — over a running game, since the
 overlay is the same override-redirect window the join card uses — with who
-asked, what for, and a countdown. Answer it in Kodi, which offers the request
-instead of its usual menu while one is waiting, or:
+asked, what for, and a countdown.
+
+**Answer it by holding both bumpers (L + R) on the controller in your hand.**
+That is the only answer reachable mid-game: Kodi is behind a fullscreen
+emulator and the overlay is click-through on purpose, so every other route
+means quitting the game the request is about. A second and a half, because the
+press is read passively and the game sees it too — anything shorter would
+approve a stranger's game by playing your own. A hold already under way when
+the request lands does not count; the bumpers have to come up first. And
+guests' own pads are excluded by name, or the person asking could approve
+themselves.
+
+There is deliberately no gesture for refusing, because refusing is what happens
+when nobody does anything.
+
+The other two routes still work when you can reach them — Kodi offers the
+request instead of its usual menu while one is waiting, or:
 
 ```sh
 python3 -m fourthplayer approve

@@ -29,6 +29,7 @@ import io
 import json
 import os
 import socket
+import time
 import sys
 
 import gi
@@ -39,6 +40,8 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango, PangoCairo  # noqa: E402
 import cairo  # noqa: E402
 import qrcode  # noqa: E402
+
+from .approve import Shoulders  # noqa: E402
 
 CONTROL_SOCKET = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
@@ -96,6 +99,12 @@ class Overlay(Gtk.Window):
         self.elapsed = 0
         self.expanded = True
         self.pending = None
+        self.shoulders = Shoulders()
+        self.hold = 0.0
+        # A hold that was already under way when the request arrived does not
+        # count. Otherwise a game that wants both bumpers approves whatever is
+        # asked for the instant it is asked.
+        self.armed = False
 
         self.set_app_paintable(True)
         self.set_decorated(False)
@@ -140,13 +149,53 @@ class Overlay(Gtk.Window):
         # A request to start a game outranks the join card: it is the one
         # thing here with a deadline, and the owner may be mid-game with no
         # other window in front of them.
+        was = self.pending
         self.pending = (status.get("launch") or {}).get("pending")
+        if self.pending and not was:
+            self.shoulders.forget()
+            self.armed = False
+            self.hold = 0.0
 
         full = status.get("guests") and len(status["guests"]) >= status.get("slots", 3)
         if self.expanded and (self.elapsed > self.card_seconds or full):
             self.expanded = False
         self.reposition()
         self.queue_draw()
+        return True
+
+    def watch_pad(self):
+        """Twenty times a second: is the owner holding both bumpers?"""
+        progress = 0.0
+        try:
+            progress = self.shoulders.progress(time.monotonic())
+        except Exception:
+            return True                       # never take the overlay down
+        if not self.pending:
+            self.armed = False
+            return True
+        if not self.armed:
+            # Wait for the bumpers to actually come up, so the hold is a new
+            # one. Arming on progress == 0 would arm at the first instant of a
+            # hold that was already under way when the request arrived, and
+            # approve it a second and a half later without anyone deciding
+            # anything.
+            if not self.shoulders.holding:
+                self.armed = True
+            return True
+        if progress >= 1.0:
+            waiting, self.pending = self.pending, None
+            self.hold = 0.0
+            self.shoulders.forget()
+            self.armed = False
+            reply = ask({"cmd": "approve"})
+            if not reply.get("ok"):
+                self.pending = waiting        # let the countdown carry on
+            self.reposition()
+            self.queue_draw()
+            return True
+        if abs(progress - self.hold) > 0.01:
+            self.hold = progress
+            self.queue_draw()
         return True
 
     def reposition(self):
@@ -213,9 +262,25 @@ class Overlay(Gtk.Window):
              (0.62, 0.66, 0.72))
         text(ctx, CARD_PAD, CARD_PAD + 46, (ask.get("label") or "")[:46], 15,
              (0.89, 0.91, 0.95), bold=True)
-        text(ctx, CARD_PAD, height - 32,
-             "Fourth Player in Kodi \u2192 Approve, or: fourthplayer approve",
-             11, (0.62, 0.66, 0.72))
+        if self.shoulders.ok:
+            text(ctx, CARD_PAD, height - 44,
+                 "Hold L + R on your controller to start it. Do nothing to refuse.",
+                 11, (0.62, 0.66, 0.72))
+            # The hold, drawn filling up, so it is obvious it is working before
+            # it finishes rather than only after.
+            bar_x, bar_y = CARD_PAD, height - 20
+            bar_w, bar_h = width - CARD_PAD * 2, 6
+            ctx.set_source_rgba(1, 1, 1, 0.12)
+            ctx.rectangle(bar_x, bar_y, bar_w, bar_h)
+            ctx.fill()
+            if self.hold > 0:
+                ctx.set_source_rgb(0.29, 0.84, 0.63)
+                ctx.rectangle(bar_x, bar_y, bar_w * self.hold, bar_h)
+                ctx.fill()
+        else:
+            text(ctx, CARD_PAD, height - 32,
+                 "Fourth Player in Kodi \u2192 Approve, or: fourthplayer approve",
+                 11, (0.62, 0.66, 0.72))
 
     def draw_card(self, ctx, width, height):
         Gdk.cairo_set_source_pixbuf(ctx, self.qr, CARD_PAD, CARD_PAD)
@@ -285,6 +350,7 @@ def main(argv=None):
         GLib.timeout_add_seconds(2, Gtk.main_quit)
     else:
         GLib.timeout_add_seconds(POLL_SECONDS, overlay.poll)
+        GLib.timeout_add(50, overlay.watch_pad)
     Gtk.main()
     return 0
 
