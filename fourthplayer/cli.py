@@ -10,6 +10,7 @@ import sys
 import time
 
 from .config import Config, CONFIG_PATH, PRESETS
+from .session import LAUNCH_POLICIES
 from .server import Server, CONTROL_SOCKET
 
 
@@ -106,6 +107,17 @@ def main(argv=None):
     sub.add_parser("reshare", help="new link and PIN, same session and players")
     sub.add_parser("status", help="show the session and its guests")
 
+    policy = sub.add_parser(
+        "policy", help="whether guests may start games, and on what terms")
+    policy.add_argument("set", nargs="?", choices=LAUNCH_POLICIES,
+                        help="off: not at all. open: any time, interrupting "
+                             "whatever is playing. idle: only when nothing is "
+                             "running. approve: ask, and answer within 30s. "
+                             "Omit to read the current setting.")
+    sub.add_parser("approve", help="say yes to the waiting launch request")
+    deny = sub.add_parser("deny", help="say no to the waiting launch request")
+    deny.add_argument("--reason", default="the owner said no")
+
     kick = sub.add_parser("kick", help="remove one guest")
     kick.add_argument("slot", type=int)
 
@@ -167,11 +179,19 @@ def main(argv=None):
         request["minutes"] = args.minutes
     if args.command == "kick":
         request["slot"] = args.slot
+    if args.command == "policy" and args.set:
+        request["set"] = args.set
+    if args.command == "deny":
+        request["reason"] = args.reason
 
     reply = _control(request, wait=getattr(args, "wait", 0.0))
     if not reply.get("ok"):
         print("error:", reply.get("error", "unknown"), file=sys.stderr)
         return 1
+    if args.command in ("approve", "deny"):
+        print(reply.get("error") or reply.get("label")
+              or reply.get("state") or "done")
+        return 0
     _print_status(reply)
     return 0
 
@@ -187,6 +207,19 @@ def _print_status(reply):
         print(f"  PIN:  {reply['pin']}")
     else:
         print("  link and PIN were forgotten on restart -- re-share to get new ones")
+    launch = reply.get("launch") or {}
+    if launch:
+        wording = {
+            "off": "guests cannot start games",
+            "open": "guests may start any game, interrupting what is playing",
+            "idle": "guests may start a game when nothing is running",
+            "approve": "guests may ask to start a game; you have 30s to answer",
+        }
+        print("  " + wording.get(launch.get("policy"), str(launch)))
+        if launch.get("pending"):
+            waiting = launch["pending"]
+            print(f"    WAITING: {waiting['who']} wants {waiting['label']} "
+                  f"({waiting['seconds']}s left) -- approve or deny")
     guests = reply.get("guests") or []
     print(f"  guests: {len(guests)}/{reply.get('slots')}")
     for guest in guests:

@@ -211,6 +211,60 @@ def set_quality(session_open):
 
 # -- the menu ------------------------------------------------------------
 
+# -- letting guests start games -----------------------------------------
+
+# The wording is the whole interface here: each of these hands somebody outside
+# the house a different amount of control over this television, and the
+# difference has to be readable at a glance from the sofa.
+POLICIES = [
+    ("off", "No — only I start games",
+     "Guests can play what is already running, and nothing else."),
+    ("approve", "Ask me first (30 seconds to answer)",
+     "A request appears on screen. No answer means no."),
+    ("idle", "Yes, when nothing is playing",
+     "Guests can start a game once the screen is free."),
+    ("open", "Yes, any time",
+     "Guests can start a game over the top of whatever is playing."),
+]
+
+
+def choose_policy(status):
+    current = (status.get("launch") or {}).get("policy", "off")
+    labels = []
+    for value, label, detail in POLICIES:
+        labels.append(("> " if value == current else "  ") + label)
+    choice = xbmcgui.Dialog().select("Can guests start games?", labels)
+    if choice < 0:
+        return
+    value, label, detail = POLICIES[choice]
+    if value == "open" and not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "Any guest will be able to stop the game you are playing and "
+            "start a different one, without asking.\n\nAllow that?",
+            nolabel="No", yeslabel="Allow"):
+        return
+    reply = C.set_policy(value)
+    notify(detail if reply.get("ok")
+           else reply.get("error", "Could not change that."),
+           error=not reply.get("ok"))
+
+
+def answer_request(waiting):
+    """Say yes or no to the guest waiting on an answer."""
+    approve = xbmcgui.Dialog().yesno(
+        "%s wants to play" % waiting.get("who", "A guest"),
+        "%s\n\nStart it? This stops whatever is playing now."
+        % waiting.get("label", "a game"),
+        nolabel="No", yeslabel="Start it")
+    reply = C.approve() if approve else C.deny()
+    if not reply.get("ok"):
+        notify(reply.get("error", "Could not answer that."), error=True)
+    elif approve:
+        notify("Starting %s" % waiting.get("label", "the game"))
+    else:
+        notify("Refused.")
+
+
 def main():
     try:
         status = C.status()
@@ -240,12 +294,18 @@ def main():
                    % (guests, remaining // 60))
         entries = [
             ("Show the link, PIN and QR code", lambda: panels.show_invite(C.status)),
+            ("Can guests start games?…", lambda: choose_policy(status)),
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
             ("Add more time…", extend_session),
             ("Remove a player…", lambda: remove_player(C.status())),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),
         ]
+
+    waiting = (status.get("launch") or {}).get("pending")
+    if waiting:
+        answer_request(waiting)
+        return
 
     choice = xbmcgui.Dialog().select(heading, [label for label, _ in entries])
     if choice >= 0:

@@ -18,7 +18,8 @@ import subprocess
 import sys
 import time
 
-from . import gpu, invites, pads as padlib, protocol, retroarch
+from . import (catalogue as cataloguelib, gpu, invites, launcher,
+               pads as padlib, protocol, retroarch)
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
 
 # Better first, so "is this a step down" is a comparison rather than a guess.
@@ -47,6 +48,16 @@ SWEEP_INTERVAL = 0.05
 # process has segfaulted inside the GPU's video driver more than once, and
 # systemd puts it straight back -- but everything about the session lived in
 # memory, so every guest was locked out of something that no longer existed.
+# What a guest may do about starting a game. Off is the default everywhere,
+# because the failure mode of the other three is somebody else's television.
+#
+#   off      nothing; the page does not even offer a game list
+#   open     start anything, including over whatever is playing now
+#   idle     start anything, but only when the screen is free
+#   approve  ask, and the owner has APPROVAL_SECONDS to answer
+LAUNCH_POLICIES = ("off", "open", "idle", "approve")
+APPROVAL_SECONDS = 30.0
+
 STATE_PATH = os.path.expanduser("~/.local/state/fourth-player/session.json")
 
 # How long to wait for the pipeline worker before giving up on a guest's
@@ -163,6 +174,11 @@ class LiveSession:
         self._sweeper = None
         self.opened_at = None
         self._previous_dpm = None
+        self.launch_policy = "off"
+        self.catalogue = cataloguelib.Catalogue()
+        # The one launch request waiting on the owner, if any. Only ever one:
+        # a queue of these is a queue of interruptions.
+        self.pending = None
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -180,6 +196,8 @@ class LiveSession:
         # picker enumerates evdev devices at launch, so a pad that appears
         # after RetroArch starts is a pad that game will never see.
         self.codec = (self.cfg.codec or "auto").lower()
+        policy = (getattr(self.cfg, "guest_launch", "off") or "off").lower()
+        self.launch_policy = policy if policy in LAUNCH_POLICIES else "off"
         self.pads = padlib.PadSet(self.cfg.slots)
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
@@ -636,6 +654,109 @@ class LiveSession:
         self._reap_ghosts(seconds=seconds)
         return before - len(self.guests)
 
+    # -- starting a game ----------------------------------------------------
+
+    def launch_state(self):
+        """What the guest's page needs to know to offer the game list."""
+        pending = None
+        if self.pending:
+            pending = {"label": self.pending["label"],
+                       "who": self.pending["who"],
+                       "seconds": max(0, round(self.pending["deadline"] - self._now()))}
+        return {"policy": self.launch_policy, "pending": pending}
+
+    def set_policy(self, policy):
+        policy = (policy or "off").lower()
+        if policy not in LAUNCH_POLICIES:
+            raise ValueError("unknown launch policy %r" % policy)
+        self.launch_policy = policy
+        if policy == "off":
+            self.deny_launch("the owner turned off starting games")
+        log.info("guests may start games: %s", policy)
+        self.notify({"t": "launchpolicy", **self.launch_state()})
+        return policy
+
+    async def request_launch(self, guest, game_id):
+        """A guest has asked for a game. Returns what to tell them."""
+        if self.launch_policy == "off":
+            return {"ok": False, "error": "The owner has not turned on starting "
+                                          "games from here."}
+        row = self.catalogue.find(game_id)
+        if row is None:
+            # Either a stale page or somebody inventing ids. Same answer.
+            return {"ok": False, "error": "That game is not on this box."}
+        problem = await self.loop.run_in_executor(None, launcher.preflight, row)
+        if problem:
+            return {"ok": False, "error": problem}
+
+        busy = await self.loop.run_in_executor(None, launcher.running)
+        if self.launch_policy == "idle" and busy:
+            return {"ok": False,
+                    "error": "Something is already playing. This can start "
+                             "once the screen is free."}
+
+        if self.launch_policy == "approve":
+            if self.pending:
+                return {"ok": False,
+                        "error": "Someone else has just asked. Wait for that "
+                                 "to be answered."}
+            self.pending = {
+                "id": row["id"],
+                "label": row["label"],
+                "short": row["short"],
+                "who": guest.label if guest is not None else "someone",
+                "slot": guest.slot if guest is not None else None,
+                "deadline": self._now() + APPROVAL_SECONDS,
+            }
+            log.info("%s asked to start %s; waiting for the owner",
+                     self.pending["who"], row["label"])
+            # Everyone sees the ask, so a second person does not sit wondering
+            # why the list stopped responding.
+            self.notify({"t": "launchpolicy", **self.launch_state()})
+            return {"ok": True, "state": "pending",
+                    "seconds": round(APPROVAL_SECONDS), "label": row["label"]}
+
+        return await self._start_game(row, busy)
+
+    async def _start_game(self, row, busy=False):
+        if busy:
+            # Only the open policy gets here with something already playing,
+            # and taking over is what that policy is.
+            log.info("stopping what is playing to start %s", row["label"])
+            await self.loop.run_in_executor(None, launcher.stop_running)
+        problem = await self.loop.run_in_executor(None, launcher.launch, row)
+        if problem:
+            return {"ok": False, "error": problem}
+        self.notify({"t": "starting", "label": row["label"],
+                     "short": row["short"]})
+        return {"ok": True, "state": "starting", "label": row["label"]}
+
+    async def approve_launch(self):
+        """The owner said yes. Returns what happened, for the control socket."""
+        if not self.pending:
+            return {"ok": False, "error": "nothing is waiting"}
+        row = self.catalogue.find(self.pending["id"])
+        who, label = self.pending["who"], self.pending["label"]
+        self.pending = None
+        if row is None:
+            self.notify({"t": "launchdenied", "reason": "that game has gone"})
+            return {"ok": False, "error": "that game is no longer in the list"}
+        log.info("owner approved %s for %s", label, who)
+        busy = await self.loop.run_in_executor(None, launcher.running)
+        result = await self._start_game(row, busy)
+        self.notify({"t": "launchpolicy", **self.launch_state()})
+        return result
+
+    def deny_launch(self, reason="the owner said no"):
+        if not self.pending:
+            return {"ok": False, "error": "nothing is waiting"}
+        label = self.pending["label"]
+        self.pending = None
+        log.info("launch of %s refused: %s", label, reason)
+        self.notify({"t": "launchdenied", "reason": reason, "label": label})
+        self.notify({"t": "launchpolicy", **self.launch_state()})
+        return {"ok": True}
+
     # -- surviving a restart -------------------------------------------------
 
     def save(self):
@@ -720,6 +841,10 @@ class LiveSession:
                         self.stage.reset_worker("it stopped answering a health check")
                 if not self.invite:
                     return
+                # An unanswered ask is a refusal. Silence must not leave a
+                # guest staring at a countdown that already ran out.
+                if self.pending and self._now() >= self.pending["deadline"]:
+                    self.deny_launch("nobody answered")
                 self._reap_ghosts()
                 left = self.remaining()
                 for threshold in WARN_AT:

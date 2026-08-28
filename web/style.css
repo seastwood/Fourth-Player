@@ -626,3 +626,130 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     max-height: none;
   }
 }
+
+/* ---- the game list ---- */
+
+/* Over the picture and over the pad, because it is a mode: while it is open,
+   the phone is a catalogue rather than a controller. */
+.browser {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.browser-bar {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: calc(env(safe-area-inset-top, 0px) + .7rem)
+           clamp(.6rem, 3vw, 1.4rem) .7rem;
+  border-bottom: 2px solid var(--bg2);
+}
+
+.find {
+  flex: 1 1 8rem;
+  min-width: 5rem;
+  font-family: var(--sans);
+  font-size: 1rem;                /* under 16px, iOS zooms the page on focus */
+  /* The bare `input` rule dresses the PIN box: pixel type, centred, widely
+     letter-spaced. Right for six digits, wrong for a search field, and
+     inherited here because both are inputs. */
+  letter-spacing: normal;
+  text-indent: 0;
+  text-align: left;
+  color: var(--ink);
+  background: var(--bg2);
+  border: 2px solid var(--dim);
+  border-radius: 0;               /* the console has no rounded corners */
+  padding: .5rem .6rem;
+}
+.find:focus-visible, .chip:focus-visible, .card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shelf {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  /* Wide enough for a box to read as a box, narrow enough that a phone in
+     portrait still gets two of them side by side. */
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: .8rem;
+  align-content: start;
+  padding: .8rem clamp(.6rem, 3vw, 1.4rem)
+           calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+.card {
+  /* `button` is uppercased across this page, which suits a label reading
+     START and does not suit "The Legend of Zelda: A Link to the Past". */
+  text-transform: none;
+  letter-spacing: normal;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  padding: .4rem;
+  text-align: left;
+  color: var(--ink);
+  background: var(--bg2);
+  border: 2px solid transparent;
+  cursor: pointer;
+  font: inherit;
+}
+@media (hover: hover) {
+  .card:hover { border-color: var(--edge); }
+}
+.card:active { border-color: var(--accent); }
+
+.box {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+/* A game with no art still needs to be the same shape as one with art, or the
+   grid staggers and the list looks broken rather than incomplete. */
+.box-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--pixel);
+  font-size: .5rem;
+  line-height: 1.6;
+  color: var(--dim);
+  text-align: center;
+  padding: .5rem;
+}
+
+.card-name {
+  font-size: .82rem;
+  /* ROM labels run to parenthesised region and language lists with no spaces
+     in them, which otherwise push out of the card rather than wrapping. */
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  /* Long ROM labels are the norm, not the exception. Three lines, then stop. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-meta {
+  font-family: var(--pixel);
+  font-size: .42rem;
+  line-height: 1.5;
+  color: var(--accent);
+}
+
+.browse-note {
+  margin: 0;
+  padding: .6rem clamp(.6rem, 3vw, 1.4rem);
+  color: var(--dim);
+  font-size: .85rem;
+}

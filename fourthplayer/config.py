@@ -134,6 +134,10 @@ class Config:
     jitter_ms: int = 30
 
     # -- session --
+    # Whether a guest may start a game, and on what terms. See
+    # session.LAUNCH_POLICIES. Off unless deliberately turned on: everything
+    # else here affects a picture, and this one affects somebody's television.
+    guest_launch: str = "off"
     slots: int = 3
     default_duration_minutes: int = 120
     max_duration_minutes: int = 480

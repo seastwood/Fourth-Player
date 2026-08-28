@@ -175,6 +175,15 @@ function connect(hello) {
       case "extended": return startClock(message.remaining);
       case "closed":   return sessionOver(message.reason);
       case "error":    return onError(message);
+      case "games":         return paintShelf(message);
+      case "launchresult":  return launchResult(message);
+      case "launchpolicy":  return launchPolicy(message);
+      case "starting":      return showNotice(
+        "<p><strong>" + escapeText(message.label) + "</strong> is starting on "
+        + "the television.</p>", false);
+      case "launchdenied":  return showNotice(
+        "<p>Not started: " + escapeText(message.reason || "refused") + "</p>",
+        false);
     }
   });
 }
@@ -230,12 +239,19 @@ function onError(message) {
   }
 }
 
+function send(message) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+  }
+}
+
 function joined(message) {
   retries = 0;
   clearTimeout(joinTimer);
   clearRejoinTimer();
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
+  launchPolicy(message.launch);
   if (message.resumed_media) {
     setChip("link", "connected", "ok");
     startClock(message.remaining);
@@ -1168,6 +1184,155 @@ if (window.visualViewport) {
 video.addEventListener("loadedmetadata", fitGutter);
 video.addEventListener("resize", fitGutter);
 window.addEventListener("resize", fitGutter);
+
+/* ---- the game list ---- */
+
+/* Everything here works off one snapshot from the host. A row carries a label,
+   a console, a player count and an id -- never a path and never a command, so
+   the worst a tampered-with page can ask for is a game that is already in the
+   list. */
+let shelfRows = [], shelfSystems = [], launchMode = "off", askTimer = null;
+
+function escapeText(text) {
+  const box = document.createElement("span");
+  box.textContent = text == null ? "" : String(text);
+  return box.innerHTML;
+}
+
+function launchPolicy(message) {
+  launchMode = (message && message.policy) || "off";
+  // No point offering a button that can only ever refuse.
+  el("games").hidden = launchMode === "off";
+  if (launchMode === "off") closeBrowser();
+  const waiting = message && message.pending;
+  if (waiting) {
+    countdown(waiting.who + " asked for " + waiting.label, waiting.seconds);
+  } else if (askTimer) {
+    clearInterval(askTimer);
+    askTimer = null;
+    hideNotice();
+  }
+}
+
+function countdown(what, seconds) {
+  if (askTimer) clearInterval(askTimer);
+  let left = Math.max(0, seconds | 0);
+  const paint = () => {
+    showNotice("<p>" + escapeText(what) + "</p>"
+               + '<p class="footnote">Waiting for the owner to say yes &mdash; '
+               + left + "s</p>", true);
+    if (left <= 0) { clearInterval(askTimer); askTimer = null; }
+    left -= 1;
+  };
+  paint();
+  askTimer = setInterval(paint, 1000);
+}
+
+function openBrowser() {
+  el("browser").hidden = false;
+  // Asked for every time it opens: games get added to the box, and a list
+  // cached from twenty minutes ago is a list missing the one they want.
+  send({ t: "games" });
+  el("shelf").innerHTML = '<p class="browse-note">Loading the game list…</p>';
+}
+
+function closeBrowser() {
+  el("browser").hidden = true;
+}
+
+function paintShelf(message) {
+  shelfRows = message.games || [];
+  shelfSystems = message.systems || [];
+  launchPolicy(message);
+  const picker = el("fsystem");
+  if (picker.options.length !== shelfSystems.length + 1) {
+    picker.innerHTML = '<option value="">Every console</option>';
+    for (const row of shelfSystems) {
+      const option = document.createElement("option");
+      option.value = row.system;
+      option.textContent = row.short;
+      picker.appendChild(option);
+    }
+  }
+  filterShelf();
+}
+
+function filterShelf() {
+  const needle = el("q").value.trim().toLowerCase();
+  const system = el("fsystem").value;
+  const players = el("fplayers").value;
+  const shown = shelfRows.filter((row) => {
+    if (system && row.system !== system) return false;
+    // A game with no known player count answers only to "any": guessing that
+    // it is one-player would hide two-player games from the filter that
+    // matters most here.
+    if (players && row.bucket !== players) return false;
+    if (needle && !row.label.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+
+  const shelf = el("shelf");
+  shelf.innerHTML = "";
+  if (!shown.length) {
+    shelf.innerHTML = '<p class="browse-note">Nothing matches that.</p>';
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const row of shown.slice(0, 400)) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card";
+    card.setAttribute("role", "listitem");
+    card.dataset.id = row.id;
+    const art = row.art
+      ? '<img class="box" loading="lazy" alt="" src="/art/' + row.id + '">'
+      : '<span class="box box-none" aria-hidden="true">' + escapeText(row.short) + "</span>";
+    const count = row.players
+      ? (row.players >= 5 ? "5+ players" : row.players + (row.players === 1 ? " player" : " players"))
+      : "";
+    card.innerHTML = art
+      + '<span class="card-name">' + escapeText(row.label) + "</span>"
+      + '<span class="card-meta">' + escapeText(row.short)
+      + (count ? " &middot; " + count : "") + "</span>";
+    card.addEventListener("click", () => askFor(row));
+    fragment.appendChild(card);
+  }
+  shelf.appendChild(fragment);
+  el("browse-note").hidden = shown.length <= 400;
+  el("browse-note").textContent =
+    shown.length > 400 ? "Showing the first 400 of " + shown.length + "." : "";
+}
+
+function askFor(row) {
+  // A confirmation, because a mis-tap here starts a game on a television in
+  // somebody else's house.
+  const warn = launchMode === "open"
+    ? " This stops whatever is playing now." : "";
+  if (!window.confirm("Start " + row.label + "?" + warn)) return;
+  send({ t: "launch", game: row.id });
+  closeBrowser();
+  showNotice("<p>Asking for <strong>" + escapeText(row.label)
+             + "</strong>&hellip;</p>", true);
+}
+
+function launchResult(message) {
+  if (!message.ok) {
+    showNotice('<p class="footnote">' + escapeText(message.error) + "</p>", false);
+    return;
+  }
+  if (message.state === "pending") {
+    countdown("You asked for " + message.label, message.seconds);
+    return;
+  }
+  showNotice("<p><strong>" + escapeText(message.label)
+             + "</strong> is starting&hellip;</p>", false);
+}
+
+el("games").addEventListener("click", openBrowser);
+el("browse-close").addEventListener("click", closeBrowser);
+for (const id of ("q fsystem fplayers").split(" ")) {
+  el(id).addEventListener("input", filterShelf);
+}
 
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();

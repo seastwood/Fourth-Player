@@ -48,6 +48,20 @@ def start_session(minutes):
     return ask({"cmd": "start", "minutes": minutes}, timeout=30)
 
 
+def set_policy(policy):
+    return ask({"cmd": "policy", "set": policy})
+
+
+def approve():
+    # Long, because saying yes runs the game: the picker comes up, RetroArch
+    # starts, and only then does this answer.
+    return ask({"cmd": "approve"}, timeout=40)
+
+
+def deny(reason="the owner said no"):
+    return ask({"cmd": "deny", "reason": reason})
+
+
 def stop_session():
     return ask({"cmd": "stop"}, timeout=30)
 

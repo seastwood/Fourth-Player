@@ -144,6 +144,71 @@ was a deliberate trade and it should stay one. If remote desktop control is ever
 wanted it must arrive as a separate, explicitly-armed mode — never as a
 permission flag on an ordinary guest session.
 
+## Letting guests start games
+
+Off by default, and the only thing here that reaches past the picture.
+
+A guest with a pad can already drive whatever is in front of them, which
+includes Kodi if Kodi is what is on screen. That is worth knowing before
+turning any of this on: the interesting question was never whether a remote
+guest can browse the television, it is what they can browse it *into*. So
+there is no remote Kodi mode here at all. Guests get a list of games in their
+own page and the host does the starting.
+
+The catalogue is the whole security model. A guest sends an opaque id and the
+only thing an id can turn into is a row that was already on this machine's
+disk — read from the RetroArch playlists `sync_games.py` maintains, with box
+art and player counts alongside. No path, no core and no command line ever
+crosses the wire in either direction, so the worst a tampered-with page can ask
+for is a game that was already in the list. `tests/test_launch.py` holds that
+down.
+
+Four settings, from Kodi (**Can guests start games?**) or the command line:
+
+```sh
+python3 -m fourthplayer policy            # what is it now
+python3 -m fourthplayer policy off        # the default
+python3 -m fourthplayer policy approve    # ask; 30 seconds to answer
+python3 -m fourthplayer policy idle       # only when nothing is running
+python3 -m fourthplayer policy open       # any time, over the top of a game
+```
+
+`open` means what it says: a guest can stop the game you are playing and start
+a different one without asking. RetroArch is asked to close rather than killed,
+so save memory is written, but it is still someone else ending your game.
+
+`approve` puts the request on the television — over a running game, since the
+overlay is the same override-redirect window the join card uses — with who
+asked, what for, and a countdown. Answer it in Kodi, which offers the request
+instead of its usual menu while one is waiting, or:
+
+```sh
+python3 -m fourthplayer approve
+python3 -m fourthplayer deny --reason "not that one"
+```
+
+Silence is a refusal. Nothing starts on a timeout.
+
+Two details worth knowing:
+
+**The player picker always appears.** A guest who cannot claim a slot is a
+guest whose controller the game ignores, which from their side looks exactly
+like the whole thing being broken. It comes for free rather than by asking:
+a session creates one virtual pad per slot the moment it opens, so RetroArch
+always sees several pads by the time anything can launch, which is the
+condition kodi-retrobox's picker appears under. `tests/test_launch.py` checks
+that against `ra_players.py`'s own rule rather than assuming it.
+
+**The game is started outside this service's sandbox.** The server runs with
+`ProtectHome=read-only` and a short list of writable paths, which is right for
+something listening to the internet and fatal for an emulator that writes saves
+across the home directory. A child would inherit all of it, so the game is
+handed to the user's service manager as its own transient unit instead.
+
+The catalogue is read, never imported: if kodi-retrobox is not installed the
+list is simply empty and none of this is available. The two programs couple
+through data files, which is what made splitting them worth doing.
+
 ## Quick start
 
 ```sh

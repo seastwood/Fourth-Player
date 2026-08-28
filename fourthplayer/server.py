@@ -81,6 +81,8 @@ class Server:
             return self._file("index.html")
         if route.startswith("/static/"):
             return self._file(route[len("/static/"):])
+        if route.startswith("/art/"):
+            return self._art(route[len("/art/"):])
         return HTTPStatus.NOT_FOUND, [], b"not found\n"
 
     def _file(self, relative):
@@ -96,6 +98,30 @@ class Server:
             body = handle.read()
         return HTTPStatus.OK, [("content-type", kind),
                                ("cache-control", "no-store")], body
+
+    def _art(self, key):
+        """Box art for one game id.
+
+        Served by id rather than by path on purpose: the id is the only name a
+        guest ever has for a game, so this route cannot be asked for a file
+        that is not artwork for something already in the catalogue.
+        """
+        if self.session is None or not self.session.open:
+            return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        if not re.fullmatch(r"[0-9a-f]{1,64}", key or ""):
+            return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        path = self.session.catalogue.art(key)
+        if not path or not os.path.isfile(path):
+            return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        try:
+            with open(path, "rb") as handle:
+                body = handle.read()
+        except OSError:
+            return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        # Box art does not change under a given id, and a phone scrolling two
+        # hundred games should not fetch each one twice.
+        return HTTPStatus.OK, [("content-type", "image/png"),
+                               ("cache-control", "private, max-age=3600")], body
 
     def _address(self, socket_):
         """Who is calling, for rate-limiting purposes.
@@ -154,6 +180,20 @@ class Server:
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
                         int(message.get("sdpMLineIndex") or 0), message["candidate"])
+                elif kind == "games":
+                    # The catalogue itself, which is public to anyone already
+                    # in the session: labels, systems and player counts, and
+                    # an id per game that means nothing anywhere else.
+                    await outbox.put({
+                        "t": "games",
+                        "systems": self.session.catalogue.systems(),
+                        "games": self.session.catalogue.listing(),
+                        **self.session.launch_state(),
+                    })
+                elif kind == "launch":
+                    result = await self.session.request_launch(
+                        guest, str(message.get("game") or ""))
+                    await outbox.put({"t": "launchresult", **result})
                 elif kind == "report":
                     # What the guest's own browser sees. The host can only
                     # know what it sent; whether any of it arrived is visible
@@ -284,6 +324,9 @@ class Server:
             "t": "joined", "slot": guest.slot, "label": guest.label,
             "guest": guest_token, "remaining": round(self.session.remaining()),
             "resumed_media": keep_media,
+            # So the page knows whether to offer a game list at all, rather
+            # than showing a button that always refuses.
+            "launch": self.session.launch_state(),
         })
         return guest
 
@@ -370,6 +413,21 @@ class Server:
                     return {"ok": False,
                             "error": "already at the maximum session length"}
                 return self._status()
+            if command == "policy":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                if request.get("set"):
+                    self.session.set_policy(str(request["set"]))
+                return self._status()
+            if command == "approve":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                return await self.session.approve_launch()
+            if command == "deny":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                return self.session.deny_launch(
+                    str(request.get("reason") or "the owner said no"))
             if command == "kick":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
@@ -416,6 +474,7 @@ class Server:
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,
+            "launch": self.session.launch_state(),
         }
 
     def join_url(self, token):

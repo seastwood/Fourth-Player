@@ -50,6 +50,7 @@
     <span id="link" class="chip">connecting</span>
     <span id="clock" class="chip"></span>
     <select id="padtype" class="chip" aria-label="Controller layout"></select>
+    <button id="games" type="button" class="ghost" hidden>Games</button>
     <button id="unmute" type="button" class="ghost" hidden>🔇 Sound off — tap</button>
     <button id="info" type="button" class="ghost" title="What is happening">?</button>
     <button id="full" type="button" class="ghost">Fullscreen</button>
@@ -61,6 +62,29 @@
        controller sits on top of it in portrait -- so the messages explaining
        why there was no picture were themselves invisible. -->
   <div id="notice" class="notice" role="status" hidden></div>
+
+  <!-- The game list. Everything in it comes from the host over the same
+       socket as everything else; the ids are meaningless anywhere but this
+       session, and a game not in this list cannot be asked for. -->
+  <div id="browser" class="browser" hidden>
+    <div class="browser-bar">
+      <input id="q" class="find" type="search" placeholder="Search games"
+             autocomplete="off" aria-label="Search games">
+      <select id="fsystem" class="chip" aria-label="Console"></select>
+      <select id="fplayers" class="chip" aria-label="Number of players">
+        <option value="">Any players</option>
+        <option value="1">1 player</option>
+        <option value="2">2 players</option>
+        <option value="3">3 players</option>
+        <option value="4">4 players</option>
+        <option value="5+">5 or more</option>
+      </select>
+      <button id="browse-close" type="button" class="ghost"
+              title="Back to the game">&times;</button>
+    </div>
+    <p id="browse-note" class="browse-note" hidden></p>
+    <div id="shelf" class="shelf" role="list"></div>
+  </div>
 
   <div id="prompt" class="prompt">
     <p><strong>Press any button on your controller.</strong></p>

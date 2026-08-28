@@ -95,6 +95,7 @@ class Overlay(Gtk.Window):
         self.qr_for = None
         self.elapsed = 0
         self.expanded = True
+        self.pending = None
 
         self.set_app_paintable(True)
         self.set_decorated(False)
@@ -136,6 +137,11 @@ class Overlay(Gtk.Window):
             self.qr = qr_surface(url)
             self.qr_for = url
 
+        # A request to start a game outranks the join card: it is the one
+        # thing here with a deadline, and the owner may be mid-game with no
+        # other window in front of them.
+        self.pending = (status.get("launch") or {}).get("pending")
+
         full = status.get("guests") and len(status["guests"]) >= status.get("slots", 3)
         if self.expanded and (self.elapsed > self.card_seconds or full):
             self.expanded = False
@@ -144,6 +150,15 @@ class Overlay(Gtk.Window):
         return True
 
     def reposition(self):
+        if self.pending:
+            self.resize(460, 132)
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            area = monitor.get_geometry()
+            # Middle of the top edge, not a corner: this one is asking for
+            # something, so it is allowed to be in the way.
+            self.move(area.x + (area.width - 460) // 2, area.y + MARGIN)
+            return
         width, height = (400, 300) if self.expanded else (168, 44)
         if not self.expanded or not self.status.get("url"):
             width, height = (168, 44) if not self.expanded else (400, 132)
@@ -172,11 +187,35 @@ class Overlay(Gtk.Window):
         ctx.set_line_width(1.5)
         ctx.stroke()
 
-        if self.expanded and self.qr:
+        if self.pending:
+            self.draw_ask(ctx, width, height)
+        elif self.expanded and self.qr:
             self.draw_card(ctx, width, height)
         else:
             self.draw_badge(ctx, width, height)
         return False
+
+    def draw_ask(self, ctx, width, height):
+        """Who wants to start what, and how long is left to answer.
+
+        No buttons, because this window is click-through by design and a
+        controller cannot reach it: it says what to do, and the doing happens
+        in Kodi or at a terminal.
+        """
+        ask = self.pending or {}
+        seconds = int(ask.get("seconds") or 0)
+        text(ctx, CARD_PAD, CARD_PAD, "START A GAME?", 12,
+             (0.90, 0.61, 0.25), bold=True)
+        text(ctx, width - CARD_PAD - 46, CARD_PAD, "%2ds" % seconds, 14,
+             (1.0, 0.36, 0.48) if seconds <= 10 else (0.89, 0.91, 0.95), bold=True)
+        text(ctx, CARD_PAD, CARD_PAD + 26,
+             "%s wants to play" % (ask.get("who") or "someone"), 12,
+             (0.62, 0.66, 0.72))
+        text(ctx, CARD_PAD, CARD_PAD + 46, (ask.get("label") or "")[:46], 15,
+             (0.89, 0.91, 0.95), bold=True)
+        text(ctx, CARD_PAD, height - 32,
+             "Fourth Player in Kodi \u2192 Approve, or: fourthplayer approve",
+             11, (0.62, 0.66, 0.72))
 
     def draw_card(self, ctx, width, height):
         Gdk.cairo_set_source_pixbuf(ctx, self.qr, CARD_PAD, CARD_PAD)
