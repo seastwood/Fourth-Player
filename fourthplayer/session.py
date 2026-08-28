@@ -241,7 +241,11 @@ class LiveSession:
         try:
             self._overlay = subprocess.Popen(
                 [sys.executable, "-m", "fourthplayer.overlay"],
-                env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # stderr is inherited on purpose, so it lands in this service's
+                # journal. Discarding it meant an overlay that failed left no
+                # record anywhere -- and one that fails is indistinguishable
+                # from a feature nobody wired up.
+                env=environment, stdout=subprocess.DEVNULL)
         except OSError as exc:
             log.warning("could not draw the on-screen card: %s", exc)
             self._overlay = None

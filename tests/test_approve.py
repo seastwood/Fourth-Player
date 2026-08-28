@@ -133,5 +133,36 @@ else:
     (_, ax, ay, aw, ah), (_, dx, dy, dw, dh) = boxes
     check(ax + aw <= dx, "and they do not overlap each other")
 
+print("the window can be made clickable and click-through again")
+# This is the one that broke it: GDK's documentation says None means the whole
+# window, and the Python binding raises TypeError instead -- inside a GLib
+# timeout, whose exceptions remove the timer and print nowhere. The overlay
+# went on drawing whatever it last drew, which looks exactly like a feature
+# that was never wired up.
+try:
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+except Exception as exc:
+    print("  --   GTK is not available here (%s)" % exc)
+else:
+    try:
+        window = Gtk.Window(type=Gtk.WindowType.POPUP)
+        window.realize()
+    except Exception as exc:                   # no display
+        print("  --   no display to realize a window on (%s)" % exc)
+    else:
+        card = O.Overlay.__new__(O.Overlay)
+        card.get_window = window.get_window
+        card.get_allocated_width = lambda: O.Overlay.ASK_WIDTH
+        card.get_allocated_height = lambda: O.Overlay.ASK_HEIGHT
+        for wanted in (True, False, True):
+            try:
+                O.Overlay.set_clickable(card, wanted)
+                check(True, "set_clickable(%s) does not raise" % wanted)
+            except Exception as exc:
+                check(False, "set_clickable(%s) raised %s: %s"
+                      % (wanted, type(exc).__name__, exc))
+
 print(("FAILED: %d" % len(fails)) if fails else "test_approve: all ok")
 sys.exit(1 if fails else 0)

@@ -29,8 +29,9 @@ import io
 import json
 import os
 import socket
-import time
 import sys
+import time
+import traceback
 
 import gi
 
@@ -136,6 +137,22 @@ class Overlay(Gtk.Window):
     # -- state --------------------------------------------------------------
 
     def poll(self):
+        """Wrapped, because returning nothing from a GLib timeout removes it.
+
+        An exception here does not print anywhere -- the parent starts this
+        with its output discarded -- and it does not stop the process either.
+        It removes the timer, so the window carries on being drawn, frozen, at
+        whatever it last was. That is the worst shape a failure can take: it
+        looks exactly like a feature that was never wired up.
+        """
+        try:
+            return self._poll()
+        except Exception:
+            print("overlay: poll failed", file=sys.stderr)
+            traceback.print_exc()
+            return True                        # keep the timer alive regardless
+
+    def _poll(self):
         status = ask({"cmd": "status"})
         if not status.get("open"):
             Gtk.main_quit()
@@ -214,10 +231,27 @@ class Overlay(Gtk.Window):
         window = self.get_window()
         if window is None:
             return
-        window.input_shape_combine_region(
-            None if yes else cairo.Region(), 0, 0)
+        # A region covering the window, not None. The documentation says None
+        # means "the whole window"; the binding says "Argument 1 does not allow
+        # None as a value" and raises -- which killed the callback that was
+        # asking, and with it every update this window makes.
+        if yes:
+            shape = cairo.Region(cairo.RectangleInt(
+                0, 0, max(1, self.get_allocated_width()),
+                max(1, self.get_allocated_height())))
+        else:
+            shape = cairo.Region()
+        window.input_shape_combine_region(shape, 0, 0)
 
     def watch_pad(self):
+        try:
+            return self._watch_pad()
+        except Exception:
+            print("overlay: reading the pads failed", file=sys.stderr)
+            traceback.print_exc()
+            return True
+
+    def _watch_pad(self):
         """Twenty times a second: is the owner holding both bumpers?"""
         progress = 0.0
         try:
