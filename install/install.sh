@@ -74,6 +74,16 @@ if [ -d "$HOME/.kodi/addons" ]; then
     echo "if the menu entry still offers to install it, restart Kodi once --"
     echo "a rescan does not always take for a brand new add-on"
   fi
+  # kodi-retrobox builds its home menu from its own game library and carries
+  # a Fourth Player entry that appears once this add-on is on disk. Its timer
+  # would do this within ten minutes; asking now means the entry is there when
+  # somebody goes looking for it, which is immediately after installing.
+  # add-kodi-menu.py is for everyone else and steps aside here on purpose.
+  if [ -x "$HOME/.local/bin/kodi_menu.py" ]; then
+    if "$HOME/.local/bin/kodi_menu.py" >/dev/null 2>&1; then
+      echo "rebuilt kodi-retrobox's menu, so FOURTH PLAYER is on it now"
+    fi
+  fi
 else
   echo "no ~/.kodi/addons -- skipping (this machine has no Kodi)"
 fi
