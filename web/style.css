@@ -556,6 +556,14 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-mid { width: 100%; align-items: stretch; }
   .centre-row { width: 100%; justify-content: space-between; }
 
+  /* Out to the edges, off the picture. Centred in their half of the grid, the
+     d-pad and the face buttons sat on top of the game -- the stream is
+     letterboxed in the middle of a much wider screen, and the black either
+     side of it is exactly the room these want. This also lines them up under
+     the shoulders, which are already in the corners. */
+  .touch-left { justify-content: flex-start; }
+  .touch-right { justify-content: flex-end; }
+
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
   .shoulders { align-self: start; }
