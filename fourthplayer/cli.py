@@ -309,7 +309,12 @@ def _check(cfg):
             if not Gst.ElementFactory.find(element):
                 problems.append(f"the GStreamer element {element} is missing")
         if cfg.hardware_encode and not Gst.ElementFactory.find("vah264enc"):
-            notes.append("vah264enc is missing; set hardware_encode=false to use x264")
+            # Not an instruction any more: the server drops to software on its
+            # own when the hardware is not there. Worth saying, because it is
+            # the difference between a session that is smooth and one that is
+            # merely watchable.
+            notes.append("no hardware encoder here (vah264enc); sessions will "
+                         "encode in software, which is slower and works")
         # webrtcbin loads without libnice and then refuses to run, which is a
         # uniquely annoying way to fail: the element exists, so every naive
         # check passes, and the error arrives only once a guest is waiting.

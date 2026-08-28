@@ -128,7 +128,9 @@ def host_codecs(hardware=True):
     found = []
     for codec in CODEC_PREFERENCE:
         va, sw, parser, payloader = _ELEMENTS[codec]
-        encoder = va if hardware else sw
+        # Fall back the same way the pipeline does, or this promises H.265 on
+        # a machine that has no VA driver and the offer is a lie.
+        encoder = va if (hardware and Gst.ElementFactory.find(va)) else sw
         if (Gst.ElementFactory.find(encoder)
                 and Gst.ElementFactory.find(parser)
                 and Gst.ElementFactory.find(payloader)):
@@ -315,7 +317,24 @@ class Stage:
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
         cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
         hevc = self.codec in ("h265", "hevc")
-        if cfg.hardware_encode:
+        # Asking for hardware that is not there used to fail at pipeline
+        # construction -- `no element "vapostproc"` -- and the session simply
+        # would not start. On a machine with no VA driver, which is every
+        # virtual machine and plenty of real ones, that is the first thing a
+        # new install does and the last thing it explains. `check` noticed and
+        # told the user to edit the config; doing it here means they never have
+        # to. Software encoding is slower, not broken.
+        hardware = cfg.hardware_encode
+        if hardware:
+            missing = [name for name in
+                       (("vah265enc" if hevc else "vah264enc"), "vapostproc")
+                       if not Gst.ElementFactory.find(name)]
+            if missing:
+                log.warning("no %s on this machine, so encoding in software "
+                            "instead (slower, and it works)",
+                            " or ".join(missing))
+                hardware = False
+        if hardware:
             element = "vah265enc" if hevc else "vah264enc"
             encoder = (f"{element} name=enc target-usage={cfg.target_usage} "
                        f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} "
@@ -337,7 +356,7 @@ class Stage:
         encoding = "H265" if hevc else "H264"
         self.encoding = encoding
         convert = (f"vapostproc ! {_caps(cfg.width, cfg.height)}"
-                   if cfg.hardware_encode else
+                   if hardware else
                    f"videoscale ! videoconvert ! video/x-raw,format=I420,"
                    f"width={cfg.width},height={cfg.height}")
 
