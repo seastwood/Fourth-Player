@@ -62,6 +62,21 @@ SWEEP_INTERVAL = 0.05
 # staring at a frozen picture.
 REBUILD_GRACE = 2.0
 
+# How long a name may be, and what it may contain. It is drawn on somebody
+# else's television and printed in their logs, so it is trimmed to something
+# that fits a card and stripped of anything that is not a printing character --
+# not as a security measure, since it cannot reach a shell or a page unescaped,
+# but because a name full of newlines is a card that no longer reads.
+NAME_MAX = 16
+
+
+def clean_name(name):
+    """A guest's chosen name, or "" to be called by their slot."""
+    text = "".join(c for c in str(name or "") if c.isprintable())
+    text = " ".join(text.split())
+    return text[:NAME_MAX]
+
+
 LAUNCH_POLICIES = ("off", "open", "idle", "approve")
 APPROVAL_SECONDS = 30.0
 
@@ -102,10 +117,11 @@ WARN_AT = (300, 120, 30)
 class GuestConnection:
     """One browser: a slot, a pad, a WebRTC peer and a socket."""
 
-    def __init__(self, session, slot, socket):
+    def __init__(self, session, slot, socket, name=""):
         self.session = session
         self.slot = slot
         self.socket = socket
+        self.name = name
         # When they last had a working media connection. A guest is only ever
         # reaped for having none, so this starts now rather than at zero.
         self.media_since = time.monotonic()
@@ -121,7 +137,9 @@ class GuestConnection:
         # this ends up pointing at. Belt and braces on a slot that has already
         # produced one connection nobody was feeding.
         self.attaching = asyncio.Lock()
-        self.label = f"Player {slot + 2}"   # the local player is player 1
+        # What they called themselves, or their slot. The local player at the
+        # television is player 1, so a guest in the first slot is player 2.
+        self.label = name or f"Player {slot + 2}"
         self.joined_at = time.monotonic()
         self.last_input = 0.0
         self.frames = 0
@@ -366,11 +384,13 @@ class LiveSession:
 
     # -- guests -------------------------------------------------------------
 
-    def admit(self, token, pin, socket, address):
+    def admit(self, token, pin, socket, address, name=""):
         """Spend the invite for a slot. Raises invites.JoinError on refusal."""
-        slot, guest_token = self.invite.join(token, pin, now=self._now(),
-                                             address=address)
-        guest = GuestConnection(self, slot, socket)
+        name = clean_name(name)
+        slot, guest_token = self.invite.join(
+            token, pin, now=self._now(), address=address, label=name,
+            require_token=getattr(self.cfg, "require_link", True))
+        guest = GuestConnection(self, slot, socket, name)
         self.guests[slot] = guest
         # Write it down now. The snapshot was only taken when a session opened
         # or somebody left, so a guest who joined and was still playing when
@@ -378,6 +398,10 @@ class LiveSession:
         # in the game as the only ones unable to get back in.
         self.save()
         log.info("%s joined from %s", guest.label, address or "unknown")
+        # Everybody already in the session hears about it. The one arriving is
+        # sent this too, but has no label of their own yet and ignores it.
+        self.notify({"t": "arrived", "label": guest.label,
+                     "guests": len(self.guests), "slots": self.slots})
         return guest, guest_token
 
     async def agree_codec(self, guest, guest_codecs):
@@ -453,7 +477,7 @@ class LiveSession:
         self.detach_peer(guest)
         return await self.attach_peer(guest, on_signal)
 
-    def resume(self, guest_token, socket):
+    def resume(self, guest_token, socket, name=""):
         """A guest whose socket dropped, coming back without the PIN.
 
         Their slot is held rather than reassigned: it is the same person, and
@@ -477,7 +501,13 @@ class LiveSession:
             self.detach_peer(existing)
             existing.socket = socket
             return existing
-        guest = GuestConnection(self, record.slot, socket)
+        # The name they gave when they first joined is on the invite's record,
+        # so coming back does not turn them into "Player 3" again. A name sent
+        # with the resume wins, since they may have just changed it.
+        name = clean_name(name) or getattr(record, "label", "") or ""
+        if name.startswith("Player "):
+            name = ""                       # a slot number is not a name
+        guest = GuestConnection(self, record.slot, socket, name)
         self.guests[record.slot] = guest
         self.save()
         return guest

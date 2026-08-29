@@ -246,12 +246,13 @@ class Server:
             return None
         try:
             if message.get("t") == "resume":
-                guest = self.session.resume(message.get("guest", ""), socket_)
+                guest = self.session.resume(message.get("guest", ""), socket_,
+                                            message.get("name", ""))
                 guest_token = message.get("guest", "")
             else:
                 guest, guest_token = self.session.admit(
                     message.get("token", ""), str(message.get("pin", "")),
-                    socket_, address)
+                    socket_, address, message.get("name", ""))
         except invites.LockedOut as exc:
             await outbox.put({"t": "error", "retry_after": round(exc.seconds),
                               "message": f"Too many tries. Wait {round(exc.seconds)}s."})
@@ -267,7 +268,7 @@ class Server:
                 try:
                     guest, guest_token = self.session.admit(
                         message.get("token", ""), str(message.get("pin", "")),
-                        socket_, address)
+                        socket_, address, message.get("name", ""))
                 except invites.JoinError:
                     await outbox.put({"t": "error",
                                       "message": "Every player slot is taken."})
@@ -445,6 +446,17 @@ class Server:
                     log.info("links will be built on %s",
                              self.cfg.public_url or "the address on this network")
                 return self._status()
+            if command == "link":
+                if "set" in request:
+                    self.cfg.require_link = bool(request["set"])
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember it: %s", exc)
+                    log.info("guests %s the full link",
+                             "need" if self.cfg.require_link
+                             else "need only the address and PIN")
+                return self._status()
             if command == "slots":
                 if request.get("set") is not None:
                     self.cfg.slots = self._slots({"slots": request["set"]},
@@ -558,6 +570,7 @@ class Server:
             return {"ok": True, "open": False,
                     "public_url": self.cfg.public_url,
                     "example_url": self.join_url("EXAMPLE"),
+                    "require_link": self.cfg.require_link,
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None}}
@@ -574,6 +587,8 @@ class Server:
             "max_slots": self.cfg.max_slots,
             "public_url": self.cfg.public_url,
             "example_url": self.join_url("EXAMPLE"),
+            "require_link": self.cfg.require_link,
+            "base_url": self.join_url("").rstrip("/").rsplit("/j", 1)[0],
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,

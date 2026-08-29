@@ -51,6 +51,9 @@ POLL_SECONDS = 1
 # How long the full card stays up before it shrinks to the badge. Long enough
 # to photograph and send, short enough not to sit on the game.
 CARD_SECONDS = 120
+# How long "somebody joined" stays up. Long enough to read from a sofa without
+# looking for it, short enough not to sit on a game.
+JOINED_SECONDS = 5.0
 
 MARGIN = 28
 QR_PIXELS = 190
@@ -100,6 +103,11 @@ class Overlay(Gtk.Window):
         self.elapsed = 0
         self.expanded = True
         self.pending = None
+        # Who is already here, so an arrival can be noticed. Seeded on the
+        # first poll rather than empty, or every guest already playing would be
+        # announced the moment this window opens.
+        self.known = None
+        self.joined = None           # (name, until) while somebody is new
         self.shoulders = Shoulders()
         self.hold = 0.0
         # A hold that was already under way when the request arrived does not
@@ -168,6 +176,20 @@ class Overlay(Gtk.Window):
         # A request to start a game outranks the join card: it is the one
         # thing here with a deadline, and the owner may be mid-game with no
         # other window in front of them.
+        # Somebody arriving is worth saying on the television: the host is
+        # usually looking at a game, not at a roster, and a controller coming
+        # to life with no explanation is how a guest gets blamed for something
+        # the cat did.
+        here = {(g.get("slot"), g.get("label"))
+                for g in (status.get("guests") or [])}
+        if self.known is None:
+            self.known = here
+        elif here - self.known:
+            newest = sorted(here - self.known)[-1]
+            self.joined = (newest[1] or "A guest",
+                           time.monotonic() + JOINED_SECONDS)
+        self.known = here
+
         was = self.pending
         self.pending = (status.get("launch") or {}).get("pending")
         if self.pending and not was:
@@ -183,6 +205,8 @@ class Overlay(Gtk.Window):
         full = status.get("guests") and len(status["guests"]) >= status.get("slots", 3)
         if self.expanded and (self.elapsed > self.card_seconds or full):
             self.expanded = False
+        if self.joined and time.monotonic() >= self.joined[1]:
+            self.joined = None
         self.reposition()
         self.queue_draw()
         return True
@@ -293,6 +317,13 @@ class Overlay(Gtk.Window):
         return True
 
     def reposition(self):
+        if self.joined and not self.pending:
+            self.resize(330, 96)
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            area = monitor.get_geometry()
+            self.move(area.x + area.width - 330 - MARGIN, area.y + MARGIN)
+            return
         if self.pending:
             self.resize(self.ASK_WIDTH, self.ASK_HEIGHT)
             self.set_clickable(True)           # again, now it is this size
@@ -333,11 +364,24 @@ class Overlay(Gtk.Window):
 
         if self.pending:
             self.draw_ask(ctx, width, height)
+        elif self.joined:
+            self.draw_joined(ctx, width, height)
         elif self.expanded and self.qr:
             self.draw_card(ctx, width, height)
         else:
             self.draw_badge(ctx, width, height)
         return False
+
+    def draw_joined(self, ctx, width, height):
+        name, _until = self.joined
+        text(ctx, CARD_PAD, CARD_PAD + 2, "JOINED", 11,
+             (0.29, 0.84, 0.63), bold=True)
+        text(ctx, CARD_PAD, CARD_PAD + 24, name[:28], 18,
+             (0.89, 0.91, 0.95), bold=True)
+        guests = len(self.status.get("guests") or [])
+        slots = self.status.get("slots", 0)
+        text(ctx, CARD_PAD, CARD_PAD + 54, "%d of %d playing" % (guests, slots),
+             12, (0.62, 0.66, 0.72))
 
     def draw_ask(self, ctx, width, height):
         """Who wants to start what, and how long is left to answer.

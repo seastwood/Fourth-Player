@@ -480,6 +480,35 @@ That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a
 timestamped backup. Safe to run twice.
 
+### Names, and getting in without the link
+
+A guest may give a name on the join form. It is optional, remembered in their
+browser, and sent again when they come back, so a reconnect does not turn them
+into a slot number. It is trimmed to sixteen printing characters before it goes
+anywhere, because it is drawn on somebody else's television and a name full of
+newlines is a card that no longer reads.
+
+Somebody arriving puts a card on the television for five seconds, and tells the
+guests already playing. The host is usually looking at a game rather than a
+roster, and a controller coming to life with no explanation is how a guest gets
+blamed for something the cat did.
+
+By default a guest needs the whole link *and* the PIN. `link open` -- in Kodi,
+**How do guests get in?** -- lets them in on the address and the PIN alone, so
+it can be read out loud rather than sent:
+
+```sh
+python3 -m fourthplayer link            # what is it now
+python3 -m fourthplayer link open       # address and PIN
+python3 -m fourthplayer link required   # the default
+```
+
+That is one secret instead of two, and worth thinking about rather than
+switching on by habit. What makes it defensible is the lockout: six digits,
+three wrong tries, then thirty seconds, two minutes, ten -- roughly a hundred
+days of guessing per address for one session. A link that *is* offered is still
+checked either way, so a stale one fails loudly instead of quietly working.
+
 ### The address links are built on
 
 Set it in Kodi under **Address for links**, or:

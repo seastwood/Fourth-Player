@@ -137,6 +137,9 @@ class Config:
     # Whether a guest may start a game, and on what terms. See
     # session.LAUNCH_POLICIES. Off unless deliberately turned on: everything
     # else here affects a picture, and this one affects somebody's television.
+    # Whether a guest needs the whole link, or just the address and the PIN.
+    # On means the link is required, which is two secrets instead of one.
+    require_link: bool = True
     guest_launch: str = "off"
     # How many can join at once. Three by default -- a fourth player for a
     # sofa that already has three on it, which is where the name comes from.

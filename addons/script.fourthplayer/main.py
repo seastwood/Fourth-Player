@@ -325,6 +325,39 @@ def choose_url(status):
         notify("Links now point at this machine on the network.")
 
 
+def choose_link(status):
+    """Whether a guest needs the whole link, or just the address and the PIN.
+
+    Two secrets or one. The PIN alone is six digits against a lockout that
+    reaches ten minutes after nine wrong tries, which is roughly a hundred days
+    of guessing per address -- so this is a real option and not a reckless one.
+    It is still one secret fewer, and worth saying so.
+    """
+    required = (status.get("require_link") is not False)
+    labels = [("> " if required else "  ") + "Send them the link  (safer)",
+              ("  " if required else "> ") + "Read out the address and PIN"]
+    choice = xbmcgui.Dialog().select("How do guests get in?", labels)
+    if choice < 0:
+        return
+    want = (choice == 0)
+    if want == required:
+        return
+    if not want and not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "Anyone who knows the address can then try PINs at it.\n\n"
+            "Six digits, and three wrong tries locks them out for a while, so "
+            "guessing it is not realistic -- but it is one secret instead of "
+            "two.\n\nAllow joining with the PIN alone?",
+            nolabel="Keep the link", yeslabel="Allow"):
+        return
+    reply = C.set_link(want)
+    if not reply.get("ok"):
+        notify(reply.get("error", "Could not change that."), error=True)
+    else:
+        notify("Guests need the link." if want
+               else "Guests need only the address and the PIN.")
+
+
 def choose_slots(status):
     """How many can join at once.
 
@@ -412,6 +445,7 @@ def main():
              lambda: start_session((status.get("launch") or {}).get("policy", "off"))),
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("How many can join?…", lambda: choose_slots(status)),
+            ("How do guests get in?…", lambda: choose_link(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
@@ -430,6 +464,7 @@ def main():
             ("Add more time…", lambda: extend_session(status)),
             ("Remove a player…", lambda: remove_player(C.status())),
             ("How many can join?…", lambda: choose_slots(status)),
+            ("How do guests get in?…", lambda: choose_link(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),

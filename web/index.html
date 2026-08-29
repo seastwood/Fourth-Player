@@ -32,6 +32,11 @@
     <label for="pin">Enter the PIN shown on their screen</label>
     <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6"
            autocomplete="one-time-code" placeholder="000000" required>
+    <!-- Optional, and remembered. It goes on somebody else's television, so
+         there is a limit to how much of it they will see. -->
+    <label for="who" class="optional">Your name (optional)</label>
+    <input id="who" name="who" maxlength="16" autocomplete="nickname"
+           placeholder="Player 2" class="name">
     <button type="submit" id="join">Join the game</button>
   </form>
 

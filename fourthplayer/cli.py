@@ -126,6 +126,13 @@ def main(argv=None):
                               "empty string to go back to this machine's "
                               "address on the network. Omit to read it.")
 
+    link = sub.add_parser(
+        "link", help="whether guests need the whole link or just the PIN")
+    link.add_argument("set", nargs="?", choices=["required", "open"],
+                      help="required: the link and the PIN, which is the "
+                           "default. open: the address and the PIN, so it can "
+                           "be read out loud. Omit to read the setting.")
+
     slots = sub.add_parser(
         "slots", help="how many can join at once, from the next session on")
     slots.add_argument("set", nargs="?", type=int,
@@ -202,6 +209,8 @@ def main(argv=None):
         request["set"] = args.set
     if args.command == "url" and args.set is not None:
         request["set"] = args.set
+    if args.command == "link" and args.set is not None:
+        request["set"] = (args.set == "required")
     if args.command == "slots" and args.set is not None:
         request["set"] = args.set
     if args.command == "start" and args.slots:
@@ -222,6 +231,10 @@ def main(argv=None):
 
 
 def _print_address(reply):
+    if reply.get("require_link") is False:
+        base = reply.get("base_url") or reply.get("public_url") or ""
+        print(f"  guests need only {base or 'the address'} and the PIN "
+              f"-- the link is not required")
     if reply.get("public_url"):
         print(f"  links are built on {reply['public_url']}")
     elif reply.get("example_url"):

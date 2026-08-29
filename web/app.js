@@ -92,8 +92,14 @@ el("pin-form").addEventListener("submit", (event) => {
   joinTimer = setTimeout(() => {
     if (!gate.hidden) fail("The host did not answer. Try again.");
   }, 12000);
-  connect({ t: "join", token, pin, codecs: videoCodecs() });
+  const who = (el("who").value || "").trim().slice(0, 16);
+  try { localStorage.setItem(nameKey, who); } catch (_) {}
+  connect({ t: "join", token, pin, name: who, codecs: videoCodecs() });
 });
+
+function myName() {
+  try { return localStorage.getItem(nameKey) || ""; } catch (_) { return ""; }
+}
 
 function fail(message) {
   clearTimeout(joinTimer);
@@ -129,8 +135,8 @@ function reconnectSoon() {
   if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    connect({ t: "resume", guest: guestToken, codecs: videoCodecs(),
-              media: mediaIsLive() ? "live" : "new" });
+    connect({ t: "resume", guest: guestToken, name: myName(),
+              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new" });
   }, delay);
 }
 
@@ -183,6 +189,7 @@ function connect(hello) {
       case "starting":      return showNotice(
         "<p><strong>" + escapeText(message.label) + "</strong> is starting on "
         + "the television.</p>", false);
+      case "arrived":       return somebodyArrived(message);
       case "launchdenied":  return showNotice(
         "<p>Not started: " + escapeText(message.reason || "refused") + "</p>",
         false);
@@ -921,7 +928,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29b";
+const CLIENT_BUILD = "2026-08-29c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1478,6 +1485,17 @@ function escapeText(text) {
   return box.innerHTML;
 }
 
+/* Somebody else joined. Ignored before this page knows its own label, which
+   is exactly the moment it is being told about itself. */
+function somebodyArrived(message) {
+  const mine = el("slot").textContent;
+  if (!mine || mine === "—" || message.label === mine) return;
+  showNotice("<p><strong>" + escapeText(message.label)
+             + "</strong> joined.</p>"
+             + '<p class="footnote">' + message.guests + " of "
+             + message.slots + " playing</p>", false);
+}
+
 function launchPolicy(message) {
   launchMode = (message && message.policy) || "off";
   // No point offering a button that can only ever refuse.
@@ -1720,6 +1738,14 @@ for (const id of ("q fsystem fplayers").split(" ")) {
   el(id).addEventListener("input", filterShelf);
 }
 
+// The name is theirs, not the session's: it is remembered here and sent again
+// on a resume, so coming back does not turn them into a slot number.
+const nameKey = "fp-name";
+try {
+  const saved = localStorage.getItem(nameKey);
+  if (saved) el("who").value = saved;
+} catch (_) {}
+
 // A guest whose socket dropped comes back without being asked for the PIN.
 const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
 if (saved) {
@@ -1727,5 +1753,6 @@ if (saved) {
   el("pin").placeholder = "rejoining…";
   el("join").disabled = true;
   armRejoinTimer();
-  connect({ t: "resume", guest: saved, codecs: videoCodecs(), media: "new" });
+  connect({ t: "resume", guest: saved, name: myName(),
+            codecs: videoCodecs(), media: "new" });
 }

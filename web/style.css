@@ -953,3 +953,20 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   bottom: 0;
   background: var(--ok);
 }
+
+/* The optional name on the join form. Deliberately quieter than the PIN: one
+   is required to get in and the other is a courtesy. */
+label.optional {
+  font-size: .5rem;
+  color: var(--dim);
+}
+input.name {
+  font: .8rem/1.4 var(--sans);
+  letter-spacing: normal;
+  text-indent: 0;
+  text-align: center;
+  padding: .6rem .5rem;
+  border-width: 2px;
+  border-color: var(--dim);
+  color: var(--ink);
+}

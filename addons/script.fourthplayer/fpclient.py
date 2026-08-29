@@ -52,6 +52,10 @@ def set_url(address):
     return ask({"cmd": "url", "set": address})
 
 
+def set_link(required):
+    return ask({"cmd": "link", "set": bool(required)})
+
+
 def set_slots(count):
     return ask({"cmd": "slots", "set": count})
 

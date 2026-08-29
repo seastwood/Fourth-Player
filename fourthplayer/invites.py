@@ -199,12 +199,24 @@ class Session:
         """
         return self.alive(now) and _matches(token, self.token_digest)
 
-    def join(self, token, pin, now, address="", label=""):
-        """Spend the two factors for a slot and a guest token."""
+    def join(self, token, pin, now, address="", label="", require_token=True):
+        """Spend the factors for a slot and a guest token.
+
+        `require_token` False lets somebody in on the PIN alone, so a host can
+        read out an address rather than send a link. The token is still checked
+        when one is offered: a wrong link must never pass, or a stale one would
+        silently work.
+
+        The PIN alone is six digits against a lockout of three tries, then
+        thirty seconds, then two minutes, then ten. That is about a hundred
+        days of guessing per address for one session, which is why this is
+        offered at all -- but it is one secret instead of two, and the caller
+        decides.
+        """
         self.check_alive(now)
         self.limiter.check(address, now)
 
-        if not _matches(token, self.token_digest):
+        if (require_token or token) and not _matches(token, self.token_digest):
             self._fail(address, now)
             raise BadPin("that link is not for this session")
         if not _matches(pin, self.pin_digest):
