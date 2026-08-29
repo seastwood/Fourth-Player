@@ -741,7 +741,7 @@ class LiveSession:
         self.notify({"t": "launchpolicy", **self.launch_state()})
         return policy
 
-    async def request_launch(self, guest, game_id):
+    async def request_launch(self, guest, game_id, resume=False):
         """A guest has asked for a game. Returns what to tell them."""
         if self.launch_policy == "off":
             return {"ok": False, "error": "The owner has not turned on starting "
@@ -767,9 +767,11 @@ class LiveSession:
                                  "to be answered."}
             self.pending = {
                 "id": row["id"],
+                "resume": bool(resume),
                 "label": row["label"],
                 "short": row["short"],
                 "who": guest.label if guest is not None else "someone",
+            "how": "continuing a save" if resume else "from the start",
                 "slot": guest.slot if guest is not None else None,
                 "deadline": self._now() + APPROVAL_SECONDS,
             }
@@ -781,20 +783,22 @@ class LiveSession:
             return {"ok": True, "state": "pending",
                     "seconds": round(APPROVAL_SECONDS), "label": row["label"]}
 
-        return await self._start_game(row, busy)
+        return await self._start_game(row, busy, resume)
 
-    async def _start_game(self, row, busy=False):
+    async def _start_game(self, row, busy=False, resume=False):
         if busy:
             # Only the open policy gets here with something already playing,
             # and taking over is what that policy is.
             log.info("stopping what is playing to start %s", row["label"])
             await self.loop.run_in_executor(None, launcher.stop_running)
-        problem = await self.loop.run_in_executor(None, launcher.launch, row)
+        problem = await self.loop.run_in_executor(
+            None, functools.partial(launcher.launch, row, resume=resume))
         if problem:
             return {"ok": False, "error": problem}
         self.notify({"t": "starting", "label": row["label"],
-                     "short": row["short"]})
-        return {"ok": True, "state": "starting", "label": row["label"]}
+                     "short": row["short"], "resume": bool(resume)})
+        return {"ok": True, "state": "starting", "label": row["label"],
+                "resume": bool(resume)}
 
     async def approve_launch(self):
         """The owner said yes. Returns what happened, for the control socket."""
@@ -802,13 +806,14 @@ class LiveSession:
             return {"ok": False, "error": "nothing is waiting"}
         row = self.catalogue.find(self.pending["id"])
         who, label = self.pending["who"], self.pending["label"]
+        resume = self.pending.get("resume", False)
         self.pending = None
         if row is None:
             self.notify({"t": "launchdenied", "reason": "that game has gone"})
             return {"ok": False, "error": "that game is no longer in the list"}
         log.info("owner approved %s for %s", label, who)
         busy = await self.loop.run_in_executor(None, launcher.running)
-        result = await self._start_game(row, busy)
+        result = await self._start_game(row, busy, resume)
         self.notify({"t": "launchpolicy", **self.launch_state()})
         return result
 

@@ -194,7 +194,8 @@ class Server:
                     })
                 elif kind == "launch":
                     result = await self.session.request_launch(
-                        guest, str(message.get("game") or ""))
+                        guest, str(message.get("game") or ""),
+                        resume=bool(message.get("resume")))
                     await outbox.put({"t": "launchresult", **result})
                 elif kind == "report":
                     # What the guest's own browser sees. The host can only

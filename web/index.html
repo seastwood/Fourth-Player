@@ -100,6 +100,23 @@
     </div>
     <p id="browse-note" class="browse-note" hidden></p>
     <div id="shelf" class="shelf" role="list"></div>
+
+    <!-- Asked before anything starts. Two different things can be meant by
+         "play this": begin it, or carry on with whatever save is on the box.
+         The second is only offered when there is actually a save to carry on
+         from. -->
+    <div id="chooser" class="chooser" hidden>
+      <div class="chooser-box">
+        <p id="chooser-name" class="chooser-name"></p>
+        <p id="chooser-meta" class="chooser-meta"></p>
+        <button id="chooser-fresh" type="button" class="choice">
+          Start from the beginning
+        </button>
+        <button id="chooser-resume" type="button" class="choice" hidden></button>
+        <p id="chooser-warn" class="footnote" hidden></p>
+        <button id="chooser-cancel" type="button" class="ghost">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div id="prompt" class="prompt">

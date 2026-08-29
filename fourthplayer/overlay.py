@@ -187,7 +187,7 @@ class Overlay(Gtk.Window):
         self.queue_draw()
         return True
 
-    ASK_WIDTH, ASK_HEIGHT = 470, 156
+    ASK_WIDTH, ASK_HEIGHT = 470, 186
     BUTTON_W, BUTTON_H = 104, 28
 
     def ask_buttons(self, width, height):
@@ -357,6 +357,10 @@ class Overlay(Gtk.Window):
              (0.62, 0.66, 0.72))
         text(ctx, CARD_PAD, CARD_PAD + 46, (ask.get("label") or "")[:46], 15,
              (0.89, 0.91, 0.95), bold=True)
+        # Which kind of start, because the two do different things to a save:
+        # continuing loads it and will write over it on the way out.
+        text(ctx, CARD_PAD, CARD_PAD + 68, ask.get("how") or "", 11,
+             (0.90, 0.61, 0.25))
         for name, x, y, w, h in self.ask_buttons(width, height):
             allow = name == "approve"
             ctx.set_source_rgba(0.29, 0.84, 0.63, 0.18) if allow else \
@@ -376,12 +380,12 @@ class Overlay(Gtk.Window):
             PangoCairo.show_layout(ctx, layout)
 
         if self.shoulders.ok:
-            text(ctx, CARD_PAD, height - 68,
+            text(ctx, CARD_PAD, height - 78,
                  "Hold both shoulders \u2014 bumpers or triggers \u2014 to start it.",
                  11, (0.62, 0.66, 0.72))
             # The hold, drawn filling up, so it is obvious it is working before
             # it finishes rather than only after.
-            bar_x, bar_y = CARD_PAD, height - 48
+            bar_x, bar_y = CARD_PAD, height - 52
             bar_w, bar_h = width - CARD_PAD * 2, 6
             ctx.set_source_rgba(1, 1, 1, 0.12)
             ctx.rectangle(bar_x, bar_y, bar_w, bar_h)
@@ -391,7 +395,7 @@ class Overlay(Gtk.Window):
                 ctx.rectangle(bar_x, bar_y, bar_w * self.hold, bar_h)
                 ctx.fill()
         else:
-            text(ctx, CARD_PAD, height - 68,
+            text(ctx, CARD_PAD, height - 78,
                  "Fourth Player in Kodi \u2192 Approve, or: fourthplayer approve",
                  11, (0.62, 0.66, 0.72))
 

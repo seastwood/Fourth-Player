@@ -209,6 +209,18 @@ python3 -m fourthplayer policy idle       # only when nothing is running
 python3 -m fourthplayer policy open       # any time, over the top of a game
 ```
 
+A game a guest starts **begins at its title screen**. That is the opposite
+default from the television's own menu, where picking a game resumes the save
+on the box -- because there it is somebody carrying on with their own game, and
+here it is a guest starting one on a machine they are not sitting at. Dropping
+into the middle of somebody else's save, then writing over it on the way out,
+is not a thing to do without being asked.
+
+Continuing is offered, and only when there is something to continue from: the
+catalogue looks for RetroArch's automatic save state and the page shows
+"Continue where it was left" with the date only if it finds one. The television
+says which of the two is being asked for when it asks you to approve.
+
 `open` means what it says: a guest can stop the game you are playing and start
 a different one without asking. RetroArch is asked to close rather than killed,
 so save memory is written, but it is still someone else ending your game.

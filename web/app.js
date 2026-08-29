@@ -921,7 +921,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-28d";
+const CLIENT_BUILD = "2026-08-29a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1345,6 +1345,8 @@ function openBrowser() {
 
 function closeBrowser() {
   el("browser").hidden = true;
+  el("chooser").hidden = true;
+  chosen = null;
   // Whatever the browser decided while the picture was behind the list.
   resumeVideo();
 }
@@ -1412,17 +1414,64 @@ function filterShelf() {
     shown.length > 400 ? "Showing the first 400 of " + shown.length + "." : "";
 }
 
+let chosen = null;
+
+/* Asked before anything starts, for two reasons. A mis-tap here starts a game
+   on a television in somebody else's house; and "play this" means two
+   different things -- begin it, or carry on from the save that is on the box.
+   Beginning it is the default here, the opposite of the television's own menu:
+   there, picking a game is somebody choosing to resume their own save; here it
+   is a guest starting one on a machine they are not sitting at, and dropping
+   into the middle of someone else's game -- then writing over it on the way
+   out -- is not a thing to do without being asked. */
 function askFor(row) {
-  // A confirmation, because a mis-tap here starts a game on a television in
-  // somebody else's house.
-  const warn = launchMode === "open"
-    ? " This stops whatever is playing now." : "";
-  if (!window.confirm("Start " + row.label + "?" + warn)) return;
-  send({ t: "launch", game: row.id });
-  closeBrowser();
-  showNotice("<p>Asking for <strong>" + escapeText(row.label)
-             + "</strong>&hellip;</p>", true);
+  chosen = row;
+  el("chooser-name").textContent = row.label;
+  const count = row.players
+    ? (row.players >= 5 ? "5+ players"
+       : row.players + (row.players === 1 ? " player" : " players"))
+    : "";
+  el("chooser-meta").textContent = [row.short, count].filter(Boolean).join("  ·  ");
+
+  const resume = el("chooser-resume");
+  resume.hidden = !row.saved;
+  if (row.saved) {
+    resume.textContent = "Continue where it was left" + savedWhen(row.saved_at);
+  }
+  const warn = el("chooser-warn");
+  warn.hidden = launchMode !== "open";
+  warn.textContent = "This stops whatever is playing now.";
+  el("chooser").hidden = false;
 }
+
+function savedWhen(stamp) {
+  if (!stamp) return "";
+  try {
+    const d = new Date(stamp * 1000);
+    return " — saved " + d.toLocaleDateString(undefined,
+      { day: "numeric", month: "short" }) + ", "
+      + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch (_) { return ""; }
+}
+
+function startChosen(resume) {
+  const row = chosen;
+  chosen = null;
+  el("chooser").hidden = true;
+  if (!row) return;
+  send({ t: "launch", game: row.id, resume: !!resume });
+  closeBrowser();
+  showNotice("<p>Asking for <strong>" + escapeText(row.label) + "</strong>"
+             + (resume ? ", continuing where it was left" : ", from the start")
+             + "&hellip;</p>", true);
+}
+
+el("chooser-fresh").addEventListener("click", () => startChosen(false));
+el("chooser-resume").addEventListener("click", () => startChosen(true));
+el("chooser-cancel").addEventListener("click", () => {
+  chosen = null;
+  el("chooser").hidden = true;
+});
 
 function launchResult(message) {
   if (!message.ok) {

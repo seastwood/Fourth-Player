@@ -14,6 +14,7 @@ the two can be installed together or apart, which was the point of splitting
 them.
 """
 
+import glob
 import hashlib
 import json
 import logging
@@ -109,6 +110,27 @@ def _counts():
         return {}
 
 
+# RetroArch's automatic save state, which is what "continue where it was left"
+# means. Found by globbing rather than by working the path out: whether these
+# are filed under the core's name, under the content directory, or in neither,
+# is three settings in retroarch.cfg that can change without this being told --
+# and the name it sorts under is the core's short one, not the long one the
+# playlist carries.
+STATES_DIR = os.path.expanduser("~/.config/retroarch/states")
+
+
+def saved_state(path):
+    """The automatic save state for a ROM, or None."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for pattern in (os.path.join(STATES_DIR, "*", stem + ".state.auto"),
+                    os.path.join(STATES_DIR, stem + ".state.auto"),
+                    os.path.join(STATES_DIR, "*", "*", stem + ".state.auto")):
+        found = sorted(glob.glob(pattern))
+        if found:
+            return found[0]
+    return None
+
+
 def art_path(system, label):
     """The box art on disk, or None. Snaps and titles are not offered: this is
     a list to choose from on a phone, not a gallery."""
@@ -191,6 +213,7 @@ class Catalogue:
         self.refresh()
         rows = []
         for row in self._rows.values():
+            state = saved_state(row["path"])
             rows.append({
                 "id": row["id"],
                 "label": row["label"],
@@ -199,6 +222,10 @@ class Catalogue:
                 "players": row["players"],
                 "bucket": bucket(row["players"]),
                 "art": bool(art_path(row["system"], row["label"])),
+                # Whether there is anything to continue from, so the page can
+                # offer that only when it is a real choice.
+                "saved": bool(state),
+                "saved_at": os.path.getmtime(state) if state else None,
             })
         rows.sort(key=lambda r: (r["short"].lower(), r["label"].lower()))
         return rows

@@ -110,8 +110,18 @@ def preflight(row):
     return None
 
 
-def build_argv(row):
+def build_argv(row, resume=False):
+    """What to run. Fresh unless the guest asked to continue.
+
+    The opposite default from the television front end, and deliberately so.
+    There, picking a game is somebody choosing to carry on with their own save;
+    here it is a guest starting a game on a machine they are not sitting at,
+    and dropping them into the middle of somebody else's saved game -- then
+    overwriting it on exit -- is not a thing to do without being asked.
+    """
     argv = [PICKER]
+    if not resume:
+        argv += ["--fresh"]
     # The picker sizes its board to the game rather than always offering four.
     # It does not suppress itself here: that only happens for one player with
     # one pad, and a session has already created one pad per slot.
@@ -123,14 +133,14 @@ def build_argv(row):
     return argv + ["-f", "-L", row["core_path"], row["path"]]
 
 
-def launch(row, display=":0"):
+def launch(row, display=":0", resume=False):
     """Start the game outside this service's sandbox. Returns None, or why not."""
     problem = preflight(row)
     if problem:
         log.warning("refusing to launch %s: %s", row["label"], problem)
         return problem
 
-    argv = build_argv(row)
+    argv = build_argv(row, resume)
     env = {"DISPLAY": display,
            "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
     runner = shutil.which("systemd-run")
@@ -158,5 +168,6 @@ def launch(row, display=":0"):
         detail = (done.stderr or b"").decode("utf-8", "replace").strip()
         log.error("launch failed (%d): %s", done.returncode, detail[:400])
         return "The game could not be started."
-    log.info("launched %s (%s) for a guest", row["label"], row["short"])
+    log.info("launched %s (%s) for a guest, %s", row["label"], row["short"],
+             "continuing from its save state" if resume else "from the start")
     return None

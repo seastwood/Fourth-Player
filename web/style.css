@@ -821,3 +821,56 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    on-screen pad is the controls for anyone without a controller, and hiding it
    to make the picture bigger would leave them unable to play. */
 .stage.immersive .hud { display: none !important; }
+
+/* ---- choosing how to start ---- */
+
+.chooser {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(16, 14, 40, .93);
+}
+.chooser-box {
+  width: min(26rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  padding: 1rem;
+  background: var(--bg2);
+  border: 3px solid var(--edge);
+}
+.chooser-name {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.chooser-meta {
+  margin: 0;
+  font-family: var(--pixel);
+  font-size: .45rem;
+  line-height: 1.6;
+  color: var(--accent);
+}
+/* Big enough to hit with a thumb without looking, which is how these get
+   pressed -- one hand, phone held sideways, eyes on the television. */
+.choice {
+  font-family: var(--pixel);
+  font-size: .55rem;
+  line-height: 1.7;
+  text-transform: none;
+  color: var(--ink);
+  background: rgba(16, 14, 40, .9);
+  border: 2px solid var(--dim);
+  padding: .8rem .7rem;
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .choice:hover { border-color: var(--edge); }
+}
+.choice:active { border-color: var(--accent); }

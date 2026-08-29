@@ -81,7 +81,10 @@ class Recorder:
         self.busy = False
 
     def install(self):
-        launcher.launch = lambda row, display=":0": self.launched.append(row) or None
+        # Same signature as the real one, or the stub hides a caller passing an
+        # argument the launcher does not take.
+        launcher.launch = lambda row, display=":0", resume=False: (
+            self.launched.append(row) or None)
         launcher.preflight = lambda row: None
         launcher.running = lambda: self.busy
         launcher.stop_running = lambda: (setattr(self, "stopped", self.stopped + 1)
@@ -206,6 +209,35 @@ except ValueError:
 print("the command line offers exactly the policies the session knows")
 check(set(sessionlib.LAUNCH_POLICIES) == {"off", "open", "idle", "approve"},
       "off, open, idle, approve")
+
+print("a guest starts a game from the beginning unless they ask not to")
+# The opposite default from the television's own menu, and deliberately: there,
+# picking a game is somebody resuming their own save; here it is a guest
+# starting one on a machine they are not sitting at.
+fresh_argv = launcher.build_argv(catalogue.find(game))
+check("--fresh" in fresh_argv, "the default carries --fresh: %s" % fresh_argv[:4])
+resumed = launcher.build_argv(catalogue.find(game), resume=True)
+check("--fresh" not in resumed, "and asking to continue does not")
+check(resumed[-2:] == fresh_argv[-2:], "both run the same game either way")
+
+print("the listing says whether there is anything to continue from")
+row_now = catalogue.listing()[0]
+check("saved" in row_now and "saved_at" in row_now,
+      "so the page can offer that only when it is a real choice")
+check(row_now["saved"] is False and row_now["saved_at"] is None,
+      "with no state file on disk, there is nothing to continue")
+
+print("the choice reaches the launcher")
+recorder.launched.clear()
+live, loop = make_session("open", recorder)
+launcher.launch = lambda row, display=":0", resume=False: (
+    recorder.launched.append((row["id"], resume)) or None)   # notes the choice
+loop.run_until_complete(live.request_launch(Guest(), game))
+check(recorder.launched and recorder.launched[-1][1] is False,
+      "asking for a game plainly starts it fresh")
+loop.run_until_complete(live.request_launch(Guest(), game, resume=True))
+check(recorder.launched[-1][1] is True, "and asking to continue continues")
+recorder.install()                       # put the recorder's launch back
 
 print("the command line it would run")
 argv = launcher.build_argv(catalogue.find(game))
