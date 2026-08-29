@@ -928,7 +928,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29c";
+const CLIENT_BUILD = "2026-08-29d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1081,7 +1081,10 @@ function tick() {
   // are answers to a question, not moves in a game. Sending them would have
   // the character running about on a television in another house while its
   // owner watched.
-  if (remapStep >= 0) return;
+  // Nothing pressed while this panel is open reaches the game. It is a
+  // mirror: somebody finding out what their buttons are called should not be
+  // starting a game by doing it, which is how a game got started too soon.
+  if (padsOpen) return;
   // Otherwise: whatever the guest told us their buttons really are.
   sendFrame(remapped(pad), false);
 }
@@ -1295,6 +1298,8 @@ const AXIS_NAMES = ["LEFT X", "LEFT Y", "RIGHT X", "RIGHT Y"];
 // browser reports it", which is right for every pad it knows.
 let padMap = null;
 let padsOpen = false, padsFrame = null, remapStep = -1;
+// Whether everything has been let go of since the last button was learned.
+let remapArmed = true;
 
 function mapKey() {
   return "fp-padmap:" + (padName || "pad");
@@ -1323,6 +1328,9 @@ function remapped(pad) {
 }
 
 function openPads() {
+  // Let go of everything on the way in, so a button held as the panel opens is
+  // not left held down in the game behind it.
+  sendFrame(null, true);
   padsOpen = true;
   el("pads").hidden = false;
   el("prompt").hidden = true;          // it shows through, and says the same
@@ -1377,17 +1385,24 @@ function paintPads() {
           raw ? "ok" : "warn");
 
   if (remapStep >= 0 && raw) {
-    // Learning a button: the first thing pressed becomes this one.
+    /* One press, one button. This ran every frame while a button was still
+       down, so a single press of A -- held for a tenth of a second, which is
+       sixty frames -- answered all ten prompts with A and left every other
+       face button doing nothing. Reported exactly that way.
+
+       So a press only counts once everything has been let go of since the last
+       one, and a button already spoken for is refused rather than quietly
+       taking a second job. */
     const hit = raw.buttons.findIndex((b) => b && b.pressed);
-    if (hit >= 0) {
-      padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
-      padMap[remapStep] = hit;
-      remapStep += 1;
-      if (remapStep >= REMAP_ORDER.length) {
-        finishRemap();
-      } else {
-        el("pads-hint").textContent = remapPrompt();
-      }
+    const next = learnPress({ map: padMap, step: remapStep, armed: remapArmed },
+                            hit);
+    padMap = next.map;
+    remapStep = next.step;
+    remapArmed = next.armed;
+    if (next.step >= REMAP_ORDER.length) {
+      finishRemap();
+    } else if (next.said) {
+      el("pads-hint").textContent = next.said;
     }
   } else {
     STANDARD_KEYS.forEach((_n, i) => {
@@ -1412,9 +1427,39 @@ function paintPads() {
    nothing to press for those either. */
 const REMAP_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+/* One step of learning a pad, as a decision rather than a side effect, so the
+   rule can be checked without a browser and a controller.
+
+   `hit` is the index of the first button held, or -1 for none. A press only
+   counts once everything has been let go of since the last one: this ran on
+   every frame, so a single press of A -- held for a tenth of a second, which
+   is sixty frames -- answered all ten prompts with A and left every other face
+   button doing nothing. A button already spoken for is refused rather than
+   quietly taking a second job. */
+function learnPress(state, hit) {
+  const map = state.map.slice();
+  if (hit < 0) return { map, step: state.step, armed: true, said: null };
+  if (!state.armed) return { map, step: state.step, armed: false, said: null };
+  const already = map.indexOf(hit);
+  if (already >= 0) {
+    return { map, step: state.step, armed: false,
+             said: "That one is already " + STANDARD_KEYS[already][0]
+                   + ". Use a different button, or start again." };
+  }
+  map[REMAP_ORDER[state.step]] = hit;
+  const step = state.step + 1;
+  return { map, step, armed: false,
+           said: step < REMAP_ORDER.length ? promptFor(step) : null };
+}
+
+function promptFor(step) {
+  const [name, note] = STANDARD_KEYS[REMAP_ORDER[step]];
+  return "Press the button you use for " + name + "  (" + note + ")"
+    + "   \u2014   " + (step + 1) + " of " + REMAP_ORDER.length;
+}
+
 function remapPrompt() {
-  const [name, note] = STANDARD_KEYS[REMAP_ORDER[remapStep]];
-  return "Press the button you use for " + name + "  (" + note + ")";
+  return promptFor(remapStep);
 }
 
 function startRemap() {
@@ -1428,6 +1473,7 @@ function startRemap() {
   // when this started stays down for the whole walk through.
   sendFrame(null, true);
   remapStep = 0;
+  remapArmed = false;          // the button that opened this may still be down
   el("pads-hint").textContent = remapPrompt();
 }
 
@@ -1437,7 +1483,8 @@ function finishRemap() {
   padMap = padMap.map((from, i) => (from == null ? i : from));
   try { localStorage.setItem(mapKey(), JSON.stringify(padMap)); } catch (_) {}
   el("pads-reset").hidden = false;
-  el("pads-hint").textContent = "Saved. Press anything to check it.";
+  el("pads-hint").textContent =
+    "Saved. Press anything to check it — nothing here reaches the game.";
   report("remapped a controller");
 }
 

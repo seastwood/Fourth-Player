@@ -60,8 +60,10 @@ check('id="pads"' in html and 'id="padtest"' in html,
       "there is a panel and a way to open it")
 check("STANDARD_KEYS" in js and "remapped(" in js,
       "the buttons are named and the mapping can be overridden")
-check("if (remapStep >= 0) return;" in js,
-      "and presses made while remapping do not reach the game")
+check("if (padsOpen) return;" in js,
+      "nothing pressed while the panel is open reaches the game")
+check("learnPress(" in js and "armed" in js,
+      "and a button is learned once per press, not once per frame")
 check("localStorage.setItem(mapKey()" in js,
       "a mapping is remembered per controller")
 

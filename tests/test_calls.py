@@ -86,6 +86,9 @@ else:
     harness = """
     let padName = "";
     function paintPicker() {}
+    // describePad also loads whatever mapping is saved against the new name,
+    // which needs a browser. Naming is what is under test here.
+    function loadPadMap() {}
     %s
     const cases = [
       // What real browsers report, and what a person should read.
