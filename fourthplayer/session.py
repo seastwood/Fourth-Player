@@ -80,6 +80,15 @@ def clean_name(name):
 LAUNCH_POLICIES = ("off", "open", "idle", "approve")
 APPROVAL_SECONDS = 30.0
 
+# What each guest calls themselves, keyed by the pad they are driving. Written
+# for kodi-retrobox's player picker, which is a different program reading
+# evdev: evdev knows a device called "Fourth Player 1" and nothing else, so
+# without this the picker shows the socket rather than the person. A file
+# rather than a question over the control socket, so that project needs no
+# knowledge of this one -- the same coupling through data the catalogue uses.
+PAD_NAMES_PATH = os.path.expanduser(
+    "~/.local/state/fourth-player/pad-names.json")
+
 STATE_PATH = os.path.expanduser("~/.local/state/fourth-player/session.json")
 
 # How long to wait for the pipeline worker before giving up on a guest's
@@ -340,6 +349,9 @@ class LiveSession:
             gpu.set_level(self._previous_dpm)
             self._previous_dpm = None
 
+        # The guests were dropped above; this writes the empty result out
+        # before the pads themselves go, so no name outlives the session.
+        self.publish_pad_names()
         stage, pads = self.stage, self.pads
         self.stage = self.pads = None
         self.invite.destroy()
@@ -400,6 +412,7 @@ class LiveSession:
         log.info("%s joined from %s", guest.label, address or "unknown")
         # Everybody already in the session hears about it. The one arriving is
         # sent this too, but has no label of their own yet and ignores it.
+        self.publish_pad_names()
         self.notify({"t": "arrived", "label": guest.label,
                      "guests": len(self.guests), "slots": self.slots})
         return guest, guest_token
@@ -510,6 +523,7 @@ class LiveSession:
         guest = GuestConnection(self, record.slot, socket, name)
         self.guests[record.slot] = guest
         self.save()
+        self.publish_pad_names()
         return guest
 
     async def attach_peer(self, guest, on_signal):
@@ -684,6 +698,7 @@ class LiveSession:
         if self.invite is not None:
             self.invite.release(slot, now=self._now())
             self.save()
+        self.publish_pad_names()
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -858,6 +873,22 @@ class LiveSession:
         return {"ok": True}
 
     # -- surviving a restart -------------------------------------------------
+
+    def publish_pad_names(self):
+        """Say which pad belongs to whom, or clear it when nobody is here."""
+        names = {}
+        if self.pads is not None:
+            for slot, guest in self.guests.items():
+                if 0 <= slot < len(self.pads):
+                    names[self.pads[slot].name] = guest.label
+        try:
+            os.makedirs(os.path.dirname(PAD_NAMES_PATH), exist_ok=True)
+            tmp = PAD_NAMES_PATH + ".new"
+            with open(tmp, "w") as handle:
+                json.dump(names, handle)
+            os.replace(tmp, PAD_NAMES_PATH)   # never a half-written file
+        except OSError as exc:
+            log.debug("could not write the pad names: %s", exc)
 
     def save(self):
         """Write the invite down, so a crash costs a reconnect and not a session."""
