@@ -55,6 +55,16 @@ for rule in (".dpad", ".face"):
     match = re.search(re.escape(rule) + r" \{ width: min\(calc\(\d+ \* var\(--sh\)\)", landscape)
     check(match is not None, f"{rule} is a fraction of the stage")
 
+print("a guest can see and fix their own controller")
+check('id="pads"' in html and 'id="padtest"' in html,
+      "there is a panel and a way to open it")
+check("STANDARD_KEYS" in js and "remapped(" in js,
+      "the buttons are named and the mapping can be overridden")
+check("if (remapStep >= 0) return;" in js,
+      "and presses made while remapping do not reach the game")
+check("localStorage.setItem(mapKey()" in js,
+      "a mapping is remembered per controller")
+
 print("the page can be installed to escape the browser furniture")
 check('name="apple-mobile-web-app-capable" content="yes"' in html,
       "added to the home screen, it opens without Safari's bars")

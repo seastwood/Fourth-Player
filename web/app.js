@@ -921,7 +921,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29a";
+const CLIENT_BUILD = "2026-08-29b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1031,6 +1031,7 @@ function describePad(pad) {
   if (!name) name = "Controller";
   if (name.length > 28) name = name.slice(0, 27).trimEnd() + "\u2026";
   padName = name;
+  loadPadMap();
   paintPicker();
 }
 
@@ -1069,7 +1070,13 @@ function tick() {
   }
 
   if (!input || input.readyState !== "open") return;
-  sendFrame(pad, false);
+  // While somebody is teaching this page which button is which, their presses
+  // are answers to a question, not moves in a game. Sending them would have
+  // the character running about on a television in another house while its
+  // owner watched.
+  if (remapStep >= 0) return;
+  // Otherwise: whatever the guest told us their buttons really are.
+  sendFrame(remapped(pad), false);
 }
 
 let lastSent = null, lastSentAt = 0;
@@ -1256,6 +1263,186 @@ if (window.visualViewport) {
 video.addEventListener("loadedmetadata", fitGutter);
 video.addEventListener("resize", fitGutter);
 window.addEventListener("resize", fitGutter);
+
+/* ---- what your controller is doing ---- */
+
+/* Every pad reports a different layout, and browsers guess at the ones they do
+   not know. A guest holding such a pad finds out only by pressing things and
+   watching a television in somebody else's house do the wrong thing -- and the
+   picker's own button tester is on that television, which is no use to them.
+   So: the same idea, on their screen.
+
+   Names are the W3C standard mapping's, which is exactly what gets sent: bit N
+   of the frame is buttons[N] here. What the host calls them is underneath. */
+const STANDARD_KEYS = [
+  ["A", "bottom face"], ["B", "right face"], ["X", "left face"], ["Y", "top face"],
+  ["LB", "left bumper"], ["RB", "right bumper"],
+  ["LT", "left trigger"], ["RT", "right trigger"],
+  ["BACK", "select"], ["START", "start"],
+  ["L3", "left stick in"], ["R3", "right stick in"],
+  ["UP", "d-pad"], ["DOWN", "d-pad"], ["LEFT", "d-pad"], ["RIGHT", "d-pad"],
+  ["GUIDE", "home"],
+];
+const AXIS_NAMES = ["LEFT X", "LEFT Y", "RIGHT X", "RIGHT Y"];
+// Which physical button answers for each standard one. null means "as the
+// browser reports it", which is right for every pad it knows.
+let padMap = null;
+let padsOpen = false, padsFrame = null, remapStep = -1;
+
+function mapKey() {
+  return "fp-padmap:" + (padName || "pad");
+}
+
+function loadPadMap() {
+  try {
+    const raw = localStorage.getItem(mapKey());
+    padMap = raw ? JSON.parse(raw) : null;
+  } catch (_) { padMap = null; }
+  const reset = el("pads-reset");
+  if (reset) reset.hidden = !padMap;
+}
+
+/* The pad as the host should see it. Built fresh each time rather than mutated:
+   the browser's Gamepad objects are snapshots and must not be written to. */
+function remapped(pad) {
+  if (!pad || !padMap) return pad;
+  const buttons = STANDARD_KEYS.map((_n, i) => {
+    const from = padMap[i];
+    return (from == null || !pad.buttons[from])
+      ? { pressed: false, value: 0 } : pad.buttons[from];
+  });
+  return { buttons, axes: pad.axes, id: pad.id, index: pad.index,
+           connected: pad.connected, mapping: pad.mapping };
+}
+
+function openPads() {
+  padsOpen = true;
+  el("pads").hidden = false;
+  el("prompt").hidden = true;          // it shows through, and says the same
+  loadPadMap();
+  buildPadsGrid();
+  paintPads();
+}
+
+function closePads() {
+  padsOpen = false;
+  remapStep = -1;
+  el("pads").hidden = true;
+  if (padIndex === null) el("prompt").hidden = false;
+  if (padsFrame) { cancelAnimationFrame(padsFrame); padsFrame = null; }
+}
+
+function buildPadsGrid() {
+  const grid = el("pads-grid");
+  grid.innerHTML = "";
+  STANDARD_KEYS.forEach(([name, note], i) => {
+    const cell = document.createElement("div");
+    cell.className = "key";
+    cell.id = "key" + i;
+    cell.innerHTML = '<span class="key-name">' + name + "</span>"
+                   + '<span class="key-note">' + note + "</span>";
+    grid.appendChild(cell);
+  });
+  const axes = el("pads-axes");
+  axes.innerHTML = "";
+  AXIS_NAMES.forEach((name, i) => {
+    const row = document.createElement("div");
+    row.className = "axis";
+    row.innerHTML = '<span class="axis-name">' + name + "</span>"
+      + '<span class="axis-track"><span class="axis-fill" id="axis' + i
+      + '"></span></span>';
+    axes.appendChild(row);
+  });
+}
+
+function livePad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let pad = padIndex !== null ? pads[padIndex] : null;
+  if (pad && !pad.connected) pad = null;
+  return pad || Array.from(pads).find((p) => p && p.connected) || null;
+}
+
+function paintPads() {
+  if (!padsOpen) return;
+  const raw = livePad();
+  const pad = remapped(raw);
+  setChip("pads-name", padName || (raw ? "controller" : "no controller"),
+          raw ? "ok" : "warn");
+
+  if (remapStep >= 0 && raw) {
+    // Learning a button: the first thing pressed becomes this one.
+    const hit = raw.buttons.findIndex((b) => b && b.pressed);
+    if (hit >= 0) {
+      padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
+      padMap[remapStep] = hit;
+      remapStep += 1;
+      if (remapStep >= REMAP_ORDER.length) {
+        finishRemap();
+      } else {
+        el("pads-hint").textContent = remapPrompt();
+      }
+    }
+  } else {
+    STANDARD_KEYS.forEach((_n, i) => {
+      const cell = el("key" + i);
+      if (cell) cell.classList.toggle("on", !!(pad && pad.buttons[i]
+                                               && pad.buttons[i].pressed));
+    });
+    AXIS_NAMES.forEach((_n, i) => {
+      const fill = el("axis" + i);
+      if (!fill) return;
+      const v = Math.max(-1, Math.min(1, (pad && pad.axes[i]) || 0));
+      // Centre is the middle of the track; a stick pushed left fills left.
+      fill.style.left = (v < 0 ? 50 + v * 50 : 50) + "%";
+      fill.style.width = Math.abs(v) * 50 + "%";
+    });
+  }
+  padsFrame = requestAnimationFrame(paintPads);
+}
+
+/* Learning a pad. Only the buttons somebody can name are asked for: the sticks
+   are axes and are not remapped, and a pad that reports its d-pad as a hat has
+   nothing to press for those either. */
+const REMAP_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+function remapPrompt() {
+  const [name, note] = STANDARD_KEYS[REMAP_ORDER[remapStep]];
+  return "Press the button you use for " + name + "  (" + note + ")";
+}
+
+function startRemap() {
+  if (!livePad()) {
+    el("pads-hint").textContent =
+      "Press a button on your controller first, so the browser can see it.";
+    return;
+  }
+  padMap = STANDARD_KEYS.map(() => null);
+  // Let go of anything held before the first prompt, or a button that was down
+  // when this started stays down for the whole walk through.
+  sendFrame(null, true);
+  remapStep = 0;
+  el("pads-hint").textContent = remapPrompt();
+}
+
+function finishRemap() {
+  remapStep = -1;
+  // Anything not asked about keeps the browser's own idea of it.
+  padMap = padMap.map((from, i) => (from == null ? i : from));
+  try { localStorage.setItem(mapKey(), JSON.stringify(padMap)); } catch (_) {}
+  el("pads-reset").hidden = false;
+  el("pads-hint").textContent = "Saved. Press anything to check it.";
+  report("remapped a controller");
+}
+
+el("padtest").addEventListener("click", openPads);
+el("pads-close").addEventListener("click", closePads);
+el("pads-remap").addEventListener("click", startRemap);
+el("pads-reset").addEventListener("click", () => {
+  padMap = null;
+  try { localStorage.removeItem(mapKey()); } catch (_) {}
+  el("pads-reset").hidden = true;
+  el("pads-hint").textContent = "Back to what the browser reports.";
+});
 
 /* ---- the game list ---- */
 

@@ -874,3 +874,82 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .choice:hover { border-color: var(--edge); }
 }
 .choice:active { border-color: var(--accent); }
+
+/* ---- what your controller is doing ---- */
+
+.pads {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+}
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .pads { background: rgba(16, 14, 40, .94); }
+}
+
+/* The panel is translucent so the video behind it keeps being composited --
+   an obscured video is one the browser may pause -- which means anything else
+   on the stage shows through it. The prompt is the only thing big enough to
+   read, and it says the same as this panel's own hint. */
+.stage:has(.pads:not([hidden])) .prompt { visibility: hidden; }
+
+.pads-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.2rem, 1fr));
+  gap: .4rem;
+  padding: 0 clamp(.6rem, 3vw, 1.4rem);
+  overflow-y: auto;
+}
+/* One cell per button in the standard mapping. Lit means held right now, so
+   the answer to "which button is this" is: press it and see what lights. */
+.key {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding: .4rem .45rem;
+  background: var(--bg2);
+  border: 2px solid transparent;
+}
+.key.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg2));
+}
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .key.on { background: #3a3320; }
+}
+.key-name {
+  font-family: var(--pixel);
+  font-size: .45rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.key-note { font-size: .62rem; color: var(--dim); }
+.key.on .key-note { color: var(--accent); }
+
+.pads-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: .35rem .8rem;
+  padding: .6rem clamp(.6rem, 3vw, 1.4rem) calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+.axis { display: flex; align-items: center; gap: .4rem; }
+.axis-name {
+  font-family: var(--pixel);
+  font-size: .4rem;
+  color: var(--dim);
+  width: 3.4rem;
+}
+.axis-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--bg2);
+}
+.axis-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--ok);
+}
