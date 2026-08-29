@@ -1434,6 +1434,26 @@ function finishRemap() {
   report("remapped a controller");
 }
 
+/* One tap for the commonest confusion there is.
+
+   The host has one virtual pad per guest and it can only be lettered one way,
+   so it is lettered to match the on-screen controller: A on the right, the
+   Nintendo arrangement. A guest holding an Xbox or PlayStation pad has A on
+   the bottom, and the two are then the other way round for them -- their A
+   reads as B on the television. Nothing can tell the two apart from the host's
+   side, so the person who can see the pad fixes it, in one tap. */
+el("pads-swap").addEventListener("click", () => {
+  padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
+  const a = padMap[0];
+  padMap[0] = padMap[1];
+  padMap[1] = a;
+  try { localStorage.setItem(mapKey(), JSON.stringify(padMap)); } catch (_) {}
+  el("pads-reset").hidden = false;
+  el("pads-hint").textContent =
+    "A and B swapped. Press them to check, and swap back if that made it worse.";
+  report("swapped A and B");
+});
+
 el("padtest").addEventListener("click", openPads);
 el("pads-close").addEventListener("click", closePads);
 el("pads-remap").addEventListener("click", startRemap);
