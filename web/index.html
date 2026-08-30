@@ -82,7 +82,7 @@
                 stroke-linecap="square"/>
         </svg>
       </button>
-      <input id="vol-range" class="vol-range" type="range" min="0" max="100"
+      <input id="vol-range" class="vol-range retro-range" type="range" min="0" max="100"
              step="5" value="100" aria-label="Volume level">
     </div>
     <button id="unmute" type="button" class="ghost" hidden>🔇 Sound off — tap</button>
@@ -206,9 +206,29 @@
       <button id="repick-no" type="button" class="ghost">Cancel</button>
     </div>
     <p id="pads-hint" class="browse-note">Press anything on your controller —
-       nothing here reaches the game.</p>
+       nothing here reaches the game. Click a button below to rebind just that
+       one.</p>
     <div id="pads-grid" class="pads-grid"></div>
     <div id="pads-axes" class="pads-axes"></div>
+
+    <!-- Stick shaping. Both are this guest's own, applied on the way out, so
+         the game is told nothing and nobody else's controller changes. -->
+    <div class="pads-tune">
+      <label class="tune" for="pads-deadzone">
+        <span class="tune-name">Dead zone</span>
+        <input id="pads-deadzone" class="pad-range retro-range" type="range"
+               min="0" max="40" step="1" value="10">
+        <span id="pads-deadzone-value" class="tune-value">10%</span>
+      </label>
+      <label class="tune" for="pads-sens">
+        <span class="tune-name">Sensitivity</span>
+        <input id="pads-sens" class="pad-range retro-range" type="range"
+               min="50" max="250" step="5" value="100">
+        <span id="pads-sens-value" class="tune-value">100%</span>
+      </label>
+      <p class="footnote">A dead zone ignores a stick that will not sit still.
+         Sensitivity above 100% reaches full tilt sooner.</p>
+    </div>
   </div>
 
   <!-- The on-screen pad. Positions come from CSS so the same markup works

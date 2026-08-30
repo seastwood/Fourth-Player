@@ -919,21 +919,21 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 }
 /* A bar with a hard fill and no rounding anywhere: the same square, lit-pixel
    language as the rest of this. --fill is set from the level in app.js. */
-.vol-range::-webkit-slider-runnable-track {
+.retro-range::-webkit-slider-runnable-track {
   height: .75rem;
   border: 2px solid var(--dim);
   background:
     linear-gradient(to right, var(--accent) var(--fill, 100%),
                     transparent var(--fill, 100%));
 }
-.vol-range::-moz-range-track {
+.retro-range::-moz-range-track {
   height: .75rem;
   border: 2px solid var(--dim);
   background:
     linear-gradient(to right, var(--accent) var(--fill, 100%),
                     transparent var(--fill, 100%));
 }
-.vol-range::-webkit-slider-thumb {
+.retro-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: .55rem;
@@ -943,14 +943,64 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   border: 2px solid var(--bg);
   border-radius: 0;
 }
-.vol-range::-moz-range-thumb {
+.retro-range::-moz-range-thumb {
   width: .55rem;
   height: 1.15rem;
   background: var(--ink);
   border: 2px solid var(--bg);
   border-radius: 0;
 }
-.vol-range:focus-visible { outline: 2px solid var(--accent); }
+.retro-range:focus-visible { outline: 2px solid var(--accent); }
+
+/* The stick sliders. Same bar as the volume one -- that look is now on
+   .retro-range, which both carry -- but always present rather than sliding
+   out of an icon. */
+.retro-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 1.4rem;
+}
+.pads-tune {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  padding: .2rem clamp(.6rem, 3vw, 1.4rem) .8rem;
+}
+.tune {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+}
+.tune-name {
+  font-family: var(--pixel);
+  font-size: .45rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  flex: 0 0 5.5rem;
+}
+.tune .pad-range { flex: 1 1 auto; min-width: 0; }
+.tune-value {
+  font-family: var(--pixel);
+  font-size: .45rem;
+  color: var(--ink);
+  flex: 0 0 2.6rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pads-tune .footnote { margin: .1rem 0 0; }
+
+/* A button in the grid waiting to be told which physical button it is. */
+.key.learning {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: learn-pulse 1s steps(2, end) infinite;
+}
+@keyframes learn-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  .key.learning { animation: none; }
+}
+.pads-grid .key { cursor: pointer; }
 
 /* An icon button is square: the same height as the row, and as wide. */
 .ghost.icon {

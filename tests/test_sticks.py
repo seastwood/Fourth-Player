@@ -51,10 +51,13 @@ def lift(name):
 import re                                                        # noqa: E402
 keys = re.search(r"const STANDARD_KEYS = \[.*?\];", source, re.S).group(0)
 
-HARNESS = keys + "\n" + lift("swapSticks") + "\n" + lift("remapped") + """
+HARNESS = keys + "\n" + lift("shapeStick") + "\n" + lift("shapeAxes") \
+    + "\n" + lift("swapSticks") + "\n" + lift("remapped") + """
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 let padMap = job.map === undefined ? null : job.map;
 let sticksSwapped = !!job.swapped;
+let deadzone = job.deadzone === undefined ? 0 : job.deadzone;
+let sensitivity = job.sensitivity === undefined ? 1 : job.sensitivity;
 const pad = job.pad === null ? null : {
   buttons: (job.buttons || []).map((v) => ({ pressed: !!v, value: v ? 1 : 0 })),
   axes: job.axes, id: "test", index: 0, connected: true, mapping: "standard",
@@ -111,6 +114,53 @@ for axes in ([], [0.1], [0.1, 0.2], [0.1, 0.2, 0.3]):
 
 print("no pad is still no pad")
 check(run({"swapped": True, "pad": None}) is None, "nothing to swap, nothing returned")
+
+print("\na dead zone is a circle, not a cross")
+# Per-axis is the easy version and it is wrong in a way people feel: it carves
+# a cross out of the middle, so a stick pushed diagonally answers while the
+# same stick pushed straight up does not.
+# Two pushes the same distance from centre, one straight and one diagonal.
+# A circular boundary treats them alike; a per-axis one lets the diagonal
+# through while stopping the straight push, which is the bug being avoided.
+import math                                                      # noqa: E402
+STRAIGHT = [0.20, 0.0, 0, 0]
+DIAGONAL = [0.20 / math.sqrt(2), 0.20 / math.sqrt(2), 0, 0]
+
+inside_s = run({"deadzone": 0.25, "axes": STRAIGHT})["axes"][:2]
+inside_d = run({"deadzone": 0.25, "axes": DIAGONAL})["axes"][:2]
+check(inside_s == [0, 0], "inside the zone, straight is ignored: %r" % inside_s)
+check(inside_d == [0, 0], "and so is diagonal, at the same distance: %r" % inside_d)
+
+out_s = run({"deadzone": 0.15, "axes": STRAIGHT})["axes"][:2]
+out_d = run({"deadzone": 0.15, "axes": DIAGONAL})["axes"][:2]
+check(out_s[0] > 0 and out_d[0] > 0, "outside it, both register")
+check(abs(math.hypot(*out_s) - math.hypot(*out_d)) < 1e-9,
+      "by the same amount: %r vs %r" % (math.hypot(*out_s), math.hypot(*out_d)))
+
+print("and past the edge it starts from nothing, not from a jump")
+edge = run({"deadzone": 0.30, "axes": [0.31, 0, 0, 0]})
+check(0 < edge["axes"][0] < 0.05,
+      "a hair past the dead zone is a hair of movement: %r" % edge["axes"][0])
+full = run({"deadzone": 0.30, "axes": [1.0, 0, 0, 0]})
+check(abs(full["axes"][0] - 1.0) < 1e-9,
+      "and all the way over is still all the way: %r" % full["axes"][0])
+
+print("sensitivity reaches full tilt sooner, and never past it")
+plain = run({"axes": [0.5, 0, 0, 0]})["axes"][0]
+keen = run({"sensitivity": 2.0, "axes": [0.5, 0, 0, 0]})["axes"][0]
+check(keen > plain, "twice as sensitive is further over: %r vs %r" % (keen, plain))
+check(run({"sensitivity": 2.5, "axes": [1.0, 0, 0, 0]})["axes"][0] <= 1.0,
+      "and full tilt is still the limit")
+check(run({"sensitivity": 0.5, "axes": [1.0, 0, 0, 0]})["axes"][0] < 1.0,
+      "below 100% never quite gets there, which is the point of it")
+
+print("a diagonal keeps its direction while it is being shaped")
+d = run({"deadzone": 0.1, "sensitivity": 1.5, "axes": [0.6, 0.6, 0, 0]})["axes"]
+check(abs(d[0] - d[1]) < 1e-9, "equal in, equal out: %r" % d[:2])
+
+print("with nothing to do, the axes are handed back untouched")
+same = run({"deadzone": 0, "sensitivity": 1, "axes": AXES})
+check(same["axes"] == AXES, "no dead zone and no gain changes nothing")
 
 print("\nthe two settings are stored apart, so neither erases the other")
 check('"fp-sticks:"' in source and '"fp-padmap:"' in source,

@@ -1086,7 +1086,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30j";
+const CLIENT_BUILD = "2026-08-30k";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1512,7 +1512,13 @@ function loadPadMap() {
   try {
     sticksSwapped = localStorage.getItem(sticksKey()) === "1";
   } catch (_) { sticksSwapped = false; }
+  let tune = null;
+  try { tune = JSON.parse(localStorage.getItem(tuneKey()) || "null"); } catch (_) {}
+  deadzone = tune && typeof tune.deadzone === "number" ? tune.deadzone : 0.10;
+  sensitivity = tune && typeof tune.sensitivity === "number"
+    ? tune.sensitivity : 1.0;
   paintSticks();
+  paintTune();
   const reset = el("pads-reset");
   if (reset) reset.hidden = !padMap && !sticksSwapped;
 }
@@ -1529,6 +1535,44 @@ function paintSticks() {
    and 1 and the right on 2 and 3, so this is those two pairs traded -- and
    only when there are four axes to trade, because plenty of pads report
    fewer and half a swap would be worse than none. */
+/* How a stick is shaped on the way out: how much of the middle to ignore, and
+   how quickly it reaches full tilt. Both belong to the guest -- a stick that
+   will not sit still is a fact about their controller, not about the game --
+   so nothing here is sent anywhere. */
+let deadzone = 0.10, sensitivity = 1.0;
+
+function tuneKey() {
+  return "fp-axistune:" + (padName || "pad");
+}
+
+/* Applied to a stick as a whole rather than to each axis on its own.
+   Per-axis is the easy version and it is wrong in a way people feel: it
+   carves a cross out of the middle, so a stick pushed diagonally answers
+   while the same stick pushed straight up does not. Measuring the distance
+   from the centre carves a circle, which is what a thumb expects.
+
+   Past the edge of the dead zone the value is stretched back out to the full
+   range, so the first movement that registers is a small one -- without that,
+   a tenth of dead zone makes the stick jump to a tenth as soon as it wakes. */
+function shapeStick(x, y) {
+  const magnitude = Math.hypot(x, y);
+  if (magnitude <= deadzone) return [0, 0];
+  const live = Math.min(1, (magnitude - deadzone) / (1 - deadzone) * sensitivity);
+  return [x / magnitude * live, y / magnitude * live];
+}
+
+function shapeAxes(axes) {
+  if (!axes || axes.length < 2) return axes;
+  if (deadzone === 0 && sensitivity === 1) return axes;
+  const out = axes.slice();
+  for (let i = 0; i + 1 < out.length; i += 2) {
+    const [x, y] = shapeStick(out[i], out[i + 1]);
+    out[i] = x;
+    out[i + 1] = y;
+  }
+  return out;
+}
+
 function swapSticks(axes) {
   if (!sticksSwapped || !axes || axes.length < 4) return axes;
   const out = axes.slice();
@@ -1544,14 +1588,16 @@ function remapped(pad) {
   // Not `!padMap` any more: a controller whose buttons are all correct can
   // still want its sticks the other way round, and returning early here meant
   // it could not have that without first breaking its buttons.
-  if (!padMap && !sticksSwapped) return pad;
+  if (!padMap && !sticksSwapped && deadzone === 0 && sensitivity === 1) {
+    return pad;
+  }
   const buttons = !padMap ? pad.buttons : STANDARD_KEYS.map((_n, i) => {
     const from = padMap[i];
     return (from == null || !pad.buttons[from])
       ? { pressed: false, value: 0 } : pad.buttons[from];
   });
-  return { buttons, axes: swapSticks(pad.axes), id: pad.id, index: pad.index,
-           connected: pad.connected, mapping: pad.mapping };
+  return { buttons, axes: shapeAxes(swapSticks(pad.axes)), id: pad.id,
+           index: pad.index, connected: pad.connected, mapping: pad.mapping };
 }
 
 /* Which player you are, changed while a game is running.
@@ -1675,6 +1721,7 @@ function openPads() {
 }
 
 function closePads() {
+  cancelLearn();
   padsOpen = false;
   remapStep = -1;
   el("pads").hidden = true;
@@ -1694,6 +1741,7 @@ function buildPadsGrid() {
     cell.id = "key" + i;
     cell.innerHTML = '<span class="key-name">' + name + "</span>"
                    + '<span class="key-note">' + note + "</span>";
+    cell.addEventListener("click", () => startLearn(i));
     grid.appendChild(cell);
   });
   const axes = el("pads-axes");
@@ -1722,7 +1770,21 @@ function paintPads() {
   setChip("pads-name", padName || (raw ? "controller" : "no controller"),
           raw ? "ok" : "warn");
 
-  if (remapStep >= 0 && raw) {
+  if (learnTarget >= 0 && raw) {
+    /* The same discipline as the full walk: a press only counts once
+       everything has been let go of since the last one. Without it the click
+       that started this, or a button still held from the previous binding,
+       answers instantly. */
+    const hit = raw.buttons.findIndex((b) => b && b.pressed);
+    if (hit < 0) {
+      remapArmed = true;
+    } else if (remapArmed) {
+      const target = learnTarget;
+      cancelLearn();
+      remapArmed = false;
+      bindOne(target, hit);
+    }
+  } else if (remapStep >= 0 && raw) {
     /* One press, one button. This ran every frame while a button was still
        down, so a single press of A -- held for a tenth of a second, which is
        sixty frames -- answered all ten prompts with A and left every other
@@ -1846,6 +1908,81 @@ el("pads-swap").addEventListener("click", () => {
   report("swapped A and B");
 });
 
+function paintTune() {
+  el("pads-deadzone").value = String(Math.round(deadzone * 100));
+  el("pads-sens").value = String(Math.round(sensitivity * 100));
+  el("pads-deadzone-value").textContent = Math.round(deadzone * 100) + "%";
+  el("pads-sens-value").textContent = Math.round(sensitivity * 100) + "%";
+  el("pads-reset").hidden = !padMap && !sticksSwapped
+    && deadzone === 0.10 && sensitivity === 1.0;
+}
+
+function saveTune() {
+  try {
+    localStorage.setItem(tuneKey(),
+                         JSON.stringify({ deadzone, sensitivity }));
+  } catch (_) {}
+  paintTune();
+}
+
+el("pads-deadzone").addEventListener("input", () => {
+  deadzone = Number(el("pads-deadzone").value) / 100;
+  saveTune();
+});
+
+el("pads-sens").addEventListener("input", () => {
+  sensitivity = Number(el("pads-sens").value) / 100;
+  saveTune();
+});
+
+/* Rebinding one button rather than all ten.
+ *
+ * "Fix my buttons" walks the whole set, which is right the first time and
+ * heavy-handed when a single button is in the wrong place. Clicking the one
+ * that is wrong and pressing what it should be is the small version. */
+let learnTarget = -1;
+
+function startLearn(index) {
+  if (remapStep >= 0) return;              // the full walk is already running
+  if (learnTarget === index) {             // clicking it again changes nothing
+    return cancelLearn();
+  }
+  cancelLearn();
+  learnTarget = index;
+  remapArmed = false;                      // let go of the mouse first
+  const cell = el("key" + index);
+  if (cell) cell.classList.add("learning");
+  el("pads-hint").textContent =
+    "Press the button you want for " + STANDARD_KEYS[index][0]
+    + ". Click it again to cancel.";
+}
+
+function cancelLearn() {
+  if (learnTarget >= 0) {
+    const cell = el("key" + learnTarget);
+    if (cell) cell.classList.remove("learning");
+  }
+  learnTarget = -1;
+}
+
+/* Whatever already had that button takes the one being given up, so the map
+   stays a swap rather than growing a duplicate -- two entries reading the same
+   physical button means one of them can never be pressed on its own. */
+function bindOne(index, hit) {
+  padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
+  const was = padMap[index];
+  const clash = padMap.findIndex((from, i) => i !== index && from === hit);
+  if (clash >= 0) padMap[clash] = was;
+  padMap[index] = hit;
+  try { localStorage.setItem(mapKey(), JSON.stringify(padMap)); } catch (_) {}
+  el("pads-reset").hidden = false;
+  el("pads-hint").textContent = clash >= 0
+    ? STANDARD_KEYS[index][0] + " set, and " + STANDARD_KEYS[clash][0]
+      + " took the button it gave up."
+    : STANDARD_KEYS[index][0] + " set. Press it to check.";
+  report("rebound " + STANDARD_KEYS[index][0]);
+}
+
 el("pads-sticks").addEventListener("click", () => {
   sticksSwapped = !sticksSwapped;
   try {
@@ -1865,6 +2002,10 @@ el("pads-close").addEventListener("click", closePads);
 el("pads-remap").addEventListener("click", startRemap);
 el("pads-reset").addEventListener("click", () => {
   padMap = null;
+  cancelLearn();
+  deadzone = 0.10;
+  sensitivity = 1.0;
+  try { localStorage.removeItem(tuneKey()); } catch (_) {}
   // The sticks go back too. This is the one button that means "undo whatever
   // I did to this controller", and leaving one of the two changes in place
   // would make it the button that undoes most of it.
@@ -1874,6 +2015,7 @@ el("pads-reset").addEventListener("click", () => {
     localStorage.removeItem(sticksKey());
   } catch (_) {}
   paintSticks();
+  paintTune();
   el("pads-reset").hidden = true;
   el("pads-hint").textContent = "Back to what the browser reports.";
 });

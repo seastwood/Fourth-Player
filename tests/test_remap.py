@@ -109,5 +109,74 @@ out = run([-1, 0])
 check("2 of 10" in (out["seen"][-1]["said"] or ""),
       "after the first, it asks for the second: %r" % (out["seen"][-1]["said"],))
 
+
+
+# -- rebinding one button, rather than all ten ------------------------------
+#
+# "Fix my buttons" walks the whole set, which is right the first time and
+# heavy-handed when a single button is in the wrong place. Clicking that one
+# and pressing what it should be is the small version -- and it has to leave
+# the map a swap rather than growing a duplicate, because two entries reading
+# the same physical button means one of them can never be pressed alone.
+print("\nrebinding a single button")
+
+ONE = consts + "\n" + lift("bindOne") + """
+const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
+let padMap = job.map;
+const stored = {};
+const localStorage = { setItem: (k, v) => { stored[k] = v; } };
+function mapKey() { return "k"; }
+function report() {}
+const said = [];
+const nodes = { "pads-reset": { hidden: true },
+                "pads-hint": { set textContent(v) { said.push(v); } } };
+function el(id) { return nodes[id] || { hidden: true, textContent: "" }; }
+bindOne(job.index, job.hit);
+process.stdout.write(JSON.stringify({ map: padMap, said: said[0] || "",
+                                      saved: stored.k !== undefined }));
+"""
+
+
+def bind(mapping, index, hit):
+    done = subprocess.run([node, "-e", ONE],
+                          input=json.dumps({"map": mapping, "index": index,
+                                            "hit": hit}),
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr[:400])
+    return json.loads(done.stdout)
+
+
+# How many standard buttons there are, read from the same table the page uses.
+KEY_COUNT = len(re.findall(r'\["', consts.split("STANDARD_KEYS", 1)[1]
+                           .split("];", 1)[0]))
+check(KEY_COUNT >= 10, "the standard set was found: %d" % KEY_COUNT)
+identity = list(range(KEY_COUNT))
+
+got = bind(identity[:], 0, 7)
+check(got["map"][0] == 7, "the button that was clicked takes the one pressed")
+check(got["saved"], "and it is written down")
+
+# Physical button 1 already belongs to entry 1, so giving it to entry 0 has to
+# hand entry 1 the button entry 0 gave up.
+got = bind(identity[:], 0, 1)
+check(got["map"][0] == 1, "the clicked entry takes the pressed button")
+check(got["map"][1] == 0, "and the entry that had it takes the one given up")
+check(sorted(got["map"]) == sorted(identity),
+      "so the map is still a swap, with no duplicates: %r" % got["map"])
+check("took the button it gave up" in got["said"],
+      "and it says so, rather than silently moving somebody else: %r"
+      % got["said"])
+
+got = bind(None, 2, 5)
+check(got["map"] is not None and got["map"][2] == 5,
+      "starting from no map at all works: %r" % got["map"])
+check(sorted(got["map"]) == sorted(identity),
+      "and still leaves a complete map: %r" % got["map"])
+
+got = bind(identity[:], 3, 3)
+check(got["map"] == identity,
+      "rebinding a button to itself changes nothing: %r" % got["map"])
+
 print(("FAILED: %d" % len(fails)) if fails else "test_remap: all ok")
 sys.exit(1 if fails else 0)
