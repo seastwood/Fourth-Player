@@ -104,5 +104,17 @@ for key, layout in layouts.items():
           "%s: the lowest button ends inside the box (%.0f%%)"
           % (key, lowest + 30 * aspect))
 
+print("\nthe on-screen pad starts as the one people can name the buttons of")
+# A phone is where the buttons have to be guessable without being told, and
+# the three-button Mega Drive pad has nowhere to put shoulders or Select.
+import re                                                     # noqa: E402
+default = re.search(r'const DEFAULT_LAYOUT = "([a-z]+)"', source).group(1)
+check(default == "nintendo", "the default layout is the SNES pad: %r" % default)
+check(default in layouts, "and it is a layout that exists")
+check(layouts[default]["name"] == "Super Nintendo",
+      "named for what it is: %r" % layouts[default]["name"])
+check(any(b["id"] == "SELECT" for b in layouts[default]["centre"]),
+      "with a Select button, which the old default had nowhere to put")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

@@ -1040,5 +1040,28 @@ input.name {
   padding-bottom: 0;
 }
 .pads-seat .chip { height: 1.75rem; padding-block: 0; }
+
+/* The question before the game stops for everybody. Inside the panel rather
+   than floating over it: it is about the row directly above it, and it should
+   read as part of that decision. */
+.repick-ask {
+  margin: .2rem clamp(.6rem, 3vw, 1.4rem) .6rem;
+  padding: .7rem .8rem;
+  border: 2px solid var(--accent);
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  align-items: flex-start;
+}
+.repick-title {
+  font-family: var(--pixel);
+  font-size: .55rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin: 0;
+}
+.repick-ask .footnote { margin: 0; }
+.repick-ask .choice { align-self: stretch; }
 .pads-seat .warn { color: var(--accent); }
 .pads-seat .ghost { height: 1.75rem; padding-block: 0; }

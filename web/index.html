@@ -157,9 +157,26 @@
       <!-- The way out when the seat you want is not one the running game has:
            only the television can add a port, and only by starting the game
            again, which it knows how to do without losing the game. -->
-      <button id="pads-repick" type="button" class="ghost" hidden>Change
-        players on the TV</button>
+      <button id="pads-repick" type="button" class="ghost" hidden>Repick
+        player slots</button>
     </p>
+
+    <!-- Asked before it happens, because it happens to everybody: the game on
+         the television stops for a moment and every player has to choose a
+         slot again. Somebody tapping a button in a phone menu should know
+         that before the screen changes under four other people. -->
+    <div id="repick-ask" class="repick-ask" hidden>
+      <p class="repick-title">Repick player slots?</p>
+      <p class="footnote">The game closes for a moment and the player picker
+         comes up on the television. <strong>Everyone playing chooses their
+         slot again</strong>, then the same game carries on from exactly where
+         it is now.</p>
+      <p class="footnote">Your place in the game is kept, and so is every
+         save.</p>
+      <button id="repick-yes" type="button" class="choice">Yes, repick
+        slots</button>
+      <button id="repick-no" type="button" class="ghost">Cancel</button>
+    </div>
     <p id="pads-hint" class="browse-note">Press anything on your controller —
        nothing here reaches the game.</p>
     <div id="pads-grid" class="pads-grid"></div>

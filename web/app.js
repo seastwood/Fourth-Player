@@ -507,7 +507,13 @@ const LAYOUTS = {
   },
 };
 
-const DEFAULT_LAYOUT = "genesis";
+/* What a guest gets before they choose anything. The on-screen pad is a phone
+   thing, and a phone is where the buttons have to be guessable: the SNES
+   diamond is the layout most people can name the buttons of without being
+   told, and it has the shoulders and Select that the three-button Mega Drive
+   pad simply has nowhere to put. Anybody who has chosen already keeps their
+   choice -- this is only the starting point. */
+const DEFAULT_LAYOUT = "nintendo";
 const LAYOUT_KEY = "fp:layout";
 
 const DPAD = { up: 12, down: 13, left: 14, right: 15 };
@@ -990,7 +996,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30e";
+const CLIENT_BUILD = "2026-08-30f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1497,13 +1503,28 @@ el("pads-seat").addEventListener("change", (ev) => {
 /* Moving between the seats a game already has is instant. Asking for a seat it
    does not have is not, and cannot be: the ports are fixed when the game
    starts. This asks the television to bring the picker back up over the game,
-   which closes it, keeps it, and puts it back where it was. */
+   which closes it, keeps it, and puts it back where it was.
+ *
+ * Asked first, because it is not a private action: the game stops on the
+ * television and everybody playing has to choose a slot again. A button that
+ * did that on one tap, from a phone, with a label that did not say so, was a
+ * trap. */
 el("pads-repick").addEventListener("click", () => {
+  el("repick-ask").hidden = false;
+});
+
+el("repick-no").addEventListener("click", () => {
+  el("repick-ask").hidden = true;
+});
+
+el("repick-yes").addEventListener("click", () => {
+  el("repick-ask").hidden = true;
   send({ t: "repick" });
   closePads();
 });
 
 function openPads() {
+  el("repick-ask").hidden = true;
   // Ask what the seats look like now rather than trusting what they looked
   // like when this page joined. A guest who was already here when the game
   // started had been told, and kept being told, that no game was running.

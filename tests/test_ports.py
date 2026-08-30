@@ -181,6 +181,34 @@ starting = starting[:starting.index('case "arrived"')]
 check('send({ t: "pads" })' in starting,
       "and again once a game has had time to come up")
 
+# Repicking is not a private action: the game stops on the television and
+# everybody playing chooses a slot again. One tap from a phone, behind a label
+# that did not say so, was a trap.
+html_src = open(os.path.join(ROOT, "web", "index.html")).read()
+flat = " ".join(html_src.split())
+check("Repick player slots" in flat and "Change players on the TV" not in flat,
+      "the button says what it does")
+
+opener = app_src[app_src.index('el("pads-repick").addEventListener'):]
+opener = opener[:opener.index("});") + 3]
+check('send({ t: "repick" })' not in opener,
+      "pressing it does not repick on the spot: %r" % opener.strip()[-60:])
+check('el("repick-ask").hidden = false' in opener,
+      "it asks first")
+
+yes = app_src[app_src.index('el("repick-yes").addEventListener'):]
+yes = yes[:yes.index("});") + 3]
+check('send({ t: "repick" })' in yes, "only confirming actually repicks")
+
+ask = flat[flat.index('id="repick-ask"'):]
+ask = ask[:ask.index("</div>")]
+for wanted in ("The game closes for a moment",
+               "picker comes up on the television",
+               "Everyone playing chooses their slot again",
+               "carries on from exactly where it is now",
+               "Your place in the game is kept"):
+    check(wanted in ask, "the question explains: %r" % wanted)
+
 if failures:
     print("\n".join("FAIL: " + f for f in failures))
     sys.exit(1)
