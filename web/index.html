@@ -62,6 +62,29 @@
     <select id="padtype" class="chip" aria-label="Controller layout"></select>
     <button id="games" type="button" class="ghost" hidden>Games</button>
     <button id="padtest" type="button" class="ghost">Buttons</button>
+    <!-- The speaker shows the level at a glance -- no waves, one wave, two --
+         and opens the slider when tapped. Its own level, not the
+         television's: turning it down here should not silence the room. -->
+    <div id="vol" class="vol">
+      <button id="vol-btn" type="button" class="ghost icon" title="Volume"
+              aria-label="Volume" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path class="vol-cone" d="M3 9h4l5-4v14l-5-4H3z"
+                fill="currentColor"/>
+          <path class="vol-wave vol-wave-1" d="M15 9.6a3.6 3.6 0 0 1 0 4.8"
+                fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="square"/>
+          <path class="vol-wave vol-wave-2" d="M17.8 7.2a7.2 7.2 0 0 1 0 9.6"
+                fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="square"/>
+          <path class="vol-cross" d="M15.5 9.5l5 5M20.5 9.5l-5 5"
+                fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="square"/>
+        </svg>
+      </button>
+      <input id="vol-range" class="vol-range" type="range" min="0" max="100"
+             step="5" value="100" aria-label="Volume level">
+    </div>
     <button id="unmute" type="button" class="ghost" hidden>🔇 Sound off — tap</button>
     <button id="info" type="button" class="ghost" title="What is happening">?</button>
     <button id="full" type="button" class="ghost icon" aria-label="Fullscreen"

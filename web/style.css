@@ -863,6 +863,77 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   align-items: center;
   justify-content: center;
 }
+/* ---- volume ------------------------------------------------------------
+   A speaker that says the level by how many waves it draws, and a slider that
+   is not there until it is asked for. Sized and bordered like everything else
+   in the row: it is one of the chips, not a widget visiting from elsewhere. */
+.vol {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+/* The waves and the cross are two readings of the same number, so exactly one
+   of them is ever showing. */
+.vol .vol-wave, .vol .vol-cross { display: none; }
+.vol.is-low  .vol-wave-1 { display: inline; }
+.vol.is-high .vol-wave-1,
+.vol.is-high .vol-wave-2 { display: inline; }
+.vol.is-off  .vol-cross  { display: inline; }
+.vol.is-off  .vol-btn,
+.vol.is-off  #vol-btn { color: var(--dim); }
+
+.vol-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  opacity: 0;
+  margin: 0;
+  height: 1.75rem;
+  background: transparent;
+  transition: width .18s ease, opacity .18s ease, margin .18s ease;
+  pointer-events: none;
+}
+.vol.open .vol-range {
+  width: clamp(5rem, 22vw, 9rem);
+  opacity: 1;
+  margin-left: .35rem;
+  pointer-events: auto;
+}
+/* A bar with a hard fill and no rounding anywhere: the same square, lit-pixel
+   language as the rest of this. --fill is set from the level in app.js. */
+.vol-range::-webkit-slider-runnable-track {
+  height: .75rem;
+  border: 2px solid var(--dim);
+  background:
+    linear-gradient(to right, var(--accent) var(--fill, 100%),
+                    transparent var(--fill, 100%));
+}
+.vol-range::-moz-range-track {
+  height: .75rem;
+  border: 2px solid var(--dim);
+  background:
+    linear-gradient(to right, var(--accent) var(--fill, 100%),
+                    transparent var(--fill, 100%));
+}
+.vol-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: .55rem;
+  height: 1.15rem;
+  margin-top: -.28rem;          /* centred on a .75rem track */
+  background: var(--ink);
+  border: 2px solid var(--bg);
+  border-radius: 0;
+}
+.vol-range::-moz-range-thumb {
+  width: .55rem;
+  height: 1.15rem;
+  background: var(--ink);
+  border: 2px solid var(--bg);
+  border-radius: 0;
+}
+.vol-range:focus-visible { outline: 2px solid var(--accent); }
+
 /* An icon button is square: the same height as the row, and as wide. */
 .ghost.icon {
   width: 1.75rem;

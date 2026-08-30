@@ -427,8 +427,9 @@ async function answer(message) {
  * anything, and the browser is right to refuse. Rather than leave them
  * wondering why it is silent, ask. */
 function startPlayback() {
+  video.volume = savedVolume();
   video.play().then(() => {
-    video.muted = false;
+    video.muted = savedVolume() === 0;
     return video.play();
   }).then(() => {
     el("unmute").hidden = true;
@@ -441,12 +442,83 @@ function startPlayback() {
 }
 
 el("unmute").addEventListener("click", () => {
+  if (volume() === 0) setVolume(1);        // silent slider, silent tap, silence
   video.muted = false;
   video.play().then(() => {
     el("unmute").hidden = true;
     hideHud();
   }).catch(() => {});
 });
+
+/* ---- volume ----
+ *
+ * This guest's own loudness, not the television's. Turning it down here is a
+ * person turning their phone down, and it would be a nasty surprise if it
+ * silenced the room everybody else is playing in.
+ *
+ * The icon carries the level -- crossed out, one wave, two -- so the common
+ * case needs no slider at all: you can see whether the sound is on without
+ * touching anything. */
+const VOLUME_KEY = "fp:volume";
+
+function volume() {
+  const raw = parseInt(el("vol-range").value, 10);
+  return isNaN(raw) ? 1 : raw / 100;
+}
+
+function paintVolume(level) {
+  const box = el("vol");
+  box.classList.toggle("is-off", level === 0);
+  box.classList.toggle("is-low", level > 0 && level < 0.55);
+  box.classList.toggle("is-high", level >= 0.55);
+  el("vol-range").style.setProperty("--fill", Math.round(level * 100) + "%");
+  const said = level === 0 ? "Sound off" : "Volume " + Math.round(level * 100) + "%";
+  el("vol-btn").title = said;
+  el("vol-btn").setAttribute("aria-label", said);
+}
+
+function setVolume(level, remember = true) {
+  level = Math.max(0, Math.min(1, level));
+  el("vol-range").value = String(Math.round(level * 100));
+  video.volume = level;
+  // Muted and zero are the same thing to a listener, and keeping them the same
+  // thing here means the icon never disagrees with what is coming out.
+  video.muted = level === 0;
+  if (level > 0) {
+    video.play().catch(() => {});          // raising it is a gesture in itself
+    el("unmute").hidden = true;
+  }
+  paintVolume(level);
+  if (remember) {
+    try { localStorage.setItem(VOLUME_KEY, String(level)); } catch (_) {}
+  }
+}
+
+function savedVolume() {
+  let raw = null;
+  try { raw = localStorage.getItem(VOLUME_KEY); } catch (_) {}
+  const level = parseFloat(raw);
+  return isNaN(level) ? 1 : Math.max(0, Math.min(1, level));
+}
+
+el("vol-btn").addEventListener("click", () => {
+  const open = el("vol").classList.toggle("open");
+  el("vol-btn").setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) el("vol-range").focus({ preventScroll: true });
+});
+
+el("vol-range").addEventListener("input", () => setVolume(volume()));
+
+/* Anywhere else closes it. Without this the slider sits open over the picture
+   for the rest of the session, because nothing else was ever going to. */
+document.addEventListener("pointerdown", (ev) => {
+  if (!el("vol").classList.contains("open")) return;
+  if (el("vol").contains(ev.target)) return;
+  el("vol").classList.remove("open");
+  el("vol-btn").setAttribute("aria-expanded", "false");
+}, true);
+
+setVolume(savedVolume(), false);
 
 /* ---- on-screen controller ----
  *
@@ -844,6 +916,10 @@ function showHud(persist) {
 }
 
 function hideHud() {
+  // The chips are going away; the slider must not still be open behind them,
+  // waiting to reappear next time somebody wants the volume.
+  el("vol").classList.remove("open");
+  el("vol-btn").setAttribute("aria-expanded", "false");
   if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
   // Nothing is hidden while there is something to read.
   if (el("notice").hidden) el("hud").classList.remove("show");
@@ -996,7 +1072,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30f";
+const CLIENT_BUILD = "2026-08-30g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
