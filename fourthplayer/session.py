@@ -89,6 +89,11 @@ APPROVAL_SECONDS = 30.0
 PAD_NAMES_PATH = os.path.expanduser(
     "~/.local/state/fourth-player/pad-names.json")
 
+# Touched to ask the television's player picker to come back over a game that
+# is already running. Coupled the same way and for the same reason: the picker
+# watches for this file, and neither program knows the other exists.
+REPICK_PATH = os.path.join(os.path.dirname(PAD_NAMES_PATH), "repick")
+
 STATE_PATH = os.path.expanduser("~/.local/state/fourth-player/session.json")
 
 # How long to wait for the pipeline worker before giving up on a guest's
@@ -152,9 +157,12 @@ class GuestConnection:
         # this ends up pointing at. Belt and braces on a slot that has already
         # produced one connection nobody was feeding.
         self.attaching = asyncio.Lock()
-        # What they called themselves, or their slot. The local player at the
-        # television is player 1, so a guest in the first slot is player 2.
-        self.label = name or f"Player {slot + 2}"
+        # What they called themselves, or which guest they are. Deliberately
+        # not a player number: which player a guest is depends on the ports the
+        # running game bound, and numbering them from the slot got it wrong in
+        # both directions -- the first guest was called "player 2" while the
+        # game called them player 1.
+        self.label = name or f"Guest {slot + 1}"
         self.joined_at = time.monotonic()
         self.last_input = 0.0
         self.frames = 0
@@ -725,7 +733,7 @@ class LiveSession:
             raise ValueError("no session is open")
         index = int(index)
         if not 0 <= index < len(self.pads):
-            raise ValueError("there is no player %d" % (index + 2))
+            raise ValueError("there is no controller %d" % (index + 1))
         if index == guest.pad_index:
             return guest.pad_index
 
@@ -750,11 +758,44 @@ class LiveSession:
         self.notify({"t": "pads", **self.pad_state()})
         return index
 
+    def request_repick(self, guest):
+        """Ask the television to put the player picker back up.
+
+        Worth having because a seat the running game never bound cannot be
+        taken from here at all: which ports exist is settled when a game
+        starts, so somebody arriving in the middle of one had no way in short
+        of the host stopping it by hand. The picker knows how to close the
+        game, hold on to it, and put it back where it was.
+        """
+        if not launcher.running():
+            raise ValueError("no game is running")
+        os.makedirs(os.path.dirname(REPICK_PATH), exist_ok=True)
+        with open(REPICK_PATH, "w") as handle:
+            handle.write(guest.label + "\n")
+        log.info("%s asked for the player picker", guest.label)
+        return True
+
     def pad_state(self):
-        """Who is on which pad, for the guests' own pages."""
+        """Who is on which pad, and which player each pad actually is.
+
+        The player number comes from the game that is running, not from the
+        pad's position: the picker decides which pad is which port and writes
+        it into the config it hands RetroArch. A pad bound to nothing is not a
+        seat anybody can take, and saying so beats offering it.
+        """
+        ports = {}
+        try:
+            ports = launcher.player_ports()
+        except Exception:
+            pass
+        pads = self.pads or []
         return {
-            "count": len(self.pads) if self.pads else 0,
+            "count": len(pads),
             "who": {str(g.pad_index): g.label for g in self.guests.values()},
+            # index -> player number in the game, or absent when that pad is
+            # not bound to a port at all.
+            "ports": {str(i): ports[pad.name]
+                      for i, pad in enumerate(pads) if pad.name in ports},
         }
 
     def roster(self):

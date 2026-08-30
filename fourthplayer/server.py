@@ -200,6 +200,17 @@ class Server:
                     else:
                         await outbox.put({"t": "pads", "yours": now_on,
                                           **self.session.pad_state()})
+                elif kind == "repick":
+                    try:
+                        self.session.request_repick(guest)
+                    except (ValueError, OSError) as exc:
+                        await outbox.put({"t": "error", "message": str(exc)})
+                    else:
+                        await outbox.put({
+                            "t": "note",
+                            "message": "Asking the television for the player "
+                                       "picker. The game will pause for a "
+                                       "moment and come back where it was."})
                 elif kind == "games":
                     # The catalogue itself, which is public to anyone already
                     # in the session: labels, systems and player counts, and
@@ -689,7 +700,16 @@ class Server:
         return await websockets.serve(
             self._guest, self.cfg.host, self.cfg.port,
             ssl=context, process_request=self._http,
-            # Generous, because losing this socket used to cost the session.
-            # It no longer does, but a browser that backgrounds a tab should
-            # not be dropped for it either.
-            ping_interval=30, ping_timeout=60, max_size=64 * 1024)
+            # Every fifteen seconds, which is not about detecting a dead
+            # browser -- it is about never being idle. A reverse proxy in front
+            # of this cuts a connection that has carried nothing for its idle
+            # timeout, and the usual default is thirty seconds. Pinging on that
+            # same thirty seconds is a race the proxy wins about half the time,
+            # which is exactly what the blackouts "at one minute intervals"
+            # were: the socket died, the guest reconnected, and the peer was
+            # rebuilt on a new UDP port. Half the shortest common timeout means
+            # traffic always crosses well inside the window.
+            #
+            # The timeout stays generous: a phone that backgrounds the tab
+            # should not be dropped for being slow to answer.
+            ping_interval=15, ping_timeout=60, max_size=64 * 1024)

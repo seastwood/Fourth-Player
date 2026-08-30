@@ -230,7 +230,7 @@ class Session:
         self.limiter.record_success(address)
         guest_token = new_token()
         self.guests[slot] = Guest(slot=slot, token_digest=_digest(guest_token),
-                                  joined_at=now, label=label or f"Player {slot + 1}",
+                                  joined_at=now, label=label or f"Guest {slot + 1}",
                                   address=address)
         return slot, guest_token
 
@@ -326,7 +326,7 @@ class Session:
         # The same digest, so the token they are holding keeps working if they
         # drop again -- which is the whole point.
         self.guests[slot] = Guest(slot=slot, token_digest=digest, joined_at=now,
-                                  label=f"Player {slot + 1}")
+                                  label=f"Guest {slot + 1}")
         return slot
 
     # -- surviving a restart -------------------------------------------------

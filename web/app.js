@@ -224,6 +224,8 @@ function connect(hello) {
         + "the television.</p>", false);
       case "arrived":       return somebodyArrived(message);
       case "pads":          return seatsFrom(message);
+      case "note":          return showNotice(
+        "<p>" + escapeText(message.message) + "</p>", false);
       case "launchdenied":  return showNotice(
         "<p>Not started: " + escapeText(message.reason || "refused") + "</p>",
         false);
@@ -964,7 +966,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29g";
+const CLIENT_BUILD = "2026-08-30a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1370,14 +1372,25 @@ function remapped(pad) {
    or a second person arriving after one player claimed -- had no way to be
    given controls short of stopping the game. Moving onto the pad that is
    already player 2 does it instantly, because that pad is already player 2. */
-let myPad = 0, padSeats = { count: 0, who: {} };
+let myPad = 0, padSeats = { count: 0, who: {}, ports: {} };
 
+/* The player number is the game's, not this pad's position. These used to be
+   counted off as "Player 2" upwards on the assumption that somebody at the
+   television is player 1 -- and on the machine this was written for that was
+   simply untrue: the pad the host had given to a guest WAS player 1, and the
+   other three ports were bound to nothing at all. So a guest was told they
+   were player 3 while the game called them player 1, and was offered two more
+   seats that did not exist. The host tells us the real mapping now. */
 function paintSeats() {
   const pick = el("pads-seat");
   const wanted = padSeats.count || 0;
+  const port = (i) => padSeats.ports[String(i)];
   const label = (i) => {
     const who = padSeats.who[String(i)];
-    const name = "Player " + (i + 2);
+    // No port means the game was started without that seat. Saying so is the
+    // whole point: it cannot be taken until the game is started again.
+    const name = port(i) ? "Player " + port(i)
+                         : "Controller " + (i + 1) + " (not in this game)";
     return (who && i !== myPad) ? name + " — " + who : name;
   };
   // Rebuilt only when something changed, or a menu open on a phone closes
@@ -1394,18 +1407,42 @@ function paintSeats() {
     }
     pick.value = String(myPad);
   }
+  const mine = padSeats.ports[String(myPad)];
+  const note = el("pads-seat-note");
+  const live = Object.keys(padSeats.ports).length;
+  // Only offered while something is running: with no game there is no picker
+  // to put back, and a button that can only fail is worse than no button.
+  el("pads-repick").hidden = !live;
+  if (mine) {
+    note.hidden = true;
+  } else {
+    note.hidden = false;
+    note.textContent = live
+      ? "This controller is not one of the game's players."
+      : "No game is running, so there are no players to be yet.";
+  }
 }
 
 function seatsFrom(message) {
   if (!message) return;
   if (typeof message.yours === "number") myPad = message.yours;
-  padSeats = { count: message.count || 0, who: message.who || {} };
+  padSeats = { count: message.count || 0, who: message.who || {},
+               ports: message.ports || {} };
   paintSeats();
 }
 
 el("pads-seat").addEventListener("change", (ev) => {
   const wanted = parseInt(ev.target.value, 10);
   if (!isNaN(wanted)) send({ t: "usepad", pad: wanted });
+});
+
+/* Moving between the seats a game already has is instant. Asking for a seat it
+   does not have is not, and cannot be: the ports are fixed when the game
+   starts. This asks the television to bring the picker back up over the game,
+   which closes it, keeps it, and puts it back where it was. */
+el("pads-repick").addEventListener("click", () => {
+  send({ t: "repick" });
+  closePads();
 });
 
 function openPads() {

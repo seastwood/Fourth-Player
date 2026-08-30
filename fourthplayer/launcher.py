@@ -20,8 +20,10 @@ instead and started as its own transient unit, outside this process's
 confinement entirely.
 """
 
+import glob
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -89,6 +91,49 @@ def stop_running():
             return True
         time.sleep(0.2)
     return not running()
+
+
+def player_ports():
+    """Which pad is which player, according to the game that is running.
+
+    The picker decides this and writes it into the config it hands RetroArch,
+    so the only honest source is that file -- and it is nothing like a guess
+    from the slot number. On the machine this was written for, "Fourth Player
+    2" was player 1 and ports two to four were parked on an index that cannot
+    exist, so a guest offered "player 3" would have been offered a seat that
+    is not in the game at all.
+
+    Returns {device name: player number}, empty when nothing is running.
+    """
+    path = None
+    for entry in glob.glob("/proc/[0-9]*/cmdline"):
+        try:
+            with open(entry, "rb") as handle:
+                argv = handle.read().split(b"\0")
+        except OSError:
+            continue
+        if not argv or not argv[0].endswith(b"retroarch"):
+            continue
+        for i, arg in enumerate(argv):
+            if arg == b"--appendconfig" and i + 1 < len(argv):
+                path = argv[i + 1].decode("utf-8", "replace")
+        break
+    return ports_from_config(path) if path else {}
+
+
+def ports_from_config(path):
+    """Read {device name: player number} out of a RetroArch config fragment."""
+    ports = {}
+    try:
+        with open(path) as handle:
+            for line in handle:
+                match = re.match(
+                    r'\s*input_player(\d+)_reserved_device\s*=\s*"(.*)"', line)
+                if match and match.group(2):
+                    ports[match.group(2)] = int(match.group(1))
+    except OSError:
+        return {}
+    return ports
 
 
 def preflight(row):

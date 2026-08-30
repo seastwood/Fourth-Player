@@ -36,7 +36,7 @@
          there is a limit to how much of it they will see. -->
     <label for="who" class="optional">Your name (optional)</label>
     <input id="who" name="who" maxlength="16" autocomplete="nickname"
-           placeholder="Player 2" class="name">
+           placeholder="Guest 1" class="name">
     <button type="submit" id="join">Join the game</button>
   </form>
 
@@ -149,6 +149,12 @@
       You are playing as
       <select id="pads-seat" class="chip" aria-label="Which player you are">
       </select>
+      <span id="pads-seat-note" class="warn" hidden></span>
+      <!-- The way out when the seat you want is not one the running game has:
+           only the television can add a port, and only by starting the game
+           again, which it knows how to do without losing the game. -->
+      <button id="pads-repick" type="button" class="ghost">Change players
+        on the TV</button>
     </p>
     <p id="pads-hint" class="browse-note">Press anything on your controller —
        nothing here reaches the game.</p>

@@ -82,7 +82,7 @@ print("and nobody ends up sharing a pad")
 seats = [g.pad_index for g in live.guests.values()]
 check(len(set(seats)) == len(seats), "one guest per pad: %s" % seats)
 
-print("a pad that does not exist is refused, and says so in players not indexes")
+print("a pad that does not exist is refused, counted the way a person counts")
 live = session_with(3)
 a = guest_on(live, 0, "Ann")
 for bad in (3, 99, -1):
@@ -90,7 +90,9 @@ for bad in (3, 99, -1):
         live.set_pad(a, bad)
         check(False, "pad %s is refused" % bad)
     except ValueError as exc:
-        check("player" in str(exc), "pad %s is refused: %s" % (bad, exc))
+        # Not "player": which player a pad is belongs to the running game,
+        # not to its position in this list. Controllers are what this counts.
+        check("controller" in str(exc), "pad %s is refused: %s" % (bad, exc))
 check(a.pad_index == 0, "and they stay where they were")
 
 print("asking for the pad you are already on does nothing at all")

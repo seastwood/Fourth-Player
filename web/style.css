@@ -976,7 +976,10 @@ input.name {
 .pads-seat {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;          /* three controls and a sentence, on a phone */
   gap: .5rem;
   padding-bottom: 0;
 }
 .pads-seat .chip { height: 1.75rem; padding-block: 0; }
+.pads-seat .warn { color: var(--accent); }
+.pads-seat .ghost { height: 1.75rem; padding-block: 0; }
