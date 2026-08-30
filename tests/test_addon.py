@@ -154,6 +154,41 @@ for wanted in ("link, PIN and QR", "Who is playing", "Add more time",
                "Remove a player", "Close the session", "Picture quality"):
     check(any(wanted in o for o in options), "the menu offers %r" % wanted)
 
+print("\na session whose code cannot be read back offers a new one")
+# The clear link and PIN are deliberately never written to disk, so a service
+# restart leaves a perfectly good session whose code nobody can read. The panel
+# used to put a wall of grey on the television advising to close the session
+# and start again -- which costs everybody their place. A new pair costs nobody
+# anything, because a guest is held by their own token, not the invite's.
+server.reply = {"ok": True, "open": True, "remaining": 754, "slots": 3,
+                "url": None, "pin": None, "guests": []}
+chosen["calls"] = []
+main.main()
+options = chosen["calls"][-1][2]
+check(any("New link and PIN" in o for o in options),
+      "the menu offers a new pair: %r" % options)
+
+server.reply = {"ok": True, "open": False}
+chosen["calls"] = []
+main.main()
+options = chosen["calls"][-1][2]
+check(not any("New link and PIN" in o for o in options),
+      "and does not, with no session to re-share: %r" % options)
+
+print("\nand says what a new pair actually costs, which depends on the mode")
+strict = main.reshare_warning({"require_link": True})
+loose = main.reshare_warning({"require_link": False})
+check("home screen" in strict,
+      "with links required, a saved shortcut dies: %r" % strict)
+check("still works" in loose,
+      "without them, only the PIN changes: %r" % loose)
+check(strict != loose, "the two are not the same sentence")
+
+print("\nnothing tells anybody to close a session to get a code")
+panel_source = open(os.path.join(ADDON, "panels.py")).read()
+check("Close this session" not in panel_source,
+      "the old advice is gone from the panel")
+
 print("\nquality presets are written where the server reads them")
 config_path = os.path.join(tempfile.mkdtemp(), "config.json")
 main.CONFIG_PATH = config_path

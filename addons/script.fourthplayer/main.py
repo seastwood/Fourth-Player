@@ -172,7 +172,46 @@ def start_session(previous="off"):
         answer = C.set_policy(POLICIES[picked][0])
         if not answer.get("ok"):
             notify(answer.get("error", "Could not set that."), error=True)
-    panels.show_invite(C.status)
+    panels.show_invite(C.status, new_invite)
+
+
+def new_invite():
+    """A fresh link and PIN for the session that is already running.
+
+    Not the same as closing and reopening. Everyone playing keeps their slot,
+    because a guest is identified by their own token rather than by the invite
+    they arrived on -- which is what makes this the right answer after a
+    restart, when the clear pair is gone by design and the old advice was to
+    throw the whole session away.
+    """
+    answer = C.reshare()
+    if answer.get("error") or answer.get("ok") is False:
+        notify(answer.get("error", "Could not make a new link."), error=True)
+        return False
+    return True
+
+
+def reshare_warning(status):
+    """What a new pair actually costs, which depends on how guests get in."""
+    if (status or {}).get("require_link"):
+        return ("Any link or QR code shared earlier stops working, including "
+                "one saved to somebody's home screen.")
+    # Guests are joining on the address and a PIN, so a saved shortcut is
+    # still a saved shortcut -- only the number changes.
+    return ("A shortcut somebody saved still works; they will need the new "
+            "PIN.")
+
+
+def new_invite_asked(status=None):
+    status = status or C.status()
+    if not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "Make a new link and PIN?[CR][CR]Everyone playing keeps their "
+            "place. " + reshare_warning(status),
+            nolabel="Cancel", yeslabel="New link"):
+        return
+    if new_invite():
+        panels.show_invite(C.status, new_invite)
 
 
 def extend_session(status=None):
@@ -458,7 +497,9 @@ def main():
                    % (guests, "no time limit" if remaining is None
                       else "%d min left" % (remaining // 60)))
         entries = [
-            ("Show the link, PIN and QR code", lambda: panels.show_invite(C.status)),
+            ("Show the link, PIN and QR code",
+             lambda: panels.show_invite(C.status, new_invite)),
+            ("New link and PIN…", lambda: new_invite_asked(status)),
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
             ("Add more time…", lambda: extend_session(status)),

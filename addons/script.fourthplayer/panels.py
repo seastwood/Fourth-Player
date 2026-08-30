@@ -119,15 +119,35 @@ def _labels(window, entries):
     return made
 
 
-def show_invite(get_status):
+def show_invite(get_status, reshare=None):
     """The link, the PIN and the QR, with the clock running."""
-    window = Panel()
-    width, height = window.getWidth(), window.getHeight()
-
     status = get_status()
     if not status.get("open"):
         return
     url, pin = status.get("url"), status.get("pin")
+
+    # The clear link and PIN are deliberately never written to disk, so a
+    # service restart -- an update, a reboot -- leaves a perfectly good session
+    # whose code nobody can read back. That used to put a wall of grey on the
+    # television saying to close the session and start again, which is far more
+    # than it costs: a fresh pair leaves everyone already playing exactly where
+    # they are, because their slots are held by their own tokens and not by the
+    # invite's. So offer that instead of the sledgehammer.
+    if not url and reshare is not None:
+        if xbmcgui.Dialog().yesno(
+                "Fourth Player",
+                "The link and PIN cannot be read back after the service "
+                "restarts.[CR][CR]Make a new pair now? Everyone playing keeps "
+                "their place.",
+                nolabel="Not now", yeslabel="New link"):
+            reshare()
+            status = get_status()
+            if not status.get("open"):
+                return
+            url, pin = status.get("url"), status.get("pin")
+
+    window = Panel()
+    width, height = window.getWidth(), window.getHeight()
 
     window.addControl(xbmcgui.ControlImage(0, 0, width, height, backdrop_png()))
 
@@ -155,10 +175,10 @@ def show_invite(get_status):
     if not url:
         _labels(window, [
             (text_x, top, text_w, line,
-             "The link and PIN were forgotten when the service restarted.",
+             "The link and PIN cannot be read back after a restart.",
              "0xFFE3E7EE"),
             (text_x, top + line * 2, text_w, line,
-             "Close this session and open a new one for a fresh pair.",
+             "Pick \"New link and PIN\" from the menu. Nobody loses their place.",
              "0xFF949CAC"),
         ])
     else:
