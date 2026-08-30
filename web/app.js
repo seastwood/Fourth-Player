@@ -916,6 +916,15 @@ function showHud(persist) {
 }
 
 function hideHud() {
+  // Not while somebody is using one of them. The timer does not know that a
+  // native dropdown is open -- the list is drawn by the operating system and
+  // the page is told nothing about it -- but focus stays on the select the
+  // whole time it is, so that is the thing to ask.
+  if (el("hud").contains(document.activeElement)) {
+    if (hudTimer) clearTimeout(hudTimer);
+    hudTimer = setTimeout(hideHud, HUD_SECONDS * 1000);
+    return;
+  }
   // The chips are going away; the slider must not still be open behind them,
   // waiting to reappear next time somebody wants the volume.
   el("vol").classList.remove("open");
@@ -1072,7 +1081,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30g";
+const CLIENT_BUILD = "2026-08-30h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

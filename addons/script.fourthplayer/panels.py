@@ -182,9 +182,19 @@ def show_invite(get_status, reshare=None):
              "0xFF949CAC"),
         ])
     else:
+        # With the link not required, the address alone plus the PIN is the
+        # whole of what a guest needs -- and that address is short enough to
+        # read down a telephone, which the tokenised link is not. Showing the
+        # long one anyway gave no sign the setting had taken effect, and left
+        # somebody dictating forty characters they did not need.
+        short = (status.get("base_url") or url) if not status.get("require_link") \
+            else url
+        heading = ("[B]Scan this, or go to[/B]" if not status.get("require_link")
+                   else "[B]Scan this, or open[/B]")
         made = _labels(window, [
-            (text_x, top, text_w, line, "[B]Scan this, or open[/B]", "0xFFE69B40"),
-            (text_x, top + line, text_w, line, url.replace("https://", ""), "0xFFE3E7EE"),
+            (text_x, top, text_w, line, heading, "0xFFE69B40"),
+            (text_x, top + line, text_w, line,
+             short.replace("https://", ""), "0xFFE3E7EE"),
             (text_x, top + int(line * 2.4), text_w, line, "[B]PIN[/B]", "0xFFE69B40"),
             (text_x, top + int(line * 3.2), text_w, int(line * 1.6),
              "[B]" + str(pin) + "[/B]", "0xFFE3E7EE"),

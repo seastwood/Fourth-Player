@@ -257,6 +257,15 @@ video {
   pointer-events: none;
 }
 .hud.show { opacity: 1; pointer-events: auto; }
+/* While anything in the row has focus, the row stays.
+ *
+ * On a desktop the chips are revealed by hovering the picture, and opening a
+ * native dropdown moves the pointer off the picture and onto an operating
+ * system menu -- so the row faded out from under the open list, taking the
+ * dropdown with it. The selection could not be made at all. Focus is the
+ * signal hovering is not: it stays on the select for as long as its list is
+ * open. */
+.hud:focus-within { opacity: 1; pointer-events: auto; }
 
 /* Hover reveals them only where hovering is a thing. A phone applies :hover to
    whatever was last tapped and keeps it there, so this rule held the chips on
