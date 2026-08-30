@@ -165,7 +165,7 @@ function mediaIsLive() {
 function reconnectSoon() {
   if (ended || retryTimer || !guestToken) return;
   const delay = Math.min(15000, 1000 * Math.pow(2, retries++));
-  if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
+  if (!mediaIsLive()) setLink("warn");
   retryTimer = setTimeout(() => {
     retryTimer = null;
     connect({ t: "resume", guest: guestToken, name: myName(),
@@ -195,7 +195,7 @@ function connect(hello) {
       return;
     }
     // Say nothing alarming if the game is still playing perfectly well.
-    if (!mediaIsLive()) setChip("link", "reconnecting…", "warn");
+    if (!mediaIsLive()) setLink("warn");
     reconnectSoon();
   });
   socket.addEventListener("error", () => {
@@ -238,7 +238,7 @@ function sessionOver(reason) {
   showHud(true);
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   setChip("clock", "session ended", "bad");
-  setChip("link", reason || "closed", "bad");
+  setLink("bad", reason || "");
   if (ticker) { clearInterval(ticker); ticker = null; }
   // Nothing is coming back, so stop pretending: drop the saved credential so a
   // reload asks for a PIN rather than silently failing to resume.
@@ -278,7 +278,7 @@ function onError(message) {
     // Already playing. A refused resume means the credential is no longer
     // good -- stop retrying with it rather than hammering the host.
     guestToken = null;
-    setChip("link", message.message, "bad");
+    setLink("bad", message.message);
   } else {
     askForPin(message.message);
   }
@@ -300,14 +300,14 @@ function joined(message) {
   seatsFrom(message.pads);
   forgetTokenInAddress();
   if (message.resumed_media) {
-    setChip("link", "connected", "ok");
+    setLink("ok");
     startClock(message.remaining);
     return;                      // the stream never stopped; leave it alone
   }
   gate.hidden = true;
   stage.hidden = false;
   setChip("slot", message.label, "ok");
-  setChip("link", "connecting", "");
+  setLink("");
   showHud();
   startClock(message.remaining);
   startPadLoop();
@@ -329,9 +329,9 @@ async function answer(message) {
   pc.addEventListener("datachannel", (event) => {
     input = event.channel;
     input.binaryType = "arraybuffer";
-    input.addEventListener("open", () => setChip("link", "connected", "ok"));
+    input.addEventListener("open", () => setLink("ok"));
     input.addEventListener("close", () => {
-      setChip("link", "controller offline", "bad");
+      setLink("bad", "controller offline");
       lastSent = null;
       // The channel can die on its own -- a congested link can push the SCTP
       // association into an error state while ICE still says connected, so
@@ -354,7 +354,7 @@ async function answer(message) {
 
   pc.addEventListener("connectionstatechange", () => {
     if (pc.connectionState === "connected") {
-      setChip("link", "connected", "ok");
+      setLink("ok");
       clearMediaTimeout();
       clearRenewTimer();
       renewals = 0;
@@ -368,7 +368,7 @@ async function answer(message) {
     // "disconnected" often mends itself in a second or two, so give it that
     // long. "failed" never does: the addresses it was using are gone.
     if (pc.connectionState === "disconnected") {
-      setChip("link", "reconnecting…", "warn");
+      setLink("warn");
       renewSoon(4000);
     }
     if (pc.connectionState === "failed") {
@@ -714,7 +714,7 @@ el("use-touch").addEventListener("click", (event) => {
 });
 
 function videoRefused() {
-  setChip("link", "no H.264", "bad");
+  setLink("bad", "no H.264");
   showHud(true);
   showNotice(
     "<strong>This browser will not accept the video.</strong>" +
@@ -752,7 +752,7 @@ function renewSoon(delay, force) {
     // rebuilt, so the picture stays frozen under a chip saying "reconnecting".
     if (!pc || (!force && pc.connectionState === "connected")) return;
     renewals += 1;
-    setChip("link", "reconnecting…", "warn");
+    setLink("warn");
     if (socket && socket.readyState === 1) {
       socket.send(JSON.stringify({ t: "renew" }));
       armMediaTimeout();
@@ -895,7 +895,7 @@ async function report(what) {
 }
 
 async function mediaFailed(why) {
-  setChip("link", "no video", "bad");
+  setLink("bad", "no video");
   showHud(true);
   el("prompt").hidden = false;
   const route = await describeRoute();
@@ -966,7 +966,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30a";
+const CLIENT_BUILD = "2026-08-30b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -996,7 +996,7 @@ async function watchMedia() {
     // Video is arriving, so whatever the chip last said is out of date. This
     // is also what stops it sticking on "reconnecting" after a rebuild that
     // actually worked.
-    setChip("link", "connected", "ok");
+    setLink("ok");
     if (!el("notice").hidden && lastNotice.includes("could not")) hideNotice();
     return;
   }
@@ -1010,7 +1010,7 @@ async function watchMedia() {
     if (connectedAt && Date.now() - connectedAt >= SILENT_LIMIT_MS) {
       connectedAt = 0;
       mediaFresh = false;
-      setChip("link", "reconnecting…", "warn");
+      setLink("warn");
       report("connected but no video arrived; rebuilding");
       renewSoon(0, true);
     }
@@ -1022,7 +1022,7 @@ async function watchMedia() {
   if (now - stalledSince >= STALL_LIMIT_MS) {
     stalledSince = 0;
     mediaFresh = false;
-    setChip("link", "reconnecting…", "warn");
+    setLink("warn");
     renewSoon(0, true);
   }
 }
@@ -1181,6 +1181,30 @@ function setChip(id, text, kind) {
   const chip = el(id);
   chip.textContent = text;
   chip.className = "chip" + (kind ? " " + kind : "");
+  chip.hidden = false;              // something to say means something to show
+}
+
+/* The connection chip is a light, not a sentence.
+ *
+ * "Connected" spelled out is a word a guest has to read and finish before it
+ * tells them the one thing they wanted, which is whether they are on. A lit
+ * pip says it without being read at all. The words stay for anything that is
+ * not simply on or off -- "no H.264" is the reason somebody has no picture and
+ * throwing it away to save four characters would be a bad trade. */
+const LINK_WORDS = { ok: "Connected", warn: "Reconnecting",
+                     bad: "Not connected", "": "Connecting" };
+
+function setLink(kind, detail) {
+  const chip = el("link");
+  chip.className = "chip link" + (kind ? " " + kind : "");
+  chip.textContent = detail || "";
+  // Still announced, and still there on a long press: a pip is not readable
+  // by a screen reader and not obvious to somebody seeing it for the first
+  // time.
+  const words = detail || LINK_WORDS[kind] || LINK_WORDS.bad;
+  chip.setAttribute("aria-label", words);
+  chip.title = words;
+  chip.hidden = false;
 }
 
 function timeLeft(seconds) {
@@ -1191,10 +1215,11 @@ function timeLeft(seconds) {
 let clockTimer = null;
 function startClock(seconds) {
   if (clockTimer) clearInterval(clockTimer);
-  // null is a session with no deadline -- not zero, and not an error. There is
-  // nothing to count down, so the chip says so once and stops.
+  // null is a session with no deadline -- not zero, and not an error. A chip
+  // reading "no time limit" is a line of screen furniture that never changes
+  // and never will; the absence of a clock says the same thing more quietly.
   if (seconds === null || seconds === undefined) {
-    setChip("clock", "no time limit", "ok");
+    el("clock").hidden = true;
     return;
   }
   let left = seconds;

@@ -53,8 +53,12 @@
 
   <div id="hud" class="hud">
     <span id="slot" class="chip">&mdash;</span>
-    <span id="link" class="chip">connecting</span>
-    <span id="clock" class="chip"></span>
+    <!-- A lit pip, not the word "connected"; the words are on it for a
+         screen reader and for a long press. -->
+    <span id="link" class="chip link" title="Connecting"
+          aria-label="Connecting"></span>
+    <!-- Hidden until there is something to count down to. -->
+    <span id="clock" class="chip" hidden></span>
     <select id="padtype" class="chip" aria-label="Controller layout"></select>
     <button id="games" type="button" class="ghost" hidden>Games</button>
     <button id="padtest" type="button" class="ghost">Buttons</button>

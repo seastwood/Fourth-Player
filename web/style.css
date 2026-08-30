@@ -269,6 +269,37 @@ video {
 .chip.warn { color: var(--accent); border-color: var(--accent); }
 .chip.bad  { color: var(--bad);    border-color: var(--bad); }
 
+/* The connection chip carries a lit pip instead of the word "connected".
+   Square, because nothing else on this screen is round, and it reads as an
+   indicator on a machine rather than a dot in a document. The frame stays the
+   quiet colour whatever the state: the pip is the signal, and a chip that
+   changed colour as well would be shouting the same thing twice. */
+.chip.link {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  border-color: var(--dim);
+  color: var(--dim);
+}
+.chip.link::before {
+  content: "";
+  width: .5rem;
+  height: .5rem;
+  flex: none;
+  /* Disconnected: an empty outline, which is a different shape and not only a
+     different colour -- it still reads as "off" to anybody who cannot tell
+     these two colours apart. */
+  border: 2px solid var(--dim);
+  background: transparent;
+}
+.chip.link.ok::before {
+  border-color: var(--ok);
+  background: var(--ok);
+  box-shadow: 0 0 .35rem var(--ok);
+}
+/* Anything with a reason attached keeps the reason readable. */
+.chip.link.bad { color: var(--bad); }
+
 /* The link chip reports the media route when tapped, so it stays tappable
    even while the rest of the overlay is not. */
 #link { pointer-events: auto; cursor: pointer; }
