@@ -85,5 +85,25 @@ import json
 json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
 print("  ok   the manifest parses")
 
+print("\nthe home-screen copy keeps clear of the clock and the battery")
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+js = open(os.path.join(ROOT, "web", "app.js")).read()
+
+# Added to the home screen the page is drawn under the status bar on purpose,
+# and the safe-area inset only describes that gap on a phone with a notch. On
+# one without it is zero, the status bar is still twenty points tall, and the
+# chips at the top ended up behind the time and the battery.
+check("--top-safe" in css, "there is one value for the top gap")
+raw = [l for l in css.splitlines()
+       if "safe-area-inset-top" in l and "--top-safe" not in l]
+check(not raw, "and nothing measures the top for itself: %r" % raw)
+check("max(env(safe-area-inset-top, 0px), 20px)" in css,
+      "with a floor for the phones that report no inset")
+check("(display-mode: standalone) and (orientation: portrait)" in css,
+      "applied only where the status bar is actually shown")
+check("navigator.standalone" in js,
+      "and the page flags the home-screen copy itself as well")
+check("html.standalone" in css, "by a class the stylesheet keys on")
+
 print(("FAILED: %d" % len(fails)) if fails else "test_viewport: all ok")
 sys.exit(1 if fails else 0)

@@ -13,6 +13,27 @@
   font-display: swap;           /* the page is usable before the font lands */
 }
 
+/* How much room the clock and battery need at the top of the screen.
+
+   Added to the home screen, this page is drawn *under* the status bar on
+   purpose, so the picture reaches the very top -- and the safe-area inset is
+   supposed to say how much of that top is spoken for. On a phone with a notch
+   it does. On one without, the inset is zero and the status bar is still there
+   and twenty points tall, so everything anchored to the top ended up
+   underneath the time and the battery.
+
+   Only in portrait: standalone landscape hides the status bar altogether, and
+   a floor there would push the chips down for no reason. */
+:root { --top-safe: env(safe-area-inset-top, 0px); }
+@media (display-mode: standalone) and (orientation: portrait) {
+  :root { --top-safe: max(env(safe-area-inset-top, 0px), 20px); }
+}
+/* iOS answered display-mode late and inconsistently for home-screen apps, so
+   the page sets this class from navigator.standalone as well. */
+@media (orientation: portrait) {
+  html.standalone { --top-safe: max(env(safe-area-inset-top, 0px), 20px); }
+}
+
 :root {
   /* Straight from ra_players.py and ra_holdbar.py. */
   --bg:      #100e28;
@@ -218,7 +239,7 @@ video {
 
 .hud {
   position: absolute;
-  top: env(safe-area-inset-top, 0);
+  top: var(--top-safe);
   left: 0;
   right: 0;
   display: flex;
@@ -328,7 +349,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    the one thing you could not read. */
 .notice {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 3.2rem);
+  top: calc(var(--top-safe) + 3.2rem);
   left: .6rem;
   right: .6rem;
   z-index: 6;
@@ -356,7 +377,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 
 .prompt {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 2.8rem);
+  top: calc(var(--top-safe) + 2.8rem);
   left: .6rem;
   right: .6rem;
   text-align: center;
@@ -569,7 +590,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     align-items: center;
     row-gap: .4rem;
     --side: clamp(.6rem, 3vw, 2rem);
-    padding: calc(env(safe-area-inset-top, 0px) + 2.9rem)
+    padding: calc(var(--top-safe) + 2.9rem)
              var(--side)
              calc(.7rem + env(safe-area-inset-bottom, 0px));
     pointer-events: none;
@@ -683,7 +704,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   gap: .5rem;
   align-items: center;
   flex: 0 0 auto;
-  padding: calc(env(safe-area-inset-top, 0px) + .7rem)
+  padding: calc(var(--top-safe) + .7rem)
            clamp(.6rem, 3vw, 1.4rem) .7rem;
   border-bottom: 2px solid var(--bg2);
 }

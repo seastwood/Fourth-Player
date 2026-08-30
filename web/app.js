@@ -10,6 +10,25 @@
  * is always talking.
  */
 
+/* Whether this is the home-screen copy rather than a tab.
+ *
+ * It matters because the two are laid out differently: a tab sits below
+ * Safari's own chrome, while the home-screen copy is drawn under the status
+ * bar, and the safe-area inset only describes that gap on a phone with a
+ * notch. On one without, the inset is zero, the status bar is still there, and
+ * the chips at the top of the screen ended up behind the clock and the
+ * battery. The stylesheet floors the gap for this case; this is how it knows.
+ *
+ * The stylesheet has a matching display-mode query, which covers this
+ * wherever iOS answers it; navigator.standalone is the belt and braces,
+ * because iOS answered display-mode late and inconsistently for home-screen
+ * apps. */
+if (window.navigator.standalone === true
+    || (window.matchMedia
+        && window.matchMedia("(display-mode: standalone)").matches)) {
+  document.documentElement.classList.add("standalone");
+}
+
 const SEND_HZ = 125;
 // Idle heartbeat. The host releases a pad after 250 ms of silence, so anything
 // well inside that keeps a held button held -- and sending only when something
@@ -966,7 +985,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30c";
+const CLIENT_BUILD = "2026-08-30d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
