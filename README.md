@@ -503,6 +503,15 @@ python3 -m fourthplayer link open       # address and PIN
 python3 -m fourthplayer link required   # the default
 ```
 
+It is also the only way a home-screen icon keeps working. Adding the page to a
+phone's home screen saves the address it is on, and that address carries an
+invite that dies with the session -- so the icon works once. With the link
+required there is no way round that, because the token *is* the invite, and the
+join page says so rather than letting somebody find out next week. With it
+open, the page drops the token out of the address bar once a guest is in, so
+what the home screen captures is the plain address: that icon keeps working and
+asks for the new PIN each time.
+
 That is one secret instead of two, and worth thinking about rather than
 switching on by habit. What makes it defensible is the lockout: six digits,
 three wrong tries, then thirty seconds, two minutes, ten -- roughly a hundred

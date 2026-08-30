@@ -101,6 +101,39 @@ function myName() {
   try { return localStorage.getItem(nameKey) || ""; } catch (_) { return ""; }
 }
 
+/* Adding this page to a home screen saves the address it is on, and that
+   address carries an invite that dies with the session -- so the icon works
+   once and then does not. There is no way round that while the link is
+   required: the token *is* the invite.
+
+   When the host has said the PIN is enough, there is: the page drops the token
+   out of the address bar once it is in, so what a home screen captures is the
+   plain address. That icon keeps working, and asks for the PIN each time. */
+let linkRequired = true;
+
+fetch("/mode", { cache: "no-store" })
+  .then((r) => r.json())
+  .then((mode) => {
+    linkRequired = mode.require_link !== false;
+    const note = el("gate-home");
+    note.hidden = false;
+    note.textContent = linkRequired
+      ? "This link is for this session only. Adding it to your home screen "
+        + "will stop working when the host opens a new one."
+      : "You can add this page to your home screen — next time just open it "
+        + "and enter the new PIN.";
+  })
+  .catch(() => {});
+
+function forgetTokenInAddress() {
+  if (linkRequired || !token) return;
+  try {
+    // Same page, plainer address. Done after joining, so a reload before that
+    // still has the invite to work with.
+    history.replaceState({}, "", "/");
+  } catch (_) { /* not worth failing a join over */ }
+}
+
 function fail(message) {
   clearTimeout(joinTimer);
   const box = el("gate-error");
@@ -261,6 +294,7 @@ function joined(message) {
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
   launchPolicy(message.launch);
+  forgetTokenInAddress();
   if (message.resumed_media) {
     setChip("link", "connected", "ok");
     startClock(message.remaining);
@@ -928,7 +962,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29e";
+const CLIENT_BUILD = "2026-08-29f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

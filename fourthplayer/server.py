@@ -77,6 +77,15 @@ class Server:
         route = path.split("?", 1)[0]
         if route == "/ws":
             return None                      # let the WebSocket handshake run
+        if route == "/mode":
+            # What the join page needs to know before anybody has joined:
+            # whether the link is required. It decides what the page says
+            # about adding itself to a home screen, which is a different
+            # answer depending. Reveals nothing a guess would not: trying to
+            # join without a link answers the same question.
+            body = json.dumps({"require_link": self.cfg.require_link}).encode()
+            return HTTPStatus.OK, [("content-type", "application/json"),
+                                   ("cache-control", "no-store")], body
         if route == "/healthz":
             return HTTPStatus.OK, [("content-type", "text/plain")], b"ok\n"
         if route == "/" or route.startswith("/j/"):

@@ -80,5 +80,21 @@ for i in range(6):
         pass
 check(locked, "wrong PINs lock the caller out rather than being free tries")
 
+print("the page is told which of the two it is, before anybody joins")
+# It decides what the join page says about home screens, and whether the token
+# is dropped from the address afterwards -- both of which have to be settled
+# before a guest has joined anything.
+import re
+js = open(os.path.join(ROOT, "web", "app.js")).read()
+server = open(os.path.join(ROOT, "fourthplayer", "server.py")).read()
+check('route == "/mode"' in server, "the host answers what the mode is")
+check('require_link' in server.split('route == "/mode"')[1][:400],
+      "and says which it is")
+check('fetch("/mode"' in js, "the page asks")
+check("history.replaceState" in js and "linkRequired" in js,
+      "and drops the invite from the address only when it is not needed")
+check("if (linkRequired || !token) return;" in js,
+      "never while the link is what gets people in")
+
 print(("FAILED: %d" % len(fails)) if fails else "test_names: all ok")
 sys.exit(1 if fails else 0)
