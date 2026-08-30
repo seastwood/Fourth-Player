@@ -1153,4 +1153,11 @@ input.name {
 .repick-ask .footnote { margin: 0; }
 .repick-ask .choice { align-self: stretch; }
 .pads-seat .warn { color: var(--accent); }
+
+/* A toggle that is on. The label already says so; this is so it reads as on
+   from across the panel rather than only when the words are read. */
+.pads .ghost.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .pads-seat .ghost { height: 1.75rem; padding-block: 0; }

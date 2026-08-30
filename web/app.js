@@ -1081,7 +1081,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30h";
+const CLIENT_BUILD = "2026-08-30i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1475,6 +1475,7 @@ const AXIS_NAMES = ["LEFT X", "LEFT Y", "RIGHT X", "RIGHT Y"];
 // Which physical button answers for each standard one. null means "as the
 // browser reports it", which is right for every pad it knows.
 let padMap = null;
+let sticksSwapped = false;
 let padsOpen = false, padsFrame = null, remapStep = -1;
 // Whether everything has been let go of since the last button was learned.
 let remapArmed = true;
@@ -1483,25 +1484,61 @@ function mapKey() {
   return "fp-padmap:" + (padName || "pad");
 }
 
+/* Kept apart from the button map, and keyed the same way, because it is a
+   different question about the same controller: which stick is which, rather
+   than which button is which. Somebody who has fixed their buttons should not
+   lose that by swapping their sticks, or the other way about. */
+function sticksKey() {
+  return "fp-sticks:" + (padName || "pad");
+}
+
 function loadPadMap() {
   try {
     const raw = localStorage.getItem(mapKey());
     padMap = raw ? JSON.parse(raw) : null;
   } catch (_) { padMap = null; }
+  try {
+    sticksSwapped = localStorage.getItem(sticksKey()) === "1";
+  } catch (_) { sticksSwapped = false; }
+  paintSticks();
   const reset = el("pads-reset");
-  if (reset) reset.hidden = !padMap;
+  if (reset) reset.hidden = !padMap && !sticksSwapped;
+}
+
+function paintSticks() {
+  const button = el("pads-sticks");
+  if (!button) return;
+  button.textContent = sticksSwapped ? "Sticks swapped" : "Swap sticks";
+  button.setAttribute("aria-pressed", sticksSwapped ? "true" : "false");
+  button.classList.toggle("on", sticksSwapped);
+}
+
+/* The two sticks, exchanged. Standard mapping puts the left stick on axes 0
+   and 1 and the right on 2 and 3, so this is those two pairs traded -- and
+   only when there are four axes to trade, because plenty of pads report
+   fewer and half a swap would be worse than none. */
+function swapSticks(axes) {
+  if (!sticksSwapped || !axes || axes.length < 4) return axes;
+  const out = axes.slice();
+  out[0] = axes[2]; out[1] = axes[3];
+  out[2] = axes[0]; out[3] = axes[1];
+  return out;
 }
 
 /* The pad as the host should see it. Built fresh each time rather than mutated:
    the browser's Gamepad objects are snapshots and must not be written to. */
 function remapped(pad) {
-  if (!pad || !padMap) return pad;
-  const buttons = STANDARD_KEYS.map((_n, i) => {
+  if (!pad) return pad;
+  // Not `!padMap` any more: a controller whose buttons are all correct can
+  // still want its sticks the other way round, and returning early here meant
+  // it could not have that without first breaking its buttons.
+  if (!padMap && !sticksSwapped) return pad;
+  const buttons = !padMap ? pad.buttons : STANDARD_KEYS.map((_n, i) => {
     const from = padMap[i];
     return (from == null || !pad.buttons[from])
       ? { pressed: false, value: 0 } : pad.buttons[from];
   });
-  return { buttons, axes: pad.axes, id: pad.id, index: pad.index,
+  return { buttons, axes: swapSticks(pad.axes), id: pad.id, index: pad.index,
            connected: pad.connected, mapping: pad.mapping };
 }
 
@@ -1797,12 +1834,34 @@ el("pads-swap").addEventListener("click", () => {
   report("swapped A and B");
 });
 
+el("pads-sticks").addEventListener("click", () => {
+  sticksSwapped = !sticksSwapped;
+  try {
+    if (sticksSwapped) localStorage.setItem(sticksKey(), "1");
+    else localStorage.removeItem(sticksKey());
+  } catch (_) {}
+  paintSticks();
+  el("pads-reset").hidden = !padMap && !sticksSwapped;
+  el("pads-hint").textContent = sticksSwapped
+    ? "Sticks swapped: the left one is now the right one. Push them to check."
+    : "Sticks back the way the controller has them.";
+  report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
+});
+
 el("padtest").addEventListener("click", openPads);
 el("pads-close").addEventListener("click", closePads);
 el("pads-remap").addEventListener("click", startRemap);
 el("pads-reset").addEventListener("click", () => {
   padMap = null;
-  try { localStorage.removeItem(mapKey()); } catch (_) {}
+  // The sticks go back too. This is the one button that means "undo whatever
+  // I did to this controller", and leaving one of the two changes in place
+  // would make it the button that undoes most of it.
+  sticksSwapped = false;
+  try {
+    localStorage.removeItem(mapKey());
+    localStorage.removeItem(sticksKey());
+  } catch (_) {}
+  paintSticks();
   el("pads-reset").hidden = true;
   el("pads-hint").textContent = "Back to what the browser reports.";
 });
