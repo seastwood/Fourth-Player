@@ -971,6 +971,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   display: flex;
   align-items: center;
   gap: .6rem;
+  /* Capped, and left where the grid above it starts. A slider is a distance
+     the thumb has to travel: stretched across a desktop it takes a swipe of
+     the whole screen to move a dead zone by a few per cent, and every value
+     in the middle is a pixel wide. Wider is not more precise here, it is
+     less usable. */
+  max-width: 26rem;
 }
 .tune-name {
   font-family: var(--pixel);
@@ -979,7 +985,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   text-transform: uppercase;
   flex: 0 0 5.5rem;
 }
-.tune .pad-range { flex: 1 1 auto; min-width: 0; }
+.tune .pad-range { flex: 1 1 auto; min-width: 0; max-width: 16rem; }
 .tune-value {
   font-family: var(--pixel);
   font-size: .45rem;

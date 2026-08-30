@@ -162,6 +162,18 @@ print("with nothing to do, the axes are handed back untouched")
 same = run({"deadzone": 0, "sensitivity": 1, "axes": AXES})
 check(same["axes"] == AXES, "no dead zone and no gain changes nothing")
 
+print("\nthe sliders do not run the width of a desktop")
+# A slider is a distance the thumb has to travel. Stretched across a wide
+# screen it takes a swipe of the whole display to move the dead zone a few per
+# cent, and every value in the middle is a pixel wide.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+row = re.search(r"\n\.tune \{([^}]*)\}", css).group(1)
+check("max-width" in row, "the row is capped: %r" % row.strip()[:60])
+rng = re.search(r"\.tune \.pad-range \{([^}]*)\}", css).group(1)
+check("max-width" in rng, "and so is the slider itself: %r" % rng.strip())
+check("flex: 1 1 auto" in rng,
+      "while still filling what it is given below that")
+
 print("\nthe two settings are stored apart, so neither erases the other")
 check('"fp-sticks:"' in source and '"fp-padmap:"' in source,
       "different keys for the button map and the sticks")
