@@ -64,6 +64,9 @@ check("if (padsOpen) return;" in js,
       "nothing pressed while the panel is open reaches the game")
 check("learnPress(" in js and "armed" in js,
       "and a button is learned once per press, not once per frame")
+check("padIndex === null && !touchOn" in js,
+      "closing the panel only brings back the prompt when there is no other "
+      "way to play")
 check("localStorage.setItem(mapKey()" in js,
       "a mapping is remembered per controller")
 

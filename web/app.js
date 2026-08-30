@@ -928,7 +928,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29d";
+const CLIENT_BUILD = "2026-08-29e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1343,7 +1343,10 @@ function closePads() {
   padsOpen = false;
   remapStep = -1;
   el("pads").hidden = true;
-  if (padIndex === null) el("prompt").hidden = false;
+  // Only worth saying when there is no other way to play. With a controller
+  // attached it is wrong, and with the on-screen pad up it is noise sitting
+  // over the picture -- which is what closing this panel used to put back.
+  if (padIndex === null && !touchOn) el("prompt").hidden = false;
   if (padsFrame) { cancelAnimationFrame(padsFrame); padsFrame = null; }
 }
 
