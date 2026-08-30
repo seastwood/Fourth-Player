@@ -88,8 +88,8 @@ import re
 js = open(os.path.join(ROOT, "web", "app.js")).read()
 server = open(os.path.join(ROOT, "fourthplayer", "server.py")).read()
 check('route == "/mode"' in server, "the host answers what the mode is")
-check('require_link' in server.split('route == "/mode"')[1][:400],
-      "and says which it is")
+check('"require_link": self.cfg.require_link' in server,
+      "and says which it is, from the setting rather than a guess")
 check('fetch("/mode"' in js, "the page asks")
 check("history.replaceState" in js and "linkRequired" in js,
       "and drops the invite from the address only when it is not needed")
