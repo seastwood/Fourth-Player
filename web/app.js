@@ -223,6 +223,7 @@ function connect(hello) {
         "<p><strong>" + escapeText(message.label) + "</strong> is starting on "
         + "the television.</p>", false);
       case "arrived":       return somebodyArrived(message);
+      case "pads":          return seatsFrom(message);
       case "launchdenied":  return showNotice(
         "<p>Not started: " + escapeText(message.reason || "refused") + "</p>",
         false);
@@ -294,6 +295,7 @@ function joined(message) {
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
   launchPolicy(message.launch);
+  seatsFrom(message.pads);
   forgetTokenInAddress();
   if (message.resumed_media) {
     setChip("link", "connected", "ok");
@@ -962,7 +964,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-29f";
+const CLIENT_BUILD = "2026-08-29g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1360,6 +1362,51 @@ function remapped(pad) {
   return { buttons, axes: pad.axes, id: pad.id, index: pad.index,
            connected: pad.connected, mapping: pad.mapping };
 }
+
+/* Which player you are, changed while a game is running.
+
+   A game that is already going has bound its player ports to devices and will
+   not revisit that until it restarts, so somebody who joins halfway through --
+   or a second person arriving after one player claimed -- had no way to be
+   given controls short of stopping the game. Moving onto the pad that is
+   already player 2 does it instantly, because that pad is already player 2. */
+let myPad = 0, padSeats = { count: 0, who: {} };
+
+function paintSeats() {
+  const pick = el("pads-seat");
+  const wanted = padSeats.count || 0;
+  const label = (i) => {
+    const who = padSeats.who[String(i)];
+    const name = "Player " + (i + 2);
+    return (who && i !== myPad) ? name + " — " + who : name;
+  };
+  // Rebuilt only when something changed, or a menu open on a phone closes
+  // itself underneath the person using it.
+  const signature = wanted + "|" + myPad + "|" + JSON.stringify(padSeats.who);
+  if (pick.dataset.signature !== signature) {
+    pick.dataset.signature = signature;
+    pick.innerHTML = "";
+    for (let i = 0; i < wanted; i++) {
+      const option = document.createElement("option");
+      option.value = String(i);
+      option.textContent = label(i);
+      pick.appendChild(option);
+    }
+    pick.value = String(myPad);
+  }
+}
+
+function seatsFrom(message) {
+  if (!message) return;
+  if (typeof message.yours === "number") myPad = message.yours;
+  padSeats = { count: message.count || 0, who: message.who || {} };
+  paintSeats();
+}
+
+el("pads-seat").addEventListener("change", (ev) => {
+  const wanted = parseInt(ev.target.value, 10);
+  if (!isNaN(wanted)) send({ t: "usepad", pad: wanted });
+});
 
 function openPads() {
   // Let go of everything on the way in, so a button held as the panel opens is

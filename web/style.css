@@ -970,3 +970,13 @@ input.name {
   border-color: var(--dim);
   color: var(--ink);
 }
+
+/* Which player you are, in the panel that is already about controls. Its own
+   line, because it is a different question from what the buttons are called. */
+.pads-seat {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding-bottom: 0;
+}
+.pads-seat .chip { height: 1.75rem; padding-block: 0; }

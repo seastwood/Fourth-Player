@@ -500,6 +500,25 @@ That edits the menu as text rather than through an XML parser, so the twenty-odd
 entries already there keep the formatting they were arranged in, and it keeps a
 timestamped backup. Safe to run twice.
 
+### Changing which player you are, mid-game
+
+A game that is running has bound its player ports to devices, and will not
+revisit that until it restarts. So a guest who joins halfway through -- or a
+second person arriving after one player claimed a slot -- had no way to be
+given controls except by stopping the game and starting it again.
+
+They do now: **You are playing as** in the Buttons panel moves them onto a
+different pad. That works because the pad is what the port is bound to, so
+moving onto the pad that is already player 2 makes them player 2, instantly and
+with nothing restarted. Taking a pad somebody else is on swaps the two, both
+pads are released first so neither is left holding a direction, and everybody
+is told who ended up where.
+
+What it cannot do is conjure a port that was never bound. A one-player game
+started by one person has only one, and a second player still needs the game
+restarting -- the picker is what assigns ports, and it runs before RetroArch
+does.
+
 ### Names, and getting in without the link
 
 A guest may give a name on the join form. It is optional, remembered in their

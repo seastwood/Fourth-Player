@@ -191,6 +191,15 @@ class Server:
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
                         int(message.get("sdpMLineIndex") or 0), message["candidate"])
+                elif kind == "usepad":
+                    try:
+                        now_on = self.session.set_pad(
+                            guest, int(message.get("pad", 0)))
+                    except (ValueError, TypeError) as exc:
+                        await outbox.put({"t": "error", "message": str(exc)})
+                    else:
+                        await outbox.put({"t": "pads", "yours": now_on,
+                                          **self.session.pad_state()})
                 elif kind == "games":
                     # The catalogue itself, which is public to anyone already
                     # in the session: labels, systems and player counts, and
@@ -342,6 +351,7 @@ class Server:
             # So the page knows whether to offer a game list at all, rather
             # than showing a button that always refuses.
             "launch": self.session.launch_state(),
+            "pads": {"yours": guest.pad_index, **self.session.pad_state()},
         })
         return guest
 

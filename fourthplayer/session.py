@@ -131,6 +131,12 @@ class GuestConnection:
         self.slot = slot
         self.socket = socket
         self.name = name
+        # Which virtual pad this guest drives, which is not the same as which
+        # invite slot they hold. RetroArch bound its player ports to specific
+        # devices when the game started and will not revisit that until it
+        # restarts -- so the way to become player 2 mid-game is to write to the
+        # pad that is already player 2, not to renumber anything.
+        self.pad_index = slot
         # When they last had a working media connection. A guest is only ever
         # reaped for having none, so this starts now rather than at zero.
         self.media_since = time.monotonic()
@@ -156,7 +162,7 @@ class GuestConnection:
 
     @property
     def pad(self):
-        return self.session.pads[self.slot]
+        return self.session.pads[self.pad_index]
 
     def has_media(self, now=None):
         """Whether this guest is actually there.
@@ -707,6 +713,50 @@ class LiveSession:
         self.drop(slot, reason="was removed")
         return self.invite.kick(slot)
 
+    def set_pad(self, guest, index):
+        """Move a guest onto a different virtual pad, swapping if it is taken.
+
+        Instant and needs no restart, which is the point: a game that is
+        already running has its ports bound to devices, and somebody arriving
+        halfway through could otherwise only be given controls by stopping the
+        game and starting again.
+        """
+        if self.pads is None:
+            raise ValueError("no session is open")
+        index = int(index)
+        if not 0 <= index < len(self.pads):
+            raise ValueError("there is no player %d" % (index + 2))
+        if index == guest.pad_index:
+            return guest.pad_index
+
+        other = next((g for g in self.guests.values()
+                      if g is not guest and g.pad_index == index), None)
+        # Let go of everything on both pads first. Moving a guest whose thumb
+        # is on a direction would otherwise leave that direction held down on a
+        # pad nobody is driving any more, and the character walks into a wall.
+        guest.pad.release_all()
+        if other is not None:
+            other.pad.release_all()
+            other.pad_index = guest.pad_index
+        was, guest.pad_index = guest.pad_index, index
+        guest.pad.adopt_new_sender()
+        if other is not None:
+            other.pad.adopt_new_sender()
+            log.info("%s and %s swapped pads (%d <-> %d)",
+                     guest.label, other.label, was, index)
+        else:
+            log.info("%s moved from pad %d to pad %d", guest.label, was, index)
+        self.publish_pad_names()
+        self.notify({"t": "pads", **self.pad_state()})
+        return index
+
+    def pad_state(self):
+        """Who is on which pad, for the guests' own pages."""
+        return {
+            "count": len(self.pads) if self.pads else 0,
+            "who": {str(g.pad_index): g.label for g in self.guests.values()},
+        }
+
     def roster(self):
         rows = []
         for g in sorted(self.guests.values(), key=lambda g: g.slot):
@@ -718,6 +768,7 @@ class LiveSession:
                 "seconds": round(time.monotonic() - g.joined_at),
                 "frames": g.frames,
                 "pad": g.pad.path,
+                "pad_index": g.pad_index,
                 "video_kb": round(sent.get("video_bytes", 0) / 1024),
                 "audio_kb": round(sent.get("audio_bytes", 0) / 1024),
                 "video_packets": sent.get("video_packets", 0),
@@ -878,9 +929,9 @@ class LiveSession:
         """Say which pad belongs to whom, or clear it when nobody is here."""
         names = {}
         if self.pads is not None:
-            for slot, guest in self.guests.items():
-                if 0 <= slot < len(self.pads):
-                    names[self.pads[slot].name] = guest.label
+            for guest in self.guests.values():
+                if 0 <= guest.pad_index < len(self.pads):
+                    names[self.pads[guest.pad_index].name] = guest.label
         try:
             os.makedirs(os.path.dirname(PAD_NAMES_PATH), exist_ok=True)
             tmp = PAD_NAMES_PATH + ".new"
