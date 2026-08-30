@@ -174,8 +174,25 @@ Name             fourthplayer
 Server           192.168.1.50:8443        # your box
 Encrypt(SSL)     YES                      # <- the one that causes 502 if wrong
 SSL checks       do NOT verify            # the certificate is self-signed
-Health check     HTTP, GET /healthz, expect 200
+Health check     Basic (TCP), every 5s, with no-check-ssl
 ```
+
+**The health check.** A plain TCP connect is enough here, and it is the quiet
+option. What to avoid is the middle setting: a *basic* check against a backend
+marked `ssl` does a full TLS handshake every interval and then resets it
+without sending a request — which the server logs as a bad request, once per
+interval, for ever. At the pfSense default of one second that is sixty lines a
+minute of pure noise, and it buries anything real.
+
+Two settings that do not do that:
+
+| Check | What it proves | Cost |
+|---|---|---|
+| Basic + `no-check-ssl`, `inter 5000` | The port is open | Nothing; silent |
+| HTTP, `GET /healthz`, expect 200 | The application is answering | A TLS handshake per interval, but a real request, so no noise |
+
+`no-check-ssl` goes in the *server's* advanced field, not the backend's. Either
+is fine; a bare `ssl check` with neither is the one to fix.
 
 pfSense calls the verification checkbox *"Verify SSL Certificate"* or offers a
 CA to check against; leave it off, or trust the box's own certificate from
@@ -192,15 +209,42 @@ Action                      Use Backend → fourthplayer
 **Timeouts.** In the backend's advanced settings:
 
 ```
-timeout tunnel  1h
-timeout client  1h
-timeout server  1h
+timeout connect  5000        # 5s. Establishing a TCP connection, nothing else
+timeout server   30000       # 30s. One ordinary HTTP request
+timeout tunnel   1h          # the WebSocket, once it has upgraded
 ```
 
-Without `timeout tunnel`, HAProxy closes the signalling socket after the
-default idle timeout. That no longer ends a session — the media survives it —
-but it does stop a guest renegotiating, so a reconnect that should be invisible
-turns into a reload.
+`timeout tunnel` is the one that matters, and it is the only one that should be
+long. Once a connection upgrades to a WebSocket, HAProxy stops applying
+`timeout server` and applies `timeout tunnel` instead — and with no
+`timeout tunnel` set it falls back to the *smaller* of client and server, which
+is where the trouble starts.
+
+**Do not solve this by making `timeout server` enormous.** It is tempting: it
+works, and it is one setting instead of two. But `timeout server` applies to
+every ordinary HTTP request as well, so a fifty-minute value means one stuck
+backend request holds a connection for fifty minutes, and a genuinely dead
+backend takes fifty minutes to notice. Raise `timeout tunnel` and leave the
+other two short.
+
+### The one-minute blackouts
+
+Worth writing down, because the symptom pointed nowhere near the cause. The
+picture would black out and recover, at roughly one-minute intervals, and each
+time the guest came back **on a new UDP port** — the sign that the peer
+connection had been rebuilt rather than merely interrupted.
+
+The media never touches HAProxy, so the proxy looked irrelevant. It was not.
+The signalling WebSocket goes through it, and the server was sending its
+keepalive every 30 seconds against a proxy idle timeout of 30 seconds. That is
+not a margin, it is a coin toss: about half the cycles the proxy reached its
+deadline first, cut the socket, and the guest reconnected and rebuilt the peer.
+
+Both halves are fixed. The server pings every **15 seconds** now, so the
+connection is never idle for anything like a common timeout; and
+`timeout tunnel 1h` means the proxy is not counting anyway. If you set your own
+timeouts, keep the idle one comfortably above 15 seconds — 30 is the floor, not
+the target.
 
 **On the box**, tell it the name guests will use, and that a proxy is in front:
 

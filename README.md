@@ -332,6 +332,13 @@ it to 80 or 120 absorbs brief jitter at the cost of exactly that much added
 delay -- worth trying in that order, since this one costs nothing and that one
 costs latency.
 
+Blackouts that recur on a **regular** interval are a different animal, and no
+amount of `jitter_ms` will touch them: they are the signalling socket being cut
+by whatever sits in front of this, not the media. The giveaway is that the
+guest comes back on a new UDP port each time, meaning the peer connection was
+rebuilt rather than interrupted. See `docs/NETWORK.md` -- "The one-minute
+blackouts".
+
 ### If it feels laggy
 
 Delay here comes from buffering far more than from picture quality, and there
@@ -763,6 +770,13 @@ tests/run.sh                       # every suite; no GPU, no network, no root
 `fourthplayer/protocol.py` are two hand-written struct layouts in two languages,
 and nothing but a test stops them drifting. It runs the real `frame.js` under
 node and decodes the result with the real Python decoder.
+
+**"All suites passed" depends on where you ran it.** The suites that exercise
+the browser half shell out to `node`, and the ones that touch pads import
+`evdev`; each **skips, loudly, when its dependency is missing**. A machine with
+node and no evdev and a machine with evdev and no node will both report
+everything passing while running different halves. If the box runs the service
+but has no node, run the suite on a workstation as well before believing it.
 
 Two tools need real hardware and a running session:
 
