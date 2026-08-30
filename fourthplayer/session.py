@@ -789,8 +789,17 @@ class LiveSession:
         except Exception:
             pass
         pads = self.pads or []
+        try:
+            playing = bool(launcher.running())
+        except Exception:
+            playing = False
         return {
             "count": len(pads),
+            # Whether a game is running at all, which is not the same as
+            # knowing which pad is which player. Told apart because saying
+            # "no game is running" while one plainly is sends somebody looking
+            # in the wrong place entirely.
+            "playing": playing,
             "who": {str(g.pad_index): g.label for g in self.guests.values()},
             # index -> player number in the game, or absent when that pad is
             # not bound to a port at all.

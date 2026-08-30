@@ -966,7 +966,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30b";
+const CLIENT_BUILD = "2026-08-30c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1397,7 +1397,7 @@ function remapped(pad) {
    or a second person arriving after one player claimed -- had no way to be
    given controls short of stopping the game. Moving onto the pad that is
    already player 2 does it instantly, because that pad is already player 2. */
-let myPad = 0, padSeats = { count: 0, who: {}, ports: {} };
+let myPad = 0, padSeats = { count: 0, who: {}, ports: {}, playing: false };
 
 /* The player number is the game's, not this pad's position. These used to be
    counted off as "Player 2" upwards on the assumption that somebody at the
@@ -1434,17 +1434,26 @@ function paintSeats() {
   }
   const mine = padSeats.ports[String(myPad)];
   const note = el("pads-seat-note");
-  const live = Object.keys(padSeats.ports).length;
-  // Only offered while something is running: with no game there is no picker
-  // to put back, and a button that can only fail is worse than no button.
-  el("pads-repick").hidden = !live;
+  const known = Object.keys(padSeats.ports).length;
+  // Offered whenever a game is running. It used to key off whether the player
+  // numbers were known, which meant that the one time it was most wanted --
+  // a game running whose players could not be read -- it was hidden.
+  el("pads-repick").hidden = !padSeats.playing;
   if (mine) {
     note.hidden = true;
-  } else {
+  } else if (!padSeats.playing) {
     note.hidden = false;
-    note.textContent = live
-      ? "This controller is not one of the game's players."
-      : "No game is running, so there are no players to be yet.";
+    note.textContent = "No game is running, so there are no players to be yet.";
+  } else if (known) {
+    note.hidden = false;
+    note.textContent = "This controller is not one of the game's players.";
+  } else {
+    // A game is running and which pad is which player could not be read. Say
+    // that, rather than "no game is running" -- which was the message, and
+    // was flatly untrue, for as long as the host could not reach the file.
+    note.hidden = false;
+    note.textContent = "A game is running, but which controller is which "
+                     + "player could not be read.";
   }
 }
 
@@ -1452,7 +1461,7 @@ function seatsFrom(message) {
   if (!message) return;
   if (typeof message.yours === "number") myPad = message.yours;
   padSeats = { count: message.count || 0, who: message.who || {},
-               ports: message.ports || {} };
+               ports: message.ports || {}, playing: !!message.playing };
   paintSeats();
 }
 

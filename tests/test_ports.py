@@ -69,6 +69,9 @@ class FakeGuest:
 
 from fourthplayer import session                      # noqa: E402
 
+saved_running = launcher.running
+launcher.running = lambda: True
+
 live = session.LiveSession.__new__(session.LiveSession)
 live.pads = [FakePad("Fourth Player 1"), FakePad("Fourth Player 2"),
              FakePad("Fourth Player 3")]
@@ -83,6 +86,7 @@ finally:
 
 check(state["ports"] == {"1": 1},
       "only the bound pad has a player number: %r" % state["ports"])
+check(state["playing"] is True, "and a game is reported as running")
 check(state["count"] == 3, "every pad is still offered")
 check(state["who"] == {"1": "Dave"}, "who is on it is unchanged")
 
@@ -93,6 +97,18 @@ finally:
     launcher.player_ports = saved
 check(state["ports"] == {},
       "an unreadable game costs the player numbers, not the panel")
+# The exact case that put "No game is running" on the screen of somebody
+# watching a game run: the host is sandboxed with a /tmp of its own and cannot
+# read the file that says which pad is which player. Not knowing the numbers
+# is not the same as there being no game.
+check(state["playing"] is True,
+      "and the game is still reported as running: %r" % state["playing"])
+launcher.running = lambda: False
+try:
+    idle = live.pad_state()
+finally:
+    launcher.running = saved_running
+check(idle["playing"] is False, "with nothing running, nothing is claimed")
 
 # A guest with no name is a guest, not a player: which player they are is not
 # knowable from their slot, which is the whole point of the above.
