@@ -95,11 +95,36 @@ def attach(session, guest):
         session.attach_peer(guest, lambda *a: None))
 
 
+class FakePads(list):
+    """A stand-in for PadSet: seats with names, whose devices come and go.
+
+    Modelled on the real thing rather than on a plain list, because the real
+    thing stopped being one: an empty seat has no device, so reading a name
+    must not conjure one, and letting a seat go has to be something a caller
+    can do.
+    """
+
+    def __init__(self, pads):
+        super().__init__(pads)
+        self.released = []
+
+    @property
+    def names(self):
+        return [p.name for p in self]
+
+    def name_for(self, index):
+        return self[index].name
+
+    def release(self, index):
+        self.released.append(index)
+        return True
+
+
 def session_with_guest():
     loop = asyncio.new_event_loop()
     session = LiveSession(Config(), loop)
     session.stage = FakeStage()
-    session.pads = [FakePad("p1"), FakePad("p2"), FakePad("p3")]
+    session.pads = FakePads([FakePad("p1"), FakePad("p2"), FakePad("p3")])
     guest = GuestConnection(session, 0, socket=None)
     session.guests[0] = guest
     return session, guest, loop

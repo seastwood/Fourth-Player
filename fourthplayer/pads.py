@@ -183,17 +183,72 @@ class VirtualPad:
 
 
 class PadSet:
-    """The pads for one session, and the dead-man sweep over them."""
+    """The pads for one session, and the dead-man sweep over them.
+
+    A seat here is not a device. The devices are made when somebody sits in
+    them and unplugged when they leave, because a virtual pad that exists is a
+    virtual pad the emulator gives a player port to -- whether or not anybody
+    is holding it.
+
+    That cost was invisible until somebody tried to mix real controllers with
+    guests. Four seats meant four pads sitting on ports one to four from the
+    moment a session opened, so a real controller plugged in afterwards was
+    autoconfigured into port five, which no game here uses. It had been given
+    player one by the picker and it drove nothing:
+
+        Remote player 1..4 configured in ports 1..4    (nobody holding them)
+        Xbox One S Controller configured in port 5     (the one that claimed P1)
+
+    An empty seat costs nothing now, so the ports go to whoever is actually
+    playing, in whatever mixture.
+    """
 
     def __init__(self, count, label="Fourth Player", now=None):
         self._now = now or time.monotonic
-        self.pads = [VirtualPad(f"{label} {i + 1}", now=self._now) for i in range(count)]
+        self._label = label
+        # The names are fixed for the life of the session even though the
+        # devices come and go: RetroArch's per-device profiles are written
+        # against them, and the picker reads them out of pad-names.json.
+        self.names = [f"{label} {i + 1}" for i in range(count)]
+        self.pads = [None] * count
 
     def __len__(self):
         return len(self.pads)
 
+    def name_for(self, index):
+        """What the seat is called, whether or not anybody is sitting in it."""
+        return self.names[index]
+
     def __getitem__(self, index):
-        return self.pads[index]
+        """The device for a seat, made on first use.
+
+        Indexing is what the input path does, so arriving here means somebody
+        is about to drive this seat and it needs to exist.
+        """
+        pad = self.pads[index]
+        if pad is None:
+            pad = VirtualPad(self.names[index], now=self._now)
+            self.pads[index] = pad
+        return pad
+
+    def live(self):
+        """The seats that currently have a device, as (index, pad)."""
+        return [(i, pad) for i, pad in enumerate(self.pads) if pad is not None]
+
+    def release(self, index):
+        """Unplug a seat's device. Harmless if there is not one."""
+        pad = self.pads[index]
+        if pad is None:
+            return False
+        self.pads[index] = None
+        # Let go before unplugging: a pad removed mid-press otherwise leaves
+        # the emulator holding whatever it held.
+        try:
+            pad.release_all()
+        except OSError:
+            pass
+        pad.close()
+        return True
 
     def sweep(self, timeout=DEADMAN_SECONDS):
         """Release any pad that has gone quiet. Returns the ones it opened.
@@ -206,13 +261,13 @@ class PadSet:
         """
         stamp = self._now()
         opened = []
-        for pad in self.pads:
+        for _index, pad in self.live():
             if not pad.released and stamp - pad.last_seen > timeout:
                 pad.release_all()
                 opened.append(pad)
         return opened
 
     def close(self):
-        for pad in self.pads:
+        for _index, pad in self.live():
             pad.close()
-        self.pads = []
+        self.pads = [None] * len(self.pads)

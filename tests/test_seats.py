@@ -38,9 +38,34 @@ class Pad:
         self.adopted += 1
 
 
+class FakePads(list):
+    """A stand-in for PadSet: seats with names, whose devices come and go.
+
+    Modelled on the real thing rather than on a plain list, because the real
+    thing stopped being one: an empty seat has no device, so reading a name
+    must not conjure one, and letting a seat go has to be something a caller
+    can do.
+    """
+
+    def __init__(self, pads):
+        super().__init__(pads)
+        self.released = []
+
+    @property
+    def names(self):
+        return [p.name for p in self]
+
+    def name_for(self, index):
+        return self[index].name
+
+    def release(self, index):
+        self.released.append(index)
+        return True
+
+
 def session_with(n):
     live = LiveSession.__new__(LiveSession)
-    live.pads = [Pad("pad%d" % i) for i in range(n)]
+    live.pads = FakePads([Pad("pad%d" % i) for i in range(n)])
     live.guests = {}
     live.on_notice = lambda m: live.notices.append(m)
     live.notices = []

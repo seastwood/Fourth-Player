@@ -86,9 +86,35 @@ from fourthplayer import session                      # noqa: E402
 saved_running = launcher.running
 launcher.running = lambda: True
 
+class FakePads(list):
+    """A stand-in for PadSet: seats with names, whose devices come and go.
+
+    Modelled on the real thing rather than on a plain list, because the real
+    thing stopped being one: an empty seat has no device, so reading a name
+    must not conjure one, and letting a seat go has to be something a caller
+    can do.
+    """
+
+    def __init__(self, pads):
+        super().__init__(pads)
+        self.released = []
+
+    @property
+    def names(self):
+        return [p.name for p in self]
+
+    def name_for(self, index):
+        return self[index].name
+
+    def release(self, index):
+        self.released.append(index)
+        return True
+
+
 live = session.LiveSession.__new__(session.LiveSession)
-live.pads = [FakePad("Fourth Player 1"), FakePad("Fourth Player 2"),
-             FakePad("Fourth Player 3")]
+live.pads = FakePads([FakePad("Fourth Player 1"),
+                      FakePad("Fourth Player 2"),
+                      FakePad("Fourth Player 3")])
 live.guests = {"a": FakeGuest(1, "Dave")}
 
 saved = launcher.player_ports

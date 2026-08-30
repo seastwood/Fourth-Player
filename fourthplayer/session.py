@@ -266,7 +266,7 @@ class LiveSession:
         self.pads = padlib.PadSet(self.slots)
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
-        retroarch.write_profiles([pad.name for pad in self.pads])
+        retroarch.write_profiles(list(self.pads.names))
         self.stage = Stage(self.cfg, self.loop,
                            codec=None if self.codec == "auto" else self.codec)
         self.stage.start()
@@ -284,7 +284,7 @@ class LiveSession:
         log.info("session open for %s, %d slots, pads at %s",
                  "no fixed time" if math.isinf(duration_seconds)
                  else "%.0f minutes" % (duration_seconds / 60), self.slots,
-                 ", ".join(p.path for p in self.pads))
+                 ", ".join(self.pads.names))
         return self.invite
 
     def _start_overlay(self):
@@ -418,6 +418,7 @@ class LiveSession:
             require_token=getattr(self.cfg, "require_link", True))
         guest = GuestConnection(self, slot, socket, name)
         self.guests[slot] = guest
+        guest.pad                        # plug their controller in
         # Write it down now. The snapshot was only taken when a session opened
         # or somebody left, so a guest who joined and was still playing when
         # the process died was absent from it -- leaving the people actually
@@ -536,6 +537,7 @@ class LiveSession:
             name = ""                       # a slot number is not a name
         guest = GuestConnection(self, record.slot, socket, name)
         self.guests[record.slot] = guest
+        guest.pad                        # plug their controller back in
         self.save()
         self.publish_pad_names()
         return guest
@@ -709,6 +711,10 @@ class LiveSession:
         if guest is None:
             return False
         self.detach_peer(guest)
+        # Unplug their controller. A seat nobody is sitting in takes a player
+        # port away from whoever is actually holding something.
+        if self.pads is not None and 0 <= guest.pad_index < len(self.pads):
+            self.pads.release(guest.pad_index)
         if self.invite is not None:
             self.invite.release(slot, now=self._now())
             self.save()
@@ -753,6 +759,9 @@ class LiveSession:
             log.info("%s and %s swapped pads (%d <-> %d)",
                      guest.label, other.label, was, index)
         else:
+            # Nobody swapped into the seat they left, so nobody is in it --
+            # and an empty seat must not keep a player port to itself.
+            self.pads.release(was)
             log.info("%s moved from pad %d to pad %d", guest.label, was, index)
         self.publish_pad_names()
         self.notify({"t": "pads", **self.pad_state()})
@@ -788,13 +797,13 @@ class LiveSession:
             ports = launcher.player_ports()
         except Exception:
             pass
-        pads = self.pads or []
+        names = list(self.pads.names) if self.pads is not None else []
         try:
             playing = bool(launcher.running())
         except Exception:
             playing = False
         return {
-            "count": len(pads),
+            "count": len(names),
             # Whether a game is running at all, which is not the same as
             # knowing which pad is which player. Told apart because saying
             # "no game is running" while one plainly is sends somebody looking
@@ -803,8 +812,8 @@ class LiveSession:
             "who": {str(g.pad_index): g.label for g in self.guests.values()},
             # index -> player number in the game, or absent when that pad is
             # not bound to a port at all.
-            "ports": {str(i): ports[pad.name]
-                      for i, pad in enumerate(pads) if pad.name in ports},
+            "ports": {str(i): ports[name]
+                      for i, name in enumerate(names) if name in ports},
         }
 
     def roster(self):
@@ -981,7 +990,7 @@ class LiveSession:
         if self.pads is not None:
             for guest in self.guests.values():
                 if 0 <= guest.pad_index < len(self.pads):
-                    names[self.pads[guest.pad_index].name] = guest.label
+                    names[self.pads.name_for(guest.pad_index)] = guest.label
         try:
             os.makedirs(os.path.dirname(PAD_NAMES_PATH), exist_ok=True)
             tmp = PAD_NAMES_PATH + ".new"
