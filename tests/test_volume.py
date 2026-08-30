@@ -147,6 +147,18 @@ check("send(" not in block,
       "the volume code sends nothing to the host: %r"
       % [l.strip() for l in block.splitlines() if "send(" in l])
 
+print("\nand it takes no room at all when it is closed")
+# A flex item's min-width is auto, which for a form control resolves to its own
+# intrinsic width -- so width:0 alone left a slider's worth of empty space
+# between the speaker and the chip after it.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+collapsed = re.search(r"\.vol-range \{([^}]*)\}", css).group(1)
+check("width: 0" in collapsed, "the closed slider is zero wide")
+check("min-width: 0" in collapsed,
+      "and is allowed to be, which width alone does not achieve")
+opened = re.search(r"\.vol\.open \.vol-range \{([^}]*)\}", css).group(1)
+check("width:" in opened, "opening gives it a width back")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))

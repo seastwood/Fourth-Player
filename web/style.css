@@ -886,8 +886,17 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   -webkit-appearance: none;
   appearance: none;
   width: 0;
+  /* A flex item's min-width is auto, which for a form control means its own
+     intrinsic width -- so width:0 did nothing and the collapsed slider went on
+     holding a slider's worth of space between the speaker and the next chip.
+     Nothing was visible in it, which is what made the gap look like a spacing
+     bug rather than an element. */
+  min-width: 0;
+  flex: 0 0 auto;
   opacity: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
   height: 1.75rem;
   background: transparent;
   transition: width .18s ease, opacity .18s ease, margin .18s ease;
