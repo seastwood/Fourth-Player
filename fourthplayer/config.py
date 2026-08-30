@@ -101,6 +101,10 @@ class Config:
     audio_bitrate_kbps: int = 96
     # 10 ms frames. Opus will happily do 20 or 60, and every one of those
     # milliseconds is added to the delay between the television and the guest.
+    # 10 ms is the low-latency choice and 20 the robust one: the same sound in
+    # half as many packets, so there is half as much to lose. Chopped audio
+    # under a picture that is otherwise fine is usually packet loss rather than
+    # bandwidth, and this is the knob for it.
     audio_frame_ms: int = 10
 
     # -- packet size --

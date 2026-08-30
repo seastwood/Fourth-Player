@@ -627,6 +627,45 @@ RX 470, capturing a 1080p desktop:
 So **720p60 is the default**, and raising it above that buys a sharper picture
 and loses frames. The defaults in `config.py` are these measurements, not taste.
 
+### If guests watch on something bigger than a phone
+
+720p is chosen for frame rate, and it shows on a large screen: a 1080p desktop
+captured at 1280x720 is downscaled before the encoder ever sees it, so the
+softness is lost detail rather than lost bitrate, and no amount of extra
+bitrate brings it back. Capturing at the display's own size is the fix, at
+30 fps rather than 60. Measured on the same machine, with a **guest actually
+connected**:
+
+| Capture | Bitrate | Delivered | While playing |
+|---|---|---|---|
+| 1080p30, nothing running | 3000 kb/s | ~28.6 fps, 2.8 Mb/s | — |
+| 1080p30, Dolphin (GameCube) | 3000 kb/s | ~26.4 fps, 2.7 Mb/s | emulator at 116% of a core |
+
+Dolphin is about the heaviest thing here, so that second row is close to the
+worst case: a tenth of the frames, for a picture with twice the detail. Lighter
+cores hold the full rate. Audio was unaffected in both — the same 48–49 packets
+a second — which is worth checking separately, because a starved encoder
+usually takes the sound with it.
+
+```json
+{ "width": 1920, "height": 1080, "fps": 30, "bitrate_kbps": 3000 }
+```
+
+Two things to raise with it, neither obvious:
+
+* `h264_profile` from `constrained-baseline` to **`main`**. Baseline has no
+  CABAC, which costs several per cent of quality for nothing. It was the safe
+  default because webrtcbin sent no `a=fmtp` line and a strict browser assumed
+  baseline; that offer now states the profile honestly, so main is no longer a
+  gamble — see the comment in `config.py`.
+* `audio_frame_ms` from `10` to **`20`**. Half as many packets for the same
+  sound, so there is half as much to lose, at the cost of 10 ms. Chopped audio
+  on an otherwise fine picture is usually this rather than bandwidth.
+
+And `jitter_ms` upwards — 100 for a guest on the far side of the internet.
+That one is pure trade: exactly that much added delay for exactly that much
+tolerance.
+
 One trap worth knowing on AMD: the GPU idles at its lowest DPM state and a
 *video encode* load does not wake it — the demand never shows up in
 `gpu_busy_percent`, so the governor leaves it asleep and encoding runs at about
