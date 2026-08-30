@@ -105,5 +105,20 @@ check("navigator.standalone" in js,
       "and the page flags the home-screen copy itself as well")
 check("html.standalone" in css, "by a class the stylesheet keys on")
 
+# The bug the first attempt at this missed entirely. Upright, the chip strip
+# is laid out in the flow rather than floated over the picture -- so `top`,
+# which is what the floating version uses to clear the status bar, does
+# nothing at all. Upright is also the only orientation in which iOS shows the
+# status bar over a home-screen app. The strip has to carry the gap in its
+# own padding.
+rules = [b for b in re.findall(r"\.hud\s*\{([^}]*)\}", css)
+         if "position: static" in b]
+check(len(rules) == 1,
+      "there is one rule that lays the strip out in the flow")
+flow = rules[0]
+check("padding-top" in flow and "--top-safe" in flow,
+      "and it pads itself past the status bar: %r"
+      % [l.strip() for l in flow.splitlines() if "padding" in l])
+
 print(("FAILED: %d" % len(fails)) if fails else "test_viewport: all ok")
 sys.exit(1 if fails else 0)

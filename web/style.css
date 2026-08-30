@@ -662,6 +662,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     background: var(--bg);
     border-bottom: 2px solid var(--bg2);
     transition: none;
+    /* Static, so the `top` the floating version uses to clear the status bar
+       does nothing here -- and this is the orientation in which the status bar
+       is actually shown. The strip is the first thing on the screen, so it
+       has to carry that gap itself, in its padding. Without this the chips sat
+       behind the clock and the battery in the home-screen copy, which is the
+       only place the page is drawn under the bar at all. */
+    padding-top: calc(.5rem + var(--top-safe));
   }
   /* Messages join the flow as well, directly under the chips. Left floating
      they would sit on top of that strip, which is the problem this whole
