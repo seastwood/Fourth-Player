@@ -276,6 +276,18 @@ def _print_status(reply):
             print(f"    WAITING: {waiting['who']} wants {waiting['label']} "
                   f"({waiting['seconds']}s left) -- approve or deny")
     _print_address(reply)
+    pads = reply.get("pads") or {}
+    if pads:
+        ports = pads.get("ports") or {}
+        if not pads.get("playing"):
+            print("  no game running, so no player numbers to give")
+        elif ports:
+            print("  players: " + ", ".join(
+                "controller %d is player %s" % (int(i) + 1, ports[i])
+                for i in sorted(ports, key=int)))
+        else:
+            print("  a game is running, but which controller is which player "
+                  "could not be read")
     guests = reply.get("guests") or []
     print(f"  guests: {len(guests)}/{reply.get('slots')}")
     for guest in guests:

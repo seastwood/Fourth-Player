@@ -52,6 +52,20 @@ check(launcher.ports_from_config(two) ==
 
 check(launcher.ports_from_config("/nonexistent/nothing.cfg") == {},
       "no config is no answer, not a crash")
+
+# The scan used to stop at the first process whose name ended in "retroarch",
+# whether or not that process had been handed a config at all -- and /proc
+# comes back in whatever order the kernel feels like. So a second emulator, or
+# one somebody started by hand, was enough to make this answer "nothing is
+# playing" while a game was plainly playing, and to do it only sometimes.
+check(launcher.ports_from_paths(["/nonexistent/nothing.cfg", path])
+      == {"Fourth Player 2": 1},
+      "an unreadable config does not end the search")
+check(launcher.ports_from_paths([path, "/nonexistent/nothing.cfg"])
+      == {"Fourth Player 2": 1}, "and order does not matter")
+check(launcher.ports_from_paths([]) == {}, "no configs, no answer")
+check(launcher.ports_from_paths(["/nonexistent/a", "/nonexistent/b"]) == {},
+      "nor several unreadable ones")
 os.unlink(path)
 os.unlink(two)
 

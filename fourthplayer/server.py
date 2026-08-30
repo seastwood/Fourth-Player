@@ -631,6 +631,11 @@ class Server:
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,
             "launch": self.session.launch_state(),
+            # Which pad is which player, as the running service sees it --
+            # which is not always what the same call answers from a shell,
+            # because this one is sandboxed. Worth being able to ask the
+            # process itself rather than a replica of it.
+            "pads": self.session.pad_state(),
         }
 
     def join_url(self, token):

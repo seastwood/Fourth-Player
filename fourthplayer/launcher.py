@@ -105,20 +105,39 @@ def player_ports():
 
     Returns {device name: player number}, empty when nothing is running.
     """
-    path = None
+    # Every emulator on the machine, not the first one this happens to walk
+    # into. It used to stop at the first process whose name ended in
+    # "retroarch" whether or not that process had been given a config at all,
+    # and /proc comes back in whatever order the kernel feels like -- so a
+    # second copy, or one started by hand without the picker, was enough to
+    # make this answer "nothing is playing" while a game was plainly playing.
+    seen, paths = [], []
     for entry in glob.glob("/proc/[0-9]*/cmdline"):
         try:
             with open(entry, "rb") as handle:
                 argv = handle.read().split(b"\0")
         except OSError:
-            continue
+            continue                  # it exited between the glob and the open
         if not argv or not argv[0].endswith(b"retroarch"):
             continue
+        seen.append(argv)
         for i, arg in enumerate(argv):
             if arg == b"--appendconfig" and i + 1 < len(argv):
-                path = argv[i + 1].decode("utf-8", "replace")
-        break
-    return ports_from_config(path) if path else {}
+                paths.append(argv[i + 1].decode("utf-8", "replace"))
+    return ports_from_paths(paths, len(seen))
+
+
+def ports_from_paths(paths, emulators=0):
+    """The first config among these that says which pad is which player."""
+    for path in paths:
+        ports = ports_from_config(path)
+        if ports:
+            return ports
+        log.info("nothing about players could be read from %s", path)
+    if emulators:
+        log.info("%d emulator process(es) running and none named a config "
+                 "this can read", emulators)
+    return {}
 
 
 def ports_from_config(path):
