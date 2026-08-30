@@ -238,7 +238,12 @@ function connect(hello) {
       case "games":         return paintShelf(message);
       case "launchresult":  return launchResult(message);
       case "launchpolicy":  return launchPolicy(message);
-      case "starting":      return showNotice(
+      case "starting":
+        // The ports are decided while the game comes up, so ask again once it
+        // has had time to. Without this the seats stay as they were until
+        // somebody opens the panel.
+        setTimeout(() => send({ t: "pads" }), 8000);
+        return showNotice(
         "<p><strong>" + escapeText(message.label) + "</strong> is starting on "
         + "the television.</p>", false);
       case "arrived":       return somebodyArrived(message);
@@ -985,7 +990,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30d";
+const CLIENT_BUILD = "2026-08-30e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1499,6 +1504,10 @@ el("pads-repick").addEventListener("click", () => {
 });
 
 function openPads() {
+  // Ask what the seats look like now rather than trusting what they looked
+  // like when this page joined. A guest who was already here when the game
+  // started had been told, and kept being told, that no game was running.
+  send({ t: "pads" });
   // Let go of everything on the way in, so a button held as the panel opens is
   // not left held down in the game behind it.
   sendFrame(null, true);

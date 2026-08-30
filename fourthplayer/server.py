@@ -200,6 +200,14 @@ class Server:
                     else:
                         await outbox.put({"t": "pads", "yours": now_on,
                                           **self.session.pad_state()})
+                elif kind == "pads":
+                    # Asked for, because the answer goes stale. It was sent
+                    # once with the welcome and never again unless somebody
+                    # changed seats -- so a guest who joined before the game
+                    # started was still being told, an hour later, that no
+                    # game was running.
+                    await outbox.put({"t": "pads", "yours": guest.pad_index,
+                                      **self.session.pad_state()})
                 elif kind == "repick":
                     try:
                         self.session.request_repick(guest)

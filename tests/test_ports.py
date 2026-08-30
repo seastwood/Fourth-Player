@@ -116,6 +116,31 @@ check("Player" not in session.GuestConnection.__init__.__doc__ if
       session.GuestConnection.__init__.__doc__ else True,
       "the docstring should not promise a player number")
 
+# --- and that anybody ever hears about it ---------------------------------
+# pad_state was sent once, with the welcome, and never again unless somebody
+# changed seats. A guest who was already connected when the game started was
+# therefore told "no game is running" for as long as they stayed -- which is
+# exactly how it was reported.
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+server_src = open(os.path.join(ROOT, "fourthplayer", "server.py")).read()
+app_src = open(os.path.join(ROOT, "web", "app.js")).read()
+
+check('elif kind == "pads":' in server_src,
+      "the host answers a request for the current seats")
+check('"pads": {"yours": guest.pad_index' in server_src,
+      "and still sends them with the welcome")
+
+start = app_src.index("function openPads(")
+opener = app_src[start:app_src.index("\n}", start)]
+check('send({ t: "pads" })' in opener,
+      "the panel asks for fresh seats as it opens")
+
+starting = app_src[app_src.index('case "starting":'):]
+starting = starting[:starting.index('case "arrived"')]
+check('send({ t: "pads" })' in starting,
+      "and again once a game has had time to come up")
+
 if failures:
     print("\n".join("FAIL: " + f for f in failures))
     sys.exit(1)
