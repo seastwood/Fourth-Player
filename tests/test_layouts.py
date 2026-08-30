@@ -116,5 +116,26 @@ check(layouts[default]["name"] == "Super Nintendo",
 check(any(b["id"] == "SELECT" for b in layouts[default]["centre"]),
       "with a Select button, which the old default had nowhere to put")
 
+print("\nthe dropdown is filled in before anybody looks at it")
+# It was built inside showTouch(), which a desktop with a real controller and
+# no touchscreen never calls -- while the select is in the page from the start
+# and visible. An empty select is drawn as a small empty box, which is exactly
+# what it looked like.
+app = source
+start = app.index("function init")  if "function init" in app else 0
+check(app.count("buildLayoutPicker()") >= 2,
+      "it is built somewhere other than showTouch alone")
+startup = app[app.index("wireTouch();"):]
+startup = startup[:startup.index("ticker = setInterval")]
+check("buildLayoutPicker()" in startup,
+      "and one of those is at startup: %r" % startup.strip()[:80])
+
+builder = app[app.index("function buildLayoutPicker"):]
+builder = builder[:builder.index("\n}")]
+check("touchOn ? chosenLayout() : \"off\"" in builder,
+      "and it starts on the choice that matches what is on the screen")
+check("paintPicker()" in builder,
+      "with the label painted, since 'off' is renamed to the real controller")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

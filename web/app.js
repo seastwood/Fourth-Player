@@ -655,7 +655,12 @@ function buildLayoutPicker() {
     option.textContent = layout.name;
     picker.appendChild(option);
   }
-  picker.value = chosenLayout();
+  // "off" is not an absence here -- paintPicker renames it to the physical
+  // controller -- so the value has to say which controller is actually in use.
+  // Claiming a layout while no on-screen pad is showing, which is the ordinary
+  // state on a desktop, would be the dropdown disagreeing with the screen.
+  picker.value = touchOn ? chosenLayout() : "off";
+  paintPicker();
   picker.addEventListener("change", () => {
     try { localStorage.setItem(LAYOUT_KEY, picker.value); } catch (_) {}
     chosenByHand = true;              // stop guessing for them from here on
@@ -1081,7 +1086,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30i";
+const CLIENT_BUILD = "2026-08-30j";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1158,6 +1163,13 @@ function startPadLoop() {
   window.addEventListener("gamepaddisconnected", forgetPad);
 
   wireTouch();
+  // Filled in here rather than only when the on-screen pad is shown. It was
+  // built inside showTouch(), which a desktop with a real controller and no
+  // touchscreen never calls -- and the select is in the page from the start
+  // and visible, so it sat there with no options in it, which a browser draws
+  // as a small empty box. It looked broken because it was empty, not because
+  // it was broken.
+  buildLayoutPicker();
   // A phone with no controller gets the on-screen pad without being asked; a
   // laptop does not, because a mouse cannot use it and it would only be in the
   // way. The link in the prompt covers everyone this guesses wrong about.
