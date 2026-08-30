@@ -312,6 +312,26 @@ session open, 58m 12s left
     slot 0  Player 2   connected  8134 frames  /dev/input/event20
 ```
 
+### Why a blip used to black the picture out
+
+A browser that loses a frame asks for a fresh keyframe, and webrtcbin turns
+that into an upstream force-key-unit event. It arrived at the guest's appsrc
+and stopped there: the encoder is in the capture pipeline, not the guest's, so
+nothing was listening. The guest then waited for the next *periodic* keyframe
+-- `fps * 2`, which is two seconds at thirty frames a second -- and two seconds
+of black after a momentary loss is what that looks like.
+
+Those requests are now carried across to the encoder, so recovery is about one
+round trip instead of up to two seconds. Rate-limited to one every half second,
+because the encoder is shared: four guests on a bad connection all asking at
+once would otherwise turn the stream into keyframes, which is the one thing
+guaranteed to make a struggling link worse.
+
+If blips are still visible, the other lever is `jitter_ms`, which is 30. Raising
+it to 80 or 120 absorbs brief jitter at the cost of exactly that much added
+delay -- worth trying in that order, since this one costs nothing and that one
+costs latency.
+
 ### If it feels laggy
 
 Delay here comes from buffering far more than from picture quality, and there

@@ -114,6 +114,10 @@ _ELEMENTS = {
 _host_codecs = None
 
 
+# The shortest gap between keyframes forced by guests asking for one.
+KEYFRAME_MIN_GAP = 0.5
+
+
 def host_codecs(hardware=True):
     """The codecs this host can actually encode, best first.
 
@@ -312,6 +316,7 @@ class Stage:
         # loop, which is what stopped the server freezing for seconds at a
         # time while a live peer was dismantled.
         self.worker = PipelineWorker()
+        self._last_keyframe = 0.0
 
         keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
@@ -628,6 +633,22 @@ class Stage:
             peer.detach()
         return peer is not None
 
+    def request_keyframe(self, who=""):
+        """A guest has lost the picture and wants a fresh start.
+
+        Rate-limited, because the encoder is shared: four guests on a bad
+        connection all asking at once would otherwise turn the stream into
+        keyframes, which is the one thing guaranteed to make a struggling link
+        worse. One every half second is enough to recover in a blink and not
+        enough to matter to the bitrate.
+        """
+        now = time.monotonic()
+        if now - self._last_keyframe < KEYFRAME_MIN_GAP:
+            return
+        self._last_keyframe = now
+        log.info("peer %s asked for a keyframe after losing the picture", who)
+        self.worker.submit(self.force_keyframe)
+
     def force_keyframe(self):
         pad = self.encoder.get_static_pad("src")
         if pad:
@@ -845,9 +866,29 @@ class Peer:
             pass                                    # older GStreamer: fine
         src.set_property("caps", caps)
         self._caps[kind] = caps
+        if kind == "video":
+            # A browser that has lost a frame asks for a new keyframe, and
+            # webrtcbin turns that request into an upstream force-key-unit
+            # event. It arrives here and stops: the encoder is in the capture
+            # pipeline, not this one, so nothing was listening and the guest
+            # waited for the next periodic keyframe -- two seconds at thirty
+            # frames a second. That is the black screen after a blip.
+            pad = src.get_static_pad("src")
+            if pad is not None:
+                pad.add_probe(Gst.PadProbeType.EVENT_UPSTREAM,
+                              self._on_upstream)
         self.pipeline.add(src)
         src.link_pads("src", self.webrtc, "sink_%u")
         self._sources[kind] = src
+
+    def _on_upstream(self, _pad, info):
+        """Pass a guest's request for a keyframe across to the encoder."""
+        event = info.get_event()
+        if event is not None and event.type == Gst.EventType.CUSTOM_UPSTREAM:
+            structure = event.get_structure()
+            if structure is not None and structure.has_name("GstForceKeyUnit"):
+                self.stage.request_keyframe(self.id)
+        return Gst.PadProbeReturn.OK
 
     def push(self, kind, buffer, caps):
         """Take one encoded packet from the capture."""
