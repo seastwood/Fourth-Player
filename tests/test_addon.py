@@ -276,9 +276,13 @@ check(main.QUALITY[0][1]["height"] == 1080 and main.QUALITY[0][1]["fps"] == 30,
       "the default captures at the screen's own size, at thirty: %r"
       % main.QUALITY[0][1])
 sixty = [n for n, s in main.QUALITY if s["height"] == 1080 and s["fps"] == 60]
-check(sixty and "fewer frames" in sixty[0],
-      "and the sixty-frame one says it delivers fewer, which it measurably "
-      "does: %r" % sixty)
+# It used to say "delivers fewer frames here", which was measured on the
+# Radeon this was written on and is a guess about anybody else's machine. The
+# warning still has to be there -- 1080p60 is the one preset that asks more of
+# an encoder than a modest one has -- but as a requirement, not a verdict on
+# hardware the reader may not own.
+check(sixty and "encoder" in sixty[0],
+      "the sixty-frame one still warns what it needs: %r" % sixty)
 
 print("\nevery preset is complete, so switching cannot leave a stale field")
 keys = [set(settings) for _, settings in main.QUALITY]
@@ -457,6 +461,14 @@ main.set_quality(False)
 check(not restarted, "no restart for a setting that did not change")
 told = [c for c in chosen["calls"] if c[0] == "notify"]
 check(told and "Already" in told[-1][2], "and it says so: %r" % (told[-1:],))
+
+print("\nno preset label claims a measurement from one particular machine")
+# "(delivers fewer frames here)" was true of the Radeon this was written on and
+# is a guess about anybody else's. A list shipped to other people should say
+# what a setting needs, not what it did once on a GPU they do not have.
+for name, _settings in main.QUALITY:
+    check("here" not in name.split("(")[-1],
+          "%r describes the setting, not this box" % name)
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

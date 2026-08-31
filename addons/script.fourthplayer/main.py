@@ -85,7 +85,7 @@ QUALITY = [
     ("Lowest delay — 540p30, 1.2 Mb/s, no smoothing",
      dict(width=960, height=540, fps=30, bitrate_kbps=1200,
           queue_ms=25, jitter_ms=10, h264_profile="main", audio_frame_ms=10)),
-    ("Big screen, smoother — 1080p60, 6 Mb/s (delivers fewer frames here)",
+    ("Big screen, smoother — 1080p60, 6 Mb/s (needs a strong encoder)",
      dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
           queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
 ]
