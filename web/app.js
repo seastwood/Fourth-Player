@@ -810,11 +810,17 @@ function paintPicker() {
     off.textContent = padName || "No on-screen pad";
   }
   const usingTouch = picker.value !== "off";
-  picker.className = "chip " + (usingTouch || padName ? "ok" : "warn");
-  picker.title = usingTouch
+  // The colour goes on the chip around the icon, not on the select -- which
+  // now carries only the classes that make it invisible, and would lose them
+  // if this wrote over className the way it used to.
+  const chip = el("padpick");
+  chip.className = "padpick chip " + (usingTouch || padName ? "ok" : "warn");
+  const said = usingTouch
     ? "On-screen controller — tap to change or turn off"
     : (padName ? padName + " — tap to add an on-screen pad"
                : "No controller — tap to add an on-screen pad");
+  chip.title = said;
+  picker.setAttribute("aria-label", said);
 }
 
 function setBit(bit, down) {
@@ -914,7 +920,7 @@ function showTouch(on, layout) {
   // The picker stays available whether or not the pad is showing -- otherwise
   // turning it off is a one-way door.
   buildLayoutPicker();
-  el("padtype").hidden = false;
+  el("padpick").hidden = false;
 
   if (!on) {
     el("touch").hidden = true;
@@ -1199,7 +1205,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30n";
+const CLIENT_BUILD = "2026-08-30o";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

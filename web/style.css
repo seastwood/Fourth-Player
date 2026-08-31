@@ -299,6 +299,45 @@ video {
 .chip.warn { color: var(--accent); border-color: var(--accent); }
 .chip.bad  { color: var(--bad);    border-color: var(--bad); }
 
+/* The controller chip: an icon with a real select laid over it.
+ *
+ * A native select always draws its chosen option when closed, and here that
+ * was a whole controller name -- long enough that the row needed a 46vw cap
+ * to stop it swallowing everything else. What the closed state has to say is
+ * only "this is where the controller is chosen"; which one is chosen is what
+ * the list shows, and it marks the active row itself.
+ *
+ * The select is kept and made invisible rather than replaced with a button
+ * and a hand-built menu: a phone then still gets its own picker, which is
+ * better than anything that could be built here. */
+.padpick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.padpick-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+  pointer-events: none;          /* the select underneath takes the tap */
+}
+.padpick-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;                    /* the popup is drawn by the browser, not this */
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 /* The connection chip carries a lit pip instead of the word "connected".
    Square, because nothing else on this screen is round, and it reads as an
    indicator on a machine rather than a dot in a document. The frame stays the

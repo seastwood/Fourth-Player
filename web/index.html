@@ -59,7 +59,25 @@
           aria-label="Connecting"></span>
     <!-- Hidden until there is something to count down to. -->
     <span id="clock" class="chip" hidden></span>
-    <select id="padtype" class="chip" aria-label="Controller layout"></select>
+    <!-- A controller, not a sentence. The closed state only has to say "this
+         is where the controller is chosen"; which one is chosen is what the
+         list itself shows, and it marks the active row for free. The select
+         is a real one, laid transparently over the icon, so phones still get
+         their native picker rather than something hand-rolled. -->
+    <span id="padpick" class="padpick chip" title="Controller">
+      <svg class="padpick-icon" viewBox="0 0 24 24" aria-hidden="true"
+           focusable="false">
+        <path d="M7 8h10a4 4 0 0 1 4 4v3a2 2 0 0 1-3.6 1.2L15.5 14h-7l-1.9 2.2
+                 A2 2 0 0 1 3 15v-3a4 4 0 0 1 4-4z" fill="none"
+              stroke="currentColor" stroke-width="1.8"/>
+        <path d="M7.4 10.6v2.2M6.3 11.7h2.2" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="square"/>
+        <circle cx="16.2" cy="11.2" r=".95" fill="currentColor"/>
+        <circle cx="17.9" cy="12.9" r=".95" fill="currentColor"/>
+      </svg>
+      <select id="padtype" class="padpick-select"
+              aria-label="Controller"></select>
+    </span>
     <button id="games" type="button" class="ghost" hidden>Games</button>
     <button id="padtest" type="button" class="ghost">Buttons</button>
     <!-- The speaker shows the level at a glance -- no waves, one wave, two --

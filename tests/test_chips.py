@@ -130,6 +130,44 @@ soon = run({"clock": 90})["clock"]
 check(soon["textContent"] == "1:30 left", "and %r" % soon["textContent"])
 check("warn" in soon["className"], "loudly, with ninety seconds to go")
 
+print("\nthe controller chip is a controller, not a sentence")
+# A native select draws its chosen option when closed, and here that was a
+# whole controller name -- long enough that the row needed a 46vw cap to stop
+# it swallowing everything else. The closed state only has to say where the
+# controller is chosen; the list marks the active row itself.
+import re                                                        # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+html = open(os.path.join(ROOT, "web", "index.html")).read()
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+app = open(os.path.join(ROOT, "web", "app.js")).read()
+
+chip = html[html.index('id="padpick"'):]
+chip = chip[:chip.index("</span>")]
+check("<svg" in chip, "the chip carries an icon")
+check('id="padtype"' in chip, "with the real select inside it")
+check('aria-label="Controller"' in chip,
+      "named for a screen reader, which cannot see the drawing")
+
+sel = re.search(r"\.padpick-select \{([^}]*)\}", css).group(1)
+check("opacity: 0" in sel, "the select itself is invisible: %r" % sel.strip()[:60])
+check("position: absolute" in sel and "inset: 0" in sel,
+      "laid over the icon, so the whole chip is the target")
+icon = re.search(r"\.padpick-icon \{([^}]*)\}", css).group(1)
+check("pointer-events: none" in icon,
+      "and the drawing does not eat the tap meant for it")
+
+# It is a real select, kept so a phone gets its own picker rather than
+# something hand-built here.
+check("<select" in chip, "it is still a native select")
+
+painter = app[app.index("function paintPicker"):]
+painter = painter[:painter.index("\n}")]
+check('el("padpick")' in painter and "chip.className" in painter,
+      "the state colour goes on the chip, not the select")
+check("picker.className" not in painter,
+      "which would otherwise wipe the classes that hide the select")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))
