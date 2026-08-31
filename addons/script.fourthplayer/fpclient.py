@@ -60,6 +60,15 @@ def set_slots(count):
     return ask({"cmd": "slots", "set": count})
 
 
+def set_share(shared):
+    return ask({"cmd": "share", "set": bool(shared)})
+
+
+def set_pin(pin):
+    """A PIN of the owner's choosing, or "" to go back to a random one."""
+    return ask({"cmd": "pin", "set": str(pin)})
+
+
 def set_policy(policy):
     return ask({"cmd": "policy", "set": policy})
 

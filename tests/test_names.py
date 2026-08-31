@@ -24,7 +24,9 @@ def check(cond, msg):
 
 print("a name is tidied before it goes anywhere")
 check(clean_name("  Dave  ") == "Dave", "trimmed")
-check(clean_name("Dave    the   Rave") == "Dave the Rave", "runs of space collapse")
+# Eight characters now, so the example has to be one that survives it --
+# the point of this line is the spaces, not the truncation below.
+check(clean_name("Da    ve") == "Da ve", "runs of space collapse")
 check(clean_name("a" * 40) == "a" * NAME_MAX, "and it cannot be longer than a card")
 check("\n" not in clean_name("Dave\nPlayer 1\nPlayer 2"),
       "newlines cannot be used to draw extra lines on the television")

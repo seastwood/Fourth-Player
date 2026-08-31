@@ -218,6 +218,16 @@ for wanted in ("The game closes for a moment",
                "Your place in the game is kept"):
     check(wanted in ask, "the question explains: %r" % wanted)
 
+print("\nthe seat list says who is on each controller, yours included")
+paint = app_src[app_src.index("function paintSeats()"):]
+paint = paint[:paint.index("\nfunction ")]
+label = paint[paint.index("const label ="):paint.index("};", paint.index("const label ="))]
+check("i === myPad" in label and "(you)" in label,
+      "your own seat is marked as yours")
+check("i !== myPad" not in label,
+      "and the names are not withheld from it: once two people can share a "
+      "pad, the seat you most need to see the company on is your own")
+
 if failures:
     print("\n".join("FAIL: " + f for f in failures))
     sys.exit(1)

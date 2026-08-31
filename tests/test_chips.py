@@ -168,10 +168,6 @@ check('el("padpick")' in painter and "chip.className" in painter,
 check("picker.className" not in painter,
       "which would otherwise wipe the classes that hide the select")
 
-print()
-if fails:
-    print("FAILURES: %d" % len(fails))
-    sys.exit(1)
 print("\nthe seats panel does not answer from stale knowledge")
 # The picture survives signalling dropping, on purpose -- so a guest can be
 # playing, with a working pad, while the socket that answers "which player am
@@ -216,4 +212,46 @@ runner = runner[:runner.index("\n}")]
 check("padSeats.ports" in runner and "return" in runner,
       "and stops as soon as there is a real answer")
 
+print("\nthe controls can be chosen from the panel, not only the chip")
+html = open(os.path.join(ROOT, "web", "index.html")).read()
+src = open(os.path.join(ROOT, "web", "app.js")).read()
+check('id="pads-type"' in html, "the panel has its own controller menu")
+check('id="pads-attached"' in html, "and somewhere to name what is plugged in")
+check(">Controls<" in html and ">Buttons<" not in html,
+      "the chip that opens it says Controls")
+
+print("\ntwo menus, one choice")
+# Two selects for one setting is two chances to disagree. Whichever is used,
+# both are written through the same function, and the panel is rebuilt from the
+# chip rather than from a second copy of the option list.
+mirror = src[src.index("function mirrorPicker()"):]
+mirror = mirror[:mirror.index("\nfunction ")]
+check("panel.value = chip.value" in mirror,
+      "the panel takes its value from the chip, not from a guess")
+check("el(\"padtype\")" in mirror and "el(\"pads-type\")" in mirror,
+      "and its options are copied from the chip's, so they cannot drift")
+picker = src[src.index("function buildLayoutPicker()"):]
+picker = picker[:picker.index("\nlet chosenByHand")]
+check("const choose =" in picker and picker.count("choose(") >= 2,
+      "both selects change the choice through one function")
+check("mirrorPicker()" in src[src.index("function paintPicker()"):][:1200],
+      "and repainting the chip brings the panel with it")
+
+print("\nwhat is plugged in is reported honestly")
+attached = src[src.index("function paintAttached()"):]
+attached = attached[:attached.index("\nfunction ")]
+check("getGamepads" in attached, "it asks the browser what is connected")
+check("press a button" in attached,
+      "and says why a plugged-in pad may still be invisible, rather than "
+      "reporting it as absent")
+check("shortPadName" in attached,
+      "names are tidied the same way the chip tidies them")
+
+# The report goes last, after every check in the file. It used to sit in the
+# middle, so anything appended below it recorded failures into a list nobody
+# read again and the suite still exited 0 -- a test that cannot fail.
+print()
+if fails:
+    print("FAILURES: %d" % len(fails))
+    sys.exit(1)
 print("test_chips: all ok")

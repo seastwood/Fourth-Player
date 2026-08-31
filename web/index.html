@@ -38,7 +38,7 @@
     <!-- Optional, and remembered. It goes on somebody else's television, so
          there is a limit to how much of it they will see. -->
     <label for="who" class="optional">Your name (optional)</label>
-    <input id="who" name="who" maxlength="16" autocomplete="nickname"
+    <input id="who" name="who" maxlength="8" autocomplete="nickname"
            placeholder="Guest 1" class="name">
     <button type="submit" id="join">Join the game</button>
   </form>
@@ -96,7 +96,7 @@
               aria-label="Controller"></select>
     </span>
     <button id="games" type="button" class="ghost" hidden>Games</button>
-    <button id="padtest" type="button" class="ghost">Buttons</button>
+    <button id="padtest" type="button" class="ghost">Controls</button>
     <!-- The speaker shows the level at a glance -- no waves, one wave, two --
          and opens the slider when tapped. Its own level, not the
          television's: turning it down here should not silence the room. -->
@@ -211,6 +211,15 @@
       <button id="pads-reset" type="button" class="ghost" hidden>Use defaults</button>
       <button id="pads-close" type="button" class="ghost" title="Back to the game">&times;</button>
     </div>
+    <!-- The same choice as the chip at the top, offered again here because
+         this is the panel somebody opens when the controls are what they are
+         thinking about, and hunting back to a chip for it is a puzzle. -->
+    <p class="browse-note pads-seat">
+      Controls
+      <select id="pads-type" class="chip" aria-label="Which controls you use">
+      </select>
+      <span id="pads-attached" class="browse-note pads-attached"></span>
+    </p>
     <p class="browse-note pads-seat">
       You are playing as
       <select id="pads-seat" class="chip" aria-label="Which player you are">

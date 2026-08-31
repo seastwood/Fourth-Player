@@ -67,7 +67,9 @@ REBUILD_GRACE = 2.0
 # that fits a card and stripped of anything that is not a printing character --
 # not as a security measure, since it cannot reach a shell or a page unescaped,
 # but because a name full of newlines is a card that no longer reads.
-NAME_MAX = 16
+# Eight. Long enough for a name and short enough that four of them fit on a
+# seat list beside a player number, which is where they now have to read.
+NAME_MAX = 8
 
 
 def clean_name(name):

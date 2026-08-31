@@ -556,6 +556,8 @@ Wars, hot-seat strategy, anything that takes turns. Everybody playing is player
 one, and swapping seats between turns is not the same thing as both of you
 having the controls.
 
+In Kodi it is **Can two people share a controller?**; from a shell:
+
 ```sh
 python3 -m fourthplayer share            # which rule is in force
 python3 -m fourthplayer share on         # picking a taken controller joins it
@@ -579,6 +581,9 @@ joined to somebody else's controller would be baffling.
 By default every session gets six fresh digits, which have to be read off the
 television before anybody can join. If that is a chore, set one and it is used
 for every session from then on:
+
+In Kodi it is **What PIN do guests type?**, which asks on the number pad so the
+remote can answer it; from a shell:
 
 ```sh
 python3 -m fourthplayer pin             # which rule is in force

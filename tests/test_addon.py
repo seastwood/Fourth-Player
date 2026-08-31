@@ -49,6 +49,10 @@ class FakeDialog:
         chosen["calls"].append(("yesno", heading, message))
         return chosen["yesno"]
 
+    def numeric(self, kind, heading, **kwargs):
+        chosen["calls"].append(("numeric", heading, kind))
+        return chosen.get("numeric", "")
+
     def notification(self, heading, message, icon=None, time=None):
         chosen["calls"].append(("notify", heading, message))
 
@@ -317,6 +321,76 @@ print("\nduration labels read like English")
 check(main.duration_label(30) == "30 minutes", "30 minutes")
 check(main.duration_label(60) == "1 hour", "1 hour, not 1 hours")
 check(main.duration_label(240) == "4 hours", "4 hours")
+
+print("\nsetting a PIN from the television")
+# Reading six new digits off the screen before anybody can join is the chore
+# this removes. What it costs -- one secret that stops changing -- has to be
+# said before it is done, not discovered later.
+sent = []
+main.C.set_pin = lambda pin: (sent.append(pin), {"ok": True})[1]
+
+chosen.update(select=0, yesno=True, numeric="481625", calls=[])
+main.choose_pin({"pin_fixed": False})
+check(sent == ["481625"], "the digits typed are the ones sent: %s" % sent)
+warned = [c for c in chosen["calls"] if c[0] == "yesno"]
+check(warned and "stops changing" in warned[0][2],
+      "and it says what the trade is first")
+check(any(c[0] == "numeric" for c in chosen["calls"]),
+      "asked on the number pad, which is what a remote has")
+
+print("\nand backing out of that warning changes nothing")
+sent.clear()
+chosen.update(select=0, yesno=False, numeric="481625", calls=[])
+main.choose_pin({"pin_fixed": False})
+check(sent == [], "saying no sets nothing")
+
+print("\ntyping nothing changes nothing either")
+sent.clear()
+chosen.update(select=0, yesno=True, numeric="", calls=[])
+main.choose_pin({"pin_fixed": False})
+check(sent == [], "an empty keypad is a cancelled dialog, not 'clear the PIN'")
+
+print("\ngoing back to a random PIN each session")
+sent.clear()
+chosen.update(select=1, yesno=True, calls=[])
+main.choose_pin({"pin_fixed": True})
+check(sent == [""], "clearing it sends an empty PIN: %s" % sent)
+sent.clear()
+chosen.update(select=1, yesno=True, calls=[])
+main.choose_pin({"pin_fixed": False})
+check(sent == [], "and choosing what is already true asks the service nothing")
+
+print("\nwhat the service refuses is what the television says")
+main.C.set_pin = lambda pin: {"ok": False, "error": "A set PIN must be "
+                              "between 4 and 12 digits."}
+chosen.update(select=0, yesno=True, numeric="12", calls=[])
+main.choose_pin({"pin_fixed": False})
+told = [c for c in chosen["calls"] if c[0] == "notify"]
+check(told and "4 and 12" in told[-1][2],
+      "the service's own reason is shown, not a guess: %s" % (told[-1:],))
+
+print("\nsharing a controller, from the television")
+shared = []
+main.C.set_share = lambda on: (shared.append(on), {"ok": True})[1]
+chosen.update(select=1, calls=[])
+main.choose_share({"share_pads": False})
+check(shared == [True], "turning it on sends True: %s" % shared)
+shared.clear()
+chosen.update(select=0, calls=[])
+main.choose_share({"share_pads": True})
+check(shared == [False], "and turning it off sends False: %s" % shared)
+shared.clear()
+chosen.update(select=0, calls=[])
+main.choose_share({"share_pads": False})
+check(shared == [], "choosing what is already true asks nothing")
+
+print("\nboth are reachable from the menu, open session or not")
+src = open(os.path.join(ROOT, "addons", "script.fourthplayer", "main.py")).read()
+# Twice in the menus, plus once where each is defined.
+check(src.count("lambda: choose_pin(status)") == 2,
+      "the PIN screen is offered whether or not a session is open")
+check(src.count("lambda: choose_share(status)") == 2,
+      "and so is the shared-controller screen")
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

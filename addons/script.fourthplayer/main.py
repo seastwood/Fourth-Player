@@ -405,6 +405,78 @@ def choose_url(status):
         notify("Links now point at this machine on the network.")
 
 
+def choose_share(status):
+    """Whether two guests may drive one controller at once.
+
+    For the games that are played by passing a pad round a sofa -- everybody
+    taking a turn is player one. Swapping seats does that one at a time; this
+    is both of them holding the controls.
+    """
+    shared = bool(status.get("share_pads"))
+    labels = [("  " if shared else "> ") + "One each  (normal)",
+              ("> " if shared else "  ") + "Share, for pass-the-pad games"]
+    choice = xbmcgui.Dialog().select("Can two people use one controller?", labels)
+    if choice < 0:
+        return
+    want = (choice == 1)
+    if want == shared:
+        return
+    reply = C.set_share(want)
+    if not reply.get("ok"):
+        notify(reply.get("error", "Could not change that."), error=True)
+    else:
+        notify("Guests may share a controller" if want
+               else "Each guest gets their own controller")
+
+
+def choose_pin(status):
+    """Set a PIN, or go back to a new random one each session.
+
+    The point of setting one is that it stops changing -- so the owner stops
+    walking to the television to read six new digits before anybody can join.
+    What it costs is said out loud below, because a secret that never rotates
+    is a different bargain from one that is thrown away with the session.
+    """
+    fixed = bool(status.get("pin_fixed"))
+    labels = [("> " if fixed else "  ") + "Use a PIN I choose…",
+              ("  " if fixed else "> ") + "A new random PIN each session  (safer)"]
+    choice = xbmcgui.Dialog().select("What PIN do guests type?", labels)
+    if choice < 0:
+        return
+
+    if choice == 1:
+        if not fixed:
+            return
+        reply = C.set_pin("")
+        if not reply.get("ok"):
+            notify(reply.get("error", "Could not change that."), error=True)
+        else:
+            notify("Each session will get a new PIN")
+        return
+
+    if not fixed and not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "A PIN you set is used for every session from now on, so it is "
+            "one secret that stops changing: everybody you have ever invited "
+            "keeps knowing it.\n\nWrong tries still lock an address out, and "
+            "it is never stored in the clear anywhere a guest can reach.\n\n"
+            "Set your own PIN?",
+            nolabel="Leave it random", yeslabel="Set one"):
+        return
+
+    # numeric input, so the remote's number pad is what answers it
+    typed = xbmcgui.Dialog().numeric(0, "PIN for guests to type (4 to 12 digits)")
+    if not typed:
+        return
+    reply = C.set_pin(typed)
+    if not reply.get("ok"):
+        # The service checks the length and refuses a single repeated digit,
+        # and its reason is better than anything guessable from here.
+        notify(reply.get("error", "Could not set that PIN."), error=True)
+    else:
+        notify("Guests will type the PIN you set")
+
+
 def choose_link(status):
     """Whether a guest needs the whole link, or just the address and the PIN.
 
@@ -528,6 +600,8 @@ def main():
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("How many can join?…", lambda: choose_slots(status)),
             ("How do guests get in?…", lambda: choose_link(status)),
+            ("What PIN do guests type?…", lambda: choose_pin(status)),
+            ("Can two people share a controller?…", lambda: choose_share(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
@@ -549,6 +623,8 @@ def main():
             ("Remove a player…", lambda: remove_player(C.status())),
             ("How many can join?…", lambda: choose_slots(status)),
             ("How do guests get in?…", lambda: choose_link(status)),
+            ("What PIN do guests type?…", lambda: choose_pin(status)),
+            ("Can two people share a controller?…", lambda: choose_share(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),

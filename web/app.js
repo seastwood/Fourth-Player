@@ -752,6 +752,56 @@ function chosenLayout() {
   return (saved === "off" || LAYOUTS[saved]) ? saved : DEFAULT_LAYOUT;
 }
 
+/* The panel's copy of the chip's controller menu.
+ *
+ * Two selects, one choice. Whichever is used, the other has to follow, or the
+ * panel says "no on-screen pad" while the buttons are plainly on the screen.
+ * Kept in step by writing through the same function both call. */
+function mirrorPicker() {
+  const chip = el("padtype"), panel = el("pads-type");
+  if (!panel) return;
+  if (panel.options.length !== chip.options.length
+      || panel.dataset.names !== chipOptionNames()) {
+    panel.dataset.names = chipOptionNames();
+    panel.innerHTML = "";
+    for (const option of chip.options) {
+      const copy = document.createElement("option");
+      copy.value = option.value;
+      copy.textContent = option.textContent;
+      panel.appendChild(copy);
+    }
+  }
+  panel.value = chip.value;
+  paintAttached();
+}
+
+function chipOptionNames() {
+  return Array.from(el("padtype").options).map((o) => o.textContent).join("|");
+}
+
+/* Which real controllers the browser can see.
+ *
+ * Worth saying out loud in the panel: a pad that is plugged in but has not
+ * been touched is invisible to the page -- browsers withhold it until a button
+ * is pressed -- so "none detected" and "none plugged in" are different states,
+ * and somebody staring at a connected controller deserves to be told which
+ * one they are in. */
+function paintAttached() {
+  const where = el("pads-attached");
+  if (!where) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const names = Array.from(pads).filter((p) => p && p.connected)
+                     .map((p) => shortPadName(p.id));
+  if (names.length) {
+    where.textContent = names.length === 1
+      ? "Controller found: " + names[0]
+      : "Controllers found: " + names.join(", ");
+  } else {
+    where.textContent = "No controller detected \u2014 press a button on one "
+                      + "if it is plugged in, or use the on-screen pad.";
+  }
+}
+
 function buildLayoutPicker() {
   const picker = el("padtype");
   if (picker.options.length) return;          // built once
@@ -773,11 +823,16 @@ function buildLayoutPicker() {
   // state on a desktop, would be the dropdown disagreeing with the screen.
   picker.value = touchOn ? chosenLayout() : "off";
   paintPicker();
-  picker.addEventListener("change", () => {
-    try { localStorage.setItem(LAYOUT_KEY, picker.value); } catch (_) {}
+  const choose = (value) => {
+    try { localStorage.setItem(LAYOUT_KEY, value); } catch (_) {}
     chosenByHand = true;              // stop guessing for them from here on
-    applyLayoutChoice(picker.value);
-  });
+    picker.value = value;
+    applyLayoutChoice(value);
+  };
+  picker.addEventListener("change", () => choose(picker.value));
+  const panel = el("pads-type");
+  if (panel) panel.addEventListener("change", () => choose(panel.value));
+  mirrorPicker();
 }
 
 let chosenByHand = false;
@@ -821,6 +876,7 @@ function paintPicker() {
                : "No controller — tap to add an on-screen pad");
   chip.title = said;
   picker.setAttribute("aria-label", said);
+  mirrorPicker();
 }
 
 function setBit(bit, down) {
@@ -1227,7 +1283,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31h";
+const CLIENT_BUILD = "2026-08-31i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1334,19 +1390,28 @@ function describePad(pad) {
      desktop the "press any button" prompt still disappeared, which looks like
      detection, and on a phone that prompt is never shown in the first place,
      so a connected controller produced no sign of itself anywhere. */
-  const raw = (pad && pad.id) || "";
-  // Ids carry vendor and product codes and, in Chrome, the words STANDARD
-  // GAMEPAD. None of that means anything to the person holding the thing.
+  padName = shortPadName((pad && pad.id) || "");
+  loadPadMap();
+  paintPicker();
+}
+
+/* A controller id fit to show somebody.
+ *
+ * Ids carry vendor and product codes and, in Chrome, the words STANDARD
+ * GAMEPAD; Firefox prefixes the vendor and product as hex, e.g.
+ * 054c-05c4-Wireless Controller, which is four useless words' worth of a chip.
+ * None of it means anything to the person holding the thing. Pulled out of
+ * describePad() so the panel's list of what is attached reads the same as the
+ * chip does, rather than growing a second opinion about the same controller.
+ */
+function shortPadName(raw) {
+  raw = raw || "";
   let name = raw.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
-  // Firefox prefixes the vendor and product as hex, e.g. 054c-05c4-Wireless
-  // Controller, which is four useless words' worth of the room in the chip.
   name = name.replace(/^[0-9a-f]{4}-[0-9a-f]{4}-\s*/i, "");
   if (!name) name = raw.trim();
   if (!name) name = "Controller";
   if (name.length > 28) name = name.slice(0, 27).trimEnd() + "\u2026";
-  padName = name;
-  loadPadMap();
-  paintPicker();
+  return name;
 }
 
 function forgetPad() {
@@ -1772,9 +1837,14 @@ function paintSeats() {
     const who = padSeats.who[String(i)];
     // No port means the game was started without that seat. Saying so is the
     // whole point: it cannot be taken until the game is started again.
-    const name = port(i) ? "Player " + port(i)
-                         : "Controller " + (i + 1) + " (not in this game)";
-    return (who && i !== myPad) ? name + " — " + who : name;
+    // Who is on it, always -- including the seat you are on. It used to name
+    // everybody except you, which is fine when a pad holds one person and
+    // useless once two can share one: the seat you most need to see the
+    // company on is your own.
+    const seat = (port(i) ? "Player " + port(i)
+                          : "Controller " + (i + 1) + " (not in this game)")
+               + (i === myPad ? " (you)" : "");
+    return who ? seat + " — " + who : seat;
   };
   // Rebuilt only when something changed, or a menu open on a phone closes
   // itself underneath the person using it.
@@ -1889,6 +1959,7 @@ function signallingUp() {
 
 function openPads() {
   el("repick-ask").hidden = true;
+  mirrorPicker();
   // Ask what the seats look like now rather than trusting what they looked
   // like when this page joined. A guest who was already here when the game
   // started had been told, and kept being told, that no game was running.
