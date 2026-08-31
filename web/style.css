@@ -690,9 +690,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      anything. Anchored to the top padding so it sits on the shoulder row. */
   .touch-mid {
     position: absolute;
-    /* The pad's own top padding, plus a little: level with the shoulder
-       buttons rather than with the very top of their cluster. */
-    top: 1.45rem;
+    /* The pad's own top padding, plus enough to clear the shoulder cluster:
+       level with the lower of the two shoulder buttons rather than with the
+       top of the pair. */
+    top: 2.3rem;
     left: 50%;
     transform: translateX(-50%);
     flex-direction: row;
