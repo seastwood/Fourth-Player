@@ -1227,7 +1227,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31f";
+const CLIENT_BUILD = "2026-08-31g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1752,6 +1752,10 @@ function remapped(pad) {
    given controls short of stopping the game. Moving onto the pad that is
    already player 2 does it instantly, because that pad is already player 2. */
 let myPad = 0, padSeats = { count: 0, who: {}, ports: {}, playing: false };
+// Whether what is on screen is known to be out of date, because the question
+// could not be sent. Never guessed at: it is set when a request is skipped and
+// cleared by the answer.
+let padsStale = false;
 
 /* The player number is the game's, not this pad's position. These used to be
    counted off as "Player 2" upwards on the assumption that somebody at the
@@ -1793,7 +1797,12 @@ function paintSeats() {
   // numbers were known, which meant that the one time it was most wanted --
   // a game running whose players could not be read -- it was hidden.
   el("pads-repick").hidden = !padSeats.playing;
-  if (mine) {
+  if (padsStale) {
+    note.hidden = false;
+    note.textContent = "Not connected to the host just now, so which "
+                     + "controller is which player cannot be read. The game "
+                     + "keeps playing; this will catch up on its own.";
+  } else if (mine) {
     note.hidden = true;
   } else if (!padSeats.playing) {
     note.hidden = false;
@@ -1813,6 +1822,7 @@ function paintSeats() {
 
 function seatsFrom(message) {
   if (!message) return;
+  padsStale = false;
   if (typeof message.yours === "number") myPad = message.yours;
   padSeats = { count: message.count || 0, who: message.who || {},
                ports: message.ports || {}, playing: !!message.playing };
@@ -1847,12 +1857,30 @@ el("repick-yes").addEventListener("click", () => {
   closePads();
 });
 
+function signallingUp() {
+  return socket !== null && socket.readyState === WebSocket.OPEN;
+}
+
 function openPads() {
   el("repick-ask").hidden = true;
   // Ask what the seats look like now rather than trusting what they looked
   // like when this page joined. A guest who was already here when the game
   // started had been told, and kept being told, that no game was running.
-  send({ t: "pads" });
+  //
+  // The picture survives signalling going down -- that is deliberate, and it
+  // is why a game keeps playing through a blip. But this question travels on
+  // signalling, so while it is down the answer never arrives and the panel
+  // went on showing what it knew before: a player being told no controller is
+  // in the game, while they are playing with one. Say what is actually true,
+  // and stop waiting out the backoff, since somebody is now looking at it.
+  padsStale = !signallingUp();
+  if (padsStale) {
+    retries = 0;
+    reconnectSoon();
+    paintSeats();
+  } else {
+    send({ t: "pads" });
+  }
   // Let go of everything on the way in, so a button held as the panel opens is
   // not left held down in the game behind it.
   sendFrame(null, true);

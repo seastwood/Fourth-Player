@@ -172,4 +172,25 @@ print()
 if fails:
     print("FAILURES: %d" % len(fails))
     sys.exit(1)
+print("\nthe seats panel does not answer from stale knowledge")
+# The picture survives signalling dropping, on purpose -- so a guest can be
+# playing, with a working pad, while the socket that answers "which player am
+# I" is down. The panel went on showing what it last knew, which read as "no
+# controller is in this game" to somebody holding one that plainly was.
+src = open(os.path.join(ROOT, "web", "app.js")).read()
+check("function signallingUp()" in src,
+      "the page can tell whether the question can even be asked")
+opener = src[src.index("function openPads()"):]
+opener = opener[:opener.index("\n}")]
+check("padsStale" in opener and "signallingUp()" in opener,
+      "opening the panel checks before trusting what it has")
+check("reconnectSoon()" in opener,
+      "and asks for the connection back rather than waiting out the backoff")
+seats = src[src.index("function seatsFrom("):]
+seats = seats[:seats.index("\n}")]
+check("padsStale = false" in seats,
+      "an answer arriving is what clears it, not a timer")
+check(src.count('padsStale = true') == 0,
+      "and nothing sets it true by guessing: it is set where a send is skipped")
+
 print("test_chips: all ok")
