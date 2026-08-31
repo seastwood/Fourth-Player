@@ -1054,8 +1054,18 @@ class Peer:
         # a browser treats it as a duplicate and ignores it.
         if fields[0].startswith("candidate:"):
             fields[0] = "candidate:" + fields[0].split(":", 1)[1] + "9"
+        # And the priority must be a real srflx priority, not a host one.
+        # This used to subtract 100, which left it ranked level with the LAN
+        # candidate it shadows -- so a guest in the house would nominate the
+        # public address, and if anything on the way (a forward, hairpin NAT)
+        # was not working they got a connected session with no picture, while
+        # the LAN path that would have worked sat unused. ICE priority is
+        # (2^24 * type preference) + ..., with host 126 and srflx 100, so a
+        # genuine srflx sits exactly this far below its own base. Announcing
+        # it at its true rank makes it what it was always described as: the
+        # fallback for people who cannot reach the LAN address.
         try:
-            fields[3] = str(max(1, int(fields[3]) - 100))
+            fields[3] = str(max(1, int(fields[3]) - (126 - 100) * (1 << 24)))
         except ValueError:
             pass
         # srflx, with the local socket recorded as its base, which is what a

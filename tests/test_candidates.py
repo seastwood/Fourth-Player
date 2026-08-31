@@ -56,8 +56,16 @@ check("raddr 192.168.1.132" in out and "rport 40005" in out,
 
 print("\nit must not look like a duplicate of the candidate it shadows")
 check(fields[0] != "candidate:1", "the foundation differs, got %r" % fields[0])
-check(int(fields[3]) < 2015363327,
-      "and the priority is lower, so the LAN route is still tried first")
+# The priority is not just "lower" -- it has to be lower by a whole type
+# preference, or the browser ranks the public address level with the LAN one
+# and nominates it. When that happened, a guest sitting in the house got a
+# connected session and a black screen, because the forward it was pointed at
+# was not carrying anything. A real srflx sits 26 * 2^24 below its base.
+check(int(fields[3]) == 2015363327 - 26 * (1 << 24),
+      "the priority is a genuine srflx priority, got %s (host was %d)"
+      % (fields[3], 2015363327))
+check(2015363327 - int(fields[3]) > 400000000,
+      "so every host candidate outranks it and the LAN route is tried first")
 
 print("\nthe component and transport are carried through untouched")
 check(fields[1] == "1" and fields[2].upper() == "UDP",
