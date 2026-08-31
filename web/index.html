@@ -51,19 +51,21 @@
 <div id="stage" class="stage" hidden>
   <video id="screen" autoplay playsinline muted></video>
 
-  <!-- Sideways the controls lie over the picture, so tapping the picture to
-       summon the chips means a thumb that strays off the d-pad summons them
-       mid-game. This is the way in instead; the picture stops answering taps
-       wherever this button is showing. -->
-  <button id="hudbtn" class="hudbtn" type="button"
-          aria-label="Show the buttons at the top">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor"
-            stroke-width="2.2" stroke-linecap="square"/>
-    </svg>
-  </button>
 
   <div id="hud" class="hud">
+    <!-- First in the row, so it sits beside the name rather than on top of it,
+         and the one control that never goes away: it is how the chips are put
+         away and the only way to bring them back. -->
+    <button id="hudbtn" class="hudbtn" type="button"
+            aria-label="Show the buttons at the top">
+      <!-- Three separate bars rather than one path, so the outer two can
+           swing into a cross while the middle one blinks out. -->
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <line class="bar bar-top" x1="4" y1="7" x2="20" y2="7"/>
+        <line class="bar bar-mid" x1="4" y1="12" x2="20" y2="12"/>
+        <line class="bar bar-bot" x1="4" y1="17" x2="20" y2="17"/>
+      </svg>
+    </button>
     <span id="slot" class="chip">&mdash;</span>
     <!-- A lit pip, not the word "connected"; the words are on it for a
          screen reader and for a long press. -->
@@ -125,7 +127,6 @@
               stroke-linecap="square"/>
       </svg>
     </button>
-    <button id="hide" type="button" class="ghost" title="Hide these">&times;</button>
   </div>
 
   <!-- Anything the page needs to say goes here, at the top over the picture.

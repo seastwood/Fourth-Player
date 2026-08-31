@@ -147,6 +147,7 @@ print("\nselect and start sit differently in each orientation, on purpose")
 # Sideways the pad floats over the picture and costs it no height at all, so
 # there is nothing to buy and they stay in the corners where the thumbs are.
 css = open(os.path.join(ROOT, "web", "style.css")).read()
+html = open(os.path.join(ROOT, "web", "index.html")).read()
 areas = re.findall(r'grid-template-areas:\s*((?:\s*"[^"]*")+)\s*;', css)
 grids = [[r.split() for r in re.findall(r'"([^"]*)"', a)] for a in areas]
 check(len(grids) == 2, "two pad grids, one per orientation: %r" % grids)
@@ -251,11 +252,12 @@ check(re.search(r"\.dpad-arm\.live[^{]*\{[^}]*opacity: \.[0-9]+", land),
 print("\nand the picture stops answering stray taps")
 # With the controls over the video, a thumb sliding off the d-pad lands on the
 # picture -- which used to summon the chips in the middle of a game.
-check(".hudbtn { display: flex; }" in land,
-      "sideways there is a button for the chips")
 btn = re.search(r"\n\.hudbtn \{([^}]*)\}", css).group(1)
-check("display: none" in btn,
-      "which is not shown upright, where the chips are always visible anyway")
+check("display: flex" in btn and "display: none" not in btn,
+      "the button is on screen everywhere, not only sideways: %r" % btn.strip()[:60])
+check("position: absolute" not in btn,
+      "and sits in the row rather than floating over it, where it landed on "
+      "top of the name chip")
 check("hudButtonShowing()" in source,
       "and the page asks whether that button exists before answering a tap")
 tap = source[source.index('el("screen").addEventListener'):]
@@ -283,30 +285,44 @@ for holder in (".touch-left", ".touch-right", ".touch-mid", ".shoulders"):
     check(holder in takes,
           "%s takes pointer events in landscape" % holder)
 
-print("\nupright, the chips minimise only because the player asked")
-# The menu button is a landscape fixture; upright it appears only once the x
-# has been pressed, so the clean view is something chosen rather than something
-# that happens to you mid-game.
-top = css[:css.index("@media (orientation: landscape)")]
-check(re.search(r"\.stage\.minimised\s+\.hudbtn\s*\{[^}]*display:\s*flex", top),
-      "the menu button appears when minimised, outside any orientation query")
-check(re.search(r"^\.hudbtn\s*\{[^}]*display:\s*none", top, re.M),
-      "and is otherwise not there upright")
+print("\nthe button is the only way the chips come and go")
+# It used to be an overlay that appeared only in landscape, with an x in the
+# row to dismiss them. The x is gone: one control, always visible, doing both
+# jobs, so what closes the chips is the same thing that opens them.
+check('id="hide"' not in html and 'el("hide")' not in source,
+      "the x is gone from the markup and the script")
+check('id="hudbtn"' in html[html.index('<div id="hud"'):
+                            html.index('<div id="hud"') + 600],
+      "the button is inside the row")
+before_name = html[html.index('<div id="hud"'):html.index('id="slot"')]
+check('id="hudbtn"' in before_name,
+      "and ahead of the name chip, not on top of it")
 
-# Nothing may reach for this state on a timer or on a connection event: the
-# request was explicit that it is the player's call and never automatic.
-adds = re.findall(r'classList\.add\(\s*"minimised"\s*\)', source)
-check(len(adds) == 1, "exactly one place turns it on, found %d" % len(adds))
-hide_handler = source[source.index('el("hide").addEventListener'):]
-hide_handler = hide_handler[:hide_handler.index("});") + 3]
-check('classList.add("minimised")' in hide_handler,
-      "and it is the x that does it")
-check("setTimeout" not in hide_handler,
-      "no timer is involved in choosing it")
-opener = source[source.index('el("hudbtn").addEventListener'):]
-opener = opener[:opener.index("\n});") + 4]
-check('classList.remove("minimised")' in opener,
-      "the menu button is what undoes it: %r" % opener[:60])
+# Collapsing has to take the chips out of the layout, not just fade them, or
+# what is left is a full-width empty bar across the game.
+check(re.search(r"\.hud:not\(\.show\)\s*>\s*:not\(\.hudbtn\)\s*\{[^}]*display:\s*none",
+                css),
+      "collapsing removes the chips but keeps the button")
+
+# Default expanded, and nothing puts them away on a timer.
+show = source[source.index("function showHud"):]
+show = show[:show.index("\nfunction ")]
+check("setTimeout" not in show,
+      "opening the row arms no timer that would close it again: %r"
+      % show.strip()[-70:])
+
+print("\nthe icon says which way the button goes")
+check(".bar-top" in css and ".bar-mid" in css and ".bar-bot" in css,
+      "the three bars are styled separately so they can move apart")
+check(re.search(r"\.hud\.show .hudbtn \.bar-top \{[^}]*rotate\(45deg\)", css)
+      and re.search(r"\.hud\.show .hudbtn \.bar-bot \{[^}]*rotate\(-45deg\)", css),
+      "expanded, the outer two cross over")
+check(re.search(r"\.hud\.show .hudbtn \.bar-mid \{[^}]*opacity:\s*0", css),
+      "and the middle one goes out, which is what makes it an x")
+check("steps(" in re.search(r"\.hudbtn \.bar \{([^}]*)\}", css).group(1),
+      "it snaps between the two rather than gliding")
+check("prefers-reduced-motion" in css,
+      "and holds still for anyone who asked for that")
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

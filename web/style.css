@@ -252,11 +252,15 @@ video {
   padding: .5rem calc(.6rem + env(safe-area-inset-right, 0px))
            .5rem calc(.6rem + env(safe-area-inset-left, 0px));
   background: linear-gradient(to bottom, rgba(16, 14, 40, .92), transparent);
-  opacity: 0;
   transition: opacity .25s ease;
-  pointer-events: none;
 }
-.hud.show { opacity: 1; pointer-events: auto; }
+/* The row always exists, because the menu button lives in it and the menu
+   button is the only way back once the chips are put away. Collapsing takes
+   the chips out of the layout rather than fading them, so what is left is a
+   single button and not a full-width bar of empty space over the game. */
+.hud:not(.show) > :not(.hudbtn) { display: none; }
+.hud:not(.show) { background: none; pointer-events: none; }
+.hud:not(.show) .hudbtn { pointer-events: auto; }
 /* While anything in the row has focus, the row stays.
  *
  * On a desktop the chips are revealed by hovering the picture, and opening a
@@ -267,16 +271,13 @@ video {
  * open. */
 .hud:focus-within { opacity: 1; pointer-events: auto; }
 
-/* The way to the chips when the picture is not answering taps. Upright the
-   chips are a strip that is always there, so this is not needed and not
-   shown; sideways it is the only way in that a thumb cannot trigger by
-   accident. */
+/* The one control that is always on screen, upright, sideways and on a
+   desktop alike: it opens the chips and it puts them away. It sits at the head
+   of the row, ahead of the name, rather than floating over the corner -- as an
+   overlay it landed on top of the name it was supposed to sit beside. */
 .hudbtn {
-  display: none;
-  position: absolute;
-  z-index: 7;
-  top: calc(var(--top-safe) + .35rem);
-  left: calc(env(safe-area-inset-left, 0px) + .5rem);
+  display: flex;
+  flex: 0 0 auto;
   width: 1.9rem;
   height: 1.9rem;
   align-items: center;
@@ -286,22 +287,38 @@ video {
   border-radius: 0;
   background: rgba(16, 14, 40, .55);
   color: var(--ink);
-  opacity: .5;
+  /* Full strength: it was half-lit when it floated over the picture and had to
+     stay out of the way, but in the row it is one of the chips and reading
+     fainter than its neighbours just looks like a mistake. */
   transition: opacity .15s ease;
 }
 .hudbtn svg { width: 1.05rem; height: 1.05rem; display: block; }
-.hudbtn:active, .hudbtn:focus-visible { opacity: 1; }
-/* Out of the way while the chips are up: it is a way in, not a way out. */
-.stage:has(.hud.show) .hudbtn { opacity: 0; pointer-events: none; }
 
-/* Upright the chips are summoned by tapping the picture and there is no button
-   in the way, which is the clean view already. Pressing the x asks for
-   something more than that: put them away and leave a way back that is not the
-   whole picture, so a thumb on the game cannot bring them back by accident.
-   Only the x sets this. Nothing here decides on its own that the player wanted
-   the buttons gone -- the five-second timer still just hides them, and the
-   picture still answers a tap when it does. */
-.stage.minimised .hudbtn { display: flex; }
+/* Hamburger when the chips are away, a cross when they are up, so the button
+   always shows what pressing it will do. The bars snap between the two in a
+   few discrete frames rather than gliding: steps() is what makes it read as a
+   machine changing state instead of a phone animating, which is the rest of
+   this page's manner. */
+.hudbtn .bar {
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: square;
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  transition: transform .16s steps(4, end), opacity .16s steps(2, end);
+}
+.hud.show .hudbtn .bar-top { transform: translateY(5px) rotate(45deg); }
+.hud.show .hudbtn .bar-bot { transform: translateY(-5px) rotate(-45deg); }
+.hud.show .hudbtn .bar-mid { opacity: 0; }
+/* The middle bar going out is what sells the change, so it leads on the way to
+   a cross and follows on the way back. */
+.hudbtn .bar-mid { transition-delay: .08s; }
+.hud.show .hudbtn .bar-mid { transition-delay: 0s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hudbtn .bar { transition: none; }
+}
+.hudbtn:active { opacity: .6; }
 
 /* Hover reveals them only where hovering is a thing. A phone applies :hover to
    whatever was last tapped and keeps it there, so this rule held the chips on
@@ -309,7 +326,7 @@ video {
 @media (hover: hover) and (pointer: fine) {
   /* Not once they have been put away on purpose: a pointer crossing the window
      is not somebody asking for them back. */
-  .stage:not(.minimised):hover .hud { opacity: 1; pointer-events: auto; }
+  .stage:hover .hud.show { opacity: 1; pointer-events: auto; }
 }
 
 .chip {
@@ -806,7 +823,6 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      pointer events never reaches it. */
   .touch-left, .touch-right, .touch-mid,
   .shoulders { pointer-events: auto; }
-  .hudbtn { display: flex; }
   /* Sized against the stage, not the window. These were 30vh and 40vh, which
      on a phone measure the window as if the address bar and tab strip were not
      there -- so on a 390-tall phone showing 300, the pad sized itself for 390,
