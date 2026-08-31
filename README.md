@@ -549,14 +549,14 @@ python3 -m fourthplayer link open       # address and PIN
 python3 -m fourthplayer link required   # the default
 ```
 
-### Two people on one controller
+### Sharing one controller
 
 Some games were built to be played by passing a pad round a sofa -- Advance
 Wars, hot-seat strategy, anything that takes turns. Everybody playing is player
 one, and swapping seats between turns is not the same thing as both of you
 having the controls.
 
-In Kodi it is **Can two people share a controller?**; from a shell:
+In Kodi it is **Can players share a controller?**; from a shell:
 
 ```sh
 python3 -m fourthplayer share            # which rule is in force
@@ -565,13 +565,14 @@ python3 -m fourthplayer share off        # the default: picking it swaps you
 ```
 
 With it on, choosing a controller somebody already holds puts you on it beside
-them rather than displacing them, and the game sees the two of you merged:
+them rather than displacing them, and the game sees everybody on it merged --
+any number of you, not a pair:
 buttons are or-ed, and each stick takes whichever of you has pushed it furthest
 from centre. That second rule is the one that matters in practice -- taking the
 newest frame instead would mean a passenger's resting thumb, arriving between
 two of the driver's frames, straightened the car out. Somebody letting go
 releases only what they were holding; the pad is only dropped when the last of
-them lets go.
+them lets go, however many that took.
 
 Off by default, because when everybody is their own player, being silently
 joined to somebody else's controller would be baffling.

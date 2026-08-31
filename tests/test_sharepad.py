@@ -1,4 +1,4 @@
-"""Two people on one controller, for the games meant to be played that way.
+"""Sharing one controller, for the games meant to be played that way.
 
 Advance Wars is passed round a sofa: everybody taking a turn is player one.
 Swapping seats in the web UI can do that, but only one at a time -- this is
@@ -95,6 +95,26 @@ pad.adopt_new_sender("b")
 check(pad.sent.pressed(UP), "a keeps playing through b's reload")
 check(pad.apply(P.PadState(seq=0, buttons=1 << DOWN), sender="b"),
       "and b's counter starting again at zero is accepted, not called stale")
+
+print("\nand it is not limited to two of them")
+# The wording in Kodi says "players", not "two people", so the code had better
+# mean it. Nothing here counts senders -- the merge walks whoever is present.
+pad = FakePad()
+for i, who in enumerate(("a", "b", "c", "d", "e")):
+    accepted = pad.apply(P.PadState(seq=i + 1, buttons=1 << (i + 8)), sender=who)
+    check(accepted, "sender %s is accepted alongside the rest" % who)
+merged = pad.sent
+check(all(merged.pressed(8 + i) for i in range(5)),
+      "all five are held at once, not just the last two")
+pad.apply(P.PadState(seq=99, axes=[12000, 0, 0, 0, 0, 0]), sender="a")
+pad.apply(P.PadState(seq=99, axes=[-31000, 0, 0, 0, 0, 0]), sender="c")
+pad.apply(P.PadState(seq=99, axes=[0, 0, 0, 0, 0, 0]), sender="e")
+check(pad.sent.axis(0) == -31000,
+      "the furthest push wins across all of them, got %d" % pad.sent.axis(0))
+pad.forget("c")
+check(pad.sent.axis(0) == 12000,
+      "and dropping one falls back to the next furthest, got %d" % pad.sent.axis(0))
+check(not pad.released, "with three still on it, the pad stays live")
 
 print("\nalone on a pad, nothing changed")
 pad = FakePad()

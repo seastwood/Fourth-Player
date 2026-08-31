@@ -392,5 +392,15 @@ check(src.count("lambda: choose_pin(status)") == 2,
 check(src.count("lambda: choose_share(status)") == 2,
       "and so is the shared-controller screen")
 
+print("\nthe controller question does not put a number on it")
+share_src = src[src.index("def choose_share"):]
+share_src = share_src[:share_src.index("\ndef ")]
+check("two people" not in share_src and "two guests" not in share_src,
+      "nothing in the screen says two: any number of guests can share a pad, "
+      "and the wording should not be the thing that limits it")
+check("Can players share a controller?" in src,
+      "it asks about players, not a pair")
+
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

@@ -406,7 +406,7 @@ def choose_url(status):
 
 
 def choose_share(status):
-    """Whether two guests may drive one controller at once.
+    """Whether guests may drive one controller together.
 
     For the games that are played by passing a pad round a sofa -- everybody
     taking a turn is player one. Swapping seats does that one at a time; this
@@ -415,7 +415,7 @@ def choose_share(status):
     shared = bool(status.get("share_pads"))
     labels = [("  " if shared else "> ") + "One each  (normal)",
               ("> " if shared else "  ") + "Share, for pass-the-pad games"]
-    choice = xbmcgui.Dialog().select("Can two people use one controller?", labels)
+    choice = xbmcgui.Dialog().select("Can players share a controller?", labels)
     if choice < 0:
         return
     want = (choice == 1)
@@ -601,7 +601,7 @@ def main():
             ("How many can join?…", lambda: choose_slots(status)),
             ("How do guests get in?…", lambda: choose_link(status)),
             ("What PIN do guests type?…", lambda: choose_pin(status)),
-            ("Can two people share a controller?…", lambda: choose_share(status)),
+            ("Can players share a controller?…", lambda: choose_share(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Picture quality…", lambda: set_quality(False)),
             ("Stop the service", stop_service),
@@ -624,7 +624,7 @@ def main():
             ("How many can join?…", lambda: choose_slots(status)),
             ("How do guests get in?…", lambda: choose_link(status)),
             ("What PIN do guests type?…", lambda: choose_pin(status)),
-            ("Can two people share a controller?…", lambda: choose_share(status)),
+            ("Can players share a controller?…", lambda: choose_share(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),

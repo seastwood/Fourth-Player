@@ -103,7 +103,7 @@ class VirtualPad:
                           product=PRODUCT, version=VERSION, bustype=BUSTYPE)
         self._last = {}
         # Per sender, not per pad. One counter was enough while a pad had one
-        # guest; two guests on one pad interleave their counters, and each
+        # guest; several on one pad interleave their counters, and each
         # one's frames then look stale beside the other's -- so both would go
         # dead. Keyed by whoever is sending, their newest frame is kept here
         # and the pad writes the merge of them.

@@ -217,7 +217,7 @@ class GuestConnection:
             return
         self.frames += 1
         self.last_input = time.monotonic()
-        # Named, so a pad two people are sharing can tell their frames apart
+        # Named, so a shared pad can tell its senders' frames apart
         # and merge them rather than treating each as the other's stale one.
         self.pad.apply(state, sender=self.slot)
 
@@ -696,7 +696,7 @@ class LiveSession:
         which is 2.3 s of every other guest's video not being served either.
         """
         peer, guest.peer = guest.peer, None
-        # Only this guest's contribution. On a pad two people are sharing, one
+        # Only this guest's contribution. On a shared pad, one
         # of them dropping out must not take the controls away from the other.
         guest.pad.forget(guest.slot)
         if peer is None:

@@ -225,7 +225,7 @@ label = paint[paint.index("const label ="):paint.index("};", paint.index("const 
 check("i === myPad" in label and "(you)" in label,
       "your own seat is marked as yours")
 check("i !== myPad" not in label,
-      "and the names are not withheld from it: once two people can share a "
+      "and the names are not withheld from it: once people can share a "
       "pad, the seat you most need to see the company on is your own")
 
 if failures:

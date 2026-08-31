@@ -120,7 +120,7 @@ def main(argv=None):
                              "running. approve: ask, and answer within 30s. "
                              "Omit to read the current setting.")
     share = sub.add_parser(
-        "share", help="whether two guests may drive the same controller")
+        "share", help="whether guests may drive the same controller together")
     share.add_argument("set", nargs="?", choices=["on", "off"],
                        help="on: everybody who picks a controller drives it, "
                             "for games meant to be played by passing one pad "
