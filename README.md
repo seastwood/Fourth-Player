@@ -283,7 +283,7 @@ through data files, which is what made splitting them worth doing.
 
 ```sh
 git clone https://github.com/seastwood/Fourth-Player
-cd fourth-player
+cd Fourth-Player                   # capital F, as GitHub spells it
 install/install.sh                 # packages, helper, udev, service, add-on
 python3 -m fourthplayer check      # says what this machine is still missing
 
@@ -587,7 +587,7 @@ remote can answer it; from a shell:
 
 ```sh
 python3 -m fourthplayer pin             # which rule is in force
-python3 -m fourthplayer pin 481625      # 4 to 12 digits, from now on
+python3 -m fourthplayer pin 246813      # 4 to 12 digits, from now on
 python3 -m fourthplayer pin ""          # back to a new random one each time
 ```
 

@@ -11,6 +11,24 @@ LIBEXEC=/usr/local/libexec/fourth-player-clocks
 
 say() { printf '\n== %s\n' "$1"; }
 
+# The service runs with PrivateTmp=yes, so it is given an empty /tmp of its
+# own. A checkout under there exists for you and not for it: the unit points
+# at a directory the service cannot see and dies at startup with 200/CHDIR,
+# which names no cause and sends you looking at the program. Refuse here, where
+# the reason is still in front of you.
+case "$REPO" in
+  /tmp/*|/var/tmp/*)
+    cat >&2 <<END
+This checkout is at $REPO.
+
+The service is sandboxed with PrivateTmp, which gives it an empty /tmp -- so it
+would never find this directory, and would fail at startup with a message that
+does not say why. Move the checkout under your home directory and run this
+again.
+END
+    exit 1;;
+esac
+
 say "packages"
 MISSING=""
 for pkg in $(grep -v '^#' "$REPO/install/packages.txt" | tr -d '\r'); do
@@ -94,7 +112,18 @@ say "config"
 say "checks"
 cd "$REPO"
 python3 -m fourthplayer check || true
-sh tests/run.sh >/dev/null && echo "tests pass"
+# Both streams. The suites log through Python's logging, which writes to
+# stderr, so a passing run still printed a page of warnings about paused
+# pipelines and sessions declining to save -- which reads, to somebody
+# installing this for the first time, as a broken install.
+LOG=/tmp/fourth-player-install-tests.log
+if sh tests/run.sh >"$LOG" 2>&1; then
+  echo "tests pass"
+else
+  echo "TESTS FAILED. The whole run is in $LOG; the end of it:" >&2
+  tail -25 "$LOG" >&2
+  exit 1
+fi
 
 cat <<'NOTE'
 

@@ -329,9 +329,9 @@ print("\nsetting a PIN from the television")
 sent = []
 main.C.set_pin = lambda pin: (sent.append(pin), {"ok": True})[1]
 
-chosen.update(select=0, yesno=True, numeric="481625", calls=[])
+chosen.update(select=0, yesno=True, numeric="246813", calls=[])
 main.choose_pin({"pin_fixed": False})
-check(sent == ["481625"], "the digits typed are the ones sent: %s" % sent)
+check(sent == ["246813"], "the digits typed are the ones sent: %s" % sent)
 warned = [c for c in chosen["calls"] if c[0] == "yesno"]
 check(warned and "stops changing" in warned[0][2],
       "and it says what the trade is first")
@@ -340,7 +340,7 @@ check(any(c[0] == "numeric" for c in chosen["calls"]),
 
 print("\nand backing out of that warning changes nothing")
 sent.clear()
-chosen.update(select=0, yesno=False, numeric="481625", calls=[])
+chosen.update(select=0, yesno=False, numeric="246813", calls=[])
 main.choose_pin({"pin_fixed": False})
 check(sent == [], "saying no sets nothing")
 
