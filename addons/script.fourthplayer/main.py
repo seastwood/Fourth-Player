@@ -37,11 +37,21 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 # Each of these sets every field, so switching between them cannot leave a
 # stale one behind from the last choice -- tests/test_addon.py enforces that.
 #
-# The 1080p entries are last, and they carry a warning, because on the machine
-# this was written for they hang the graphics card soonest. Not uniquely: 720p
-# hung it too, two and a half minutes into a later session, so this is about
-# how hard the card is being worked rather than a line 1080p crosses. Raising
-# the resolution just makes it happen sooner and more reliably.
+# 1080p30 is the default here, and the story behind that is worth keeping
+# because it was got wrong twice.
+#
+# A GameCube game kept hanging the graphics card mid-session -- a real reset,
+# VRAM lost, the picture black and the emulator unkillable. It happened sooner
+# at 1080p than at 720p, so 1080p looked like the cause and the default was put
+# back. Then it happened at 720p as well. Then it turned out that one game did
+# it -- Smuggler's Run, which drives around an open world -- while another on
+# the same emulator, Mario Power Tennis, played for as long as anyone liked.
+#
+# So it is a game that pushes this card past what it will do while also
+# encoding, not a resolution. Resolution changes how quickly that shows up,
+# which is exactly what made it look like the culprit. Anything that hangs the
+# card will announce itself in `dmesg | grep "VRAM is lost"`, which is the only
+# reliable way to tell.
 # Measured twice from a clean boot, running a GameCube game with a guest
 # connected:
 #
@@ -60,7 +70,10 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 # newer encoder may well be fine, so the option stays -- named so that nobody
 # picks it without knowing what it can do.
 QUALITY = [
-    ("Over the internet — 720p30, 1.5 Mb/s (default)",
+    ("Big screen — 1080p30, 3 Mb/s (default)",
+     dict(width=1920, height=1080, fps=30, bitrate_kbps=3000,
+          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
+    ("Over the internet — 720p30, 1.5 Mb/s",
      dict(width=1280, height=720, fps=30, bitrate_kbps=1500,
           queue_ms=60, jitter_ms=30, h264_profile="main", audio_frame_ms=20)),
     ("Same network — 720p60, 6 Mb/s",
@@ -72,10 +85,7 @@ QUALITY = [
     ("Lowest delay — 540p30, 1.2 Mb/s, no smoothing",
      dict(width=960, height=540, fps=30, bitrate_kbps=1200,
           queue_ms=25, jitter_ms=10, h264_profile="main", audio_frame_ms=10)),
-    ("Big screen — 1080p30, 3 Mb/s (hangs this GPU soonest)",
-     dict(width=1920, height=1080, fps=30, bitrate_kbps=3000,
-          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
-    ("Big screen, smoother — 1080p60, 6 Mb/s (worse again)",
+    ("Big screen, smoother — 1080p60, 6 Mb/s (delivers fewer frames here)",
      dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
           queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
 ]

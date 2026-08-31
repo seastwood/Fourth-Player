@@ -264,17 +264,17 @@ check(all(s["width"] == 1920 and s["height"] == 1080 for s in big),
 # for they hang the graphics card in ninety seconds -- vce_v3_0, the hardware
 # encoder, taking the game and the stream with it -- so the warning belongs in
 # the name somebody reads while choosing, not in a note further down.
-big_names = [n for n, s in main.QUALITY if s["height"] == 1080]
-# Both carry a warning, whatever its wording. 720p hangs this card too, just
-# less often, so the labels say "soonest" and "worse" rather than pretending
-# 1080p is a line the trouble starts at.
-check(all(re.search(r"hang|worse", n) for n in big_names),
-      "both 1080p entries warn: %r" % big_names)
-check([i for i, (_n, s) in enumerate(main.QUALITY) if s["height"] == 1080]
-      == [len(main.QUALITY) - 2, len(main.QUALITY) - 1],
-      "and they are the last two, not the first")
-check(main.QUALITY[0][1]["height"] == 720,
-      "while the default is the one that ran four minutes clean")
+# 1080p30 is the default: capturing a 1080p desktop at 720p downscales it
+# before the encoder sees it, and that softness is lost detail rather than
+# lost bitrate. The card's hangs turned out to be one particular game rather
+# than a resolution, so the resolution is chosen on how it looks.
+check(main.QUALITY[0][1]["height"] == 1080 and main.QUALITY[0][1]["fps"] == 30,
+      "the default captures at the screen's own size, at thirty: %r"
+      % main.QUALITY[0][1])
+sixty = [n for n, s in main.QUALITY if s["height"] == 1080 and s["fps"] == 60]
+check(sixty and "fewer frames" in sixty[0],
+      "and the sixty-frame one says it delivers fewer, which it measurably "
+      "does: %r" % sixty)
 
 print("\nevery preset is complete, so switching cannot leave a stale field")
 keys = [set(settings) for _, settings in main.QUALITY]
@@ -284,12 +284,18 @@ check(all(k == keys[0] for k in keys),
 existing = {"public_url": "https://play.example.com", "slots": 2}
 with open(config_path, "w") as handle:
     json.dump(existing, handle)
-chosen["select"] = 1
+# By name again. This was index 1, which meant the sixty-frame preset until
+# the list was reordered and then quietly meant something else -- the third
+# time an index in this file has gone stale under a reordering.
+sixty = next(i for i, (_n, st) in enumerate(main.QUALITY) if st["fps"] == 60)
+chosen["select"] = sixty
 main.set_quality(False)
 with open(config_path) as handle:
     written = json.load(handle)
-check(written.get("public_url") == "https://play.example.com" and written["fps"] == 60,
+check(written.get("public_url") == "https://play.example.com"
+      and written.get("slots") == 2,
       "and does not trample settings it does not own: %r" % written)
+check(written["fps"] == 60, "while writing the preset that was chosen")
 
 print("\nthe QR is a real image of the real link")
 try:

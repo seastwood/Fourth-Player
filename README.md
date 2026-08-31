@@ -627,7 +627,7 @@ RX 470, capturing a 1080p desktop:
 So **720p60 is the default**, and raising it above that buys a sharper picture
 and loses frames. The defaults in `config.py` are these measurements, not taste.
 
-### This card hangs under a heavy core plus encoding, at any resolution
+### One game hung this card, and it took three goes to see why
 
 Written first because it cost a power supply to learn. On the machine this was
 built for — a Radeon RX 470 — capturing at 1080p **hangs the graphics card**,
@@ -654,9 +654,14 @@ it is what the encoder is being asked to do rather than the power it draws.
 `Source: 1` on that reset is the scheduler timing out a hung job, which is why
 this reads as a hang rather than a brownout.
 
-**720p is not a cure, only a delay.** Written down because the first reading of
-this was wrong. A later session at 1280x720 and 1.5 Mb/s, with the same
-GameCube game, hung the same way two and a half minutes in:
+**It was one game, not the resolution.** Kept here in full because the wrong
+answer was reached twice, and the shape of the mistake is more useful than the
+conclusion.
+
+A GameCube game kept resetting the graphics card mid-session — VRAM lost, the
+picture black, the emulator unkillable. It happened within ninety seconds at
+1080p and took minutes at 720p, so 1080p looked like the cause. Then it
+happened at 720p too:
 
 ```
 21:00:31  capture running: 1280x720 @30, 1500 kb/s
@@ -664,25 +669,29 @@ GameCube game, hung the same way two and a half minutes in:
 21:03:17  amdgpu: VRAM is lost due to GPU reset!
 ```
 
-An earlier run at exactly those settings had lasted twelve minutes, so it is
-not a threshold that 1080p crosses and 720p does not. Raising the resolution
-makes it happen sooner and more reliably -- ninety seconds against minutes --
-which is why it looked like the cause.
+An earlier run at exactly those settings had lasted twelve minutes. So not a
+threshold either.
 
-What it actually seems to be is this card running a demanding emulator and a
-video encode at the same time. Dolphin is the heaviest thing here and the only
-core it has been seen with. So:
+What it actually was: **one game.** *Smuggler's Run*, which drives around an
+open world, hung the card reliably while being played. *Mario Power Tennis*, on
+the same emulator at the same settings, played as long as anyone liked. The
+resolution only changed how quickly the first one fell over, which is exactly
+what made it look responsible.
 
-* **Lighter cores may well be fine.** Everything up to and including the
-  Dreamcast has run for hours.
-* **Software encoding takes the failing block out of the picture**
-  (`"hardware_encode": false`). It costs CPU -- measured at 237% of a core for
-  1080p60, so perhaps 40-60% at 720p30 -- and this is a six-core machine.
-* **A newer card fixes it properly.** This is Polaris-era VCE; a card with VCN
-  encodes 1080p60 without noticing.
+Two things worth taking from that:
 
-The way to tell whether any change helped is `dmesg | grep "VRAM is lost"`
-after a session, not how it felt.
+* **A game that hangs the card will say so**, in
+  `dmesg | grep "VRAM is lost"`. Nothing else is reliable — not how it felt,
+  not how long it lasted, and certainly not which setting was changed most
+  recently.
+* **The lever for a game like that is not the capture size.** Software
+  encoding (`"hardware_encode": false`) takes the encoder out of the picture
+  at a cost in CPU; a card newer than Polaris encodes 1080p60 without
+  noticing. Dropping to 720p buys minutes, not safety.
+
+A power supply was replaced along the way, on the strength of a single power
+connector and a plausible story. It changed nothing. Worth remembering before
+buying a part to fix a hang.
 
 ### If guests watch on something bigger than a phone
 
