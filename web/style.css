@@ -267,6 +267,33 @@ video {
  * open. */
 .hud:focus-within { opacity: 1; pointer-events: auto; }
 
+/* The way to the chips when the picture is not answering taps. Upright the
+   chips are a strip that is always there, so this is not needed and not
+   shown; sideways it is the only way in that a thumb cannot trigger by
+   accident. */
+.hudbtn {
+  display: none;
+  position: absolute;
+  z-index: 7;
+  top: calc(var(--top-safe) + .35rem);
+  left: calc(env(safe-area-inset-left, 0px) + .5rem);
+  width: 1.9rem;
+  height: 1.9rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid var(--dim);
+  border-radius: 0;
+  background: rgba(16, 14, 40, .55);
+  color: var(--ink);
+  opacity: .5;
+  transition: opacity .15s ease;
+}
+.hudbtn svg { width: 1.05rem; height: 1.05rem; display: block; }
+.hudbtn:active, .hudbtn:focus-visible { opacity: 1; }
+/* Out of the way while the chips are up: it is a way in, not a way out. */
+.stage:has(.hud.show) .hudbtn { opacity: 0; pointer-events: none; }
+
 /* Hover reveals them only where hovering is a thing. A phone applies :hover to
    whatever was last tapped and keeps it there, so this rule held the chips on
    screen no matter what closed them -- the x appeared to do nothing. */
@@ -762,13 +789,20 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     pointer-events: none;
   }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
+  .hudbtn { display: flex; }
   /* Sized against the stage, not the window. These were 30vh and 40vh, which
      on a phone measure the window as if the address bar and tab strip were not
      there -- so on a 390-tall phone showing 300, the pad sized itself for 390,
      the middle row grew past the space available, and select and start were
      pushed off the bottom. */
-  .dpad { width: min(calc(30 * var(--sh)), 175px); }
-  .face { width: min(calc(40 * var(--sh)), 235px); }
+  /* Bigger than the letterbox bar, and see-through because of it. Sideways
+     these used to be held inside the black margin beside the picture, which
+     on a phone is a thumb's width if you are lucky -- so the controls were
+     sized by how wide the bars happened to be rather than by the hand using
+     them. They lie over the picture now and are faint enough to see through,
+     which is the trade that buys the size. */
+  .dpad { width: min(calc(38 * var(--sh)), 215px); }
+  .face { width: min(calc(46 * var(--sh)), 265px); }
   /* Sideways they go back to the far corners: the middle of the screen is
      the picture, the corners are where the thumbs already are, and there is
      no height to save here because the pad floats over the picture rather
@@ -776,30 +810,21 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-mid { width: 100%; align-items: stretch; }
   .centre-row { width: 100%; justify-content: space-between; }
 
-  /* Centred in the black beside the picture, rather than in the whole half of
-     the screen (which put them on the game) or hard against the edge (which
-     was further out than necessary). fitGutter() measures the letterbox and
-     writes it into --gutter; the floor keeps the buttons their own size when
-     the picture is wide enough to leave almost no bar, and the fallback is a
-     reasonable guess for the moment before the first frame arrives. */
+  /* Against the outer edges, sized by their contents. These used to be held
+     inside the black bar beside the picture -- off the game, but on a phone
+     that bar is a thumb's width and the controls came out too small to use.
+     They reach back out through the padding to the edge of the safe area, and
+     lie over the picture, which is what the transparency below is for. */
   .touch-left, .touch-right { justify-content: center; }
-  /* The floor is the cluster's own width, repeated from the rules below --
-     max() takes lengths, so `min-content` cannot go here, and a bad value
-     would throw the whole declaration away. */
-  /* These two reach back out through the padding to the edge of the stage, so
-     that a column one gutter wide lands exactly on the letterbox. Inset by the
-     padding like everything else, it started a few pixels inside the picture
-     on a 16:9 stream, where the bar is barely wider than the buttons. The
-     padding still applies to the shoulders and to select and start. */
   .touch-left {
     justify-self: start;
     margin-left: calc(-1 * var(--side));
-    width: max(var(--gutter, 30%), min(30 * var(--sh), 175px));
+    width: auto;
   }
   .touch-right {
     justify-self: end;
     margin-right: calc(-1 * var(--side));
-    width: max(var(--gutter, 30%), min(40 * var(--sh), 235px));
+    width: auto;
   }
 
   /* Back in the grid, at the top corners, where the padding above keeps them
@@ -808,22 +833,25 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   /* Pinned to the bottom of its row so it cannot drift upward. */
   .touch-mid { align-self: end; }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
-  .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
+  /* Faint, because they are on the picture now rather than beside it. Enough
+     to aim at, little enough to see the game through. */
+  .dpad-arm, .dpad-hat, .tbtn, .stick { opacity: .58; }
+  .dpad-arm.live, .tbtn.live, .stick.live { opacity: .85; }
 
   /* With sticks, the corner clusters become two rows in a screen that has no
      spare height, so both shrink to make room and the stick takes the smaller
      share -- a thumb needs less travel than a d-pad needs reach. Everything
      is in --sh, the stage height, so this tracks the letterbox rather than
      the window: on a phone the window is taller than what is actually shown. */
-  .touch.has-sticks .dpad { width: min(calc(21 * var(--sh)), 125px); }
-  .touch.has-sticks .face { width: min(calc(28 * var(--sh)), 165px); }
-  .touch.has-sticks .stick { width: min(calc(19 * var(--sh)), 112px); }
+  .touch.has-sticks .dpad { width: min(calc(28 * var(--sh)), 165px); }
+  .touch.has-sticks .face { width: min(calc(34 * var(--sh)), 200px); }
+  .touch.has-sticks .stick { width: min(calc(25 * var(--sh)), 145px); }
   .touch.has-sticks .touch-left,
   .touch.has-sticks .touch-right { gap: .3rem; }
   /* The columns are as wide as their widest row now, so the gutter floor has
      to allow for the cluster above the stick rather than the stick alone. */
-  .touch.has-sticks .touch-left  { width: max(var(--gutter, 30%), min(21 * var(--sh), 125px)); }
-  .touch.has-sticks .touch-right { width: max(var(--gutter, 30%), min(28 * var(--sh), 165px)); }
+  .touch.has-sticks .touch-left,
+  .touch.has-sticks .touch-right { width: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

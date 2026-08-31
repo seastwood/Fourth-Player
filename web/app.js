@@ -1059,8 +1059,7 @@ function hideHud() {
   else hudTimer = setTimeout(hideHud, HUD_SECONDS * 1000);
 }
 
-// Tapping the picture asks for the chips, and asks again to dismiss them.
-el("screen").addEventListener("click", () => {
+function toggleHud() {
   if (el("hud").classList.contains("show")) {
     hideNotice();
     el("hud").classList.remove("show");
@@ -1068,6 +1067,25 @@ el("screen").addEventListener("click", () => {
   } else {
     showHud();
   }
+}
+
+/* Tapping the picture asks for the chips, and asks again to dismiss them --
+ * but only where there is no button for it. Sideways the controls lie over the
+ * picture, so a thumb that slides off the d-pad lands on the video and used to
+ * summon the chips in the middle of a game. Where the menu button is showing,
+ * that button is the only way in. */
+function hudButtonShowing() {
+  return getComputedStyle(el("hudbtn")).display !== "none";
+}
+
+el("screen").addEventListener("click", () => {
+  if (hudButtonShowing()) return;
+  toggleHud();
+});
+
+el("hudbtn").addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleHud();
 });
 
 function showNotice(html, sticky) {
@@ -1205,7 +1223,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31a";
+const CLIENT_BUILD = "2026-08-31b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1562,24 +1580,15 @@ function fitStage() {
   style.setProperty("--vv-width", vv.width + "px");
   style.setProperty("--vv-top", vv.offsetTop + "px");
   style.setProperty("--vv-left", vv.offsetLeft + "px");
-  fitGutter();
 }
 
-/* How much black there is beside the picture.
-   The stream is letterboxed -- a 4:3 game on a wide phone leaves a wide bar
-   either side, a 16:9 one leaves a narrow bar -- and that bar is where the
-   d-pad and face buttons belong: off the game, but no further out than they
-   have to be. Pinned to the screen edge they were too far out; centred in
-   their half of the grid they sat on the picture. Centred in the bar is both,
-   and it follows whatever is actually being played. */
-function fitGutter() {
-  const box = stage.getBoundingClientRect();
-  const w = video.videoWidth, h = video.videoHeight;
-  if (!box.width || !box.height || !w || !h) return;
-  const shown = Math.min(box.width, box.height * (w / h));
-  document.documentElement.style.setProperty(
-    "--gutter", Math.max(0, (box.width - shown) / 2) + "px");
-}
+/* There was a fitGutter() here, measuring the black bars beside the picture so
+   the d-pad and face buttons could sit in them -- off the game, but no further
+   out than necessary. It is gone because the controls no longer fit in those
+   bars: on a phone held sideways the bar is a thumb's width if you are lucky,
+   and sizing the controls by it made them too small to use. They lie over the
+   picture now and are faint enough to see through, which buys the size the
+   hand actually needs. Nothing reads --gutter any more. */
 
 if (window.visualViewport) {
   let pending = false;

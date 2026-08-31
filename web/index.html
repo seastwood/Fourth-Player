@@ -51,6 +51,18 @@
 <div id="stage" class="stage" hidden>
   <video id="screen" autoplay playsinline muted></video>
 
+  <!-- Sideways the controls lie over the picture, so tapping the picture to
+       summon the chips means a thumb that strays off the d-pad summons them
+       mid-game. This is the way in instead; the picture stops answering taps
+       wherever this button is showing. -->
+  <button id="hudbtn" class="hudbtn" type="button"
+          aria-label="Show the buttons at the top">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor"
+            stroke-width="2.2" stroke-linecap="square"/>
+    </svg>
+  </button>
+
   <div id="hud" class="hud">
     <span id="slot" class="chip">&mdash;</span>
     <!-- A lit pip, not the word "connected"; the words are on it for a

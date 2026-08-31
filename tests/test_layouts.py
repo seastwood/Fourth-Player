@@ -231,5 +231,37 @@ check("--side) + env(safe-area-inset-left" in block,
       "added to the padding, so the negative margins still reach the safe edge "
       "rather than the glass")
 
+print("\nsideways the controls are sized by the hand, not by the letterbox")
+# They used to be held inside the black bar beside the picture, which on a
+# phone is a thumb's width if you are lucky -- so the size came from how wide
+# the bars happened to be. They lie over the picture now, and are faint enough
+# to see the game through, which is the trade that buys the size.
+land = css[css.index("@media (orientation: landscape)"):]
+check("var(--gutter" not in land,
+      "nothing sideways is still measured against the letterbox bar")
+faint = re.search(r"\.dpad-arm, \.dpad-hat, \.tbtn, \.stick \{([^}]*)\}", land)
+check(faint and "opacity" in faint.group(1),
+      "the controls are see-through: %r"
+      % (faint.group(1).strip() if faint else None))
+alpha = float(re.search(r"opacity: (\.[0-9]+)", faint.group(1)).group(1))
+check(alpha < 0.7, "faint enough to see the game through: %s" % alpha)
+check(re.search(r"\.dpad-arm\.live[^{]*\{[^}]*opacity: \.[0-9]+", land),
+      "and a pressed one is brighter, so it is clear what was hit")
+
+print("\nand the picture stops answering stray taps")
+# With the controls over the video, a thumb sliding off the d-pad lands on the
+# picture -- which used to summon the chips in the middle of a game.
+check(".hudbtn { display: flex; }" in land,
+      "sideways there is a button for the chips")
+btn = re.search(r"\n\.hudbtn \{([^}]*)\}", css).group(1)
+check("display: none" in btn,
+      "which is not shown upright, where the chips are always visible anyway")
+check("hudButtonShowing()" in source,
+      "and the page asks whether that button exists before answering a tap")
+tap = source[source.index('el("screen").addEventListener'):]
+tap = tap[:tap.index("});")]
+check("if (hudButtonShowing()) return;" in tap,
+      "declining the tap where it does: %r" % tap.strip()[:80])
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
