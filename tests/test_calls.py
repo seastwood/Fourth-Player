@@ -53,6 +53,26 @@ PROVIDED = {
     "showTouch",
 }
 
+# What is inside a string is not code. CSS carries function calls of its own
+# -- calc(), translate(), url() -- and a page that builds a transform out of
+# numbers has those in string literals, where this audit read them as calls
+# into JavaScript that nothing defined. Comments go the same way: an example
+# written in prose is not a call either.
+def code_only(text):
+    """The source with string literals and comments blanked out."""
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)      # block comments
+    text = re.sub(r"(?m)//.*$", " ", text)                    # line comments
+    for quote in ("'", '"', "`"):
+        # Non-greedy, honouring backslash escapes, and never across a newline
+        # for the two quote kinds that cannot span one.
+        across = "" if quote == "`" else "\n"
+        text = re.sub(r"%s(?:\\.|[^%s\\%s])*%s" % (quote, quote, across, quote),
+                      " ", text, flags=re.S if quote == "`" else 0)
+    return text
+
+
+everything = code_only(everything)
+
 print("every call resolves to a definition")
 defined = set(PROVIDED)
 for pattern in (r"function\s+([A-Za-z_$][\w$]*)",

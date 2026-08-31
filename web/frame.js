@@ -77,7 +77,11 @@
     return buildRaw(state.buttons, state.axes, seq, releaseAll);
   }
 
-  const api = { buildFrame, buildRaw, padState, direction,
+  // toAxis is exported because the on-screen sticks produce their own -1..1
+  // values and must land on the wire in exactly the units the physical pad
+  // does. Doing that conversion in app.js would be a second copy of the
+  // protocol, which is the thing this file exists to prevent.
+  const api = { buildFrame, buildRaw, padState, direction, toAxis,
                 DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.FPFrame = api;

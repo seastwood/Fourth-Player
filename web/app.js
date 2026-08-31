@@ -585,6 +585,25 @@ const LAYOUTS = {
    told, and it has the shoulders and Select that the three-button Mega Drive
    pad simply has nowhere to put. Anybody who has chosen already keeps their
    choice -- this is only the starting point. */
+/* The Super Nintendo pad with two thumbsticks added, for games that want an
+   analogue stick and a diamond of buttons at once. Everything but the sticks
+   is shared with the layout above rather than copied, so a change to the
+   diamond cannot land on one pad and not the other. */
+LAYOUTS.nintendo_sticks = {
+  name: "Super Nintendo + sticks",
+  faceAspect: 1,
+  // The same diamond as the Super Nintendo pad, because that is the layout
+  // most people can name the buttons of without being told.
+  face: LAYOUTS.nintendo.face,
+  shoulders: LAYOUTS.nintendo.shoulders,
+  centre: LAYOUTS.nintendo.centre,
+  // Standard mapping: axes 0 and 1 are the left stick, 2 and 3 the right.
+  sticks: [
+    { id: "stick-left", axes: [0, 1] },
+    { id: "stick-right", axes: [2, 3] },
+  ],
+};
+
 const DEFAULT_LAYOUT = "nintendo";
 const LAYOUT_KEY = "fp:layout";
 
@@ -631,7 +650,101 @@ function buildTouchPad(layout) {
     centre.appendChild(makeButton(spec, "tbtn tbtn-start"));
   }
 
+  const sticks = layout.sticks || [];
+  el("touch").classList.toggle("has-sticks", sticks.length > 0);
+  for (const id of ["stick-left", "stick-right"]) {
+    const well = el(id);
+    const spec = sticks.find((k) => k.id === id);
+    well.hidden = !spec;
+    well.dataset.axes = spec ? spec.axes.join(",") : "";
+    centreKnob(well);
+  }
+
   el("touch-name").textContent = layout.name;
+}
+
+/* ---- on-screen sticks ----
+ *
+ * A thumb on glass has no spring and no centre, so the two things a real stick
+ * gives for free both have to be built: the knob follows the thumb only as far
+ * as the edge of the well, and it snaps back to the middle the moment the
+ * thumb leaves. Anything else and the character keeps walking after you let
+ * go, which is the one failure people do not forgive.
+ */
+let touchAxes = [0, 0, 0, 0];
+const stickHeld = {};                    // pointer id -> the well being dragged
+
+function centreKnob(well) {
+  const knob = well.querySelector(".stick-knob");
+  if (knob) knob.style.transform = "translate(-50%, -50%)";
+}
+
+function stickAxesOf(well) {
+  return (well.dataset.axes || "").split(",").filter((n) => n !== "")
+    .map(Number);
+}
+
+function moveStick(well, event) {
+  const rect = well.getBoundingClientRect();
+  const radius = rect.width / 2;
+  if (!radius) return;
+  let x = (event.clientX - (rect.left + radius)) / radius;
+  let y = (event.clientY - (rect.top + radius)) / radius;
+  // Clamped to the circle, not the square: a thumb in the corner of the well
+  // would otherwise read as 1.41 of tilt, which is past what a stick can do.
+  const reach = Math.hypot(x, y);
+  if (reach > 1) { x /= reach; y /= reach; }
+  const [ax, ay] = stickAxesOf(well);
+  if (ax !== undefined) touchAxes[ax] = x;
+  if (ay !== undefined) touchAxes[ay] = y;
+  const knob = well.querySelector(".stick-knob");
+  if (knob) {
+    knob.style.transform =
+      "translate(calc(-50% + " + (x * radius * 0.62).toFixed(1) + "px), "
+      + "calc(-50% + " + (y * radius * 0.62).toFixed(1) + "px))";
+  }
+}
+
+function releaseStick(well) {
+  for (const axis of stickAxesOf(well)) touchAxes[axis] = 0;
+  well.classList.remove("live");
+  centreKnob(well);
+}
+
+function releaseAllSticks() {
+  touchAxes = [0, 0, 0, 0];
+  for (const id of ["stick-left", "stick-right"]) {
+    const well = el(id);
+    well.classList.remove("live");
+    centreKnob(well);
+  }
+  for (const key of Object.keys(stickHeld)) delete stickHeld[key];
+}
+
+function wireSticks() {
+  for (const id of ["stick-left", "stick-right"]) {
+    const well = el(id);
+    well.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      well.setPointerCapture(event.pointerId);
+      stickHeld[event.pointerId] = well;
+      well.classList.add("live");
+      moveStick(well, event);
+      if (navigator.vibrate) navigator.vibrate(8);
+    });
+    well.addEventListener("pointermove", (event) => {
+      if (stickHeld[event.pointerId] !== well) return;
+      event.preventDefault();
+      moveStick(well, event);
+    });
+    const letGo = (event) => {
+      if (stickHeld[event.pointerId] !== well) return;
+      delete stickHeld[event.pointerId];
+      releaseStick(well);
+    };
+    well.addEventListener("pointerup", letGo);
+    well.addEventListener("pointercancel", letGo);
+  }
 }
 
 function chosenLayout() {
@@ -789,6 +902,7 @@ function wireTouch() {
 }
 
 function releaseAllTouch() {
+  releaseAllSticks();
   lastSent = null;          // the next frame must go, whatever it says
   touchButtons = 0;
   pointers.clear();
@@ -1086,7 +1200,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30k";
+const CLIENT_BUILD = "2026-08-30l";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1163,6 +1277,7 @@ function startPadLoop() {
   window.addEventListener("gamepaddisconnected", forgetPad);
 
   wireTouch();
+  wireSticks();
   // Filled in here rather than only when the on-screen pad is shown. It was
   // built inside showTouch(), which a desktop with a real controller and no
   // touchscreen never calls -- and the select is in the page from the start
@@ -1271,7 +1386,14 @@ function sendFrame(pad, releaseAll) {
   // the other: whichever is being touched wins by simply being pressed.
   const state = FPFrame.padState(releaseAll ? null : pad);
   const buttons = releaseAll ? 0 : (state.buttons | touchButtons);
-  const axes = releaseAll ? [0, 0, 0, 0, 0, 0] : state.axes;
+  // Whichever is being touched wins, exactly as the buttons do: an on-screen
+  // stick only overrides the physical one while a thumb is actually on it.
+  const axes = releaseAll ? [0, 0, 0, 0, 0, 0] : state.axes.slice();
+  if (!releaseAll) {
+    for (let i = 0; i < 4; i++) {
+      if (touchAxes[i]) axes[i] = FPFrame.toAxis(touchAxes[i]);
+    }
+  }
 
   const now = Date.now();
   const due = releaseAll || changed(buttons, axes) ||

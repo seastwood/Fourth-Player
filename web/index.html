@@ -252,6 +252,12 @@
         <div class="dpad-arm dpad-right" data-dir="right"></div>
         <div class="dpad-hat"></div>
       </div>
+      <!-- Empty unless the chosen layout has sticks. Built here rather than
+           created on the fly so the grid keeps its shape either way. -->
+      <div id="stick-left" class="stick" hidden
+           role="group" aria-label="Left stick">
+        <div class="stick-knob"></div>
+      </div>
     </div>
 
     <div class="touch-mid">
@@ -261,6 +267,10 @@
 
     <div class="touch-right">
       <div class="face" id="face"></div>
+      <div id="stick-right" class="stick" hidden
+           role="group" aria-label="Right stick">
+        <div class="stick-knob"></div>
+      </div>
     </div>
   </div>
 </div>

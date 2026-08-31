@@ -49,8 +49,8 @@ if out.returncode != 0:
 layouts = json.loads(out.stdout)
 
 print("both controllers are present and named")
-check(set(layouts) == {"genesis", "nintendo"},
-      "genesis and nintendo, got %r" % sorted(layouts))
+check(set(layouts) == {"genesis", "nintendo", "nintendo_sticks"},
+      "genesis, nintendo and nintendo_sticks, got %r" % sorted(layouts))
 for key, layout in layouts.items():
     check(bool(layout.get("name")), "%s has a name for the picker" % key)
 

@@ -436,6 +436,52 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .touch-right { grid-area: right; }
 .touch-mid { grid-area: mid; flex-direction: column; gap: .5rem; }
 
+/* ---- on-screen sticks --------------------------------------------------
+   A well with a knob in it. The knob follows the thumb to the edge and snaps
+   back when it leaves, because glass has neither a spring nor a centre.
+
+   Stacked under the cluster it belongs to -- the left stick below the d-pad,
+   the right below the face buttons -- which is where a thumb already is on a
+   modern pad, and which costs the grid nothing: both columns simply become
+   two rows. */
+.touch.has-sticks .touch-left,
+.touch.has-sticks .touch-right {
+  flex-direction: column;
+  gap: .45rem;
+}
+.stick {
+  position: relative;
+  flex: 0 0 auto;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 2px solid var(--key-edge);
+  background:
+    radial-gradient(circle at 50% 50%,
+                    rgba(122, 111, 192, .16) 0 38%, transparent 39%),
+    var(--key);
+  touch-action: none;
+}
+.stick[hidden] { display: none; }
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42%;
+  height: 42%;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--bg);
+  transform: translate(-50%, -50%);
+  /* No transition while a thumb is on it -- the knob must track the finger
+     exactly -- but it eases home on release, which is the only moment the
+     movement is not the player's own. */
+  transition: transform .12s ease-out;
+}
+.stick.live .stick-knob {
+  transition: none;
+  background: var(--accent);
+}
+
 /* Shoulders sit above the hand they belong to, triggers furthest out, the way
    they are reached for on a real pad. */
 .shoulders {
@@ -570,6 +616,17 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* Upright there is room below the picture, so the clusters give up less --
+     but they still give up something, because two rows of controls where
+     there was one has to come from somewhere and the strip is not allowed to
+     push the picture off the top. */
+  .touch.has-sticks .dpad  { width: min(30vw, 150px); }
+  .touch.has-sticks .face  { width: min(42vw, 200px); }
+  .touch.has-sticks .stick { width: min(27vw, 135px); }
+  .touch.has-sticks .touch-left,
+  .touch.has-sticks .touch-right { gap: .5rem; }
+  .touch {
     background: var(--bg);
     border-top: 3px solid var(--edge);
   }
@@ -653,6 +710,21 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }
+
+  /* With sticks, the corner clusters become two rows in a screen that has no
+     spare height, so both shrink to make room and the stick takes the smaller
+     share -- a thumb needs less travel than a d-pad needs reach. Everything
+     is in --sh, the stage height, so this tracks the letterbox rather than
+     the window: on a phone the window is taller than what is actually shown. */
+  .touch.has-sticks .dpad { width: min(calc(21 * var(--sh)), 125px); }
+  .touch.has-sticks .face { width: min(calc(28 * var(--sh)), 165px); }
+  .touch.has-sticks .stick { width: min(calc(19 * var(--sh)), 112px); }
+  .touch.has-sticks .touch-left,
+  .touch.has-sticks .touch-right { gap: .3rem; }
+  /* The columns are as wide as their widest row now, so the gutter floor has
+     to allow for the cluster above the stick rather than the stick alone. */
+  .touch.has-sticks .touch-left  { width: max(var(--gutter, 30%), min(21 * var(--sh), 125px)); }
+  .touch.has-sticks .touch-right { width: max(var(--gutter, 30%), min(28 * var(--sh), 165px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
