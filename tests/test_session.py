@@ -120,9 +120,20 @@ class FakePads(list):
         return True
 
 
-def session_with_guest():
+def session_with_guest(now=None):
+    """A session with one guest in slot 0.
+
+    `now` is installed before the guest is built, not after. The guest reads
+    the session's clock when it records when it last had media, and the reaper
+    compares against that same clock -- so a fixture that swapped the clock in
+    afterwards left the two reading different sources, and whether the test
+    passed then depended on how long the machine had been switched on. It held
+    for three days and failed within the hour after a reboot.
+    """
     loop = asyncio.new_event_loop()
     session = LiveSession(Config(), loop)
+    if now is not None:
+        session._now = now
     session.stage = FakeStage()
     session.pads = FakePads([FakePad("p1"), FakePad("p2"), FakePad("p3")])
     guest = GuestConnection(session, 0, socket=None)
@@ -206,8 +217,7 @@ check(session.reap_now(seconds=10) == 1,
 check(0 not in session.guests, "and the guest is gone")
 
 print("\nbut it never takes a slot from somebody who is playing")
-session, guest, loop = session_with_guest()
-session._now = lambda: clock[0]
+session, guest, loop = session_with_guest(lambda: clock[0])
 attach(session, guest)
 # Somebody playing is heard from constantly: their browser sends its pad state
 # every 50 ms whether or not anything moved. Timestamps must come from the same
@@ -230,13 +240,18 @@ check(guest.has_media(clock[0]), "and one heard from just now is")
 
 print("\na guest with no video does not keep a slot for ever")
 clock = [1000.0]
-session, guest, loop = session_with_guest()
-session._now = lambda: clock[0]
+session, guest, loop = session_with_guest(lambda: clock[0])
 session.invite = None            # the sweeper checks this; reap directly instead
 peer = attach(session, guest)
 check(session.guests.get(0) is guest, "the guest holds slot 0")
 
 clock[0] += S.GHOST_SECONDS + 10
+# Still sending pad state, which is what having media means: a browser sends
+# it every 50 ms whether or not anything moved, so silence is the only signal
+# that works. Saying "their peer exists" is not enough and has not been since
+# a guest who vanished was found holding a slot behind an ICE state that said
+# `completed` for ever.
+guest.last_input = clock[0]
 session._reap_ghosts()
 check(session.guests.get(0) is guest,
       "a guest whose media is up is never reaped, however long it has been")
@@ -255,8 +270,7 @@ check(0 not in session.guests,
       "but a slot held with no video is eventually freed")
 
 print("\na guest whose socket has gone too is not waited for as long")
-session, guest, loop = session_with_guest()
-session._now = lambda: clock[0]
+session, guest, loop = session_with_guest(lambda: clock[0])
 guest.socket = None              # tab closed, or out of range
 guest.media_since = clock[0]
 clock[0] += S.LEFT_SECONDS + 2

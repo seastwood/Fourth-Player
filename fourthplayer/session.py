@@ -144,7 +144,14 @@ class GuestConnection:
         self.pad_index = slot
         # When they last had a working media connection. A guest is only ever
         # reaped for having none, so this starts now rather than at zero.
-        self.media_since = time.monotonic()
+        #
+        # From the session's clock rather than straight from time.monotonic():
+        # the reaper compares this against that clock, and reading the two from
+        # different sources made the comparison depend on how long the machine
+        # had been switched on. It held for three days and broke within an hour
+        # of a reboot, because monotonic() had gone back to counting from a few
+        # hundred seconds while the test drove its own clock from a thousand.
+        self.media_since = session._now() if session is not None else time.monotonic()
         self.outbox = None      # set by the server; None while signalling is down
         self.on_signal = None   # how to reach them, so a rebuild needs no help
         self.codecs = []        # what their browser said it can decode
