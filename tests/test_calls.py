@@ -95,6 +95,31 @@ for match in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", everything):
 missing = sorted(called - defined)
 check(not missing, "no call has a missing definition: " + (", ".join(missing) or "none"))
 
+# A handler passed by name is a reference, not a call, so the check above --
+# which looks for `name(` -- cannot see it. fitGutter() was deleted along with
+# the one call to it, and three `addEventListener("resize", fitGutter)` lines
+# were left behind. Evaluating that argument threw a ReferenceError at load,
+# and every line of the script after it never ran: the guest could still join
+# and receive video, because that code came earlier in the file, but the whole
+# back half of the client was dead. Nothing failed loudly; it just stopped.
+print("\nevery handler passed by name exists too")
+handlers = set()
+for match in re.finditer(
+        # The event name is a string, and strings are blanked out above, so
+        # what is left to match between the parentheses is nothing at all.
+        r"(?:add|remove)EventListener\s*\(\s*,\s*"
+        r"([A-Za-z_$][\w$]*)\s*[,)]", everything):
+    handlers.add(match.group(1))
+for match in re.finditer(
+        r"(?:setTimeout|setInterval|requestAnimationFrame)\s*\(\s*"
+        r"([A-Za-z_$][\w$]*)\s*[,)]", everything):
+    handlers.add(match.group(1))
+handlers -= {"function", "async", "true", "false", "null", "undefined"}
+orphans = sorted(handlers - defined)
+check(not orphans,
+      "no handler is passed by a name nothing defines: "
+      + (", ".join(orphans) or "none"))
+
 print("a controller gets a readable name")
 node = shutil.which("node") or shutil.which("nodejs")
 if not node:

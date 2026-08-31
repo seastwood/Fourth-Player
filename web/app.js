@@ -1223,7 +1223,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31b";
+const CLIENT_BUILD = "2026-08-31c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1603,12 +1603,6 @@ if (window.visualViewport) {
   window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
   fitStage();
 }
-
-// The picture's shape is only known once there is a picture, and it changes
-// when the host switches console or resolution.
-video.addEventListener("loadedmetadata", fitGutter);
-video.addEventListener("resize", fitGutter);
-window.addEventListener("resize", fitGutter);
 
 /* ---- what your controller is doing ---- */
 

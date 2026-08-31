@@ -816,16 +816,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      They reach back out through the padding to the edge of the safe area, and
      lie over the picture, which is what the transparency below is for. */
   .touch-left, .touch-right { justify-content: center; }
-  .touch-left {
-    justify-self: start;
-    margin-left: calc(-1 * var(--side));
-    width: auto;
-  }
-  .touch-right {
-    justify-self: end;
-    margin-right: calc(-1 * var(--side));
-    width: auto;
-  }
+  /* Sized by their contents and left inside the padding. Reaching back out
+     through it with a negative margin put the cluster flush against the screen
+     edge, and the d-pad's arms are drawn outside its own box -- so the left arm
+     was cut off by the edge, which is the same thing the camera island does to
+     a control placed too far out. */
+  .touch-left { justify-self: start; width: auto; }
+  .touch-right { justify-self: end; width: auto; }
 
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
