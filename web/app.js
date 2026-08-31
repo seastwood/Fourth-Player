@@ -1085,6 +1085,14 @@ el("screen").addEventListener("click", () => {
 
 el("hudbtn").addEventListener("click", (event) => {
   event.stopPropagation();
+  if (stage.classList.contains("minimised")) {
+    // Coming back out of the clean view. Upright this also takes the button
+    // away again, which is why it opens rather than toggles: the thing that
+    // would close it is about to stop existing.
+    stage.classList.remove("minimised");
+    showHud();
+    return;
+  }
   toggleHud();
 });
 
@@ -1113,6 +1121,10 @@ el("hide").addEventListener("click", (event) => {
   hideNotice();
   el("hud").classList.remove("show");
   if (hudTimer) { clearTimeout(hudTimer); hudTimer = null; }
+  // Asking for them to go away is different from them timing out: it is a
+  // choice, so it lasts, and the menu button is what undoes it. Upright that
+  // button is otherwise not there at all.
+  stage.classList.add("minimised");
 });
 
 el("info").addEventListener("click", async () => {
@@ -1223,7 +1235,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31d";
+const CLIENT_BUILD = "2026-08-31e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

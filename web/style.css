@@ -294,11 +294,22 @@ video {
 /* Out of the way while the chips are up: it is a way in, not a way out. */
 .stage:has(.hud.show) .hudbtn { opacity: 0; pointer-events: none; }
 
+/* Upright the chips are summoned by tapping the picture and there is no button
+   in the way, which is the clean view already. Pressing the x asks for
+   something more than that: put them away and leave a way back that is not the
+   whole picture, so a thumb on the game cannot bring them back by accident.
+   Only the x sets this. Nothing here decides on its own that the player wanted
+   the buttons gone -- the five-second timer still just hides them, and the
+   picture still answers a tap when it does. */
+.stage.minimised .hudbtn { display: flex; }
+
 /* Hover reveals them only where hovering is a thing. A phone applies :hover to
    whatever was last tapped and keeps it there, so this rule held the chips on
    screen no matter what closed them -- the x appeared to do nothing. */
 @media (hover: hover) and (pointer: fine) {
-  .stage:hover .hud { opacity: 1; pointer-events: auto; }
+  /* Not once they have been put away on purpose: a pointer crossing the window
+     is not somebody asking for them back. */
+  .stage:not(.minimised):hover .hud { opacity: 1; pointer-events: auto; }
 }
 
 .chip {

@@ -283,5 +283,30 @@ for holder in (".touch-left", ".touch-right", ".touch-mid", ".shoulders"):
     check(holder in takes,
           "%s takes pointer events in landscape" % holder)
 
+print("\nupright, the chips minimise only because the player asked")
+# The menu button is a landscape fixture; upright it appears only once the x
+# has been pressed, so the clean view is something chosen rather than something
+# that happens to you mid-game.
+top = css[:css.index("@media (orientation: landscape)")]
+check(re.search(r"\.stage\.minimised\s+\.hudbtn\s*\{[^}]*display:\s*flex", top),
+      "the menu button appears when minimised, outside any orientation query")
+check(re.search(r"^\.hudbtn\s*\{[^}]*display:\s*none", top, re.M),
+      "and is otherwise not there upright")
+
+# Nothing may reach for this state on a timer or on a connection event: the
+# request was explicit that it is the player's call and never automatic.
+adds = re.findall(r'classList\.add\(\s*"minimised"\s*\)', source)
+check(len(adds) == 1, "exactly one place turns it on, found %d" % len(adds))
+hide_handler = source[source.index('el("hide").addEventListener'):]
+hide_handler = hide_handler[:hide_handler.index("});") + 3]
+check('classList.add("minimised")' in hide_handler,
+      "and it is the x that does it")
+check("setTimeout" not in hide_handler,
+      "no timer is involved in choosing it")
+opener = source[source.index('el("hudbtn").addEventListener'):]
+opener = opener[:opener.index("\n});") + 4]
+check('classList.remove("minimised")' in opener,
+      "the menu button is what undoes it: %r" % opener[:60])
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
