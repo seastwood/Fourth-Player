@@ -308,24 +308,62 @@ def close_session():
 
 # -- quality -------------------------------------------------------------
 
+def read_config():
+    """What is on disk now, or {} if there is nothing readable there."""
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    try:
+        with open(CONFIG_PATH) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def current_quality(config):
+    """Which preset the saved settings are, or None if they are not one.
+
+    Matched on the numbers rather than remembered as a name, because the file
+    is also editable by hand and by the command line -- a remembered name would
+    go on claiming a preset that the numbers underneath had moved away from.
+    """
+    for index, (_name, settings) in enumerate(QUALITY):
+        if all(config.get(key) == value for key, value in settings.items()):
+            return index
+    return None
+
+
 def set_quality(session_open):
     dialog = xbmcgui.Dialog()
-    choice = dialog.select("Picture quality", [name for name, _ in QUALITY])
-    if choice < 0:
-        return
+    config = read_config()
+    active = current_quality(config)
+    # The same marker the other pickers use, so the list says which one you are
+    # on rather than making you remember. Without it the only way to tell was
+    # to pick one and see whether anything changed.
+    labels = [("> " if index == active else "   ") + name
+              for index, (name, _settings) in enumerate(QUALITY)]
+    if active is None and config:
+        # Settings that are not any of these -- hand-edited, or from the
+        # command line. Saying so beats showing six unmarked lines and letting
+        # somebody conclude the first one is in force.
+        labels.append("   (currently: %dx%d, %d fps, %d kb/s -- not one of these)"
+                      % (config.get("width", 0), config.get("height", 0),
+                         config.get("fps", 0), config.get("bitrate_kbps", 0)))
+    choice = dialog.select("Picture quality", labels)
+    if choice < 0 or choice >= len(QUALITY):
+        return                          # the note at the end is not a choice
     _, settings = QUALITY[choice]
+    if choice == active:
+        notify("Already using that.")
+        return
 
-    config = {}
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH) as handle:
-                config = json.load(handle)
-        except (OSError, ValueError):
-            config = {}
     config.update(settings)
     try:
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        with open(CONFIG_PATH, "w") as handle:
+        # 0600, the same as the service writes it: this file can hold a set PIN,
+        # which is a password for the television, and rewriting it here must not
+        # be what quietly makes it world-readable.
+        fd = os.open(CONFIG_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
             json.dump(config, handle, indent=2)
             handle.write("\n")
     except OSError as exc:

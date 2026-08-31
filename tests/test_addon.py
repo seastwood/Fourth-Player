@@ -402,5 +402,61 @@ check("Can players share a controller?" in src,
       "it asks about players, not a pair")
 
 
+print("\nthe quality list says which one is in force")
+# Six unmarked lines and no way to tell which you are on: the only way to find
+# out was to pick one and see whether anything changed.
+big, over_net, same_net = main.QUALITY[0][1], main.QUALITY[1][1], main.QUALITY[2][1]
+check(main.current_quality(dict(big)) == 0, "the saved numbers name their preset")
+check(main.current_quality(dict(over_net)) == 1, "and a different one, its own")
+check(main.current_quality({}) is None, "nothing saved matches nothing")
+check(main.current_quality({"width": 1234, "height": 5, "fps": 7,
+                            "bitrate_kbps": 9}) is None,
+      "and settings that are not a preset are not forced into one")
+
+# Extra keys alongside a preset must not stop it matching: the file holds every
+# other setting too, and a preset is only the handful of keys it writes.
+mixed = dict(big)
+mixed.update({"slots": 4, "fixed_pin": "", "tls": True})
+check(main.current_quality(mixed) == 0,
+      "a preset is still recognised beside the rest of the config")
+
+print("\nand the marker is on the active line, not the first one")
+main.CONFIG_PATH = os.path.join(PROFILE, "quality.json")
+with open(main.CONFIG_PATH, "w") as fh:
+    json.dump(dict(same_net), fh)
+chosen.update(select=-1, calls=[])
+main.set_quality(False)
+listed = [c for c in chosen["calls"] if c[0] == "select"]
+check(listed, "the picker was shown")
+options = listed[-1][2] if listed else []
+marked = [o for o in options if o.startswith("> ")]
+check(len(marked) == 1, "exactly one line is marked, got %r" % marked)
+check(marked and marked[0].lstrip("> ").startswith("Same network"),
+      "and it is the one that is saved: %r" % (marked[:1],))
+check(options and options[0].startswith("   "),
+      "the default is not marked just for being first: %r" % (options[:1],))
+
+print("\nsettings that are not a preset say so rather than lying")
+with open(main.CONFIG_PATH, "w") as fh:
+    json.dump({"width": 800, "height": 600, "fps": 24, "bitrate_kbps": 999}, fh)
+chosen.update(select=-1, calls=[])
+main.set_quality(False)
+options = [c for c in chosen["calls"] if c[0] == "select"][-1][2]
+check(not any(o.startswith("> ") for o in options),
+      "nothing is claimed as active")
+check(any("not one of these" in o for o in options),
+      "and what is actually in force is shown: %r" % (options[-1:],))
+
+print("\npicking the one already in force does not restart anything")
+with open(main.CONFIG_PATH, "w") as fh:
+    json.dump(dict(big), fh)
+restarted = []
+main.C.restart_service = lambda: (restarted.append(True), (0, ""))[1]
+chosen.update(select=0, yesno=True, calls=[])
+main.set_quality(False)
+check(not restarted, "no restart for a setting that did not change")
+told = [c for c in chosen["calls"] if c[0] == "notify"]
+check(told and "Already" in told[-1][2], "and it says so: %r" % (told[-1:],))
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
