@@ -153,28 +153,42 @@ check(len(grids) == 2, "two pad grids, one per orientation: %r" % grids)
 portrait, landscape = grids
 
 check(len(portrait) == 2, "upright: two rows: %r" % portrait)
-check(portrait[0] == ["lsh", "mid", "rsh"],
-      "upright: between the bumpers: %r" % portrait[0])
+check(portrait[0] == ["lsh", "rsh"],
+      "upright: the shoulders own the top row: %r" % portrait[0])
+check(not any("mid" in row for row in portrait),
+      "upright: the pair is not in the grid at all, so it takes no width from "
+      "the clusters: %r" % portrait)
 check(len(landscape) == 3 and landscape[-1] == ["mid", "mid", "mid"],
       "sideways: still a row of their own along the bottom: %r" % landscape)
 
 # The whole rule, not up to the grid line -- the property being looked for
 # comes after it, so slicing there found a different rule's columns.
-opener = css.rindex(".touch {", 0, css.index('"lsh  mid   rsh"'))
+opener = css.rindex(".touch {", 0, css.index('"lsh  rsh"'))
 upright = css[opener:css.index("\n  }", opener)]
 cols = re.search(r"grid-template-columns:\s*([^;]*);", upright)
-check(cols and cols.group(1).strip() == "minmax(0, 1fr) auto minmax(0, 1fr)",
-      "upright: the middle is measured from its contents, so it is not "
-      "clipped as it was: %r" % (cols.group(1).strip() if cols else None))
+check(cols and cols.group(1).strip() == "1fr 1fr",
+      "upright: two equal halves, so the clusters keep the width they had "
+      "before the pair was put up there: %r"
+      % (cols.group(1).strip() if cols else None))
+check("position: relative" in upright,
+      "and the pad is the thing the floating pair is positioned against")
 
-block = css[css.index('"lsh  mid   rsh"'):]
+block = css[css.index('"lsh  rsh"'):]
 block = block[:block.index("@media (orientation: landscape)")]
-check("rotate(" in block, "upright: the pair is angled")
-check(re.search(r"\.touch-mid \.tbtn-start \{[^}]*rotate\(-?\d+deg\)", block),
-      "by a stated angle, on the buttons themselves")
-check("padding: 0 .5rem" in block,
-      "with room either side for the corners the turn throws out, which the "
-      "layout box does not account for")
+mid_rule = re.search(r"\.touch-mid \{([^}]*)\}", block).group(1)
+check("position: absolute" in mid_rule,
+      "upright: the pair floats rather than taking a column: %r"
+      % mid_rule.strip()[:70])
+angle = re.search(r"\.touch-mid \.tbtn-start \{[^}]*rotate\((-?\d+)deg\)", block)
+check(angle and int(angle.group(1)) <= -25,
+      "and is properly angled, not merely tilted: %r"
+      % (angle.group(1) if angle else None))
+check("margin-left: -" in block,
+      "with the two overlapping slightly, which is how they sit that close")
+inward = re.search(r"\.touch-left  \{([^}]*)\}", block)
+check(inward and "flex-end" in inward.group(1),
+      "and the clusters pulled in towards the middle: %r"
+      % (inward.group(1).strip() if inward else None))
 mid = re.search(r"\n\.touch-mid \{([^}]*)\}", css).group(1)
 check("overflow: hidden" not in mid, "and nothing is clipped anywhere")
 check("touch-name" not in css and "touch-name" not in source,

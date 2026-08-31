@@ -650,12 +650,17 @@ select.chip option { background: var(--bg2); color: var(--ink); }
        stacked shoulder buttons beside it, so the row it joins does not get
        any taller. Straight, they were clipped between the clusters; that was
        a sizing mistake rather than an argument against the position. */
+    /* Two columns, and the angled pair is not one of them. Giving it a
+       column of its own took that width off the clusters either side: the
+       d-pad and the buttons shrank to fit a narrower column and were pushed
+       apart into the middle of it. Floated over the gap between the shoulders
+       instead, it costs the grid nothing and the clusters keep every pixel
+       they had. */
+    position: relative;
     grid-template-areas:
-      "lsh  mid   rsh"
-      "left  .    right";
-    /* The middle is measured from its contents; the shoulders take what is
-       left and are content to be a little narrower. */
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      "lsh  rsh"
+      "left right";
+    grid-template-columns: 1fr 1fr;
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
@@ -677,22 +682,35 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .face { width: min(40vw, 190px); }
   .tbtn-shoulder { width: min(21vw, 96px); padding: .45rem 0; min-width: 0; }
   .shoulders { min-width: 0; }
-  /* In the flow it is a row, and one that leaves room either side for the
-     corners the rotation throws out -- a transform does not change the box
-     the layout reserves, so the space has to be asked for. */
+  /* Over the gap between the shoulder clusters, taking no space from
+     anything. Anchored to the top padding so it sits on the shoulder row. */
   .touch-mid {
+    position: absolute;
+    top: .8rem;
+    left: 50%;
+    transform: translateX(-50%);
     flex-direction: row;
-    align-self: center;
     justify-content: center;
-    gap: .15rem;
-    padding: 0 .5rem;
+    gap: 0;
   }
   .touch-mid .tbtn-start {
-    /* Both the same way, parallel, as they are on the real thing. */
-    transform: rotate(-20deg);
-    padding: .42rem .7rem;
-    font-size: .45rem;
+    /* Both the same way, parallel, as they are on the real thing -- and
+       overlapping slightly, which is what lets them sit as close together as
+       they do on it. */
+    transform: rotate(-32deg);
+    padding: .4rem .65rem;
+    font-size: .42rem;
   }
+  .touch-mid .tbtn-start + .tbtn-start { margin-left: -.35rem; }
+
+  /* The clusters come in towards the middle rather than sitting in the centre
+     of their half. Both properties, because with sticks these columns stack
+     and it is align-items that places them, and without sticks they are a row
+     placed by justify-content. */
+  .touch-left  { justify-content: flex-end;   align-items: flex-end; }
+  .touch-right { justify-content: flex-start; align-items: flex-start; }
+  .touch-left  > * { margin-right: 3vw; }
+  .touch-right > * { margin-left: 3vw; }
 }
 
 @media (orientation: landscape) {
