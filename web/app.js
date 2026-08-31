@@ -242,7 +242,7 @@ function connect(hello) {
         // The ports are decided while the game comes up, so ask again once it
         // has had time to. Without this the seats stay as they were until
         // somebody opens the panel.
-        setTimeout(() => send({ t: "pads" }), 8000);
+        askSeatsUntilKnown();
         return showNotice(
         "<p><strong>" + escapeText(message.label) + "</strong> is starting on "
         + "the television.</p>", false);
@@ -1227,7 +1227,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31g";
+const CLIENT_BUILD = "2026-08-31h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1778,7 +1778,16 @@ function paintSeats() {
   };
   // Rebuilt only when something changed, or a menu open on a phone closes
   // itself underneath the person using it.
-  const signature = wanted + "|" + myPad + "|" + JSON.stringify(padSeats.who);
+  //
+  // The player numbers belong in this key. They are half of what each option
+  // says, and they are the half that arrives late: a guest who is already here
+  // when a game starts sees ports go from nothing to a real mapping while the
+  // count, the seat and the names all stay put -- so the key matched, the list
+  // was left alone, and every option went on reading "not in this game" for a
+  // player who was holding a pad that worked. Reloading the page fixed it,
+  // which is the shape of a cache that is asked the wrong question.
+  const signature = wanted + "|" + myPad + "|" + JSON.stringify(padSeats.who)
+                  + "|" + JSON.stringify(padSeats.ports);
   if (pick.dataset.signature !== signature) {
     pick.dataset.signature = signature;
     pick.innerHTML = "";
@@ -1818,6 +1827,23 @@ function paintSeats() {
     note.textContent = "A game is running, but which controller is which "
                      + "player could not be read.";
   }
+}
+
+/* One question eight seconds after a game starts was a guess at how long a
+ * game takes to come up. A cartridge is ready in that time; a GameCube disc
+ * through Dolphin is not, so the answer came back saying the ports were not
+ * known yet and nothing ever asked again. Ask a few times instead, spread out,
+ * and stop as soon as there is a real answer -- or after about a minute, which
+ * is long enough that a game still not up is not one this can wait for. */
+const SEAT_ASKS = [4000, 9000, 18000, 32000, 60000];
+let seatAsks = [];
+
+function askSeatsUntilKnown() {
+  seatAsks.forEach(clearTimeout);
+  seatAsks = SEAT_ASKS.map((delay) => setTimeout(() => {
+    if (Object.keys(padSeats.ports).length) return;   // already answered
+    send({ t: "pads" });
+  }, delay));
 }
 
 function seatsFrom(message) {

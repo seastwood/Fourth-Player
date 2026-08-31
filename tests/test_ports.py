@@ -178,8 +178,17 @@ check('send({ t: "pads" })' in opener,
 
 starting = app_src[app_src.index('case "starting":'):]
 starting = starting[:starting.index('case "arrived"')]
-check('send({ t: "pads" })' in starting,
+check("askSeatsUntilKnown()" in starting,
       "and again once a game has had time to come up")
+# It used to be one question eight seconds in, which is a guess at how long a
+# game takes to start: right for a cartridge, far too early for a GameCube disc
+# through Dolphin, and there was no second attempt. The answer came back "not
+# known yet" and stayed on screen until the page was reloaded.
+runner = app_src[app_src.index("function askSeatsUntilKnown"):]
+runner = runner[:runner.index("\n}")]
+check('send({ t: "pads" })' in runner, "the retry is what does the asking")
+check("padSeats.ports" in runner,
+      "and it gives up as soon as there is a real answer, not on a fixed count")
 
 # Repicking is not a private action: the game stops on the television and
 # everybody playing chooses a slot again. One tap from a phone, behind a label

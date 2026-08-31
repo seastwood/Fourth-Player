@@ -193,4 +193,27 @@ check("padsStale = false" in seats,
 check(src.count('padsStale = true') == 0,
       "and nothing sets it true by guessing: it is set where a send is skipped")
 
+print("\nthe seat list is rebuilt when the player numbers arrive")
+# The options read "Player 2" or "not in this game" -- the player numbers are
+# half of what each one says, and the half that arrives late. Leaving them out
+# of the cache key meant a guest already here when a game started kept a list
+# built before there were any, and only a page reload fixed it.
+src = open(os.path.join(ROOT, "web", "app.js")).read()
+paint = src[src.index("function paintSeats()"):]
+paint = paint[:paint.index("\nfunction ")]
+key = paint[paint.index("const signature"):paint.index(";", paint.index("const signature"))]
+for part in ("padSeats.ports", "padSeats.who", "myPad"):
+    check(part in key, "the rebuild key covers %s: %s" % (part, key.split("=")[1].strip()[:80]))
+
+print("\nand a game that takes its time still gets asked about")
+check("SEAT_ASKS" in src and src.count("setTimeout(() => send({ t: \"pads\" }), 8000)") == 0,
+      "the single eight-second guess is gone")
+asks = src[src.index("const SEAT_ASKS"):]
+asks = asks[:asks.index("\n\n")]
+check(asks.count(",") >= 3, "it asks several times, spread out: %s" % asks.splitlines()[0])
+runner = src[src.index("function askSeatsUntilKnown"):]
+runner = runner[:runner.index("\n}")]
+check("padSeats.ports" in runner and "return" in runner,
+      "and stops as soon as there is a real answer")
+
 print("test_chips: all ok")
