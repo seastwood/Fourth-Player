@@ -119,6 +119,12 @@ def main(argv=None):
                              "whatever is playing. idle: only when nothing is "
                              "running. approve: ask, and answer within 30s. "
                              "Omit to read the current setting.")
+    pin = sub.add_parser(
+        "pin", help="set the PIN guests type, instead of a new one each session")
+    pin.add_argument("set", nargs="?",
+                     help="4 to 12 digits, used for every session from now on. "
+                          "Pass an empty string to go back to a fresh random "
+                          "PIN each time. Omit to see which is in use.")
     address = sub.add_parser(
         "url", help="the address guests' links are built on")
     address.add_argument("set", nargs="?",
@@ -207,6 +213,8 @@ def main(argv=None):
         request["slot"] = args.slot
     if args.command == "policy" and args.set:
         request["set"] = args.set
+    if args.command == "pin" and args.set is not None:
+        request["set"] = args.set
     if args.command == "url" and args.set is not None:
         request["set"] = args.set
     if args.command == "link" and args.set is not None:
@@ -244,6 +252,15 @@ def _print_address(reply):
               f"{reply['example_url'].split('/j/')[0]} (this network only)")
 
 
+def _print_pin_rule(reply):
+    # The digits themselves are only ever shown beside a live session; this
+    # says which rule is in force, which is what somebody setting it wants.
+    if reply.get("pin_fixed"):
+        print("  guests type the PIN that was set")
+    else:
+        print("  each session gets a new random PIN")
+
+
 def _print_status(reply):
     if not reply.get("open"):
         print("no session is open")
@@ -251,7 +268,9 @@ def _print_status(reply):
             print(f"  the next one will hold {reply['slots']} "
                   f"(up to {reply.get('max_slots', '?')})")
         _print_address(reply)
+        _print_pin_rule(reply)
         return
+    _print_pin_rule(reply)
     if reply.get("unlimited") or reply.get("remaining") is None:
         print("session open, no time limit")
     else:

@@ -260,7 +260,8 @@ class LiveSession:
         now = self._now()
         self.slots = int(slots or self.cfg.slots)
         self.invite = invite or invites.Session(
-            slots=self.slots, duration=duration_seconds, now=now)
+            slots=self.slots, duration=duration_seconds, now=now,
+            pin=getattr(self.cfg, "fixed_pin", "") or None)
         # A restored invite brings its own count: the pads have to match the
         # slots the people already holding the link were given.
         self.slots = self.invite.slots
@@ -1051,7 +1052,7 @@ class LiveSession:
             pass
 
     @staticmethod
-    def saved_invite(now):
+    def saved_invite(now, fixed_pin=""):
         """The invite from a previous run, if it is still in date."""
         try:
             with open(STATE_PATH) as handle:
@@ -1063,6 +1064,11 @@ class LiveSession:
         except (KeyError, TypeError, ValueError) as exc:
             log.warning("the saved session could not be read: %s", exc)
             return None
+        if invite is not None:
+            # The config is where a set PIN lives; the snapshot deliberately
+            # holds only digests. Without this a re-share after a restart would
+            # hand out a random PIN and quietly undo the owner's choice.
+            invite.adopt_fixed_pin(fixed_pin)
         if invite is None:
             # Said out loud, because the alternative -- what happened here for
             # weeks -- is a session that silently does not come back and no

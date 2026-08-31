@@ -75,8 +75,36 @@ def new_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
 
 
+# A PIN the owner sets is reused for every session rather than thrown away with
+# the old one, so it is exposed for longer and to more people. Four digits is
+# 10,000 guesses, which the lockout makes slow rather than impossible, so a
+# longer one can be chosen.
+MIN_FIXED_PIN = 4
+MAX_FIXED_PIN = 12
+
+
 def new_pin() -> str:
     return f"{secrets.randbelow(10 ** PIN_DIGITS):0{PIN_DIGITS}d}"
+
+
+def check_fixed_pin(pin):
+    """Why this cannot be used as a set PIN, or None.
+
+    Refusing where it is set beats discovering it where somebody cannot join:
+    a PIN nobody can type is a session nobody can enter, and by then the owner
+    is standing in front of a television with guests waiting.
+    """
+    if not pin:
+        return None
+    pin = str(pin)
+    if not pin.isdigit():
+        return "A set PIN must be digits only, so it can be typed on a phone."
+    if not MIN_FIXED_PIN <= len(pin) <= MAX_FIXED_PIN:
+        return ("A set PIN must be between %d and %d digits."
+                % (MIN_FIXED_PIN, MAX_FIXED_PIN))
+    if len(set(pin)) == 1:
+        return "A PIN of one repeated digit is guessed on the first try."
+    return None
 
 
 @dataclass
@@ -123,9 +151,12 @@ class Guest:
 class Session:
     """One open session: an invite, a set of slots, and a deadline."""
 
-    def __init__(self, slots, duration, now, label="Fourth Player"):
+    def __init__(self, slots, duration, now, label="Fourth Player", pin=None):
         if slots < 1:
             raise ValueError("a session with no slots admits nobody")
+        problem = check_fixed_pin(pin)
+        if problem:
+            raise ValueError(problem)
         self.slots = slots
         self.label = label
         self.started_at = now
@@ -133,7 +164,12 @@ class Session:
         self.destroyed = False
 
         self._token = new_token()
-        self._pin = new_pin()
+        # A set PIN is the same one every session -- that is the point of it,
+        # so the owner stops reading a new number off the television each
+        # time. The token is still fresh, so the link remains good for this
+        # session only even when the PIN is not.
+        self.fixed_pin = str(pin) if pin else ""
+        self._pin = self.fixed_pin or new_pin()
         self.token_digest = _digest(self._token)
         self.pin_digest = _digest(self._pin)
 
@@ -144,6 +180,42 @@ class Session:
         self._claims = {}            # digest -> (slot, when they left)
 
     # -- what the owner may read -------------------------------------------
+
+    def adopt_fixed_pin(self, pin):
+        """Tell a rebuilt invite which PIN the owner had set.
+
+        Called after restore(), where the clear pair is gone by design. If it
+        is still the PIN this invite was built with, the digests agree and it
+        can be shown again; if the owner changed it while the service was down,
+        they disagree and the stored one stays in force until the next
+        re-share, rather than locking out everybody holding the old link.
+        """
+        if not pin:
+            return False
+        self.fixed_pin = str(pin)
+        if _matches(self.fixed_pin, self.pin_digest):
+            self._pin = self.fixed_pin
+            return True
+        return False
+
+    def set_pin(self, pin):
+        """Change the PIN of a session that is already open.
+
+        Setting one and being told it applies to some future session is not
+        what somebody asks for when guests are waiting. People already playing
+        are unaffected -- they hold their own guest tokens and never type the
+        PIN again -- so this only changes what the next person has to type.
+        The failed-attempt count resets with it: it counted guesses at a PIN
+        that no longer exists.
+        """
+        problem = check_fixed_pin(pin)
+        if problem:
+            raise ValueError(problem)
+        self.fixed_pin = str(pin) if pin else ""
+        self._pin = self.fixed_pin or new_pin()
+        self.pin_digest = _digest(self._pin)
+        self.pin_attempts = 0
+        return self._pin
 
     @property
     def clear_invite(self):
@@ -291,7 +363,10 @@ class Session:
         promise a re-share has always made.
         """
         self._token = new_token()
-        self._pin = new_pin()
+        # The link changes, the set PIN does not: re-sharing is for handing the
+        # link to somebody new, and a PIN the owner chose is theirs to change,
+        # not something a re-share should quietly replace.
+        self._pin = getattr(self, "fixed_pin", "") or new_pin()
         self.token_digest = _digest(self._token)
         self.pin_digest = _digest(self._pin)
         self.pin_attempts = 0
@@ -386,6 +461,12 @@ class Session:
         # back. The invite still works for anybody already holding it; the
         # owner is told to re-share if they want to read it again.
         invite._token = invite._pin = None
+        # Whether a PIN was set is not written down here -- the setting lives
+        # in the config, which is the thing the owner edits. It is filled in
+        # from there by adopt_fixed_pin() once this is rebuilt; without it a
+        # re-share after a restart would quietly hand out a random PIN and
+        # undo a choice the owner made.
+        invite.fixed_pin = ""
         invite.token_digest = raw(data["token"])
         invite.pin_digest = raw(data["pin"])
         invite.pin_attempts = int(data.get("pin_attempts", 0))

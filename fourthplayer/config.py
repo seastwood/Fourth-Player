@@ -144,6 +144,12 @@ class Config:
     # Whether a guest needs the whole link, or just the address and the PIN.
     # On means the link is required, which is two secrets instead of one.
     require_link: bool = True
+    # A PIN of the owner's choosing, reused for every session, instead of six
+    # fresh digits each time that have to be read off the television before
+    # anybody can join. Empty means a new random one per session, which is
+    # still the safer default: a set PIN is one secret that stops changing.
+    # 4 to 12 digits -- see invites.check_fixed_pin.
+    fixed_pin: str = ""
     guest_launch: str = "off"
     # How many can join at once. Three by default -- a fourth player for a
     # sofa that already has three on it, which is where the name comes from.
@@ -177,9 +183,17 @@ class Config:
 
     def save(self, path=CONFIG_PATH):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as handle:
+        # This file can hold a set PIN, which is a password for the television.
+        # Create it unreadable to anybody else rather than fixing the mode
+        # afterwards, so there is no moment where it is world-readable.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
             json.dump(asdict(self), handle, indent=2)
             handle.write("\n")
+        try:
+            os.chmod(path, 0o600)          # an existing file keeps its mode
+        except OSError:
+            pass
 
     @classmethod
     def load(cls, path=CONFIG_PATH):

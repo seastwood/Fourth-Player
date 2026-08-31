@@ -30,7 +30,10 @@
 
   <form id="pin-form" autocomplete="off">
     <label for="pin">Enter the PIN shown on their screen</label>
-    <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+    <!-- Up to twelve, because the host may have set their own PIN rather than
+         taking the six random digits, and a longer one is the sensible answer
+         to a PIN that no longer changes every session. -->
+    <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="12"
            autocomplete="one-time-code" placeholder="000000" required>
     <!-- Optional, and remembered. It goes on somebody else's television, so
          there is a limit to how much of it they will see. -->

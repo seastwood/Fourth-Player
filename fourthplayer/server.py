@@ -484,6 +484,36 @@ class Server:
                     log.info("links will be built on %s",
                              self.cfg.public_url or "the address on this network")
                 return self._status()
+            if command == "pin":
+                if "set" in request:
+                    wanted = str(request["set"] or "")
+                    problem = invites.check_fixed_pin(wanted)
+                    if problem:
+                        return {"ok": False, "error": problem}
+                    self.cfg.fixed_pin = wanted
+                    # Take effect now, not at the next session. Being told a
+                    # PIN you just set does not apply yet, while people are
+                    # waiting to join, is the annoyance this feature exists to
+                    # remove rather than move.
+                    if self.session is not None and self.session.open:
+                        try:
+                            self.session.invite.set_pin(wanted)
+                        except ValueError as exc:
+                            return {"ok": False, "error": str(exc)}
+                        # Persist it with the session, so a restart does not
+                        # come back asking for the old one.
+                        self.session.save()
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        return {"ok": False,
+                                "error": "could not remember the PIN: %s" % exc}
+                    # Never the digits themselves: this log is read over a
+                    # shoulder and shipped in bug reports.
+                    log.info("sessions will %s",
+                             "use the PIN that was set" if wanted
+                             else "get a new random PIN each time")
+                return self._status()
             if command == "link":
                 if "set" in request:
                     self.cfg.require_link = bool(request["set"])
@@ -585,7 +615,8 @@ class Server:
         down, so the owner is told to re-share if they want to read it again.
         """
         import time as _time
-        invite = LiveSession.saved_invite(_time.monotonic())
+        invite = LiveSession.saved_invite(
+            _time.monotonic(), getattr(self.cfg, "fixed_pin", ""))
         if invite is None:
             return
         try:
@@ -609,6 +640,9 @@ class Server:
                     "public_url": self.cfg.public_url,
                     "example_url": self.join_url("EXAMPLE"),
                     "require_link": self.cfg.require_link,
+                    # Whether one is set, never what it is: this reply goes to
+                    # the add-on and to the terminal.
+                    "pin_fixed": bool(self.cfg.fixed_pin),
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None}}
@@ -626,6 +660,7 @@ class Server:
             "public_url": self.cfg.public_url,
             "example_url": self.join_url("EXAMPLE"),
             "require_link": self.cfg.require_link,
+            "pin_fixed": bool(self.cfg.fixed_pin),
             "base_url": self.join_url("").rstrip("/").rsplit("/j", 1)[0],
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,

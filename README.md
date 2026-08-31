@@ -549,6 +549,32 @@ python3 -m fourthplayer link open       # address and PIN
 python3 -m fourthplayer link required   # the default
 ```
 
+### A PIN you choose
+
+By default every session gets six fresh digits, which have to be read off the
+television before anybody can join. If that is a chore, set one and it is used
+for every session from then on:
+
+```sh
+python3 -m fourthplayer pin             # which rule is in force
+python3 -m fourthplayer pin 481625      # 4 to 12 digits, from now on
+python3 -m fourthplayer pin ""          # back to a new random one each time
+```
+
+It takes effect on the session that is already open, not just the next one, and
+it survives a restart: a re-share hands out a new link with the same PIN. It is
+stored in `~/.config/fourth-player/config.json`, which is written `0600` because
+it is now a password for the television.
+
+Worth knowing what you are trading. A PIN that never changes is one secret that
+stops rotating: it is exposed for longer, to everybody you have ever invited,
+and it is no longer thrown away with the session. Nothing else changes -- it is
+still only ever stored as a digest, still never written to a log, and still
+behind the same lockout, which shuts an address out after three wrong tries
+without spending the invite everybody else is holding. Pair it with `link
+required` if you want the second secret back, or choose more than six digits,
+which is why up to twelve are allowed.
+
 It is also the only way a home-screen icon keeps working. Adding the page to a
 phone's home screen saves the address it is on, and that address carries an
 invite that dies with the session -- so the icon works once. With the link
