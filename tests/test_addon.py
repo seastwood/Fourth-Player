@@ -259,9 +259,18 @@ check(len(big) == 2 and {s["fps"] for s in big} == {30, 60},
       "both 1080p options exist, at thirty and sixty: %r" % big)
 check(all(s["width"] == 1920 and s["height"] == 1080 for s in big),
       "and both really are 1080p")
-check("fast encoder" in [n for n, s in main.QUALITY if s["fps"] == 60
-                         and s["height"] == 1080][0],
-      "the sixty-frame one warns, where somebody is choosing")
+# Both 1080p entries warn, and they are last. On the machine this was written
+# for they hang the graphics card in ninety seconds -- vce_v3_0, the hardware
+# encoder, taking the game and the stream with it -- so the warning belongs in
+# the name somebody reads while choosing, not in a note further down.
+big_names = [n for n, s in main.QUALITY if s["height"] == 1080]
+check(all("hung" in n or "hangs" in n for n in big_names),
+      "both 1080p entries say what they did: %r" % big_names)
+check([i for i, (_n, s) in enumerate(main.QUALITY) if s["height"] == 1080]
+      == [len(main.QUALITY) - 2, len(main.QUALITY) - 1],
+      "and they are the last two, not the first")
+check(main.QUALITY[0][1]["height"] == 720,
+      "while the default is the one that ran four minutes clean")
 
 print("\nevery preset is complete, so switching cannot leave a stale field")
 keys = [set(settings) for _, settings in main.QUALITY]

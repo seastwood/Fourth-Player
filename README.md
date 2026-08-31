@@ -627,6 +627,38 @@ RX 470, capturing a 1080p desktop:
 So **720p60 is the default**, and raising it above that buys a sharper picture
 and loses frames. The defaults in `config.py` are these measurements, not taste.
 
+### Do not raise this above 720p on a Polaris card
+
+Written first because it cost a power supply to learn. On the machine this was
+built for — a Radeon RX 470 — capturing at 1080p **hangs the graphics card**,
+and takes the game and the stream down with it. Measured twice from a clean
+boot, running a GameCube game with a guest connected:
+
+| Capture | Result |
+|---|---|
+| 720p30 | four minutes, 28.8–29.7 fps throughout, no kernel errors at all |
+| 1080p30 | ninety seconds, then a GPU reset |
+
+```
+amdgpu 0000:01:00.0: GPU reset begin!. Source: 1
+amdgpu 0000:01:00.0: suspend of IP block <vce_v3_0> failed -22
+amdgpu 0000:01:00.0: GPU reset succeeded, trying to resume
+amdgpu 0000:01:00.0: VRAM is lost due to GPU reset!
+```
+
+`vce_v3_0` is the hardware H.264 encoder. Once it goes the screen is black,
+the process cannot even be killed cleanly, and the card needs a reboot. A new
+power supply was fitted between those two measurements and changed nothing, so
+it is what the encoder is being asked to do rather than the power it draws.
+
+`Source: 1` on that reset is the scheduler timing out a hung job, which is why
+this reads as a hang rather than a brownout.
+
+This is a fact about one encoder, not about 1080p. A newer card may be
+perfectly happy. But **the way to find out is to raise it and watch
+`dmesg | grep "VRAM is lost"`**, not to assume, and the default stays where it
+was measured.
+
 ### If guests watch on something bigger than a phone
 
 720p is chosen for frame rate, and it shows on a large screen: a 1080p desktop
@@ -640,6 +672,7 @@ connected**:
 |---|---|---|---|
 | 1080p30, nothing running | 3000 kb/s | ~28.6 fps, 2.8 Mb/s | — |
 | 1080p30, Dolphin (GameCube) | 3000 kb/s | ~26.4 fps, 2.7 Mb/s | emulator at 116% of a core |
+| 1080p30, Dolphin, sustained | 3000 kb/s | **the card hung after 90 s** | see the warning above |
 
 Dolphin is about the heaviest thing here, so that second row is close to the
 worst case: a tenth of the frames, for a picture with twice the detail. Lighter
@@ -650,6 +683,10 @@ usually takes the sound with it.
 ```json
 { "width": 1920, "height": 1080, "fps": 30, "bitrate_kbps": 3000 }
 ```
+
+**Read the section above before setting that**, which is where the same
+machine's encoder gave out after ninety seconds. What follows is what to raise
+*if the card can take it*.
 
 Two things to raise with it, neither obvious:
 

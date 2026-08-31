@@ -37,24 +37,27 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 # Each of these sets every field, so switching between them cannot leave a
 # stale one behind from the last choice -- tests/test_addon.py enforces that.
 #
-# Two of them are worth a word. The 1080p ones capture the screen at its own
-# size: a 1080p desktop sent at 720p is downscaled before the encoder sees it,
-# and that softness is lost detail rather than lost bitrate, so no amount of
-# extra bandwidth brings it back. And "smoother" is a promise the machine has
-# to be able to keep -- asking a slow encoder for sixty frames gets fewer
-# frames than asking it for thirty, not more, because it drops what it cannot
-# finish. Measured on the machine this was written for, with a guest connected:
-# 1080p30 delivered ~28.6 fps at 2.8 Mb/s, and 1080p60 delivered ~23.1 fps at
-# 2.2 Mb/s. Hence the warning in the name rather than in a footnote nobody
-# reads at the moment they are choosing.
+# The 1080p entries are last, and they carry a warning, because on the machine
+# this was written for they are not merely slow -- they hang the graphics card.
+# Measured twice from a clean boot, running a GameCube game with a guest
+# connected:
+#
+#   720p30   four minutes, 28.8-29.7 fps throughout, no errors at all
+#   1080p30  ninety seconds, then:
+#              amdgpu: GPU reset begin!. Source: 1
+#              amdgpu: suspend of IP block <vce_v3_0> failed -22
+#              amdgpu: VRAM is lost due to GPU reset!
+#
+# vce_v3_0 is the hardware encoder. Once it goes the game is black, the stream
+# is dead and the card needs a reboot. A new power supply was fitted between
+# those two measurements and made no difference, so it is the encoder's
+# throughput rather than the power it draws.
+#
+# Which is a fact about a Polaris card, not about 1080p. A machine with a
+# newer encoder may well be fine, so the option stays -- named so that nobody
+# picks it without knowing what it can do.
 QUALITY = [
-    ("Big screen — 1080p30, 3 Mb/s (default)",
-     dict(width=1920, height=1080, fps=30, bitrate_kbps=3000,
-          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
-    ("Big screen, smoother — 1080p60, 6 Mb/s (needs a fast encoder)",
-     dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
-          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
-    ("Over the internet — 720p30, 1.5 Mb/s",
+    ("Over the internet — 720p30, 1.5 Mb/s (default)",
      dict(width=1280, height=720, fps=30, bitrate_kbps=1500,
           queue_ms=60, jitter_ms=30, h264_profile="main", audio_frame_ms=20)),
     ("Same network — 720p60, 6 Mb/s",
@@ -66,6 +69,12 @@ QUALITY = [
     ("Lowest delay — 540p30, 1.2 Mb/s, no smoothing",
      dict(width=960, height=540, fps=30, bitrate_kbps=1200,
           queue_ms=25, jitter_ms=10, h264_profile="main", audio_frame_ms=10)),
+    ("Big screen — 1080p30, 3 Mb/s (hung this GPU in 90 seconds)",
+     dict(width=1920, height=1080, fps=30, bitrate_kbps=3000,
+          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
+    ("Big screen, smoother — 1080p60, 6 Mb/s (worse, and hangs it too)",
+     dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
+          queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
 ]
 
 
