@@ -155,5 +155,18 @@ for grid in grids:
           "and the clusters mirrored below: %r" % rows[1])
     check("mid" not in rows[1], "the middle does not reach the lower row")
 
+print("\nthe middle cannot climb onto the shoulders beside it")
+# It shares a row with two clusters of fixed width. The layout name used to
+# live in there too, and the moment that row became horizontal the name sat
+# next to select and start and pushed the pair straight onto the triggers.
+mid = re.search(r"\n\.touch-mid \{([^}]*)\}", css).group(1)
+check("min-width: 0" in mid, "it may shrink: %r" % mid.strip()[:60])
+check("align-self: center" in mid, "and sits between the two shoulder rows")
+check("touch-name" not in css and "touch-name" not in source,
+      "and the name is off the pad entirely, where the dropdown already says it")
+start = re.search(r"\.tbtn-start \{([^}]*)\}", css).group(1)
+check("clamp(" in start, "select and start give up padding before space: %r"
+      % [l.strip() for l in start.splitlines() if "padding" in l])
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

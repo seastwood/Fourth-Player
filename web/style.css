@@ -440,8 +440,16 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   grid-area: mid;
   flex-direction: row;
   gap: .5rem;
-  align-self: start;
+  /* Centred against the shoulders beside it, which stack two deep -- start
+     put select and start level with the triggers rather than between the two
+     rows. */
+  align-self: center;
   justify-content: center;
+  /* It shares its row with two clusters of fixed width. Without this it is
+     free to grow past its column and sit on top of them, which is what the
+     layout name did the moment this became a row. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ---- on-screen sticks --------------------------------------------------
@@ -505,14 +513,6 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 
 
 .centre-row { display: flex; gap: .5rem; align-items: center; }
-
-.touch-name {
-  font-family: var(--pixel);
-  font-size: .45rem;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
 
 .dpad {
   position: relative;
@@ -597,7 +597,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   position: static;
   width: auto;
   height: auto;
-  padding: .5rem 1rem;
+  /* Padding that gives way before the button does. Between two clusters of
+     fixed width there is only so much middle, and on a narrow phone a fixed
+     1rem either side is what turns "centred" into "on top of the trigger". */
+  padding: .5rem clamp(.4rem, 2.5vw, 1rem);
+  min-width: 0;
+  white-space: nowrap;
   border-radius: 0;
   border-color: var(--dim);
   color: var(--dim);
@@ -717,11 +722,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
   .shoulders { align-self: start; }
-  /* Along the top with the shoulders, not pinned to the bottom. */
-  .touch-mid { align-self: start; }
+  /* Between the shoulders rather than pinned to the bottom. */
+  .touch-mid { align-self: center; }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
-  .touch-name { display: none; }
 
   /* With sticks, the corner clusters become two rows in a screen that has no
      spare height, so both shrink to make room and the stick takes the smaller

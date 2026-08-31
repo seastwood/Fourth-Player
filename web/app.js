@@ -660,7 +660,6 @@ function buildTouchPad(layout) {
     centreKnob(well);
   }
 
-  el("touch-name").textContent = layout.name;
 }
 
 /* ---- on-screen sticks ----
@@ -1200,7 +1199,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30m";
+const CLIENT_BUILD = "2026-08-30n";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
