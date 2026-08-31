@@ -1205,7 +1205,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-30u";
+const CLIENT_BUILD = "2026-08-31a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1397,6 +1397,16 @@ function sendFrame(pad, releaseAll) {
   if (!releaseAll) {
     for (let i = 0; i < 4; i++) {
       if (touchAxes[i]) axes[i] = FPFrame.toAxis(touchAxes[i]);
+    }
+    /* The shoulders are buttons on this screen and triggers on the pad the
+       host builds. A physical controller reports both -- the button pressed
+       *and* how far the trigger travelled -- but a finger on glass has no
+       travel to report, so the button alone arrived and the trigger stayed at
+       rest. Games that steer or accelerate with an analogue trigger therefore
+       did nothing at all: Crazy Taxi would let you drive its menus and not its
+       car. Held on screen means held all the way. */
+    for (const [bit, axis] of [[6, 4], [7, 5]]) {
+      if (touchButtons & (1 << bit)) axes[axis] = FPFrame.TRIGGER_FULL;
     }
   }
 

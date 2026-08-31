@@ -81,7 +81,12 @@
   // values and must land on the wire in exactly the units the physical pad
   // does. Doing that conversion in app.js would be a second copy of the
   // protocol, which is the thing this file exists to prevent.
-  const api = { buildFrame, buildRaw, padState, direction, toAxis,
+  // Full travel on a trigger, in the units the wire uses. Exported because an
+  // on-screen shoulder button has no travel of its own to report and has to
+  // stand in for a trigger pressed all the way.
+  const TRIGGER_FULL = 32767;
+
+  const api = { buildFrame, buildRaw, padState, direction, toAxis, TRIGGER_FULL,
                 DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.FPFrame = api;
