@@ -623,7 +623,11 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   width: auto;
   height: auto;
   padding: .5rem 1rem;
-  border-radius: 0;
+  /* The one rounded thing on the whole screen, and deliberately so. Nothing
+     else here has a radius -- the console is drawn square on purpose -- but
+     these two are pills on the pad this is copying, and they read as select
+     and start because of it. */
+  border-radius: 999px;
   border-color: var(--dim);
   color: var(--dim);
   font-size: .5rem;
@@ -686,7 +690,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      anything. Anchored to the top padding so it sits on the shoulder row. */
   .touch-mid {
     position: absolute;
-    top: .8rem;
+    /* The pad's own top padding, plus a little: level with the shoulder
+       buttons rather than with the very top of their cluster. */
+    top: 1.45rem;
     left: 50%;
     transform: translateX(-50%);
     flex-direction: row;

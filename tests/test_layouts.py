@@ -185,6 +185,12 @@ check(angle and int(angle.group(1)) <= -25,
       % (angle.group(1) if angle else None))
 check("margin-left: -" in block,
       "with the two overlapping slightly, which is how they sit that close")
+start_rule = re.search(r"\n\.tbtn-start \{([^}]*)\}", css).group(1)
+check("border-radius: 999px" in start_rule,
+      "and they are pills, as they are on the pad being copied: %r"
+      % [l.strip() for l in start_rule.splitlines() if "radius" in l])
+check(css.count("border-radius: 999px") == 1,
+      "the only rounded thing on the screen, which is the point of it")
 inward = re.search(r"\.touch-left  \{([^}]*)\}", block)
 check(inward and "flex-end" in inward.group(1),
       "and the clusters pulled in towards the middle: %r"
