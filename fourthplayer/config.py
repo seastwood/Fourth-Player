@@ -150,6 +150,12 @@ class Config:
     # still the safer default: a set PIN is one secret that stops changing.
     # 4 to 12 digits -- see invites.check_fixed_pin.
     fixed_pin: str = ""
+    # Whether two guests may drive the same controller at once. Off means
+    # picking a controller somebody holds swaps the two of you, which is the
+    # right answer when everybody is a separate player. On is for the games
+    # that were built to be played by passing one pad round a sofa -- Advance
+    # Wars and the rest -- where the people taking turns are all player one.
+    share_pads: bool = False
     guest_launch: str = "off"
     # How many can join at once. Three by default -- a fourth player for a
     # sofa that already has three on it, which is where the name comes from.

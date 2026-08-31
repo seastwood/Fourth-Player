@@ -34,7 +34,12 @@ class Pad:
     def release_all(self):
         self.released += 1
 
-    def adopt_new_sender(self):
+    def forget(self, sender=None):
+        # VirtualPad drops one sender's share here; a stand-in has only ever
+        # had the one sender, so letting go of everything is the same thing.
+        self.release_all()
+
+    def adopt_new_sender(self, sender=None):
         self.adopted += 1
 
 

@@ -102,7 +102,12 @@ class VirtualPad:
         self._ui = UInput(capabilities(), name=name, vendor=VENDOR,
                           product=PRODUCT, version=VERSION, bustype=BUSTYPE)
         self._last = {}
-        self._seq = None
+        # Per sender, not per pad. One counter was enough while a pad had one
+        # guest; two guests on one pad interleave their counters, and each
+        # one's frames then look stale beside the other's -- so both would go
+        # dead. Keyed by whoever is sending, their newest frame is kept here
+        # and the pad writes the merge of them.
+        self._senders = {}               # key -> [seq, PadState]
         self.last_seen = (now or time.monotonic)()
         self.released = True
 
@@ -119,24 +124,69 @@ class VirtualPad:
         device = getattr(self._ui, "device", None)
         return getattr(device, "path", None) or "(node not resolved)"
 
-    def apply(self, state, now=None):
-        """Apply a frame. Returns False if it was stale and ignored."""
+    def apply(self, state, now=None, sender=None):
+        """Apply a frame from one sender. False if it was stale and ignored.
+
+        `sender` names who sent it, so that a pad being shared can tell two
+        people's frames apart. Left out, everything shares one name and this
+        behaves exactly as it did when a pad only ever had one guest.
+        """
+        key = "solo" if sender is None else sender
         stamp = (now or time.monotonic)()
-        if self._seq is not None and not P.is_newer(state.seq, self._seq):
+        known = self._senders.get(key)
+        if known is not None and not P.is_newer(state.seq, known[0]):
             # Still proof of life: an out-of-order frame means the guest is
             # talking, even though this particular one is not the newest truth.
             self.last_seen = stamp
             return False
-        self._seq = state.seq
         self.last_seen = stamp
         if state.release_all:
-            self.release_all()
+            # Only this sender lets go. Somebody else on the same pad may still
+            # be holding a direction, and taking their hand off the controller
+            # because a third person put theirs down is exactly the bug that
+            # sharing a pad has to avoid.
+            self._senders.pop(key, None)
+            if not self._senders:
+                self.release_all()
+            else:
+                self._write(to_events(self._merged()))
             return True
-        self._write(to_events(state))
+        self._senders[key] = [state.seq, state]
+        self._write(to_events(self._merged()))
         self.released = False
         return True
 
-    def adopt_new_sender(self):
+    def forget(self, sender):
+        """Drop a sender from a shared pad, and stop holding what they held."""
+        if self._senders.pop(sender, None) is None:
+            return
+        if not self._senders:
+            self.release_all()
+        else:
+            self._write(to_events(self._merged()))
+
+    def _merged(self):
+        """One pad state from everybody currently on this pad.
+
+        Buttons are or-ed and each axis takes whichever value is furthest from
+        centre. Both rules exist so that somebody sitting still cannot cancel
+        somebody playing: taking the newest frame instead would mean a
+        passenger's idle stick, arriving between two of the driver's frames,
+        straightened the car out.
+        """
+        states = [entry[1] for entry in self._senders.values()]
+        if len(states) == 1:
+            return states[0]
+        buttons = 0
+        axes = [0] * len(P.PadState().axes)
+        for state in states:
+            buttons |= state.buttons
+            for i, value in enumerate(state.axes):
+                if abs(value) > abs(axes[i]):
+                    axes[i] = value
+        return P.PadState(seq=0, buttons=buttons, axes=axes)
+
+    def adopt_new_sender(self, sender=None):
         """Forget the sequence number, because a fresh browser restarts at zero.
 
         This is what made a reconnecting guest able to watch but not play. The
@@ -149,8 +199,14 @@ class VirtualPad:
         Called whenever a peer attaches to this pad, which is the only moment
         the sender can have changed.
         """
-        self._seq = None
-        self.release_all()
+        if sender is None:
+            self._senders.clear()
+            self.release_all()
+            return
+        # Only the one who came back. Clearing the lot would take the pad away
+        # from everybody else sharing it, in the middle of their game, because
+        # somebody else reloaded a page.
+        self.forget(sender)
 
     def release_all(self):
         """Centre every axis and lift every button.
@@ -160,6 +216,7 @@ class VirtualPad:
         """
         if self.released:
             return
+        self._senders.clear()
         self._write(to_events(P.PadState()))
         self.released = True
 

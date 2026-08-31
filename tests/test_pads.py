@@ -124,7 +124,10 @@ clock[0] = 0.0
 pad = PADS.VirtualPad("rejoin", now=lambda: clock[0])
 for seq in range(1, 400):
     pad.apply(P.PadState(seq=seq, buttons=1 << P.BTN_A), now=lambda: clock[0])
-check(pad._seq == 399, "the pad tracked the sequence up to 399")
+# Sequence numbers are per sender now, so that two people sharing a pad
+# do not each look stale to the other. With one sender there is one.
+check(pad._senders["solo"][0] == 399,
+      "the pad tracked the sequence up to 399")
 # The browser reloads. Its counter restarts, and every frame now looks stale.
 stale = pad.apply(P.PadState(seq=0, buttons=1 << P.BTN_B), now=lambda: clock[0])
 check(stale is False,

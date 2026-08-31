@@ -119,6 +119,13 @@ def main(argv=None):
                              "whatever is playing. idle: only when nothing is "
                              "running. approve: ask, and answer within 30s. "
                              "Omit to read the current setting.")
+    share = sub.add_parser(
+        "share", help="whether two guests may drive the same controller")
+    share.add_argument("set", nargs="?", choices=["on", "off"],
+                       help="on: everybody who picks a controller drives it, "
+                            "for games meant to be played by passing one pad "
+                            "round. off: picking a taken one swaps you. Omit "
+                            "to read the current setting.")
     pin = sub.add_parser(
         "pin", help="set the PIN guests type, instead of a new one each session")
     pin.add_argument("set", nargs="?",
@@ -213,6 +220,8 @@ def main(argv=None):
         request["slot"] = args.slot
     if args.command == "policy" and args.set:
         request["set"] = args.set
+    if args.command == "share" and args.set is not None:
+        request["set"] = (args.set == "on")
     if args.command == "pin" and args.set is not None:
         request["set"] = args.set
     if args.command == "url" and args.set is not None:
@@ -252,6 +261,13 @@ def _print_address(reply):
               f"{reply['example_url'].split('/j/')[0]} (this network only)")
 
 
+def _print_share_rule(reply):
+    if reply.get("share_pads"):
+        print("  guests may share one controller")
+    else:
+        print("  each guest gets a controller of their own")
+
+
 def _print_pin_rule(reply):
     # The digits themselves are only ever shown beside a live session; this
     # says which rule is in force, which is what somebody setting it wants.
@@ -269,8 +285,10 @@ def _print_status(reply):
                   f"(up to {reply.get('max_slots', '?')})")
         _print_address(reply)
         _print_pin_rule(reply)
+        _print_share_rule(reply)
         return
     _print_pin_rule(reply)
+    _print_share_rule(reply)
     if reply.get("unlimited") or reply.get("remaining") is None:
         print("session open, no time limit")
     else:

@@ -215,7 +215,9 @@ class GuestConnection:
             return
         self.frames += 1
         self.last_input = time.monotonic()
-        self.pad.apply(state)
+        # Named, so a pad two people are sharing can tell their frames apart
+        # and merge them rather than treating each as the other's stale one.
+        self.pad.apply(state, sender=self.slot)
 
 
 class LiveSession:
@@ -564,7 +566,7 @@ class LiveSession:
         guest.on_signal = on_signal
         # A new peer means a new sender, whose sequence numbers start again at
         # zero. Without this the pad rejects everything they send as stale.
-        guest.pad.adopt_new_sender()
+        guest.pad.adopt_new_sender(guest.slot)
 
         def configure(peer):
             peer.on_input = guest.feed
@@ -692,7 +694,9 @@ class LiveSession:
         which is 2.3 s of every other guest's video not being served either.
         """
         peer, guest.peer = guest.peer, None
-        guest.pad.release_all()
+        # Only this guest's contribution. On a pad two people are sharing, one
+        # of them dropping out must not take the controls away from the other.
+        guest.pad.forget(guest.slot)
         if peer is None:
             return
         # Its death is expected from here on, and must not be read as the
@@ -735,6 +739,14 @@ class LiveSession:
         self.drop(slot, reason="was removed")
         return self.invite.kick(slot)
 
+    def _who_by_pad(self):
+        """{pad index as a string: [names]}, in slot order."""
+        out = {}
+        for guest in sorted(self.guests.values(),
+                            key=lambda g: getattr(g, "slot", 0)):
+            out.setdefault(str(guest.pad_index), []).append(guest.label)
+        return out
+
     def set_pad(self, guest, index):
         """Move a guest onto a different virtual pad, swapping if it is taken.
 
@@ -751,19 +763,28 @@ class LiveSession:
         if index == guest.pad_index:
             return guest.pad_index
 
-        other = next((g for g in self.guests.values()
-                      if g is not guest and g.pad_index == index), None)
+        # Sharing means nobody is displaced: both of you drive that pad, and
+        # what the game sees is the two of you merged. It is how a hot-seat
+        # game is meant to be played -- the pad goes round the sofa and
+        # everybody taking a turn is player one -- and it is off by default,
+        # because when everybody is their own player being silently joined to
+        # somebody else's controller would be baffling.
+        sharing = bool(getattr(getattr(self, "cfg", None),
+                               "share_pads", False))
+        other = None if sharing else next(
+            (g for g in self.guests.values()
+             if g is not guest and g.pad_index == index), None)
         # Let go of everything on both pads first. Moving a guest whose thumb
         # is on a direction would otherwise leave that direction held down on a
         # pad nobody is driving any more, and the character walks into a wall.
-        guest.pad.release_all()
+        guest.pad.forget(guest.slot)
         if other is not None:
-            other.pad.release_all()
+            other.pad.forget(other.slot)
             other.pad_index = guest.pad_index
         was, guest.pad_index = guest.pad_index, index
-        guest.pad.adopt_new_sender()
+        guest.pad.adopt_new_sender(guest.slot)
         if other is not None:
-            other.pad.adopt_new_sender()
+            other.pad.adopt_new_sender(other.slot)
             log.info("%s and %s swapped pads (%d <-> %d)",
                      guest.label, other.label, was, index)
         else:
@@ -817,7 +838,11 @@ class LiveSession:
             # "no game is running" while one plainly is sends somebody looking
             # in the wrong place entirely.
             "playing": playing,
-            "who": {str(g.pad_index): g.label for g in self.guests.values()},
+            # Everybody on each pad, not just whoever was looked at last: with
+            # sharing on there can be several, and a list that silently kept
+            # one name would make a shared controller look unoccupied.
+            "who": {index: ", ".join(names)
+                    for index, names in self._who_by_pad().items()},
             # index -> player number in the game, or absent when that pad is
             # not bound to a port at all.
             "ports": {str(i): ports[name]

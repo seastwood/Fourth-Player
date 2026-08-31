@@ -484,6 +484,18 @@ class Server:
                     log.info("links will be built on %s",
                              self.cfg.public_url or "the address on this network")
                 return self._status()
+            if command == "share":
+                if request.get("set") is not None:
+                    self.cfg.share_pads = bool(request["set"])
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember it: %s", exc)
+                    log.info("guests %s",
+                             "may share one controller"
+                             if self.cfg.share_pads
+                             else "each get a controller of their own")
+                return self._status()
             if command == "pin":
                 if "set" in request:
                     wanted = str(request["set"] or "")
@@ -643,6 +655,7 @@ class Server:
                     # Whether one is set, never what it is: this reply goes to
                     # the add-on and to the terminal.
                     "pin_fixed": bool(self.cfg.fixed_pin),
+                    "share_pads": self.cfg.share_pads,
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None}}
@@ -661,6 +674,7 @@ class Server:
             "example_url": self.join_url("EXAMPLE"),
             "require_link": self.cfg.require_link,
             "pin_fixed": bool(self.cfg.fixed_pin),
+            "share_pads": self.cfg.share_pads,
             "base_url": self.join_url("").rstrip("/").rsplit("/j", 1)[0],
             "guests": self.session.roster(),
             "url": self.join_url(clear[0]) if clear else None,
