@@ -137,25 +137,46 @@ check("touchOn ? chosenLayout() : \"off\"" in builder,
 check("paintPicker()" in builder,
       "with the label painted, since 'off' is renamed to the real controller")
 
-print("\nselect and start have a row of their own, in both orientations")
-# They were moved up between the shoulders to save a row of height. Squeezed
-# between two clusters they had nowhere to go and were clipped, and the
-# version with a row to itself simply reads better -- so the height stays
-# spent.
+print("\nselect and start sit differently in each orientation, on purpose")
+# Upright the picture is above the pad, so height the pad takes is width the
+# picture cannot have -- the video keeps its shape and grows in both
+# directions or neither. So they go up between the bumpers and are angled, the
+# way the pad this is drawn from does it: turned, the pair is shorter than the
+# two stacked shoulder buttons beside it, and the row costs nothing extra.
+#
+# Sideways the pad floats over the picture and costs it no height at all, so
+# there is nothing to buy and they stay in the corners where the thumbs are.
 css = open(os.path.join(ROOT, "web", "style.css")).read()
 areas = re.findall(r'grid-template-areas:\s*((?:\s*"[^"]*")+)\s*;', css)
 grids = [[r.split() for r in re.findall(r'"([^"]*)"', a)] for a in areas]
-check(len(grids) == 2, "there are two pad grids, one per orientation: %r" % grids)
-for rows in grids:
-    check(rows[-1][0] == "mid" and len(set(rows[-1])) == 1,
-          "the bottom row is select and start, all the way across: %r" % rows[-1])
-    check("mid" not in rows[0], "and nothing sits between the shoulders: %r" % rows[0])
-    check(rows[1][0] == "left" and rows[1][-1] == "right",
-          "with the clusters mirrored above it: %r" % rows[1])
+check(len(grids) == 2, "two pad grids, one per orientation: %r" % grids)
+portrait, landscape = grids
 
+check(len(portrait) == 2, "upright: two rows: %r" % portrait)
+check(portrait[0] == ["lsh", "mid", "rsh"],
+      "upright: between the bumpers: %r" % portrait[0])
+check(len(landscape) == 3 and landscape[-1] == ["mid", "mid", "mid"],
+      "sideways: still a row of their own along the bottom: %r" % landscape)
+
+# The whole rule, not up to the grid line -- the property being looked for
+# comes after it, so slicing there found a different rule's columns.
+opener = css.rindex(".touch {", 0, css.index('"lsh  mid   rsh"'))
+upright = css[opener:css.index("\n  }", opener)]
+cols = re.search(r"grid-template-columns:\s*([^;]*);", upright)
+check(cols and cols.group(1).strip() == "minmax(0, 1fr) auto minmax(0, 1fr)",
+      "upright: the middle is measured from its contents, so it is not "
+      "clipped as it was: %r" % (cols.group(1).strip() if cols else None))
+
+block = css[css.index('"lsh  mid   rsh"'):]
+block = block[:block.index("@media (orientation: landscape)")]
+check("rotate(" in block, "upright: the pair is angled")
+check(re.search(r"\.touch-mid \.tbtn-start \{[^}]*rotate\(-?\d+deg\)", block),
+      "by a stated angle, on the buttons themselves")
+check("padding: 0 .5rem" in block,
+      "with room either side for the corners the turn throws out, which the "
+      "layout box does not account for")
 mid = re.search(r"\n\.touch-mid \{([^}]*)\}", css).group(1)
-check("column" in mid, "and the middle stacks rather than spreading: %r" % mid.strip())
-check("overflow: hidden" not in mid, "nothing there is clipped")
+check("overflow: hidden" not in mid, "and nothing is clipped anywhere")
 check("touch-name" not in css and "touch-name" not in source,
       "the layout name is off the pad, where the dropdown already says it")
 

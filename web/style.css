@@ -641,15 +641,21 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   video { flex: 1 1 auto; min-height: 0; max-height: none; }
   .touch {
     flex: 0 0 auto;
-    grid-template-columns: 1fr 1fr;
-    /* Select and start along the bottom, centred. Putting them between the
-       shoulders saved a row of height, and it was not worth what it cost:
-       squeezed between two clusters they had nowhere to go, and the version
-       with a row of its own simply reads better. */
+    /* Select and start angled between the bumpers, the way the pad this is
+       drawn from puts them. Upright the picture sits above the pad, so height
+       the pad takes is width the picture cannot have -- the video keeps its
+       shape, and grows in both directions or neither. A row of its own cost
+       about three rem of that.
+       The angle is not decoration: turned, the pair is shorter than the two
+       stacked shoulder buttons beside it, so the row it joins does not get
+       any taller. Straight, they were clipped between the clusters; that was
+       a sizing mistake rather than an argument against the position. */
     grid-template-areas:
-      "lsh  rsh"
-      "left right"
-      "mid  mid";
+      "lsh  mid   rsh"
+      "left  .    right";
+    /* The middle is measured from its contents; the shoulders take what is
+       left and are content to be a little narrower. */
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
@@ -669,7 +675,24 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   }
   .dpad { width: min(32vw, 150px); }
   .face { width: min(40vw, 190px); }
-  .tbtn-shoulder { width: min(24vw, 105px); padding: .45rem 0; }
+  .tbtn-shoulder { width: min(21vw, 96px); padding: .45rem 0; min-width: 0; }
+  .shoulders { min-width: 0; }
+  /* In the flow it is a row, and one that leaves room either side for the
+     corners the rotation throws out -- a transform does not change the box
+     the layout reserves, so the space has to be asked for. */
+  .touch-mid {
+    flex-direction: row;
+    align-self: center;
+    justify-content: center;
+    gap: .15rem;
+    padding: 0 .5rem;
+  }
+  .touch-mid .tbtn-start {
+    /* Both the same way, parallel, as they are on the real thing. */
+    transform: rotate(-20deg);
+    padding: .42rem .7rem;
+    font-size: .45rem;
+  }
 }
 
 @media (orientation: landscape) {
