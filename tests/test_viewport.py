@@ -120,5 +120,19 @@ check("padding-top" in flow and "--top-safe" in flow,
       "and it pads itself past the status bar: %r"
       % [l.strip() for l in flow.splitlines() if "padding" in l])
 
+print("\nnothing that grows to fill a row does so without a limit")
+# A search field or a slider given flex-grow and no ceiling takes every spare
+# pixel, which on a desktop is most of the panel. Both were reported that way.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+for name, rule in (("the search field", r"\.browser-bar\.searching \.find \{([^}]*)\}"),
+                   ("the stick sliders", r"\.tune \.pad-range \{([^}]*)\}")):
+    block = re.search(rule, css)
+    check(block is not None, "%s rule is present" % name)
+    if block:
+        body = block.group(1)
+        check("flex: 1 1" in body, "%s grows to fill the row" % name)
+        check("max-width" in body,
+              "%s stops somewhere: %r" % (name, body.strip()[:70]))
+
 print(("FAILED: %d" % len(fails)) if fails else "test_viewport: all ok")
 sys.exit(1 if fails else 0)

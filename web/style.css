@@ -757,6 +757,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .browser-bar.searching .find {
   flex: 1 1 8rem;
   min-width: 5rem;
+  /* Capped, or it takes every pixel the bar has spare. On a desktop that is
+     most of the panel, for a field holding two or three words -- and the
+     wider it gets the further the eye has to travel from what is typed to the
+     games it filters. It still shrinks below this on a phone, which is the
+     case the growing was for. */
+  max-width: 22rem;
   padding-inline: .6rem;
   border-width: 2px;
   opacity: 1;
