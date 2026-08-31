@@ -38,7 +38,10 @@ CONFIG_PATH = os.path.expanduser("~/.config/fourth-player/config.json")
 # stale one behind from the last choice -- tests/test_addon.py enforces that.
 #
 # The 1080p entries are last, and they carry a warning, because on the machine
-# this was written for they are not merely slow -- they hang the graphics card.
+# this was written for they hang the graphics card soonest. Not uniquely: 720p
+# hung it too, two and a half minutes into a later session, so this is about
+# how hard the card is being worked rather than a line 1080p crosses. Raising
+# the resolution just makes it happen sooner and more reliably.
 # Measured twice from a clean boot, running a GameCube game with a guest
 # connected:
 #
@@ -69,10 +72,10 @@ QUALITY = [
     ("Lowest delay — 540p30, 1.2 Mb/s, no smoothing",
      dict(width=960, height=540, fps=30, bitrate_kbps=1200,
           queue_ms=25, jitter_ms=10, h264_profile="main", audio_frame_ms=10)),
-    ("Big screen — 1080p30, 3 Mb/s (hung this GPU in 90 seconds)",
+    ("Big screen — 1080p30, 3 Mb/s (hangs this GPU soonest)",
      dict(width=1920, height=1080, fps=30, bitrate_kbps=3000,
           queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
-    ("Big screen, smoother — 1080p60, 6 Mb/s (worse, and hangs it too)",
+    ("Big screen, smoother — 1080p60, 6 Mb/s (worse again)",
      dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
           queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
 ]

@@ -627,7 +627,7 @@ RX 470, capturing a 1080p desktop:
 So **720p60 is the default**, and raising it above that buys a sharper picture
 and loses frames. The defaults in `config.py` are these measurements, not taste.
 
-### Do not raise this above 720p on a Polaris card
+### This card hangs under a heavy core plus encoding, at any resolution
 
 Written first because it cost a power supply to learn. On the machine this was
 built for — a Radeon RX 470 — capturing at 1080p **hangs the graphics card**,
@@ -654,10 +654,35 @@ it is what the encoder is being asked to do rather than the power it draws.
 `Source: 1` on that reset is the scheduler timing out a hung job, which is why
 this reads as a hang rather than a brownout.
 
-This is a fact about one encoder, not about 1080p. A newer card may be
-perfectly happy. But **the way to find out is to raise it and watch
-`dmesg | grep "VRAM is lost"`**, not to assume, and the default stays where it
-was measured.
+**720p is not a cure, only a delay.** Written down because the first reading of
+this was wrong. A later session at 1280x720 and 1.5 Mb/s, with the same
+GameCube game, hung the same way two and a half minutes in:
+
+```
+21:00:31  capture running: 1280x720 @30, 1500 kb/s
+21:03:12  amdgpu: GPU reset begin!. Source: 1
+21:03:17  amdgpu: VRAM is lost due to GPU reset!
+```
+
+An earlier run at exactly those settings had lasted twelve minutes, so it is
+not a threshold that 1080p crosses and 720p does not. Raising the resolution
+makes it happen sooner and more reliably -- ninety seconds against minutes --
+which is why it looked like the cause.
+
+What it actually seems to be is this card running a demanding emulator and a
+video encode at the same time. Dolphin is the heaviest thing here and the only
+core it has been seen with. So:
+
+* **Lighter cores may well be fine.** Everything up to and including the
+  Dreamcast has run for hours.
+* **Software encoding takes the failing block out of the picture**
+  (`"hardware_encode": false`). It costs CPU -- measured at 237% of a core for
+  1080p60, so perhaps 40-60% at 720p30 -- and this is a six-core machine.
+* **A newer card fixes it properly.** This is Polaris-era VCE; a card with VCN
+  encodes 1080p60 without noticing.
+
+The way to tell whether any change helped is `dmesg | grep "VRAM is lost"`
+after a session, not how it felt.
 
 ### If guests watch on something bigger than a phone
 

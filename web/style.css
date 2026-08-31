@@ -434,7 +434,15 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 }
 .touch-left { grid-area: left; }
 .touch-right { grid-area: right; }
-.touch-mid { grid-area: mid; flex-direction: column; gap: .5rem; }
+/* Between the shoulders, across the top. A row rather than a column now: it
+   is a short, wide space between two clusters, not a tall narrow one. */
+.touch-mid {
+  grid-area: mid;
+  flex-direction: row;
+  gap: .5rem;
+  align-self: start;
+  justify-content: center;
+}
 
 /* ---- on-screen sticks --------------------------------------------------
    A well with a knob in it. The knob follows the thumb to the edge and snaps
@@ -609,10 +617,16 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch {
     flex: 0 0 auto;
     grid-template-columns: 1fr 1fr;
+    /* Select and start sit between the shoulders rather than on a row of
+       their own. That row cost height nothing else was using, and upright
+       the picture is above the pad -- so every millimetre the pad gives back
+       is a wider picture, because the video keeps its shape and grows in both
+       directions at once. It is also simply symmetrical: left cluster,
+       middle, right cluster, mirrored. */
     grid-template-areas:
-      "lsh  rsh"
-      "left right"
-      "mid  mid";
+      "lsh  mid   rsh"
+      "left  .    right";
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
@@ -650,9 +664,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     inset: 0;
     grid-template-rows: auto 1fr auto;
     grid-template-areas:
-      "lsh   .    rsh"
-      "left  .    right"
-      "mid   mid  mid";
+      "lsh   mid  rsh"
+      "left   .   right";
     align-items: center;
     row-gap: .4rem;
     --side: clamp(.6rem, 3vw, 2rem);
@@ -669,11 +682,11 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      pushed off the bottom. */
   .dpad { width: min(calc(30 * var(--sh)), 175px); }
   .face { width: min(calc(40 * var(--sh)), 235px); }
-  /* Select and start go to the far corners rather than the middle: in
-     landscape the middle of the screen is the picture, and the corners are
-     where the thumbs already are. */
-  .touch-mid { width: 100%; align-items: stretch; }
-  .centre-row { width: 100%; justify-content: space-between; }
+  /* Between the shoulders now, along the top edge, where they are still
+     reachable without a thumb crossing the picture -- and where they cost no
+     height, which is what the row of their own was costing. */
+  .touch-mid { align-items: center; }
+  .centre-row { justify-content: center; gap: .5rem; }
 
   /* Centred in the black beside the picture, rather than in the whole half of
      the screen (which put them on the game) or hard against the edge (which
@@ -704,9 +717,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
   .shoulders { align-self: start; }
-  /* Pinned to the ends of their row so they cannot drift inward as the middle
-     row takes up slack. */
-  .touch-mid { align-self: end; }
+  /* Along the top with the shoulders, not pinned to the bottom. */
+  .touch-mid { align-self: start; }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
   .touch-name { display: none; }

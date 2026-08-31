@@ -137,5 +137,23 @@ check("touchOn ? chosenLayout() : \"off\"" in builder,
 check("paintPicker()" in builder,
       "with the label painted, since 'off' is renamed to the real controller")
 
+print("\nthe pad is symmetrical and does not eat the picture's height")
+# Select and start used to have a row of their own across the bottom. Upright
+# that row cost height the picture wanted -- the video keeps its shape, so
+# height it cannot have is width it cannot have either -- and it made the pad
+# asymmetric: two clusters above, one bar below.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+areas = re.findall(r'grid-template-areas:\s*((?:\s*"[^"]*")+)\s*;', css)
+grids = [" / ".join(re.findall(r'"([^"]*)"', a)) for a in areas]
+check(len(grids) == 2, "there are two pad grids, one per orientation: %r" % grids)
+for grid in grids:
+    rows = [r.split() for r in grid.split(" / ")]
+    check(len(rows) == 2, "two rows, not three: %r" % grid)
+    check(rows[0] == ["lsh", "mid", "rsh"],
+          "shoulders with select and start between them: %r" % rows[0])
+    check(rows[1][0] == "left" and rows[1][-1] == "right",
+          "and the clusters mirrored below: %r" % rows[1])
+    check("mid" not in rows[1], "the middle does not reach the lower row")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

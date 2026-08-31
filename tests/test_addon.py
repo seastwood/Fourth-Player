@@ -10,6 +10,7 @@ What this cannot check is that it looks right on a screen. That needs eyes.
 """
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -264,8 +265,11 @@ check(all(s["width"] == 1920 and s["height"] == 1080 for s in big),
 # encoder, taking the game and the stream with it -- so the warning belongs in
 # the name somebody reads while choosing, not in a note further down.
 big_names = [n for n, s in main.QUALITY if s["height"] == 1080]
-check(all("hung" in n or "hangs" in n for n in big_names),
-      "both 1080p entries say what they did: %r" % big_names)
+# Both carry a warning, whatever its wording. 720p hangs this card too, just
+# less often, so the labels say "soonest" and "worse" rather than pretending
+# 1080p is a line the trouble starts at.
+check(all(re.search(r"hang|worse", n) for n in big_names),
+      "both 1080p entries warn: %r" % big_names)
 check([i for i, (_n, s) in enumerate(main.QUALITY) if s["height"] == 1080]
       == [len(main.QUALITY) - 2, len(main.QUALITY) - 1],
       "and they are the last two, not the first")
