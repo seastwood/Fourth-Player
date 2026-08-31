@@ -137,36 +137,39 @@ check("touchOn ? chosenLayout() : \"off\"" in builder,
 check("paintPicker()" in builder,
       "with the label painted, since 'off' is renamed to the real controller")
 
-print("\nthe pad is symmetrical and does not eat the picture's height")
-# Select and start used to have a row of their own across the bottom. Upright
-# that row cost height the picture wanted -- the video keeps its shape, so
-# height it cannot have is width it cannot have either -- and it made the pad
-# asymmetric: two clusters above, one bar below.
+print("\nselect and start have a row of their own, in both orientations")
+# They were moved up between the shoulders to save a row of height. Squeezed
+# between two clusters they had nowhere to go and were clipped, and the
+# version with a row to itself simply reads better -- so the height stays
+# spent.
 css = open(os.path.join(ROOT, "web", "style.css")).read()
 areas = re.findall(r'grid-template-areas:\s*((?:\s*"[^"]*")+)\s*;', css)
-grids = [" / ".join(re.findall(r'"([^"]*)"', a)) for a in areas]
+grids = [[r.split() for r in re.findall(r'"([^"]*)"', a)] for a in areas]
 check(len(grids) == 2, "there are two pad grids, one per orientation: %r" % grids)
-for grid in grids:
-    rows = [r.split() for r in grid.split(" / ")]
-    check(len(rows) == 2, "two rows, not three: %r" % grid)
-    check(rows[0] == ["lsh", "mid", "rsh"],
-          "shoulders with select and start between them: %r" % rows[0])
+for rows in grids:
+    check(rows[-1][0] == "mid" and len(set(rows[-1])) == 1,
+          "the bottom row is select and start, all the way across: %r" % rows[-1])
+    check("mid" not in rows[0], "and nothing sits between the shoulders: %r" % rows[0])
     check(rows[1][0] == "left" and rows[1][-1] == "right",
-          "and the clusters mirrored below: %r" % rows[1])
-    check("mid" not in rows[1], "the middle does not reach the lower row")
+          "with the clusters mirrored above it: %r" % rows[1])
 
-print("\nthe middle cannot climb onto the shoulders beside it")
-# It shares a row with two clusters of fixed width. The layout name used to
-# live in there too, and the moment that row became horizontal the name sat
-# next to select and start and pushed the pair straight onto the triggers.
 mid = re.search(r"\n\.touch-mid \{([^}]*)\}", css).group(1)
-check("min-width: 0" in mid, "it may shrink: %r" % mid.strip()[:60])
-check("align-self: center" in mid, "and sits between the two shoulder rows")
+check("column" in mid, "and the middle stacks rather than spreading: %r" % mid.strip())
+check("overflow: hidden" not in mid, "nothing there is clipped")
 check("touch-name" not in css and "touch-name" not in source,
-      "and the name is off the pad entirely, where the dropdown already says it")
-start = re.search(r"\.tbtn-start \{([^}]*)\}", css).group(1)
-check("clamp(" in start, "select and start give up padding before space: %r"
-      % [l.strip() for l in start.splitlines() if "padding" in l])
+      "the layout name is off the pad, where the dropdown already says it")
+
+print("\nand sideways the clusters keep clear of the camera island")
+# Rotated, the notch is at one end of the long edge -- which is exactly where
+# the left-hand cluster is put, so the d-pad and the left stick were being cut
+# in half by it. Every layout, not only the one with sticks.
+block = css[css.index("@media (orientation: landscape)"):]
+block = block[:block.index("\n}", block.index(".touch {"))]
+check("safe-area-inset-left" in block and "safe-area-inset-right" in block,
+      "the padding allows for both sides")
+check("--side) + env(safe-area-inset-left" in block,
+      "added to the padding, so the negative margins still reach the safe edge "
+      "rather than the glass")
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

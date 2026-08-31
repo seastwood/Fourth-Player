@@ -475,21 +475,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .touch-right { grid-area: right; }
 /* Between the shoulders, across the top. A row rather than a column now: it
    is a short, wide space between two clusters, not a tall narrow one. */
-.touch-mid {
-  grid-area: mid;
-  flex-direction: row;
-  gap: .5rem;
-  /* Centred against the shoulders beside it, which stack two deep -- start
-     put select and start level with the triggers rather than between the two
-     rows. */
-  align-self: center;
-  justify-content: center;
-  /* It shares its row with two clusters of fixed width. Without this it is
-     free to grow past its column and sit on top of them, which is what the
-     layout name did the moment this became a row. */
-  min-width: 0;
-  overflow: hidden;
-}
+.touch-mid { grid-area: mid; flex-direction: column; gap: .5rem; }
 
 /* ---- on-screen sticks --------------------------------------------------
    A well with a knob in it. The knob follows the thumb to the edge and snaps
@@ -636,12 +622,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   position: static;
   width: auto;
   height: auto;
-  /* Padding that gives way before the button does. Between two clusters of
-     fixed width there is only so much middle, and on a narrow phone a fixed
-     1rem either side is what turns "centred" into "on top of the trigger". */
-  padding: .5rem clamp(.4rem, 2.5vw, 1rem);
-  min-width: 0;
-  white-space: nowrap;
+  padding: .5rem 1rem;
   border-radius: 0;
   border-color: var(--dim);
   color: var(--dim);
@@ -661,16 +642,14 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch {
     flex: 0 0 auto;
     grid-template-columns: 1fr 1fr;
-    /* Select and start sit between the shoulders rather than on a row of
-       their own. That row cost height nothing else was using, and upright
-       the picture is above the pad -- so every millimetre the pad gives back
-       is a wider picture, because the video keeps its shape and grows in both
-       directions at once. It is also simply symmetrical: left cluster,
-       middle, right cluster, mirrored. */
+    /* Select and start along the bottom, centred. Putting them between the
+       shoulders saved a row of height, and it was not worth what it cost:
+       squeezed between two clusters they had nowhere to go, and the version
+       with a row of its own simply reads better. */
     grid-template-areas:
-      "lsh  mid   rsh"
-      "left  .    right";
-    grid-template-columns: auto minmax(0, 1fr) auto;
+      "lsh  rsh"
+      "left right"
+      "mid  mid";
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
@@ -708,14 +687,21 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     inset: 0;
     grid-template-rows: auto 1fr auto;
     grid-template-areas:
-      "lsh   mid  rsh"
-      "left   .   right";
+      "lsh   .    rsh"
+      "left  .    right"
+      "mid   mid  mid";
     align-items: center;
     row-gap: .4rem;
     --side: clamp(.6rem, 3vw, 2rem);
-    padding: calc(var(--top-safe) + 2.9rem)
-             var(--side)
-             calc(.7rem + env(safe-area-inset-bottom, 0px));
+    /* Sideways, the notch or camera island is at one end of the long edge --
+       exactly where the left-hand cluster is put. The inset is added to the
+       padding rather than to --side, so the negative margins below still pull
+       the clusters out to the edge of the *safe* area rather than to the edge
+       of the glass, where a thumb finds a lens instead of a d-pad. */
+    padding-top: calc(var(--top-safe) + 2.9rem);
+    padding-bottom: calc(.7rem + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(var(--side) + env(safe-area-inset-left, 0px));
+    padding-right: calc(var(--side) + env(safe-area-inset-right, 0px));
     pointer-events: none;
   }
   .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
@@ -726,11 +712,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      pushed off the bottom. */
   .dpad { width: min(calc(30 * var(--sh)), 175px); }
   .face { width: min(calc(40 * var(--sh)), 235px); }
-  /* Between the shoulders now, along the top edge, where they are still
-     reachable without a thumb crossing the picture -- and where they cost no
-     height, which is what the row of their own was costing. */
-  .touch-mid { align-items: center; }
-  .centre-row { justify-content: center; gap: .5rem; }
+  /* Sideways they go back to the far corners: the middle of the screen is
+     the picture, the corners are where the thumbs already are, and there is
+     no height to save here because the pad floats over the picture rather
+     than sitting under it. */
+  .touch-mid { width: 100%; align-items: stretch; }
+  .centre-row { width: 100%; justify-content: space-between; }
 
   /* Centred in the black beside the picture, rather than in the whole half of
      the screen (which put them on the game) or hard against the edge (which
@@ -761,8 +748,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   /* Back in the grid, at the top corners, where the padding above keeps them
      clear of the chips. */
   .shoulders { align-self: start; }
-  /* Between the shoulders rather than pinned to the bottom. */
-  .touch-mid { align-self: center; }
+  /* Pinned to the bottom of its row so it cannot drift upward. */
+  .touch-mid { align-self: end; }
   .tbtn-shoulder { width: min(22vw, 105px); padding: .42rem 0; }
   .dpad-arm, .dpad-hat, .tbtn { opacity: .86; }
 
