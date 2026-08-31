@@ -788,7 +788,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     padding-right: calc(var(--side) + env(safe-area-inset-right, 0px));
     pointer-events: none;
   }
-  .touch-left, .touch-right, .touch-mid { pointer-events: auto; }
+  /* Every cluster that holds a control, not just the three named ones. The
+     shoulders are their own elements outside those, so leaving them off this
+     list left LB, LT, RB and RT visible, lit on press, and sending nothing --
+     the parent is what turns taps into buttons, and a child that does not take
+     pointer events never reaches it. */
+  .touch-left, .touch-right, .touch-mid,
+  .shoulders { pointer-events: auto; }
   .hudbtn { display: flex; }
   /* Sized against the stage, not the window. These were 30vh and 40vh, which
      on a phone measure the window as if the address bar and tab strip were not

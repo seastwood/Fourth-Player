@@ -271,5 +271,36 @@ else:
         check(not rp.needs_picker(0, 1),
               "and stands down with no pads at all, which a session never has")
 
+print("two games in a row do not fight over one unit name")
+# Every game ran as the transient unit `fourth-player-game`. Starting a second
+# over the top of a first was then refused outright -- "Unit
+# fourth-player-game.service was already loaded" -- because a unit lingers
+# after its process is gone. The first game had already been told to quit, so
+# the screen held its last frame and nothing replaced it.
+names = {launcher.new_unit_name() for _ in range(50)}
+check(len(names) == 50,
+      "50 launches ask for 50 different unit names, got %d" % len(names))
+check(all(n.startswith(launcher.UNIT_PREFIX) for n in names),
+      "and every one is still recognisably ours, so the sweep can match them")
+
+print("a game that will not close stops the new one from being launched")
+# stop_running() reporting failure means the old game is still on screen.
+# Launching anyway gave the guest the worst of both: the game they were
+# playing had been told to quit, and the one they asked for was refused.
+stubborn_launched = []
+saved_stop, saved_launch = launcher.stop_running, launcher.launch
+launcher.stop_running = lambda: False
+launcher.launch = lambda r, resume=False: stubborn_launched.append(r)
+try:
+    live2, loop2 = make_session("open", recorder)
+    answer = loop2.run_until_complete(
+        live2._start_game(catalogue.find(game), busy=True, resume=False))
+    check(answer.get("ok") is False,
+          "the guest is told it did not happen: %r" % (answer,))
+    check(not stubborn_launched,
+          "and nothing was launched over a game that is still running")
+finally:
+    launcher.stop_running, launcher.launch = saved_stop, saved_launch
+
 print(("FAILED: %d" % len(fails)) if fails else "test_launch: all ok")
 sys.exit(1 if fails else 0)

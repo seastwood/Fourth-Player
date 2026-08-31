@@ -81,6 +81,16 @@ def stop_running():
     TERM rather than KILL because RetroArch writes its save memory on the way
     out, and the difference between the two signals is somebody's progress.
     """
+    # The unit as well as the process. Killing only the process leaves systemd
+    # holding the unit open for as long as it takes to notice, and a game
+    # started in that window was refused the name.
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        try:
+            subprocess.run([systemctl, "--user", "stop", UNIT_PREFIX + "*"],
+                           capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
     for name in ("retroarch", "ra_players.py"):
         try:
             subprocess.run(["pkill", "-TERM", "-f", name], timeout=5)
@@ -197,6 +207,24 @@ def build_argv(row, resume=False):
     return argv + ["-f", "-L", row["core_path"], row["path"]]
 
 
+UNIT_PREFIX = "fourth-player-game"
+
+
+def new_unit_name():
+    """A unit name no previous game can still be holding.
+
+    Every game used to run as `fourth-player-game`, one fixed name. Starting a
+    second game over the top of a first then failed outright -- systemd-run
+    refuses a name that is still loaded, and a unit lingers for a moment after
+    its process is gone, longer if the process is slow to go. The old game had
+    already been told to quit by then, so the television kept its last frame
+    and the new game never arrived: "it froze and the other one did not start".
+    A fresh name each time cannot collide with anything, however slowly the
+    last one is taking to be cleaned up.
+    """
+    return "%s-%d" % (UNIT_PREFIX, time.monotonic_ns())
+
+
 def launch(row, display=":0", resume=False):
     """Start the game outside this service's sandbox. Returns None, or why not."""
     problem = preflight(row)
@@ -210,7 +238,7 @@ def launch(row, display=":0", resume=False):
     runner = shutil.which("systemd-run")
     if runner:
         command = [runner, "--user", "--collect", "--quiet",
-                   "--unit", "fourth-player-game"]
+                   "--unit", new_unit_name()]
         for key, value in env.items():
             command += ["--setenv", "%s=%s" % (key, value)]
         command += ["--"] + argv

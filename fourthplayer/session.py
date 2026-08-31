@@ -952,7 +952,16 @@ class LiveSession:
             # Only the open policy gets here with something already playing,
             # and taking over is what that policy is.
             log.info("stopping what is playing to start %s", row["label"])
-            await self.loop.run_in_executor(None, launcher.stop_running)
+            stopped = await self.loop.run_in_executor(None, launcher.stop_running)
+            # Launching anyway left the guest with the worst of both: the game
+            # they were playing had been told to quit, and the one they asked
+            # for was refused. Say so instead, while the old one is still up.
+            if not stopped:
+                log.warning("%s is still running; not starting %s over it",
+                            "what was playing", row["label"])
+                return {"ok": False,
+                        "error": "The game that is running would not close. "
+                                 "Try again in a moment."}
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         if problem:

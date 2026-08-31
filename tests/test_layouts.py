@@ -263,5 +263,25 @@ tap = tap[:tap.index("});")]
 check("if (hudButtonShowing()) return;" in tap,
       "declining the tap where it does: %r" % tap.strip()[:80])
 
+print("\nevery cluster holding a control can be pressed sideways")
+# The parent turns taps into buttons, so a child that does not accept pointer
+# events never reaches it. Landscape switches .touch to pointer-events: none
+# and hands it back per cluster -- and the shoulders are their own elements
+# outside the three that were named, so LB, LT, RB and RT drew, lit up on
+# press, and sent nothing at all.
+land = css[css.index("@media (orientation: landscape)"):]
+takes = set()
+# Comments sit between rules, so strip them before reading selectors -- else
+# the prose in front of a rule is read as part of its first selector.
+bare = re.sub(r"/\*.*?\*/", " ", land, flags=re.S)
+for match in re.finditer(r"([^{}]+)\{[^{}]*pointer-events:\s*auto", bare):
+    for sel in match.group(1).split(","):
+        parts = sel.split()
+        if parts:
+            takes.add(parts[-1])
+for holder in (".touch-left", ".touch-right", ".touch-mid", ".shoulders"):
+    check(holder in takes,
+          "%s takes pointer events in landscape" % holder)
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
