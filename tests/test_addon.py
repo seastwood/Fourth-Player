@@ -260,8 +260,14 @@ check(main.QUALITY[0][1]["fps"] == 30,
 check(sum("(default)" in n for n, _ in main.QUALITY) == 1,
       "exactly one preset claims to be the default")
 big = [s for n, s in main.QUALITY if "1080p" in n]
-check(len(big) == 2 and {s["fps"] for s in big} == {30, 60},
-      "both 1080p options exist, at thirty and sixty: %r" % big)
+# Both frame rates are offered at full size. The count is deliberately not
+# pinned: there is more than one sixty now, because 6 Mb/s was a ceiling this
+# machine's encoder imposed rather than one the setting deserves.
+check({s["fps"] for s in big} == {30, 60},
+      "1080p is offered at thirty and sixty: %r" % [s["fps"] for s in big])
+check(len({s["bitrate_kbps"] for s in big}) == len(big),
+      "and no two 1080p presets are the same bitrate, which would make them "
+      "the same choice twice: %r" % [s["bitrate_kbps"] for s in big])
 check(all(s["width"] == 1920 and s["height"] == 1080 for s in big),
       "and both really are 1080p")
 # Both 1080p entries warn, and they are last. On the machine this was written
@@ -469,6 +475,52 @@ print("\nno preset label claims a measurement from one particular machine")
 for name, _settings in main.QUALITY:
     check("here" not in name.split("(")[-1],
           "%r describes the setting, not this box" % name)
+
+print("\nsound and the on-screen join code, from the television")
+main.CONFIG_PATH = os.path.join(PROFILE, "extras.json")
+main.C.service_installed = lambda: False
+
+def extras_labels(saved):
+    with open(main.CONFIG_PATH, "w") as fh:
+        json.dump(saved, fh)
+    chosen.update(select=-1, calls=[])
+    main.choose_extras(False)
+    return [c for c in chosen["calls"] if c[0] == "select"][-1][2]
+
+labels = extras_labels({})
+check(any("Sound: on" in o for o in labels),
+      "with nothing saved it reports the defaults: %r" % labels)
+check(any("shown" in o for o in labels), "including the join code")
+labels = extras_labels({"audio": False, "overlay": False})
+check(any("Sound: off" in o for o in labels), "and reads what is saved: %r" % labels)
+check(any("hidden" in o for o in labels), "for both of them")
+
+print("\nchoosing a line turns that one round and leaves the other alone")
+with open(main.CONFIG_PATH, "w") as fh:
+    json.dump({"audio": True, "overlay": True, "fixed_pin": "123456"}, fh)
+chosen.update(select=0, yesno=False, calls=[])
+main.choose_extras(False)
+saved = json.load(open(main.CONFIG_PATH))
+check(saved["audio"] is False, "sound was turned off")
+check(saved["overlay"] is True, "the join code was not touched")
+check(saved.get("fixed_pin") == "123456",
+      "and the rest of the config survives being rewritten: %r" % saved)
+
+chosen.update(select=1, yesno=False, calls=[])
+main.choose_extras(False)
+saved = json.load(open(main.CONFIG_PATH))
+check(saved["overlay"] is False, "the second line turns the join code off")
+check(saved["audio"] is False, "without turning the sound back on")
+
+print("\nbacking out changes nothing")
+before = json.load(open(main.CONFIG_PATH))
+chosen.update(select=-1, calls=[])
+main.choose_extras(False)
+check(json.load(open(main.CONFIG_PATH)) == before, "cancelling wrote nothing")
+
+print("\nand the file it writes is not readable by anybody else")
+mode = oct(os.stat(main.CONFIG_PATH).st_mode & 0o777)
+check(mode == "0o600", "config.json is 0600, since it can hold a PIN: %s" % mode)
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

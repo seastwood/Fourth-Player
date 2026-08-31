@@ -621,6 +621,16 @@ three wrong tries, then thirty seconds, two minutes, ten -- roughly a hundred
 days of guessing per address for one session. A link that *is* offered is still
 checked either way, so a stale one fails loudly instead of quietly working.
 
+### Sound, and the code on the television
+
+Two things the service reads once at startup, so both cost a restart -- which
+is why they are one screen in Kodi, **Sound and the television**, rather than
+two entries that each end the session:
+
+* **Sound** in the stream, on or off.
+* **The join code on the television**, shown or hidden. Worth hiding if the
+  set is somewhere you would rather not leave a way in on display.
+
 ### The address links are built on
 
 Set it in Kodi under **Address for links**, or:

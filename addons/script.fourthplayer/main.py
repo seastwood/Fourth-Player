@@ -88,6 +88,14 @@ QUALITY = [
     ("Big screen, smoother — 1080p60, 6 Mb/s (needs a strong encoder)",
      dict(width=1920, height=1080, fps=60, bitrate_kbps=6000,
           queue_ms=60, jitter_ms=100, h264_profile="main", audio_frame_ms=20)),
+    # Nothing above 6 Mb/s existed, because the machine this was written on
+    # cannot feed more. On a newer encoder and a wired network that ceiling is
+    # the settings' and not the hardware's, so there is a rung above it now --
+    # with the short buffers the "same network" preset uses, since a link that
+    # can carry 9 Mb/s is not one that needs smoothing.
+    ("Fast network, best picture — 1080p60, 9 Mb/s (needs a strong encoder)",
+     dict(width=1920, height=1080, fps=60, bitrate_kbps=9000,
+          queue_ms=80, jitter_ms=25, h264_profile="main", audio_frame_ms=10)),
 ]
 
 
@@ -332,6 +340,70 @@ def current_quality(config):
     return None
 
 
+def save_settings(config, session_open, dialog, what="Saved."):
+    """Write config.json and offer the restart that makes it take effect.
+
+    Shared by every screen that changes something the service only reads at
+    startup, so they cannot drift into disagreeing about whether a restart is
+    needed or what it costs.
+    """
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        # 0600, the same as the service writes it: this file can hold a set
+        # PIN, which is a password for the television.
+        fd = os.open(CONFIG_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+        # The mode above only applies when the file is created. A config.json
+        # that already existed keeps whatever it had -- so a file written by an
+        # older version, or by hand, stayed world-readable while holding a PIN.
+        os.chmod(CONFIG_PATH, 0o600)
+    except OSError as exc:
+        dialog.ok(ADDON_NAME, "Could not save it:\n\n%s" % exc)
+        return False
+
+    if not C.service_installed():
+        notify("%s Restart the server for it to take effect." % what)
+        return True
+    prompt = ("Restart the service now so it takes effect?\n\n"
+              "The open session will end." if session_open else
+              "Restart the service now so it takes effect?")
+    if not dialog.yesno(ADDON_NAME, prompt):
+        notify("%s It applies next time the service starts." % what)
+        return True
+    code, output = C.restart_service()
+    notify("Restarted." if code == 0 else (output or "Could not restart it."),
+           error=code != 0)
+    return True
+
+
+def choose_extras(session_open):
+    """Sound, and whether the join code is drawn on the television.
+
+    Both are read at startup, so both cost a restart -- which is why they are
+    one screen rather than two menu entries that each stop the session.
+    """
+    dialog = xbmcgui.Dialog()
+    config = read_config()
+    sound = config.get("audio", True)
+    overlay = config.get("overlay", True)
+    labels = [
+        "Sound: " + ("on" if sound else "off"),
+        "Join code on the television: " + ("shown" if overlay else "hidden"),
+    ]
+    choice = dialog.select("Sound and the television", labels)
+    if choice < 0:
+        return
+    if choice == 0:
+        config["audio"] = not sound
+        told = "Sound is now %s." % ("on" if not sound else "off")
+    else:
+        config["overlay"] = not overlay
+        told = "The join code will be %s." % ("shown" if not overlay else "hidden")
+    save_settings(config, session_open, dialog, told)
+
+
 def set_quality(session_open):
     dialog = xbmcgui.Dialog()
     config = read_config()
@@ -357,33 +429,9 @@ def set_quality(session_open):
         return
 
     config.update(settings)
-    try:
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        # 0600, the same as the service writes it: this file can hold a set PIN,
-        # which is a password for the television, and rewriting it here must not
-        # be what quietly makes it world-readable.
-        fd = os.open(CONFIG_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as handle:
-            json.dump(config, handle, indent=2)
-            handle.write("\n")
-    except OSError as exc:
-        dialog.ok(ADDON_NAME, "Could not save it:\n\n%s" % exc)
-        return
-
     # The pipeline is built when a session opens, so this takes effect then --
     # and the service reads its config at startup, so it needs a restart too.
-    if not C.service_installed():
-        notify("Saved. Restart the server for it to take effect.")
-        return
-    prompt = ("Restart the service now so it takes effect?\n\n"
-              "The open session will end." if session_open else
-              "Restart the service now so it takes effect?")
-    if not dialog.yesno(ADDON_NAME, prompt):
-        notify("Saved. It applies next time the service starts.")
-        return
-    code, output = C.restart_service()
-    notify("Restarted." if code == 0 else (output or "Could not restart it."),
-           error=code != 0)
+    save_settings(config, session_open, dialog)
 
 
 # -- the menu ------------------------------------------------------------
@@ -642,6 +690,7 @@ def main():
             ("Can players share a controller?…", lambda: choose_share(status)),
             ("Address for links…", lambda: choose_url(status)),
             ("Picture quality…", lambda: set_quality(False)),
+            ("Sound and the television…", lambda: choose_extras(False)),
             ("Stop the service", stop_service),
         ]
         heading = "Fourth Player — nothing open"
@@ -666,6 +715,7 @@ def main():
             ("Address for links…", lambda: choose_url(status)),
             ("Close the session", close_session),
             ("Picture quality…", lambda: set_quality(True)),
+            ("Sound and the television…", lambda: choose_extras(True)),
         ]
 
     waiting = (status.get("launch") or {}).get("pending")
