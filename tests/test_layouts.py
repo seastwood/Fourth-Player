@@ -191,10 +191,29 @@ check("border-radius: 999px" in start_rule,
       % [l.strip() for l in start_rule.splitlines() if "radius" in l])
 check(css.count("border-radius: 999px") == 1,
       "the only rounded thing on the screen, which is the point of it")
-inward = re.search(r"\.touch-left  \{([^}]*)\}", block)
-check(inward and "flex-end" in inward.group(1),
-      "and the clusters pulled in towards the middle: %r"
-      % (inward.group(1).strip() if inward else None))
+inward = re.search(r"\.touch-left  \{([^}]*)\}", block).group(1)
+check("justify-content: flex-end" in inward,
+      "and the clusters pulled in towards the middle: %r" % inward.strip())
+
+# The axis depends on which way the column runs, and getting that wrong is
+# what left the d-pad and the buttons sitting at different heights: in a row
+# align-items is the *vertical* one, so pinning it to an edge moved them up
+# and down rather than in and out.
+check("align-items: center" in inward,
+      "without moving it up or down, which align-items does in a row: %r"
+      % inward.strip())
+stacked = re.search(r"\.touch\.has-sticks \.touch-left  \{([^}]*)\}", block)
+check(stacked and "align-items: flex-end" in stacked.group(1)
+      and "justify-content: center" in stacked.group(1),
+      "and the two swap jobs once the column stacks: %r"
+      % (stacked.group(1).strip() if stacked else None))
+
+# A matched pair, as they are on the pad being copied -- which is also what
+# puts them level, both being centred in equal halves.
+check(re.search(r"\n  \.dpad, \.face \{ width:", block),
+      "the d-pad and the buttons are given one size between them")
+pair = re.search(r"\.touch\.has-sticks \.dpad,\s*\.touch\.has-sticks \.face\s*\{", block)
+check(pair, "and the same again once there are sticks below them")
 mid = re.search(r"\n\.touch-mid \{([^}]*)\}", css).group(1)
 check("overflow: hidden" not in mid, "and nothing is clipped anywhere")
 check("touch-name" not in css and "touch-name" not in source,

@@ -673,8 +673,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
      but they still give up something, because two rows of controls where
      there was one has to come from somewhere and the strip is not allowed to
      push the picture off the top. */
-  .touch.has-sticks .dpad  { width: min(30vw, 150px); }
-  .touch.has-sticks .face  { width: min(42vw, 200px); }
+  .touch.has-sticks .dpad,
+  .touch.has-sticks .face  { width: min(38vw, 180px); }
   .touch.has-sticks .stick { width: min(27vw, 135px); }
   .touch.has-sticks .touch-left,
   .touch.has-sticks .touch-right { gap: .5rem; }
@@ -682,8 +682,11 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     background: var(--bg);
     border-top: 3px solid var(--edge);
   }
-  .dpad { width: min(32vw, 150px); }
-  .face { width: min(40vw, 190px); }
+  /* The same size as each other, and bigger than either was. The d-pad had
+     been the smaller of the two for no reason worth keeping -- on the pad
+     this copies they are a matched pair, and matching them is also what puts
+     them level, since both are centred in equal halves. */
+  .dpad, .face { width: min(42vw, 200px); }
   .tbtn-shoulder { width: min(21vw, 96px); padding: .45rem 0; min-width: 0; }
   .shoulders { min-width: 0; }
   /* Over the gap between the shoulder clusters, taking no space from
@@ -711,11 +714,17 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch-mid .tbtn-start + .tbtn-start { margin-left: -.35rem; }
 
   /* The clusters come in towards the middle rather than sitting in the centre
-     of their half. Both properties, because with sticks these columns stack
-     and it is align-items that places them, and without sticks they are a row
-     placed by justify-content. */
-  .touch-left  { justify-content: flex-end;   align-items: flex-end; }
-  .touch-right { justify-content: flex-start; align-items: flex-start; }
+     of their half -- and which property does that depends on which way the
+     column runs, which is the part this got wrong.
+     Without sticks these are rows: justify-content is the horizontal one and
+     align-items is the vertical one. Setting both to an edge pulled the
+     d-pad down and the buttons up, so the two sat at different heights --
+     which is exactly what "not in line with each other" looked like. */
+  .touch-left  { justify-content: flex-end;   align-items: center; }
+  .touch-right { justify-content: flex-start; align-items: center; }
+  /* With sticks they stack, so the two swap jobs. */
+  .touch.has-sticks .touch-left  { align-items: flex-end;   justify-content: center; }
+  .touch.has-sticks .touch-right { align-items: flex-start; justify-content: center; }
   .touch-left  > * { margin-right: 3vw; }
   .touch-right > * { margin-left: 3vw; }
 }
