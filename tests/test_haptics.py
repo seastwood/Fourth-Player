@@ -161,8 +161,14 @@ const canBuzz = canVibrate || !!el("haptic-label");
 // test, and what this one watches is the buzzing.
 const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 let dpadLive = "";
+let pressedAt = 0;
 function setBit() {}
 function paintDpad() {}
+// The d-pad puts its own frame on the wire the moment the direction changes.
+// Counted rather than ignored: a direction that is felt and not sent would be
+// a worse fault than one that is sent and not felt.
+const sends = [];
+function sendNow() { sends.push(1); }
 function dpadDirections(event) { return event.dirs; }
 
 if (job.set !== undefined) setHaptics(job.set);
@@ -172,7 +178,7 @@ for (const dirs of (job.presses || [])) {
 for (let i = 0; i < (job.taps || 0); i++) buzz();
 paintBuzz();
 process.stdout.write(JSON.stringify({
-  buzzes, flips, deadClicks, stored: store, on: hapticsOn,
+  buzzes, flips, deadClicks, sends: sends.length, stored: store, on: hapticsOn,
   checked: box.checked, note: note.textContent, flipped: tapBox.checked,
   offered }));
 """
@@ -280,6 +286,8 @@ check(out["buzzes"] == [8], "a thumb held on one arm buzzes once")
 out = run(presses=[["left"], ["left", "up"], ["up"]])
 check(out["buzzes"] == [8, 8, 8],
       "sliding through a diagonal buzzes for each direction it becomes")
+check(out["sends"] == 3,
+      "and each of those goes on the wire at once, not at the next tick")
 out = run(presses=[["left"], None, ["left"]])
 check(out["buzzes"] == [8, 8], "and letting go and pressing again is two")
 out = run(presses=[[]])

@@ -1269,6 +1269,8 @@ function applyDpad(event) {
   if (now !== dpadLive) {
     dpadLive = now;
     if (now) buzz();
+    if (now) pressedAt = (event && event.timeStamp) || 0;
+    sendNow();
   }
   // Light the arm being pressed, not the middle: a diagonal lights two, which
   // is also the clearest way to see that diagonals work at all.
@@ -1279,6 +1281,7 @@ function clearDpad() {
   for (const bit of Object.values(DPAD)) setBit(bit, false);
   dpadLive = "";
   paintDpad([]);
+  sendNow();
 }
 
 function wireTouch() {
@@ -1343,6 +1346,8 @@ function wireTouch() {
     pointers.set(event.pointerId, button);
     button.classList.add("live");
     setBit(Number(button.dataset.button), true);
+    pressedAt = event.timeStamp;
+    sendNow();
     // In switch mode the feeling comes from the label being activated by the
     // finger that is already on it. Calling buzz() as well would be a second
     // tap on the phones where the scripted one still works.
@@ -1354,6 +1359,9 @@ function wireTouch() {
     pointers.delete(event.pointerId);
     button.classList.remove("live");
     setBit(Number(button.dataset.button), false);
+    // Letting go is as urgent as pressing: a button released 8 ms late is a
+    // jump held 8 ms too long, and in a game that is the same fault.
+    sendNow();
   };
   el("touch").addEventListener("pointerup", releaseButton);
   el("touch").addEventListener("pointercancel", releaseButton);
@@ -2044,7 +2052,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03k";
+const CLIENT_BUILD = "2026-09-03l";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2268,6 +2276,28 @@ function hasGamepad() {
   return Array.from(pads).some((p) => p && p.connected);
 }
 
+/* The pad as it is right now, for a send that is not waiting for the timer.
+
+   tick() does more than this -- it notices a controller arriving or leaving --
+   and that part belongs on a timer. Reading the buttons does not. */
+function livePad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const pad = padIndex !== null ? pads[padIndex] : null;
+  return pad && pad.connected ? pad : null;
+}
+
+/* Send the pad now, because something on the glass just changed.
+ *
+ * The timer runs at 125 Hz, so waiting for it costs up to 8 ms -- small, but
+ * it is 8 ms of nothing between a thumb landing and anything at all
+ * happening, and it is paid on every single press. A button that is read the
+ * moment it is pressed is the thing being copied here; the timer's job is the
+ * heartbeat and the physical pad, neither of which knows when it changed. */
+function sendNow() {
+  if (padsOpen) return;
+  sendFrame(remapped(livePad()), false);
+}
+
 function tick() {
   /* Deliberately before the channel check below. Which controller is attached
      is worth showing whether or not there is anywhere to send its buttons yet,
@@ -2301,6 +2331,38 @@ function tick() {
 }
 
 let lastSent = null, lastSentAt = 0;
+
+/* How long a press takes to leave this page, measured rather than assumed.
+ *
+ * The complaint this exists for: buttons that have to be held before the game
+ * notices on one phone, and feel like buttons on another. Everything between
+ * the thumb and the wire is a suspect -- when the browser chooses to deliver
+ * pointerdown, whether the data channel is backed up and dropping frames,
+ * whether the timer is being throttled -- and none of it can be seen from the
+ * host, where the symptom is.
+ *
+ * pointerdown's own timeStamp is the start, not the moment the handler runs:
+ * that is the whole question. A browser that sat on the event for 80 ms
+ * before telling the page about it is indistinguishable, from inside the
+ * handler, from one that delivered it instantly. */
+let pressedAt = 0;
+let presses = [], dropped = 0, buffered = 0;
+const PRESS_SAMPLE = 25;
+
+function notePress(latency, backlog) {
+  presses.push(Math.round(latency));
+  buffered = Math.max(buffered, backlog);
+  if (presses.length < PRESS_SAMPLE) return;
+  const sorted = presses.slice().sort((a, b) => a - b);
+  const mid = sorted[Math.floor(sorted.length / 2)];
+  report("press to wire over " + sorted.length + " presses: median " + mid
+         + " ms, worst " + sorted[sorted.length - 1] + " ms, "
+         + dropped + " dropped for backlog, deepest queue " + buffered
+         + " bytes");
+  presses = [];
+  dropped = 0;
+  buffered = 0;
+}
 
 function changed(buttons, axes) {
   if (!lastSent) return true;
@@ -2356,7 +2418,10 @@ function sendFrame(pad, releaseAll) {
   // of the pad: the next one supersedes whatever was lost. A release is the
   // exception and always goes, because a button left down is the one state
   // that does not correct itself.
-  if (!releaseAll && input.bufferedAmount > BACKLOG_LIMIT) return;
+  if (!releaseAll && input.bufferedAmount > BACKLOG_LIMIT) {
+    if (pressedAt) dropped += 1;
+    return;
+  }
 
   const buffer = FPFrame.buildRaw(buttons, axes, seq, releaseAll);
   seq = (seq + 1) & 0xffff;
@@ -2364,6 +2429,13 @@ function sendFrame(pad, releaseAll) {
     input.send(buffer);
     lastSent = { buttons, axes: axes.slice() };
     lastSentAt = now;
+    if (pressedAt) {
+      // performance.now() and a pointer event's timeStamp share an origin, so
+      // this is the whole distance: the browser's delay in delivering the
+      // event, plus everything this page did with it.
+      notePress(performance.now() - pressedAt, input.bufferedAmount);
+      pressedAt = 0;
+    }
   } catch (_) { /* a closing channel is not news */ }
 }
 
