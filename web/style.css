@@ -234,7 +234,15 @@ video {
   object-fit: contain;
   display: block;
   background: #000;
-  touch-action: manipulation;
+  /* The picture takes its own gestures now: two fingers zoom it and one moves
+     it about, both inside the page. `manipulation` left the browser's own
+     pinch on top of that, and the two fought -- the page zoomed, the fixed
+     stage slid out from under the visual viewport, and the hud went with it.
+     What is given up is browser zoom over the picture alone; everywhere else
+     on the page it is untouched, and what replaces it here stops at the edges
+     of the picture instead of wandering off into the furniture. */
+  touch-action: none;
+  transform-origin: center center;
 }
 
 .hud {
@@ -1111,11 +1119,14 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    A speaker that says the level by how many waves it draws, and a slider that
    is not there until it is asked for. Sized and bordered like everything else
    in the row: it is one of the chips, not a widget visiting from elsewhere. */
-.vol {
+.vol, .zoom {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
 }
+/* Lit while it is doing something, so a picture that is zoomed says so from
+   the row rather than only from the picture. */
+.zoom.is-on #zoom-btn { color: var(--accent); }
 /* The waves and the cross are two readings of the same number, so exactly one
    of them is ever showing. */
 .vol .vol-wave, .vol .vol-cross { display: none; }
@@ -1126,7 +1137,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .vol.is-off  .vol-btn,
 .vol.is-off  #vol-btn { color: var(--dim); }
 
-.vol-range {
+.vol-range, .zoom-range {
   -webkit-appearance: none;
   appearance: none;
   width: 0;
@@ -1146,7 +1157,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   transition: width .18s ease, opacity .18s ease, margin .18s ease;
   pointer-events: none;
 }
-.vol.open .vol-range {
+.vol.open .vol-range,
+.zoom.open .zoom-range {
   width: clamp(5rem, 22vw, 9rem);
   opacity: 1;
   margin-left: .35rem;

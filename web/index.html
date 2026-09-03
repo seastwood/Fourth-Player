@@ -122,6 +122,29 @@
     <!-- The speaker shows the level at a glance -- no waves, one wave, two --
          and opens the slider when tapped. Its own level, not the
          television's: turning it down here should not silence the room. -->
+    <!-- Zoom, beside the volume and built the same way: an icon that expands
+         a slider. A guest watching on a phone is looking at a television-sized
+         picture through a letterbox, and the part they want is often a corner
+         of it -- a health bar, a lap counter, a map. Pinching the picture does
+         the same thing without coming up here at all. -->
+    <div id="zoom" class="zoom">
+      <button id="zoom-btn" type="button" class="ghost icon" title="Zoom in"
+              aria-label="Zoom in" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="10.5" cy="10.5" r="6.5" fill="none"
+                  stroke="currentColor" stroke-width="2.4"/>
+          <path d="M15.5 15.5 21 21" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="square"/>
+          <!-- A plus inside the glass, which is what tells this apart from
+               the search icon at a glance. -->
+          <path d="M10.5 7.5v6M7.5 10.5h6" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="square"/>
+        </svg>
+      </button>
+      <input id="zoom-range" class="zoom-range retro-range" type="range"
+             min="100" max="400" step="10" value="100"
+             aria-label="Zoom level">
+    </div>
     <div id="vol" class="vol">
       <button id="vol-btn" type="button" class="ghost icon" title="Volume"
               aria-label="Volume" aria-expanded="false">

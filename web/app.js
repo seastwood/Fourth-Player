@@ -1432,9 +1432,239 @@ function hudButtonShowing() {
 }
 
 el("screen").addEventListener("click", () => {
+  // A drag that ends over the picture is not a tap on it. Browsers do not
+  // agree about whether a click follows a pointer that moved, so this is
+  // decided here rather than hoped for.
+  if (dragged) { dragged = false; return; }
   if (hudButtonShowing()) return;
   toggleHud();
 });
+
+/* ---- zooming the picture ----
+ *
+ * A guest is watching a television through whatever they have in their hand,
+ * and on a phone that is a picture about as wide as two fingers. The part they
+ * actually need is often a corner of it -- a health bar, a lap counter, the
+ * map in the top right -- and there was no way to get closer to it.
+ *
+ * The picture is moved rather than the page: a CSS transform on the video
+ * element, so nothing else on the screen scales with it. The hud stays the
+ * size it was, the on-screen pad stays where the thumbs are, and the game goes
+ * on being sent at exactly the same resolution -- this is a magnifying glass
+ * held over what has arrived, not a request for a bigger picture.
+ *
+ * Panning stops at the edges of the *picture*, which is not the edge of the
+ * video element: object-fit letterboxes a 16:9 stream inside whatever shape
+ * the phone is, and being able to drag off into the black would be a way to
+ * lose the game entirely. */
+const ZOOM_MIN = 1, ZOOM_MAX = 4;
+let zoom = 1, panX = 0, panY = 0, dragged = false;
+
+/* The picture inside the element, in screen pixels, before any zoom. */
+function pictureBox() {
+  const box = video.getBoundingClientRect();
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h || !box.width || !box.height) {
+    return { width: box.width, height: box.height, box };
+  }
+  const fit = Math.min(box.width / w, box.height / h);
+  return { width: w * fit, height: h * fit, box };
+}
+
+/* How far the picture may be moved along one axis: half of however much it
+   overhangs what can be seen of it, and nothing at all when it does not
+   overhang -- a picture narrower than the screen it is on has no slack, and
+   letting it be dragged anyway would move the game off into the black. */
+function panRoom(size, seen, level) {
+  return Math.max(0, (size * level - seen) / 2);
+}
+
+/* Where the picture has to sit for the point being zoomed towards to stay
+   under the fingers doing it. A point sits at `pan + u * level` for some
+   fixed u in the picture, so holding it still across a change of level is
+   `towards + (pan - towards) * ratio` -- which is the whole of why a pinch
+   grows what is between the fingers rather than what is in the middle. */
+function panTowards(pan, towards, ratio) {
+  return towards + (pan - towards) * ratio;
+}
+
+function applyZoom() {
+  zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+  if (zoom <= ZOOM_MIN + 0.001) {
+    zoom = ZOOM_MIN;
+    panX = 0;
+    panY = 0;
+  } else {
+    const picture = pictureBox();
+    const maxX = panRoom(picture.width, picture.box.width, zoom);
+    const maxY = panRoom(picture.height, picture.box.height, zoom);
+    panX = Math.max(-maxX, Math.min(maxX, panX));
+    panY = Math.max(-maxY, Math.min(maxY, panY));
+  }
+  video.style.transform = zoom === ZOOM_MIN
+    ? "" : "translate(" + panX + "px, " + panY + "px) scale(" + zoom + ")";
+  paintZoom();
+}
+
+function paintZoom() {
+  const range = el("zoom-range");
+  if (range) {
+    range.value = String(Math.round(zoom * 100));
+    range.style.setProperty(
+      "--fill",
+      Math.round(((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100) + "%");
+  }
+  const group = el("zoom");
+  if (group) group.classList.toggle("is-on", zoom > ZOOM_MIN);
+  const button = el("zoom-btn");
+  if (button) {
+    const said = zoom > ZOOM_MIN
+      ? "Zoomed " + (Math.round(zoom * 10) / 10) + "\u00d7 \u2014 drag the "
+        + "picture to move it, or set this to 1 to fit it again"
+      : "Zoom in";
+    button.title = said;
+    button.setAttribute("aria-label", said);
+  }
+}
+
+/* Zooming towards a point rather than towards the middle, so what is under two
+   fingers -- or under the mouse -- is still under them afterwards. */
+function zoomAbout(next, clientX, clientY) {
+  const box = video.getBoundingClientRect();
+  const towardsX = (clientX == null ? box.left + box.width / 2 : clientX)
+                 - (box.left + box.width / 2);
+  const towardsY = (clientY == null ? box.top + box.height / 2 : clientY)
+                 - (box.top + box.height / 2);
+  const to = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+  const ratio = to / zoom;
+  panX = panTowards(panX, towardsX, ratio);
+  panY = panTowards(panY, towardsY, ratio);
+  zoom = to;
+  applyZoom();
+}
+
+const held = new Map();
+let pinchGap = 0, pinchAt = null;
+
+const gapBetween = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const middleOf = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+video.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  held.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (held.size === 2) {
+    const [a, b] = Array.from(held.values());
+    pinchGap = gapBetween(a, b);
+    pinchAt = middleOf(a, b);
+  }
+  if (held.size === 1) {
+    // A new touch is a new question. Without this, a drag that ended without
+    // a click after it -- which is every drag on a touchscreen -- left the
+    // flag set and swallowed the next honest tap.
+    dragged = false;
+    // Captured so a drag that wanders over the hud, or off the screen
+    // entirely, keeps moving the picture instead of stopping dead.
+    try { video.setPointerCapture(event.pointerId); } catch (_) {}
+  }
+});
+
+video.addEventListener("pointermove", (event) => {
+  const was = held.get(event.pointerId);
+  if (!was) return;
+  const now = { x: event.clientX, y: event.clientY };
+  held.set(event.pointerId, now);
+  if (held.size >= 2) {
+    const [a, b] = Array.from(held.values());
+    const gap = gapBetween(a, b);
+    const at = middleOf(a, b);
+    if (pinchGap > 0 && gap > 0) {
+      zoomAbout(zoom * (gap / pinchGap), at.x, at.y);
+      // Two fingers that move together move the picture, which is how
+      // somebody keeps hold of what they were looking at while resizing it.
+      if (pinchAt) { panX += at.x - pinchAt.x; panY += at.y - pinchAt.y; }
+      applyZoom();
+    }
+    pinchGap = gap;
+    pinchAt = at;
+    dragged = true;
+    event.preventDefault();
+    return;
+  }
+  if (zoom > ZOOM_MIN) {
+    panX += now.x - was.x;
+    panY += now.y - was.y;
+    applyZoom();
+    dragged = true;
+    event.preventDefault();
+  }
+});
+
+function letGoOfPicture(event) {
+  held.delete(event.pointerId);
+  if (held.size < 2) { pinchGap = 0; pinchAt = null; }
+  try { video.releasePointerCapture(event.pointerId); } catch (_) {}
+}
+
+video.addEventListener("pointerup", letGoOfPicture);
+video.addEventListener("pointercancel", letGoOfPicture);
+
+/* A trackpad pinch arrives as a wheel with ctrl held; an ordinary wheel is
+   what a mouse has instead. Neither scrolls anything here -- there is nothing
+   on this page to scroll -- so both are zoom. */
+video.addEventListener("wheel", (event) => {
+  if (!gate.hidden) return;
+  event.preventDefault();
+  const step = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.002));
+  zoomAbout(zoom * step, event.clientX, event.clientY);
+}, { passive: false });
+
+// Back to the whole picture, by the gesture everything else uses for it.
+video.addEventListener("dblclick", () => {
+  if (zoom > ZOOM_MIN) { zoom = ZOOM_MIN; applyZoom(); }
+});
+
+/* Safari does not give a page pointer events for a pinch: it recognises the
+   gesture itself and reports it as one thing, with a scale, after cancelling
+   the pointers it was made of. Left alone that means iPhones -- most of the
+   guests this is for -- get the browser's own zoom of the whole page instead
+   of this one. */
+let gestureFrom = 0;
+video.addEventListener("gesturestart", (event) => {
+  event.preventDefault();
+  gestureFrom = zoom;
+});
+video.addEventListener("gesturechange", (event) => {
+  event.preventDefault();
+  if (gestureFrom) zoomAbout(gestureFrom * event.scale, event.clientX, event.clientY);
+});
+video.addEventListener("gestureend", (event) => {
+  event.preventDefault();
+  gestureFrom = 0;
+});
+
+// Guarded, like the reconnect button: a browser holding an older page would
+// otherwise throw here and take every listener defined after it with it.
+if (el("zoom-btn") && el("zoom-range")) {
+  el("zoom-btn").addEventListener("click", () => {
+    const open = el("zoom").classList.toggle("open");
+    el("zoom-btn").setAttribute("aria-expanded", open ? "true" : "false");
+    // Opening it is asking about zoom, so keep the chips up while it is open.
+    showHud(true);
+  });
+
+  el("zoom-range").addEventListener("input", () => {
+    zoomAbout(parseInt(el("zoom-range").value, 10) / 100, null, null);
+  });
+}
+
+/* The shape of the picture decides how far it can be moved, and that is not
+   known until the stream says what size it is -- nor after it changes, which
+   is what a codec renegotiation does. */
+video.addEventListener("loadedmetadata", applyZoom);
+window.addEventListener("resize", applyZoom);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", applyZoom);
+}
 
 el("hudbtn").addEventListener("click", (event) => {
   event.stopPropagation();
@@ -1581,7 +1811,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03c";
+const CLIENT_BUILD = "2026-09-03d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

@@ -1047,6 +1047,47 @@ page running and holding the controller. Tapping the screen brings the chips
 back. For a genuinely chrome-free screen, add the page to the home screen --
 the manifest and the apple-mobile-web-app meta are there for exactly that.
 
+## Getting closer to part of the picture
+
+A guest is watching a whole television through whatever is in their hand, and
+on a phone that is a picture about as wide as two fingers. What they actually
+need is often a corner of it — a health bar, a lap counter, the map in the top
+right — and there was no way to get closer to it.
+
+**Pinch the picture** to zoom it, up to four times, and **drag it** to move
+about at that zoom. A pinch grows what is between the fingers rather than
+whatever happens to be in the middle, so getting to a corner is one gesture
+instead of a zoom and then a hunt. On a desktop the wheel does the same thing
+around the pointer, and there is a **zoom** button in the chips that expands a
+slider, built like the volume one beside it. Double-click, or drag the slider
+back to 1, and the whole picture is back.
+
+Two details that decide whether it feels right rather than approximately
+right:
+
+- **Dragging stops at the edges of the picture, not of the video element.** A
+  16:9 stream inside a taller phone is letterbox black above and below; being
+  able to drag the game off into that black would be a way to lose it
+  entirely. The slack is half of however much the picture overhangs the
+  screen, and it is nothing at all until it does overhang.
+- **Nothing is asked of the host.** This is a transform on the video element —
+  a magnifying glass held over what has already arrived. The stream is the same
+  resolution and bitrate it was, the hud does not scale with it, the on-screen
+  pad stays where the thumbs are, and the host is never told any of it
+  happened. Zooming in does not sharpen anything, and it costs nothing.
+
+The picture takes its own touch gestures now (`touch-action: none` on the video
+alone), because the browser's page zoom and this one fought: the page zoomed,
+the fixed stage slid out from under the visual viewport, and the chips went
+with it. Safari does not report a pinch as pointer events at all — it
+recognises the gesture itself and cancels the pointers it was made of — so its
+`gesture*` events are handled as well, or iPhones would have got the browser's
+zoom and nobody else would have.
+
+`tests/test_zoom.py` covers both pieces of arithmetic: the slack at each zoom,
+including the letterboxed case where there is none, and that the point being
+zoomed towards stays under the fingers doing it.
+
 ## Layout
 
 ```
