@@ -390,6 +390,7 @@ function connect(hello) {
         + "the television.</p>", false);
       case "arrived":       return somebodyArrived(message);
       case "pads":          return seatsFrom(message);
+      case "hold":          return holdInput(message);
       case "note":          return showNotice(
         "<p>" + escapeText(message.message) + "</p>", false);
       case "launchdenied":  return showNotice(
@@ -2155,7 +2156,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03r";
+const CLIENT_BUILD = "2026-09-03s";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2589,6 +2590,30 @@ function sendFrame(pad, releaseAll) {
       pressedAt = 0;
     }
   } catch (_) { /* a closing channel is not news */ }
+}
+
+/* The television is in a menu, so this controller is not reaching it.
+ *
+ * Said plainly and immediately, because the alternative is a guest pressing
+ * buttons at a picture that is plainly moving and concluding the whole thing
+ * is broken -- and then reloading, which fixes nothing and costs them their
+ * seat for a moment.
+ *
+ * The buttons keep working on this page: they light, they send, and the host
+ * counts them. They stop at the television. That distinction is not worth
+ * explaining to somebody holding a pad, so the message is about the
+ * television rather than about frames. */
+function holdInput(message) {
+  const held = !!message.held;
+  document.documentElement.classList.toggle("held", held);
+  if (held) {
+    showNotice("<p><strong>Controls paused</strong></p>"
+      + '<p class="footnote">The television is in a menu rather than in a '
+      + "game, and controllers here only reach the game. They come back the "
+      + "moment something is playing.</p>", false);
+  } else if (!el("notice").hidden && lastNotice.includes("Controls paused")) {
+    hideNotice();
+  }
 }
 
 /* ---- chrome ---- */

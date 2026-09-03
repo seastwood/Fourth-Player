@@ -20,7 +20,7 @@ import sys
 import time
 
 from . import (catalogue as cataloguelib, gpu, invites, launcher,
-               pads as padlib, protocol, retroarch)
+               pads as padlib, protocol, retroarch, screen)
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
 
 # Better first, so "is this a step down" is a comparison rather than a guess.
@@ -176,6 +176,10 @@ class GuestConnection:
         self.last_input = 0.0
         self.frames = 0
         self.bad_frames = 0
+        # Frames that arrived while the television was in a menu, and so went
+        # nowhere. Counted rather than dropped silently: "my controller did
+        # nothing" is a question somebody will ask, and this is the answer.
+        self.held_frames = 0
 
     @property
     def pad(self):
@@ -216,7 +220,14 @@ class GuestConnection:
                             self.label, self.bad_frames)
             return
         self.frames += 1
+        # Counted as presence before anything else, and whatever happens next.
+        # A guest whose frames are being withheld is still plainly there, and
+        # the dead-man switch releases pads for *silence* -- reaping somebody
+        # for being held is the wrong answer to the right observation.
         self.last_input = time.monotonic()
+        if self.session is not None and self.session.input_held:
+            self.held_frames += 1
+            return
         # Named, so a shared pad can tell its senders' frames apart
         # and merge them rather than treating each as the other's stale one.
         self.pad.apply(state, sender=self.slot)
@@ -232,6 +243,12 @@ class LiveSession:
         self.invite = None
         self.stage = None
         self.pads = None
+        # Whether guest frames are reaching the machine, and what is in front
+        # if they are not. See screen.py: a guest's pad is wired to the
+        # machine rather than to the game, so what it can do depends entirely
+        # on what has the foreground.
+        self.input_held = False
+        self.hold_reason = ""
         self.guests = {}          # slot -> GuestConnection
         self._overlay = None
         self._previous_dpm = None
@@ -1106,6 +1123,50 @@ class LiveSession:
                      max(0.0, time.time() - float(data.get("saved_at", 0))))
         return invite
 
+    def _watch_the_screen(self):
+        """Whether a guest's frames should be reaching the machine right now.
+
+        Read on a timer rather than per frame: frames arrive 125 times a
+        second per guest and this asks X two questions, which is not a thing
+        to do eight thousand times a minute for an answer that changes when
+        somebody walks across a room.
+        """
+        if not self.cfg.guest_input_needs_a_game:
+            return False, ""
+        shells = tuple(self.cfg.shell_windows) or screen.SHELLS
+        front = screen.foreground()
+        if not screen.is_shell(front, shells):
+            return False, ""
+        # Named in the message, because "controls paused" without a reason is
+        # indistinguishable from a fault, and the guest can see the screen.
+        for shell in shells:
+            if shell in front:
+                return True, shell
+        return True, "the desktop"
+
+    def _hold_input(self, held, why=""):
+        """Start or stop withholding guest frames, and say so once."""
+        if held == self.input_held:
+            return
+        self.input_held = held
+        self.hold_reason = why
+        if held:
+            # Let go of everything on the way in. A button held at the moment
+            # the menu came up would otherwise stay held on the television for
+            # as long as the menu is there, which is the one state that does
+            # not correct itself.
+            # Let go of the buttons, not of the device. Unplugging a pad
+            # would take its port binding with it -- RetroArch settles which
+            # device is which player when a game starts and does not revisit
+            # it -- so a guest would come back from the menu as nobody.
+            if self.pads is not None:
+                for _index, pad in self.pads.live():
+                    pad.release_all()
+            log.info("guest controllers held: %s is in front", why or "a menu")
+        else:
+            log.info("guest controllers live again")
+        self.notify({"t": "hold", "held": held, "why": why})
+
     def notify(self, message):
         if self.on_notice is not None:
             try:
@@ -1122,6 +1183,14 @@ class LiveSession:
                     for pad in self.pads.sweep():
                         log.debug("dead-man: released %s", pad.name)
                 self._ticks += 1
+                # Every shell_poll_ms, ask what is in front. The sweeper runs
+                # far more often than that; this rides on it rather than
+                # bringing a second timer of its own.
+                every = max(1, int(self.cfg.shell_poll_ms / (SWEEP_INTERVAL * 1000)))
+                if self._ticks % every == 0:
+                    held, why = await self.loop.run_in_executor(
+                        None, self._watch_the_screen)
+                    self._hold_input(held, why)
                 # Roughly every ten seconds, make sure the thread that owns the
                 # pipeline is still answering. A wedge is otherwise invisible
                 # until somebody tries to join and is refused.

@@ -119,6 +119,31 @@ class Config:
     # and it is only ever reached when something is already wrong.
     audio_queue_ms: int = 120
 
+    # -- what a guest's controller is allowed to reach --
+    # A guest's pad is a real input device on this machine, wired to the
+    # machine and not to the game: whatever has the foreground reads it. That
+    # was tolerable when the only thing in front was ever RetroArch. Steam's
+    # gamepad interface is a mouse pointer, an on-screen keyboard, a store
+    # with a saved card, the account settings and a button marked "switch to
+    # desktop", and none of that is something an invited guest should be able
+    # to drive from another house.
+    #
+    # So the frames stop at the television while the thing in front is one of
+    # those. Off makes this exactly what it was before, which is the right
+    # setting for a machine with no Steam on it and nobody but the household
+    # on the link.
+    guest_input_needs_a_game: bool = True
+    # Matched against the focused window's class and name, lowercased. A
+    # blocklist, and deliberately: the failure an allowlist produces is a
+    # controller going dead in the middle of a game nobody thought to name,
+    # which is worse here than a guest reaching a menu. Empty falls back to
+    # the list in screen.py.
+    shell_windows: tuple = ()
+    # How often to look. Half a second is far quicker than anybody can walk
+    # from the television to a menu, and 120 subprocess calls a minute is
+    # nothing beside encoding video.
+    shell_poll_ms: int = 500
+
     # -- packet size --
     # The RTP packet, before DTLS-SRTP (~16 bytes), UDP (8) and IP (20) are
     # added. GStreamer defaults to 1400, which puts ~1444 bytes on the wire and

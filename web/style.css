@@ -1542,6 +1542,26 @@ label.optional {
    two elements answer to is a rule one of them never asked for. */
 .pads:not(.onscreen) .touch-only { display: none; }
 
+/* While the television is in a menu, this pad reaches the page and stops
+   there. Dimmed rather than hidden or disabled: it still lights under a
+   thumb, which is what says the phone is working, and taking the controls
+   away would make a pause look like a failure. */
+html.held .touch { opacity: .45; }
+html.held .touch::after {
+  content: "controls paused";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  text-align: center;
+  font: .55rem/1.6 var(--pixel);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  pointer-events: none;
+}
+
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
    keep it laid out and animated while keeping it out of sight and out of the
    way of a thumb: display:none, visibility:hidden and zero size would each
