@@ -256,11 +256,6 @@
            with it. This is that, without asking the game. -->
       <button id="pads-sticks" type="button" class="ghost pad-only"
               aria-pressed="false">Swap sticks</button>
-      <!-- Glass has no click to it. This is the switch for the buzz that
-           stands in for one, and it is here rather than in a menu of its own
-           because this is already the panel about how the controls feel. -->
-      <button id="pads-buzz" type="button" class="ghost touch-only"
-              aria-pressed="true">Buzz on tap: on</button>
       <button id="pads-reset" type="button" class="ghost" hidden>Use defaults</button>
       <button id="pads-close" type="button" class="ghost" title="Back to the game">&times;</button>
     </div>
@@ -272,6 +267,22 @@
       <select id="pads-type" class="chip" aria-label="Which controls you use">
       </select>
       <span id="pads-attached" class="browse-note pads-attached pad-only"></span>
+    </p>
+    <!-- Glass has no click to it, and this is the switch for the buzz that
+         stands in for one. Its own line rather than another button in the bar
+         at the top: that bar already carried four, and in portrait they
+         squeezed each other down to a couple of letters apiece. A switch
+         rather than a button because it is a setting that is on or off, and
+         that reads from across the panel without the words being read. -->
+    <p class="browse-note pads-feel touch-only">
+      <label class="switch" for="pads-buzz">
+        <input id="pads-buzz" type="checkbox" checked>
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-knob"></span>
+        </span>
+        <span class="switch-name">Buzz on tap</span>
+      </label>
+      <span id="pads-buzz-note" class="footnote"></span>
     </p>
     <p class="browse-note pads-seat">
       You are playing as
@@ -375,14 +386,18 @@
 </div>
 
 <!-- Not a control anybody uses: it is how an iPhone is made to tap.
-     Safari has no vibrate(), and the haptic its own switch makes when it
-     flips is the one a web page can still reach -- so this is flipped, off
-     screen, when a button is pressed. Laid out rather than display:none,
-     because a control the browser does not animate makes no feeling; hidden
-     from the reading order and from screen readers, because to everyone but
-     a thumb it is not there. See tapSwitch() in app.js. -->
-<input id="haptic-switch" class="haptic-switch" type="checkbox" switch
-       tabindex="-1" aria-hidden="true">
+     Safari has no vibrate(), and the haptic its own switch control makes when
+     it flips is the one a web page can still reach. It is the *label* that
+     has to be clicked -- WebKit plays the feedback from the label's
+     activation behaviour and not from a click on the input, which is the
+     difference between this working and this doing nothing at all.
+     Laid out rather than display:none, because a control the browser does not
+     animate makes no feeling; out of the reading order and hidden from screen
+     readers, because to everyone but a thumb it is not there.
+     See tapSwitch() in app.js. -->
+<label id="haptic-label" class="haptic-switch" for="haptic-tap"
+       aria-hidden="true"><input id="haptic-tap" type="checkbox" switch
+       tabindex="-1"></label>
 
 <script src="/static/frame.js"></script>
 <script src="/static/app.js"></script>

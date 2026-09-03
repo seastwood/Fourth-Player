@@ -1464,8 +1464,9 @@ label.optional {
 /* The controller's own settings, when there is no controller in this. */
 .pads.keys .pad-only { display: none; }
 .pads:not(.keys) .keys-only { display: none; }
-/* The panel carries `touch` while the on-screen pad is the controls and the
-   phone can vibrate; without both, a buzz switch is a switch for nothing. */
+/* The panel carries `touch` while the on-screen pad is the controls it is
+   about; a buzz switch over a pad that is not on the screen is a switch for
+   nothing. */
 .pads:not(.touch) .touch-only { display: none; }
 
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
@@ -1482,6 +1483,77 @@ label.optional {
   pointer-events: none;
   z-index: -1;
 }
+
+/* The buzz setting, on its own line. */
+.pads-feel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+  padding-bottom: 0;
+}
+
+/* A switch that looks like a switch. Square, like everything else here: a
+   pill would be the only rounded thing on the screen. The input carries the
+   state and is invisible, so the state lives in one place rather than in a
+   class somebody has to remember to keep in step. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  cursor: pointer;
+  /* iOS greys the whole label on tap otherwise, which reads as a button. */
+  -webkit-tap-highlight-color: transparent;
+}
+.switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 1.35rem;
+  border: 2px solid var(--dim);
+  background: var(--bg2);
+  transition: border-color .1s steps(2), background .1s steps(2);
+}
+.switch-knob {
+  position: absolute;
+  top: 50%;
+  left: .18rem;
+  width: .75rem;
+  height: .75rem;
+  margin-top: -.375rem;
+  background: var(--dim);
+  /* Stepped rather than smooth: it should read as a thing that snapped, the
+     way the switch it stands for does. */
+  transition: transform .1s steps(3), background .1s steps(2);
+}
+.switch input:checked + .switch-track {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg2));
+}
+.switch input:checked + .switch-track .switch-knob {
+  background: var(--accent);
+  transform: translateX(1.05rem);
+}
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.switch-name {
+  font-family: var(--pixel);
+  font-size: .5rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.switch input:checked ~ .switch-name { color: var(--accent); }
+#pads-buzz-note { margin: 0; }
 
 input.paste {
   font: 1rem/1.4 var(--sans);

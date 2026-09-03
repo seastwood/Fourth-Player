@@ -41,6 +41,21 @@ def check(cond, msg):
 
 
 source = open(os.path.join(ROOT, "web", "app.js")).read()
+
+
+def lift_text(name):
+    """One function's source, by brace counting. Used before node is looked for
+    so the markup half of this suite runs on a machine without it."""
+    start = source.index("function " + name + "(")
+    depth = 0
+    for j in range(source.index("{", start), len(source)):
+        if source[j] == "{":
+            depth += 1
+        elif source[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:j + 1]
+    raise AssertionError(name)
 page = open(os.path.join(ROOT, "web", "index.html")).read()
 style = open(os.path.join(ROOT, "web", "style.css")).read()
 
@@ -52,8 +67,12 @@ check(source.count("navigator.vibrate(") == 1,
       "navigator.vibrate is called from exactly one place")
 check(source.count("typeof navigator.vibrate") == 1,
       "and asked about in exactly one place")
-check('id="haptic-switch"' in page and 'type="checkbox" switch' in page,
+check('id="haptic-tap"' in page and "checkbox\" switch" in page,
       "the page carries a switch control for the phone with no vibrate()")
+check('for="haptic-tap"' in page,
+      "with a label pointing at it, which is the half that plays the haptic")
+check("label.click()" in source and ".checked = !" not in lift_text("tapSwitch"),
+      "and the tap goes through the label, without the box being flipped twice")
 check(".haptic-switch" in style and "display: none" not in
       style.split(".haptic-switch")[1].split("}")[0],
       "and it is laid out rather than hidden, or it makes no feeling")
@@ -62,11 +81,22 @@ check("if (navigator.vibrate) navigator.vibrate" not in source,
 
 print("the switch is on the panel about how the controls feel")
 check('id="pads-buzz"' in page, "the panel carries the switch")
-tag = page.split('id="pads-buzz"')[1].split(">")[0]
-check("touch-only" in tag,
-      "the switch is marked as belonging to the on-screen pad")
+check('<input id="pads-buzz" type="checkbox"' in page,
+      "and it is a switch rather than another button: a checkbox, drawn as one")
+# The row it sits in. The top bar had four buttons in it already and portrait
+# squeezed them to a couple of letters each, which is what put this on its own
+# line -- so the line is the fix, and it is checked rather than remembered.
+bar = page.split('class="browser-bar"')[1].split("</div>")[0]
+check('id="pads-buzz"' not in bar,
+      "it is not crammed into the bar at the top, which was already full")
+row = page.split('class="browse-note pads-feel')[1].split("</p>")[0]
+check('id="pads-buzz"' in row, "it has a line of its own")
+check("touch-only" in page.split('class="browse-note pads-feel')[1].split(">")[0],
+      "marked as belonging to the on-screen pad")
 check(".pads:not(.touch) .touch-only { display: none; }" in style,
-      "and is out of the way when the controls are not the on-screen pad")
+      "and out of the way when the controls are not the on-screen pad")
+check(".switch-track" in style and ".switch-knob" in style,
+      "and it is drawn as a track and a knob, not as a tickbox")
 
 node = shutil.which("node") or shutil.which("nodejs")
 if not node:
@@ -74,17 +104,7 @@ if not node:
     sys.exit(1 if fails else 0)
 
 
-def lift(name):
-    start = source.index("function " + name + "(")
-    depth = 0
-    for j in range(source.index("{", start), len(source)):
-        if source[j] == "{":
-            depth += 1
-        elif source[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start:j + 1]
-    raise AssertionError(name)
+lift = lift_text
 
 
 def constant(name):
@@ -112,30 +132,30 @@ const navigator = job.canVibrate
   : {};
 const canVibrate = typeof navigator.vibrate === "function";
 
-// The off-screen checkbox, and what iOS would feel: a flip.
+/* The off-screen control, as the two halves iOS distinguishes: clicking the
+   label is what plays the haptic, and clicking the input is what does not, so
+   the test counts them apart rather than counting "a click". */
 const flips = [];
-const box = {
-  checked: false,
-  click() { flips.push(this.checked); },
-  blur() {},
-};
-const document = { activeElement: null };
+const deadClicks = [];
+const tapBox = { checked: false, click() { deadClicks.push(1); } };
+const tapLabel = { click() { tapBox.checked = !tapBox.checked; flips.push(1); } };
 
 let hapticsOn = savedHaptics();
-const button = {
-  textContent: "", classList: { toggle() {} },
-  setAttribute(name, value) { this[name] = value; },
-};
+// The visible switch is a checkbox, and its state is the checkbox's state.
+const box = { checked: null };
+const note = { textContent: "" };
 // The panel remembers the last class it was told about, which is how the test
 // sees whether the switch is offered at all.
 let offered = null;
 const panel = { classList: { toggle: (name, on) => { offered = on; } } };
 const touch = { hidden: !!job.padHidden };
-const el = (id) => (id === "pads-buzz" ? button
+const el = (id) => (id === "pads-buzz" ? box
+                    : id === "pads-buzz-note" ? note
                     : id === "touch" ? touch
-                    : id === "haptic-switch" ? (job.noSwitch ? null : box)
+                    : id === "haptic-label" ? (job.noSwitch ? null : tapLabel)
+                    : id === "haptic-tap" ? tapBox
                     : panel);
-const canBuzz = canVibrate || !!el("haptic-switch");
+const canBuzz = canVibrate || !!el("haptic-label");
 
 // Enough of the d-pad to press: the bits and the lights are somebody else's
 // test, and what this one watches is the buzzing.
@@ -152,8 +172,9 @@ for (const dirs of (job.presses || [])) {
 for (let i = 0; i < (job.taps || 0); i++) buzz();
 paintBuzz();
 process.stdout.write(JSON.stringify({
-  buzzes, flips, stored: store, on: hapticsOn, label: button.textContent,
-  pressed: button["aria-pressed"], offered }));
+  buzzes, flips, deadClicks, stored: store, on: hapticsOn,
+  checked: box.checked, note: note.textContent, flipped: tapBox.checked,
+  offered }));
 """
 
 
@@ -170,15 +191,14 @@ print("a page that has never been asked buzzes")
 out = run(taps=3)
 check(out["on"] is True, "with nothing stored, the buzz is on")
 check(out["buzzes"] == [8, 8, 8], "and three taps are three buzzes")
-check(out["label"] == "Buzz on tap: on" and out["pressed"] == "true",
-      "the switch says so, and says it to a screen reader too")
+check(out["checked"] is True, "and the switch is drawn on")
 
 print("a page that was told no stays told")
 out = run(stored={"fp:haptics": "0"}, taps=3)
 check(out["on"] is False, "the stored off is read back as off")
 check(out["buzzes"] == [], "and nothing buzzes")
-check(out["label"] == "Buzz on tap: off" and out["pressed"] == "false",
-      "the switch says so")
+check(out["checked"] is False and "quiet" in out["note"],
+      "the switch is drawn off, and says so in words underneath")
 
 print("the switch is remembered")
 out = run(set=False, taps=2)
@@ -189,7 +209,7 @@ check("fp:haptics" not in out["stored"],
       "turning it back on clears the key rather than storing the default")
 # Turning it on answers with the thing it turns on: a switch for a feeling is
 # hard to check any other way.
-check(out["buzzes"] == [24, 8], "and answers with a buzz of its own")
+check(out["buzzes"] == [30, 8], "and answers with a buzz of its own")
 
 print("a phone with no vibrate() is offered the switch, and taps another way")
 # The regression this suite exists for: hidden on the iPhone, which is the
@@ -198,6 +218,10 @@ out = run(canVibrate=False, taps=3)
 check(out["offered"] is True, "the switch is offered on a browser with no vibrate")
 check(out["buzzes"] == [], "nothing is called that is not there")
 check(len(out["flips"]) == 3, "and three taps flip the switch control three times")
+check(out["deadClicks"] == [],
+      "through the label, never the input -- WebKit plays nothing for the input")
+check(out["flipped"] is True,
+      "and the box is left flipped, not put back where it started")
 out = run(canVibrate=False, stored={"fp:haptics": "0"}, taps=3)
 check(out["flips"] == [], "the off switch governs that path too")
 out = run(taps=2)

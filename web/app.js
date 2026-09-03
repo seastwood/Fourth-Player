@@ -792,33 +792,37 @@ const canVibrate = typeof navigator.vibrate === "function";
  * right on Android.
  *
  * What iOS does give a web page is the haptic its own switch control makes
- * when it flips. A checkbox with `switch` on it is that control, and toggling
- * one taps the phone. So there is one off-screen, flipped and flipped back,
- * and it is a tap. It is a trick and it is Apple's to withdraw, which is why
- * nothing depends on it working: if it does nothing, the pad is exactly as
- * silent as it was before, and the switch that turned it on says so by
- * tapping when you turn it on.
+ * when it flips. A checkbox with `switch` on it is that control, so there is
+ * one off the side of the screen and flipping it is the tap.
  *
- * The element is off-screen rather than display:none, because a control that
- * is not laid out is not a control the browser animates, and the animation is
- * where the feeling comes from. */
+ * It has to be flipped by clicking the *label*. WebKit plays the feedback
+ * from the label's activation behaviour and not from a click on the input
+ * itself, which is the whole difference between this working and this doing
+ * nothing -- and doing nothing is what the first go at it did.
+ *
+ * Two further conditions, neither of them ours to relax: it needs a live user
+ * gesture, which is why this is only ever called from inside a pointerdown,
+ * and the grant lapses about a second after one. It is a trick and it is
+ * Apple's to withdraw -- reportedly withdrawn in iOS 26.5 -- so nothing here
+ * depends on it working. Where it does nothing the pad is exactly as silent
+ * as it was before there was a switch. */
 function tapSwitch() {
-  const box = el("haptic-switch");
-  if (!box) return;
-  try {
-    box.checked = !box.checked;
-    // A programmatic click is what iOS answers; the property change on its
-    // own is not a flip as far as the control is concerned.
-    box.click();
-    // It must never take the focus off whatever the guest was doing, and it
-    // is aria-hidden, so a screen reader has nothing to say about it either.
-    if (document.activeElement === box) box.blur();
-  } catch (_) { /* a tap that does not happen is not worth an error */ }
+  const label = el("haptic-label");
+  if (!label) return;
+  // The click toggles the box itself; setting .checked here as well would put
+  // it back where it started and leave the control unflipped.
+  try { label.click(); } catch (_) { /* a tap that does not happen is not an error */ }
 }
 
-// Whether there is any way at all to answer a press. The switch is offered
-// on the strength of this, and on an iPhone it rests on the trick above.
-const canBuzz = canVibrate || !!el("haptic-switch");
+// Whether there is any way at all to answer a press. The switch is offered on
+// the strength of this, and on an iPhone it rests on the trick above.
+const canBuzz = canVibrate || !!el("haptic-label");
+
+// Which of the two is doing the work, for the host log: "it does not buzz on
+// my phone" is three different faults, and they are not tellable apart from
+// here without knowing which path the page took.
+const feelPath = canVibrate ? "vibrate()"
+               : (el("haptic-label") ? "switch tap" : "no way to");
 
 function savedHaptics() {
   let raw = null;
@@ -842,9 +846,13 @@ function buzz(ms = BUZZ_MS) {
   tapSwitch();
 }
 
-/* The switch, and the two places its state shows. The panel only carries the
-   button while the on-screen pad is the controls, which is what the class on
-   the panel says -- the same trick `keys` plays for the keyboard. */
+/* The switch, and the places its state shows. The panel only carries the row
+   while the on-screen pad is the controls, which is what the class on the
+   panel says -- the same trick `keys` plays for the keyboard.
+
+   The checkbox is the state rather than a picture of it: the stylesheet draws
+   the track and the knob off :checked, so there is no class here to be kept
+   in step with what the box actually says. */
 function paintBuzz() {
   const panel = el("pads");
   // Whether the pad is on the screen, rather than whether it was asked for:
@@ -852,11 +860,15 @@ function paintBuzz() {
   // switch above a pad that is not there is a switch for nothing.
   const showing = canBuzz && !el("touch").hidden;
   if (panel) panel.classList.toggle("touch", showing);
-  const button = el("pads-buzz");
-  if (!button) return;
-  button.textContent = hapticsOn ? "Buzz on tap: on" : "Buzz on tap: off";
-  button.setAttribute("aria-pressed", hapticsOn ? "true" : "false");
-  button.classList.toggle("on", hapticsOn);
+  const box = el("pads-buzz");
+  if (!box) return;
+  box.checked = hapticsOn;
+  const note = el("pads-buzz-note");
+  if (note) {
+    note.textContent = hapticsOn
+      ? "The pad answers a press. Turn it off if you would rather it did not."
+      : "The pad is quiet.";
+  }
 }
 
 function setHaptics(on) {
@@ -867,9 +879,9 @@ function setHaptics(on) {
   } catch (_) {}
   paintBuzz();
   // Answer the switch with the thing it switches, so turning it on is its own
-  // demonstration -- and on a phone where the trick above does nothing, the
-  // silence here is the honest answer to "does this work on mine?".
-  if (hapticsOn) buzz(24);
+  // demonstration -- and on a phone where none of this works, the silence is
+  // the honest answer to "does it work on mine?".
+  if (hapticsOn) buzz(30);
 }
 
 let touchOn = false;
@@ -1939,7 +1951,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03g";
+const CLIENT_BUILD = "2026-09-03h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3184,12 +3196,13 @@ el("pads-sticks").addEventListener("click", () => {
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
 });
 
-el("pads-buzz").addEventListener("click", () => {
-  setHaptics(!hapticsOn);
-  el("pads-hint").textContent = hapticsOn
-    ? "The on-screen pad buzzes when you press it."
-    : "The on-screen pad is quiet now.";
-  report(hapticsOn ? "turned the buzz on" : "turned the buzz off");
+el("pads-buzz").addEventListener("change", (event) => {
+  setHaptics(event.target.checked);
+  // Which path the page is taking, and on what, so a phone that feels nothing
+  // can be told apart from a phone that was never asked. The user agent is
+  // the only way to know which iOS this is, and iOS is the whole question.
+  report("turned the buzz " + (hapticsOn ? "on" : "off") + ", via " + feelPath
+         + " on " + navigator.userAgent);
 });
 
 el("padtest").addEventListener("click", openPads);

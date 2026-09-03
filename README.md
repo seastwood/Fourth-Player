@@ -153,10 +153,18 @@ vibration API, so `navigator.vibrate` is a no-op there and the pad has always
 felt dead on the phone it is most often played on. What iOS does hand a web
 page is the haptic its own switch control makes when it flips — so there is a
 checkbox with `switch` on it off the side of the screen, and flipping it is
-the tap. It is Apple's to withdraw and nothing depends on it: if it stops
-working the pad is as silent as it was before, and turning the switch on
-answers with a tap, so whether it works on a given phone is something you can
-feel rather than something to look up.
+the tap.
+
+Three conditions, and missing any one of them is silence rather than an error.
+The flip has to come from clicking the **label**: WebKit plays the feedback
+from the label's activation behaviour and not from a click on the input, which
+is the difference between this working and this doing nothing. It needs a live
+user gesture, which is why it is only ever called from inside a `pointerdown`,
+and the grant lapses about a second after one. And it is Apple's to withdraw —
+reported gone in iOS 26.5. Nothing depends on it: where it does nothing the
+pad is as silent as it was before, and turning the switch on answers with a
+tap, so whether it works on a given phone is something you can feel rather
+than something to look up.
 
 ### Or a keyboard
 
