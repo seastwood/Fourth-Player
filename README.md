@@ -207,6 +207,31 @@ retargets that click away from the label, so neither is used in this mode —
 release is heard on the window rather than through capture. On Android, where
 `vibrate()` exists, none of this applies and the press path is unchanged.
 
+### Naming somebody who may drive
+
+A guest's controller is held while a menu is in front rather than a game. That
+is right nearly always and wrong in one case worth having: the person you are
+streaming a game to through Moonlight is *meant* to be driving it, and
+Moonlight's chooser and its stream are the same window, so nothing here can
+tell them apart.
+
+So it is a person rather than a rule. **Who may drive the screen…** in the
+Kodi add-on names one connected guest, and only from the television — a guest
+cannot give it to themselves, which is the whole reason it is worth anything.
+One at a time, because "who is driving" is a single answer and two people on
+one remote desktop is a mess.
+
+It lapses three ways, and the third is the one that matters: when the host
+takes it back, when that guest leaves — nobody inherits it with the seat — and
+when something else comes to the front. Closing Moonlight and opening Steam is
+not something anybody would think of as revoking a permission, which is
+exactly why it is done for them.
+
+Each page is told where it stands separately, because "may you drive" is a
+different answer for each of them, and which seat a browser holds is this
+program's business rather than something a page should be comparing numbers
+about.
+
 ### Steam and Moonlight get out of the way
 
 A guest starting a game from the web UI closes Steam and Moonlight first — the

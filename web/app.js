@@ -2263,7 +2263,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03w";
+const CLIENT_BUILD = "2026-09-03x";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2711,14 +2711,34 @@ function sendFrame(pad, releaseAll) {
  * explaining to somebody holding a pad, so the message is about the
  * television rather than about frames. */
 function holdInput(message) {
-  const held = !!message.held;
+  /* Whether this page is the one that may drive. The server says so per
+     guest rather than the page working it out from a slot number: which slot
+     this browser holds is the server's business, it can change, and a page
+     that guessed wrong would either pause a driver or let everybody through. */
+  const driving = !!message.driving;
+  const held = !!message.held && !driving;
   document.documentElement.classList.toggle("held", held);
+  if (driving) {
+    document.documentElement.classList.remove("held");
+    showNotice("<p><strong>You are driving " + escapeText(message.why || "the screen")
+      + "</strong></p>"
+      + '<p class="footnote">The host has handed this to you, so your '
+      + "controller reaches it as if you were in the room. It lasts until "
+      + "they take it back, until you leave, or until something else comes to "
+      + "the front.</p>", false);
+    return;
+  }
   if (held) {
+    const who = message.driver_label
+      ? escapeText(message.driver_label) + " is driving it."
+      : "";
     showNotice("<p><strong>Controls paused</strong></p>"
       + '<p class="footnote">The television is in a menu rather than in a '
-      + "game, and controllers here only reach the game. They come back the "
-      + "moment something is playing.</p>", false);
-  } else if (!el("notice").hidden && lastNotice.includes("Controls paused")) {
+      + "game, and controllers here only reach the game. " + who
+      + " They come back the moment something is playing.</p>", false);
+  } else if (!el("notice").hidden
+             && (lastNotice.includes("Controls paused")
+                 || lastNotice.includes("You are driving"))) {
     hideNotice();
   }
 }

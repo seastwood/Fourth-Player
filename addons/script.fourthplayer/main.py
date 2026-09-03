@@ -280,6 +280,66 @@ def extend_session(status=None):
         notify(reply.get("error", "Could not add time."), error=True)
 
 
+def choose_driver(status):
+    """Name one guest who may drive what is on the screen, or take it back.
+
+    A guest's controller is wired to this machine, so what it can reach is
+    whatever has the foreground -- which is why guests are held while a menu
+    is in front rather than a game. Sometimes that is the wrong answer: the
+    person you are streaming a game to through Moonlight is meant to be
+    driving it, and Moonlight's own list of machines and the stream itself are
+    the same window, so there is no telling them apart from here.
+
+    So it is a person rather than a rule: this names one, and only from the
+    television. A guest cannot give it to themselves.
+    """
+    guests = status.get("guests") or []
+    if not guests:
+        notify("Nobody has joined yet.")
+        return
+    if not status.get("held"):
+        # Nothing is being held, so nothing is being withheld from anybody,
+        # and a permission granted now would be scoped to a menu that is not
+        # in front. Say what it is for instead of granting a puzzle.
+        xbmcgui.Dialog().ok(
+            ADDON_NAME,
+            "Nothing is in front of the game right now, so every guest's "
+            "controller already reaches it.\n\n"
+            "This is for when something like Moonlight or the Steam menu is "
+            "up: open that first, then come back and name who may drive it.")
+        return
+
+    front = status.get("hold_reason") or "what is in front"
+    driving = status.get("driver")
+    labels = []
+    for guest in guests:
+        mark = "> " if guest["slot"] == driving else "  "
+        labels.append("%s%s — %s" % (mark, guest["label"],
+                                     "playing" if guest["connected"] else "away"))
+    labels.append(("> " if driving is None else "  ") + "Nobody")
+    choice = xbmcgui.Dialog().select("Who may drive %s?" % front, labels)
+    if choice < 0:
+        return
+    if choice == len(guests):
+        reply = C.set_driver(None)
+        notify("Nobody is driving now." if reply.get("ok")
+               else reply.get("error", "Could not change that."),
+               error=not reply.get("ok"))
+        return
+    guest = guests[choice]
+    if not xbmcgui.Dialog().yesno(
+            ADDON_NAME,
+            "Let %s drive %s?\n\nTheir controller reaches it as if they were "
+            "sitting here -- including anything it can open. It lasts until "
+            "you take it back, until they leave, or until something else comes "
+            "to the front." % (guest["label"], front)):
+        return
+    reply = C.set_driver(guest["slot"])
+    notify("%s is driving." % guest["label"] if reply.get("ok")
+           else reply.get("error", "Could not change that."),
+           error=not reply.get("ok"))
+
+
 def remove_player(status):
     guests = status.get("guests") or []
     if not guests:
@@ -707,6 +767,7 @@ def main():
             ("Can guests start games?…", lambda: choose_policy(status)),
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
             ("Add more time…", lambda: extend_session(status)),
+            ("Who may drive the screen…", lambda: choose_driver(C.status())),
             ("Remove a player…", lambda: remove_player(C.status())),
             ("How many can join?…", lambda: choose_slots(status)),
             ("How do guests get in?…", lambda: choose_link(status)),

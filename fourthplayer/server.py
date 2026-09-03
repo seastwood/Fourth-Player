@@ -379,6 +379,19 @@ class Server:
         for outbox in list(self._outboxes):
             outbox.put_nowait(message)
 
+    def _send_one(self, guest, message):
+        """Send one message to one guest, for the things that differ per page.
+
+        "Are you the one who may drive" is the first of those: it is a
+        different answer for each guest, and a broadcast carrying a slot
+        number would leave every page working out whether it means them --
+        which they cannot do reliably, because the seat a browser holds is
+        this program's business and it changes.
+        """
+        outbox = getattr(guest, "outbox", None)
+        if outbox is not None:
+            outbox.put_nowait(message)
+
     async def _drain(self, socket_, outbox):
         """One writer per socket, so signalling never races itself.
 
@@ -418,6 +431,21 @@ class Server:
         try:
             if command == "status":
                 return self._status()
+            if command == "drive":
+                # Which guest may drive whatever is in front. From here only:
+                # this socket is the host's own machine, and a guest cannot
+                # reach it, which is the whole reason the permission is worth
+                # anything.
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session is open"}
+                slot = request.get("slot")
+                try:
+                    label = self.session.name_a_driver(
+                        None if slot is None else int(slot))
+                except (TypeError, ValueError) as exc:
+                    return {"ok": False, "error": str(exc)}
+                return {"ok": True, "driver": self.session.driver,
+                        "label": label}
             if command == "start":
                 if self.session and self.session.open:
                     return {"ok": False, "error": "a session is already open"}
@@ -445,6 +473,7 @@ class Server:
                     seconds = minutes * 60
                 self.session = LiveSession(self.cfg, self.loop)
                 self.session.on_notice = self._broadcast
+                self.session.on_notice_one = self._send_one
                 self.session.start(seconds, slots=self._slots(request))
                 return self._status()
             if command == "stop":
@@ -634,6 +663,7 @@ class Server:
         try:
             session = LiveSession(self.cfg, self.loop)
             session.on_notice = self._broadcast
+            session.on_notice_one = self._send_one
             session.start(0, invite=invite)
         except Exception as exc:
             log.warning("could not restore the previous session: %s", exc)
@@ -677,6 +707,13 @@ class Server:
             "share_pads": self.cfg.share_pads,
             "base_url": self.join_url("").rstrip("/").rsplit("/j", 1)[0],
             "guests": self.session.roster(),
+            # Who may drive what is in front, if anybody, and what it was
+            # granted against -- so the add-on can offer to take it back and
+            # say what it is for.
+            "driver": self.session.driver,
+            "driver_shell": self.session.driver_shell,
+            "held": self.session.input_held,
+            "hold_reason": self.session.hold_reason,
             "url": self.join_url(clear[0]) if clear else None,
             "pin": clear[1] if clear else None,
             "launch": self.session.launch_state(),

@@ -225,7 +225,8 @@ class GuestConnection:
         # the dead-man switch releases pads for *silence* -- reaping somebody
         # for being held is the wrong answer to the right observation.
         self.last_input = time.monotonic()
-        if self.session is not None and self.session.input_held:
+        if (self.session is not None and self.session.input_held
+                and self.session.driver != self.slot):
             self.held_frames += 1
             return
         # Named, so a shared pad can tell its senders' frames apart
@@ -249,6 +250,25 @@ class LiveSession:
         # on what has the foreground.
         self.input_held = False
         self.hold_reason = ""
+        # One guest the host has named who may drive whatever is in front,
+        # while everybody else's frames stop at the television. A slot number,
+        # or None, which is what it is until somebody says otherwise.
+        #
+        # One at a time on purpose: "who is driving" is a single answer, not a
+        # set of ticks. Two people on one remote desktop is a mess, and a
+        # single value makes taking it back unambiguous.
+        #
+        # `on_notice_one` is set by the server beside `on_notice`: some things
+        # are the same for everybody and some are not, and this is the first
+        # that is not.
+        self.on_notice_one = None
+        self.driver = None
+        # And what it was granted against. A permission to drive Moonlight is
+        # not a permission to drive Steam's store, and the way somebody gets
+        # from one to the other is closing one and opening the other -- which
+        # nobody would think of as revoking anything. So it is scoped to the
+        # thing in front when it was given, and dropped when that changes.
+        self.driver_shell = ""
         self.guests = {}          # slot -> GuestConnection
         self._overlay = None
         self._previous_dpm = None
@@ -745,6 +765,10 @@ class LiveSession:
         guest = self.guests.pop(slot, None)
         if guest is None:
             return False
+        # Whoever was driving stops driving by leaving. Nobody inherits it:
+        # the next guest into that seat is a different person, and a
+        # permission that arrives with a chair is not one anybody granted.
+        self.forget_driver_if(slot)
         self.detach_peer(guest)
         # Unplug their controller. A seat nobody is sitting in takes a player
         # port away from whoever is actually holding something.
@@ -1167,9 +1191,71 @@ class LiveSession:
                 return True, shell
         return True, "the desktop"
 
+    def name_a_driver(self, slot):
+        """Let one guest drive what is in front, or nobody. Returns the label.
+
+        Only from the television: this arrives on the control socket, which is
+        the host's own machine, and never from the web UI. A guest cannot give
+        it to themselves, which is the whole point of it existing.
+        """
+        if slot is None:
+            was, self.driver, self.driver_shell = self.driver, None, ""
+            if was is not None:
+                log.info("nobody is driving %s now", self.hold_reason or "the screen")
+            self._tell_about_the_hold()
+            return None
+        guest = next((g for g in self.guests.values() if g.slot == slot), None)
+        if guest is None:
+            raise ValueError("nobody is in that seat")
+        self.driver = slot
+        # What it is granted against, so it cannot outlive it. Held means
+        # something is in front; not held means the permission is moot for as
+        # long as that lasts, and it is scoped to whatever comes next.
+        self.driver_shell = self.hold_reason
+        log.info("%s may drive %s", guest.label, self.driver_shell or "the screen")
+        self._tell_about_the_hold()
+        return guest.label
+
+    def forget_driver_if(self, gone_slot):
+        """Take it back when that guest leaves. Nobody inherits it."""
+        if self.driver is not None and self.driver == gone_slot:
+            log.info("the guest who was driving has gone; nobody is now")
+            self.driver = None
+            self.driver_shell = ""
+
+    def _tell_about_the_hold(self):
+        """Tell every page where it stands, one page at a time.
+
+        Per guest rather than broadcast, because "are you the one driving" is
+        a different answer for each of them and it is not the page's job to
+        work that out from a slot number: which slot a browser holds is this
+        program's business, it changes, and a page that guessed wrong would
+        either pause the driver or let everybody through.
+        """
+        driving = next((g.label for g in self.guests.values()
+                        if g.slot == self.driver), "")
+        for guest in list(self.guests.values()):
+            self.notify_one(guest, {
+                "t": "hold", "held": self.input_held, "why": self.hold_reason,
+                "driving": guest.slot == self.driver,
+                "driver_label": "" if guest.slot == self.driver else driving})
+
     def _hold_input(self, held, why=""):
         """Start or stop withholding guest frames, and say so once."""
+        if held == self.input_held and why == self.hold_reason:
+            return
+        # A permission given while Moonlight was in front is not a permission
+        # for whatever replaced it. Closing one program and opening another is
+        # not something anybody would think of as revoking a permission, which
+        # is exactly why this has to do it for them.
+        if self.driver is not None and why != self.driver_shell:
+            log.info("what is in front changed from %s to %s; nobody is "
+                     "driving now", self.driver_shell or "nothing",
+                     why or "nothing")
+            self.driver = None
+            self.driver_shell = ""
         if held == self.input_held:
+            self.hold_reason = why
             return
         self.input_held = held
         self.hold_reason = why
@@ -1188,7 +1274,7 @@ class LiveSession:
             log.info("guest controllers held: %s is in front", why or "a menu")
         else:
             log.info("guest controllers live again")
-        self.notify({"t": "hold", "held": held, "why": why})
+        self._tell_about_the_hold()
 
     def notify(self, message):
         if self.on_notice is not None:

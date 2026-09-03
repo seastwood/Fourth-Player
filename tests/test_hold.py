@@ -78,11 +78,38 @@ check("pad.release_all()" in held,
       "the buttons are let go of, so nothing is left held on the television")
 check(".release(" not in held,
       "and the pad is not unplugged: that would take its port binding with it")
-check('"t": "hold"' in held, "the guests are told, rather than left guessing")
+check("_tell_about_the_hold()" in held,
+      "the guests are told, rather than left guessing")
+
+told = source.split("def _tell_about_the_hold")[1].split("\n    def ")[0]
+check('"t": "hold"' in told and "notify_one" in told,
+      "one page at a time, because 'may you drive' is a different answer for "
+      "each of them")
+check('"driving": guest.slot == self.driver' in told,
+      "and the answer is worked out here rather than by a page comparing slot "
+      "numbers it cannot be sure of")
+
+print("one guest may be named to drive what is in front")
+named = source.split("def name_a_driver")[1].split("\n    def ")[0]
+check("self.driver = slot" in named and "raise ValueError" in named,
+      "a seat with nobody in it cannot be named")
+check("self.driver_shell = self.hold_reason" in named,
+      "and what it is granted against is remembered with it")
+feed2 = source.split("def feed(self, data)")[1].split("\n    def ")[0]
+check("self.session.driver != self.slot" in feed2,
+      "which is the whole of the gate: everybody is held except the one named")
+gone = source.split("def forget_driver_if")[1].split("\n    def ")[0]
+check("self.driver = None" in gone,
+      "leaving takes it away, and nobody inherits it with the seat")
+lapse = source.split("def _hold_input")[1].split("\n    def ")[0]
+check("why != self.driver_shell" in lapse,
+      "and so does something else coming to the front -- closing one program "
+      "and opening another is not what anybody would call revoking a "
+      "permission, which is why it has to be done for them")
 
 feed = source.split("def feed(self, data)")[1].split("\n    def ")[0]
 check(feed.index("self.last_input = time.monotonic()")
-      < feed.index("if self.session is not None and self.session.input_held"),
+      < feed.index("and self.session.input_held"),
       "presence is counted before the hold, or a held guest is reaped for "
       "silence that is not theirs")
 check("self.held_frames += 1" in feed,

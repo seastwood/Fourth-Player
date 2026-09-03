@@ -56,6 +56,11 @@ def set_link(required):
     return ask({"cmd": "link", "set": bool(required)})
 
 
+def set_driver(slot):
+    """Name the guest who may drive what is in front, or None for nobody."""
+    return ask({"cmd": "drive", "slot": slot})
+
+
 def set_slots(count):
     return ask({"cmd": "slots", "set": count})
 
