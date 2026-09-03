@@ -243,10 +243,30 @@ video {
      of the picture instead of wandering off into the furniture. */
   touch-action: none;
   transform-origin: center center;
+  /* Said out loud, because zooming changed where this element paints. An
+     untransformed video is a plain block and sits underneath everything
+     positioned over it -- the chips, the on-screen pad, the panels -- without
+     anyone having to say so. A transformed one is its own stacking context,
+     which browsers hand to the compositor, and a composited layer can come up
+     over siblings that were painting above it a moment earlier. That is a
+     zoomed picture drawn over the row of chips: still there, still tappable in
+     theory, and covered.
+
+     So the order is stated rather than inherited. Position and a zero put this
+     back exactly where it was, underneath everything with a number below. */
+  position: relative;
+  z-index: 0;
 }
 
 .hud {
   position: absolute;
+  /* Over the picture, under the panels that replace it. See the note on the
+     video: none of these numbers used to be needed. The one thing this does
+     change is that the chips now sit over a notice rather than under it, on a
+     phone narrow enough for the row to wrap into it -- which is the right way
+     round: a message can be read around a chip, and a chip that cannot be
+     reached is a control nobody has. */
+  z-index: 10;
   top: var(--top-safe);
   left: 0;
   right: 0;
@@ -488,6 +508,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 
 .prompt {
   position: absolute;
+  /* Under the notice, which is where it was: the notice carries a number and
+     this did not, and a numbered element paints over an unnumbered one
+     whatever the page order says. */
+  z-index: 5;
   top: calc(var(--top-safe) + 2.8rem);
   left: .6rem;
   right: .6rem;
@@ -519,6 +543,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
  */
 
 .touch {
+  /* Above the chips, which is where it has always been -- it is later in the
+     page and both were left to tree order. In landscape it lies over the
+     picture, and the shoulder buttons share the strip the chips are in; a chip
+     row that is not open takes no taps anyway. Upright it sits below the
+     picture in the ordinary flow and this decides nothing. */
+  z-index: 12;
   --key: #241c52;
   --key-edge: var(--dim);
   display: grid;

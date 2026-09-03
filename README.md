@@ -1076,6 +1076,16 @@ right:
   pad stays where the thumbs are, and the host is never told any of it
   happened. Zooming in does not sharpen anything, and it costs nothing.
 
+One thing zooming changed that nobody asks for and everybody notices: where the
+picture *paints*. An untransformed video is a plain block and sits underneath
+everything positioned over it — the chips, the on-screen pad, the panels —
+without anyone having to say so. A transformed one is its own stacking context,
+which browsers hand to the compositor, and a composited layer can come up over
+siblings that were painting above it a moment earlier. What that looked like
+was a zoomed picture drawn over the row of chips. The order is stated in the
+stylesheet now rather than inherited from the page order, and
+`tests/test_zoom.py` checks it stays that way.
+
 The picture takes its own touch gestures now (`touch-action: none` on the video
 alone), because the browser's page zoom and this one fought: the page zoomed,
 the fixed stage slid out from under the visual viewport, and the chips went

@@ -149,5 +149,37 @@ check("video.style.transform" in lift("applyZoom"),
 check("videoWidth" in lift("pictureBox"),
       "and the picture's own shape is read from the stream, not assumed")
 
+print("the chips stay on top of a picture that has been made bigger")
+# An untransformed video is a plain block and paints underneath everything
+# positioned over it without anyone saying so. A transformed one is its own
+# stacking context, which browsers hand to the compositor -- and a composited
+# layer can come up over siblings that were painting above it a moment before.
+# What that looked like was a zoomed picture drawn over the row of chips.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+
+
+def layer(selector):
+    """The z-index the first rule for a selector states, or None."""
+    block = re.search(re.escape(selector) + r"\s*\{(.*?)\}", css, re.S)
+    if not block:
+        return None
+    found = re.search(r"z-index:\s*(-?\d+)", block.group(1))
+    return int(found.group(1)) if found else None
+
+
+video_rule = re.search(r"\nvideo \{(.*?)\n\}", css, re.S)
+check(bool(video_rule) and "position: relative" in video_rule.group(1),
+      "the video is positioned, so its z-index means something")
+check(layer("\nvideo") == 0, "and states where it paints: %s" % layer("\nvideo"))
+for name, selector in (("the chips", ".hud"), ("the on-screen pad", ".touch"),
+                       ("the game list", ".browser"),
+                       ("the controls panel", ".pads")):
+    above = layer(selector)
+    check(above is not None and above > 0,
+          "%s says it is above the picture: %s" % (name, above))
+check((layer(".browser") or 0) > (layer(".hud") or 0)
+      and (layer(".pads") or 0) > (layer(".hud") or 0),
+      "and a panel that replaces the picture is above the chips too")
+
 print(("FAILED: %d" % len(fails)) if fails else "test_zoom: all ok")
 sys.exit(1 if fails else 0)
