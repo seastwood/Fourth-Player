@@ -141,6 +141,14 @@ Which buttons exist, what they send and where they sit is data (`LAYOUTS` in
 `web/app.js`), so another controller — one with sticks, say — is an entry in
 that table rather than new code.
 
+Glass gives nothing back, so a press buzzes the phone for eight milliseconds —
+long enough to feel, too short to hear across a room. The d-pad buzzes when
+the direction *changes* rather than while it is held, or a direction held for
+a minute would shake the phone for a minute. **Buzz on tap** in **Controls**
+turns it off and on, remembered per device; it is on to start with, and the
+switch only appears on a phone that can vibrate while the on-screen pad is the
+controls being used.
+
 ### Or a keyboard
 
 An on-screen pad is no use on a laptop: there is no touchscreen to put it on,

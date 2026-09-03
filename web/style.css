@@ -1464,6 +1464,9 @@ label.optional {
 /* The controller's own settings, when there is no controller in this. */
 .pads.keys .pad-only { display: none; }
 .pads:not(.keys) .keys-only { display: none; }
+/* The panel carries `touch` while the on-screen pad is the controls and the
+   phone can vibrate; without both, a buzz switch is a switch for nothing. */
+.pads:not(.touch) .touch-only { display: none; }
 
 input.paste {
   font: 1rem/1.4 var(--sans);

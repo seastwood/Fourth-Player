@@ -758,6 +758,76 @@ const LAYOUT_KEY = "fp:layout";
 
 const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 
+/* A short buzz under a thumb that pressed glass.
+ *
+ * Glass gives nothing back: a finger on a physical button knows it went down
+ * before the game shows anything, and a finger on a picture of a button does
+ * not. Eight milliseconds is enough to feel and too short to hear, which
+ * matters when five people are in one room and only one of them is holding
+ * the phone.
+ *
+ * It is a preference because it is genuinely a matter of taste and of
+ * battery, and because a buzz on every d-pad direction is a lot of buzzing
+ * for somebody playing a game that holds a direction for minutes. On by
+ * default, since that is what this did before there was a switch.
+ *
+ * Only the on-screen pad buzzes. A physical controller has its own rumble and
+ * a keyboard has its own keys, so the switch is hidden in both cases -- as it
+ * is on a device that cannot vibrate at all, which is every desktop browser
+ * and, deliberately, Safari on iOS. */
+const HAPTICS_KEY = "fp:haptics";
+const BUZZ_MS = 8;
+
+// Read once: whether the browser has the call at all cannot change under us,
+// and asking on every button press would be a lookup per frame.
+const canBuzz = typeof navigator.vibrate === "function";
+
+function savedHaptics() {
+  let raw = null;
+  try { raw = localStorage.getItem(HAPTICS_KEY); } catch (_) {}
+  // Anything other than an explicit "off" is on, so a key this page has never
+  // written -- or one it cannot read -- lands on the old behaviour.
+  return raw !== "0";
+}
+
+let hapticsOn = savedHaptics();
+
+function buzz(ms = BUZZ_MS) {
+  if (!hapticsOn || !canBuzz) return;
+  // A refusal is normal rather than exceptional: a browser ignores vibrate
+  // until the page has been touched, and throws in a few of them.
+  try { navigator.vibrate(ms); } catch (_) {}
+}
+
+/* The switch, and the two places its state shows. The panel only carries the
+   button while the on-screen pad is the controls, which is what the class on
+   the panel says -- the same trick `keys` plays for the keyboard. */
+function paintBuzz() {
+  const panel = el("pads");
+  // Whether the pad is on the screen, rather than whether it was asked for:
+  // "off" and the keyboard both leave touchOn true behind them, and a buzz
+  // switch above a pad that is not there is a switch for nothing.
+  const showing = canBuzz && !el("touch").hidden;
+  if (panel) panel.classList.toggle("touch", showing);
+  const button = el("pads-buzz");
+  if (!button) return;
+  button.textContent = hapticsOn ? "Buzz on tap: on" : "Buzz on tap: off";
+  button.setAttribute("aria-pressed", hapticsOn ? "true" : "false");
+  button.classList.toggle("on", hapticsOn);
+}
+
+function setHaptics(on) {
+  hapticsOn = !!on;
+  try {
+    if (hapticsOn) localStorage.removeItem(HAPTICS_KEY);
+    else localStorage.setItem(HAPTICS_KEY, "0");
+  } catch (_) {}
+  paintBuzz();
+  // Answer the switch with the thing it switches, so turning it on is its own
+  // demonstration and nobody has to go and find a button to test it.
+  if (hapticsOn) buzz(24);
+}
+
 let touchOn = false;
 let touchButtons = 0;
 /* A keyboard, as a set of buttons held. The same shape as the on-screen pad's
@@ -889,7 +959,7 @@ function wireSticks() {
       stickHeld[event.pointerId] = well;
       well.classList.add("live");
       moveStick(well, event);
-      if (navigator.vibrate) navigator.vibrate(8);
+      buzz();
     });
     well.addEventListener("pointermove", (event) => {
       if (stickHeld[event.pointerId] !== well) return;
@@ -1022,6 +1092,7 @@ function applyLayoutChoice(key) {
   }
   paintPicker();
   paintKeyMode();
+  paintBuzz();
 }
 
 /* One control, which is also the readout.
@@ -1078,9 +1149,20 @@ function paintDpad(live) {
   }
 }
 
+/* Which arms were live at the last look. A thumb sliding across the pad from
+   left to up-left to up is three directions and should feel like three, while
+   a thumb held on one arm is one press and must not buzz 125 times a second
+   for as long as it is held -- so the buzz follows the change, not the touch. */
+let dpadLive = "";
+
 function applyDpad(event) {
   const live = dpadDirections(event);
   for (const [name, bit] of Object.entries(DPAD)) setBit(bit, live.includes(name));
+  const now = live.join(",");
+  if (now !== dpadLive) {
+    dpadLive = now;
+    if (now) buzz();
+  }
   // Light the arm being pressed, not the middle: a diagonal lights two, which
   // is also the clearest way to see that diagonals work at all.
   paintDpad(live);
@@ -1088,6 +1170,7 @@ function applyDpad(event) {
 
 function clearDpad() {
   for (const bit of Object.values(DPAD)) setBit(bit, false);
+  dpadLive = "";
   paintDpad([]);
 }
 
@@ -1121,7 +1204,7 @@ function wireTouch() {
     pointers.set(event.pointerId, button);
     button.classList.add("live");
     setBit(Number(button.dataset.button), true);
-    if (navigator.vibrate) navigator.vibrate(8);
+    buzz();
   });
   const releaseButton = (event) => {
     const button = pointers.get(event.pointerId);
@@ -1152,6 +1235,7 @@ function releaseAllTouch() {
 
 function showTouch(on, layout) {
   touchOn = on;
+  paintBuzz();
   // The picker stays available whether or not the pad is showing -- otherwise
   // turning it off is a one-way door.
   buildLayoutPicker();
@@ -1811,7 +1895,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03e";
+const CLIENT_BUILD = "2026-09-03f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2732,6 +2816,7 @@ function openPads() {
   loadPadMap();
   buildPadsGrid();
   paintKeyMode();
+  paintBuzz();
   paintPads();
 }
 
@@ -3053,6 +3138,14 @@ el("pads-sticks").addEventListener("click", () => {
     ? "Sticks swapped: the left one is now the right one. Push them to check."
     : "Sticks back the way the controller has them.";
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
+});
+
+el("pads-buzz").addEventListener("click", () => {
+  setHaptics(!hapticsOn);
+  el("pads-hint").textContent = hapticsOn
+    ? "The on-screen pad buzzes when you press it."
+    : "The on-screen pad is quiet now.";
+  report(hapticsOn ? "turned the buzz on" : "turned the buzz off");
 });
 
 el("padtest").addEventListener("click", openPads);
