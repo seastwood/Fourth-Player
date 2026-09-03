@@ -687,6 +687,31 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   transition: background .05s linear, transform .05s linear;
 }
 
+/* The switch inside every button. A finger on the label activates it, and on
+   an iPhone that flip is the only haptic a web page can still cause -- so it
+   has to be a real control, in the page, activated by a real touch. Invisible
+   and inert to the pointer: the label is what is touched, and the input is
+   only what the touch ends up meaning. */
+.tbtn-tap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  margin: 0;
+}
+/* The letter on the key. Its own element now that the button is a label with
+   a control inside it, so the two cannot be confused for each other. */
+.tbtn-cap { pointer-events: none; }
+/* Not preventing the default of a press is what lets the switch flip, so the
+   things preventDefault was quietly also doing have to be said out loud. */
+.tbtn {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .tbtn.live {
   background: var(--edge);
   color: var(--bg);
@@ -700,7 +725,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    shoulder. Declared earlier, these lost and the shoulders came out as
    overlapping pills with one of each pair invisible. */
 .tbtn-shoulder {
-  position: static;
+  /* Relative rather than static: in flow either way, but it gives the switch
+     inside the label something to be positioned against instead of letting a
+     stray pixel of it wander up to the nearest positioned ancestor. */
+  position: relative;
   width: min(26vw, 120px);
   padding: .55rem 0;
   border-radius: 0;
@@ -712,7 +740,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .tbtn-shoulder.live { background: var(--dim); color: var(--bg); }
 
 .tbtn-start {
-  position: static;
+  position: relative;
   width: auto;
   height: auto;
   padding: .5rem 1rem;
@@ -1563,15 +1591,6 @@ label.optional {
 .switch input:checked ~ .switch-name { color: var(--accent); }
 #pads-buzz-note { margin: 0; }
 
-/* Deliberately undressed: this is Safari's own switch, and the whole point of
-   it is that it is the real control rather than a picture of one. */
-.feel-test {
-  display: inline-flex;
-  align-items: center;
-  gap: .55rem;
-  cursor: pointer;
-}
-.feel-test input { accent-color: var(--accent); }
 
 input.paste {
   font: 1rem/1.4 var(--sans);

@@ -155,20 +155,26 @@ page is the haptic its own switch control makes when it flips — so there is a
 checkbox with `switch` on it off the side of the screen, and flipping it is
 the tap.
 
-Three conditions, and missing any one of them is silence rather than an error.
-The third has now closed: Apple patched the programmatic path in **iOS 26.5**,
-so a current iPhone cannot be tapped by a web page at all. The switch stays
-because Android still can, and the note under it says plainly which phones
-cannot rather than leaving somebody pressing buttons wondering.
-The flip has to come from clicking the **label**: WebKit plays the feedback
-from the label's activation behaviour and not from a click on the input, which
-is the difference between this working and this doing nothing. It needs a live
-user gesture, which is why it is only ever called from inside a `pointerdown`,
-and the grant lapses about a second after one. And it is Apple's to withdraw —
-reported gone in iOS 26.5. Nothing depends on it: where it does nothing the
-pad is as silent as it was before, and turning the switch on answers with a
-tap, so whether it works on a given phone is something you can feel rather
-than something to look up.
+Apple closed the *scripted* version of that in **iOS 26.5**: a page can no
+longer click one of these from JavaScript and get a haptic, which is what
+every web-haptics library was doing. What it did not close is a real finger on
+a real switch — so on a phone with no `vibrate()`, each button on the pad
+**is** one. A button is a `<label>` with a hidden `<input type="checkbox"
+switch>` inside it, and the finger that presses the button activates the
+switch, which taps the phone.
+
+Two things follow from that, and both are the price of it. The tap lands as
+you let go rather than as you press, because that is when a switch flips —
+the *button* still registers on `pointerdown`, so the game hears the press
+immediately and only the feeling is late. And it is only the buttons: the
+d-pad and the sticks are dragged rather than tapped, and a drag flips nothing.
+
+It also means the press cannot swallow its own touch. `preventDefault()` on
+`pointerdown` cancels the click that activates the switch, and pointer capture
+retargets that click away from the label, so neither is used in this mode —
+`touch-action: none` on the pad stops the scroll and the zoom instead, and the
+release is heard on the window rather than through capture. On Android, where
+`vibrate()` exists, none of this applies and the press path is unchanged.
 
 ### Or a keyboard
 

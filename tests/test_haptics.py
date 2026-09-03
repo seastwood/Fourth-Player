@@ -228,12 +228,12 @@ out = run(taps=2)
 check(out["flips"] == [] and out["buzzes"] == [8, 8],
       "a phone with vibrate() uses it and leaves the trick alone")
 
-print("a phone that cannot be tapped is told so")
+print("a phone that taps a different way is told how")
 out = run(canVibrate=False)
-check("Safari" in out["note"] and "26.5" in out["note"],
-      "the note under the switch says why an iPhone may feel nothing")
+check("as you let go" in out["note"] and "buttons" in out["note"],
+      "the note says the tap lands on release, and only on the buttons")
 out = run()
-check("Safari" not in out["note"],
+check("as you let go" not in out["note"],
       "and says nothing of the sort where vibrate() exists")
 
 print("the switch is only offered where it means something")
@@ -245,6 +245,24 @@ check(out["offered"] is False,
 out = run(canVibrate=False, noSwitch=True)
 check(out["offered"] is False,
       "and neither is a browser with no way to tap at all")
+
+print("a button is a label with a switch in it")
+wired = lift_text("wireTouch")
+check("const bySwitch = hapticsOn && !canVibrate;" in wired,
+      "the press knows which of the two ways it is making a feeling")
+check(wired.count("if (!bySwitch) {") == 1
+      and "event.preventDefault();" in wired.split("if (!bySwitch) {")[1],
+      "and leaves the browser's own handling alone when the switch is it --"
+      " a prevented pointerdown is a click that never happens")
+check("setPointerCapture" in wired.split("if (!bySwitch) {")[1].split("}")[0],
+      "capture too, which would retarget the click away from the label")
+check(wired.count('window.addEventListener("pointerup"') == 1,
+      "and a release that does not need capture to be heard")
+built = lift_text("makeButton")
+check('createElement("label")' in built and '"switch"' in built,
+      "the button itself is a label around a switch, not a <button>")
+check("interactive content nested in a" in source,
+      "with the reason it cannot be a <button> written down beside it")
 
 print("the d-pad buzzes on the direction, not on the frame")
 out = run(presses=[["left"], ["left"], ["left"]])

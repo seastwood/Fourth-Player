@@ -55,6 +55,15 @@ const BACKLOG_LIMIT = 4096;
  * zoom away from someone who needs it, to fix a gesture, is a poor trade. */
 let lastTapEnd = 0;
 document.addEventListener("touchend", (event) => {
+  /* Not on the pad. Two presses of a button inside 350 ms is not a double tap
+     to be swallowed, it is somebody playing, and cancelling the second one
+     takes the switch flip -- and so the feeling -- with it. The pad does not
+     need this guard anyway: `touch-action: none` on it stops the zoom by
+     saying so rather than by cancelling touches after the fact. */
+  if (event.target && event.target.closest && event.target.closest(".touch")) {
+    lastTapEnd = 0;
+    return;
+  }
   const now = Date.now();
   if (now - lastTapEnd <= 350) event.preventDefault();
   lastTapEnd = now;
@@ -871,14 +880,12 @@ function paintBuzz() {
        indistinguishable here from a phone that is buzzing away happily, and
        the only decent thing to do about that is say which phones cannot. */
     const caveat = canVibrate ? ""
-      : " Safari has no way to vibrate a phone, so on an iPhone this rests on"
-        + " a trick Apple closed in iOS 26.5 -- newer than that and it does"
-        + " nothing, however it is set.";
+      : " On an iPhone the tap comes from iOS's own switch, which means it"
+        + " lands as you let go rather than as you press, and only on the"
+        + " buttons -- Safari has no way to vibrate a phone on demand.";
     note.textContent = (hapticsOn ? "The pad answers a press."
                                   : "The pad is quiet.") + caveat;
   }
-  const feel = el("feel-row");
-  if (feel) feel.hidden = canVibrate || !showing;
 }
 
 function setHaptics(on) {
@@ -909,12 +916,44 @@ let keyButtons = 0;
 let keyboardOn = false;
 const pointers = new Map();
 
+/* A button on the glass, and -- for the phone that cannot be told to vibrate
+   -- the control that makes it tap.
+ *
+ * It is a <label> around a hidden `<input type="checkbox" switch>` rather than
+ * a <button>, because a finger landing on a label activates the switch inside
+ * it, and iOS plays its own haptic when a switch flips. That is the only
+ * feedback left to a web page on a current iPhone: Safari has no vibration
+ * API, and the programmatic version of this -- clicking the label from script
+ * -- is what Apple closed in iOS 26.5. A real finger on a real control is
+ * still a real switch being used, which is the thing Apple did not close.
+ *
+ * The <input> cannot go inside a <button>: interactive content nested in a
+ * button is invalid, and the tap does not reach it. A label costs nothing
+ * visually -- .tbtn states its own display, border, background and font, so
+ * none of it came from the button element -- and keeps role and name for a
+ * screen reader.
+ *
+ * Everything else about the press is unchanged and unchanged on purpose: the
+ * bit is still set on pointerdown, so the game hears the press when the
+ * finger lands, not when the switch flips under it. */
 function makeButton(spec, className) {
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = document.createElement("label");
   button.className = className;
-  button.textContent = spec.id;
+  button.setAttribute("role", "button");
   button.dataset.button = String(spec.button);
+  const cap = document.createElement("span");
+  cap.className = "tbtn-cap";
+  cap.textContent = spec.id;
+  button.appendChild(cap);
+  const tap = document.createElement("input");
+  tap.type = "checkbox";
+  // Not a property: `switch` is an attribute Safari reads and every other
+  // browser ignores, and there is no IDL for it to be set through.
+  tap.setAttribute("switch", "");
+  tap.className = "tbtn-tap";
+  tap.tabIndex = -1;
+  tap.setAttribute("aria-hidden", "true");
+  button.appendChild(tap);
   return button;
 }
 
@@ -1265,12 +1304,33 @@ function wireTouch() {
   el("touch").addEventListener("pointerdown", (event) => {
     const button = event.target.closest(".tbtn");
     if (!button) return;
-    event.preventDefault();
-    button.setPointerCapture(event.pointerId);
+    /* Two ways to press a button, and the difference is whether the browser's
+       own handling of the touch is left alone.
+     *
+       Ordinarily it is not: preventDefault stops the tap highlight, the text
+       selection and the callout, and pointer capture keeps the release with
+       the button even if the thumb rolls off it.
+
+       On a phone whose only haptic is the switch inside this label, both of
+       those are what kills the feeling. Preventing the default of pointerdown
+       cancels the click that would activate the switch, and capture retargets
+       that click away from the label. So the browser is left to do its own
+       thing with this touch, and what is normally prevented is prevented by
+       other means instead: `touch-action: none` on the pad stops the scroll
+       and the zoom, and `user-select`/`touch-callout` in the stylesheet stop
+       the rest. Letting go is covered below, without capture. */
+    const bySwitch = hapticsOn && !canVibrate;
+    if (!bySwitch) {
+      event.preventDefault();
+      button.setPointerCapture(event.pointerId);
+    }
     pointers.set(event.pointerId, button);
     button.classList.add("live");
     setBit(Number(button.dataset.button), true);
-    buzz();
+    // In switch mode the feeling comes from the label being activated by the
+    // finger that is already on it. Calling buzz() as well would be a second
+    // tap on the phones where the scripted one still works.
+    if (!bySwitch) buzz();
   });
   const releaseButton = (event) => {
     const button = pointers.get(event.pointerId);
@@ -1281,6 +1341,13 @@ function wireTouch() {
   };
   el("touch").addEventListener("pointerup", releaseButton);
   el("touch").addEventListener("pointercancel", releaseButton);
+  /* Without pointer capture a thumb that rolls off the pad entirely lifts
+     somewhere this listener never hears about, and the button stays held on
+     somebody else's television. The window hears every one of them. Running
+     twice for a release inside the pad costs nothing: the second one finds
+     the pointer already forgotten and returns. */
+  window.addEventListener("pointerup", releaseButton);
+  window.addEventListener("pointercancel", releaseButton);
 
   // A finger still down when the page goes away must not leave a button held
   // on somebody else's television.
@@ -1961,7 +2028,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03i";
+const CLIENT_BUILD = "2026-09-03j";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3204,10 +3271,6 @@ el("pads-sticks").addEventListener("click", () => {
     ? "Sticks swapped: the left one is now the right one. Push them to check."
     : "Sticks back the way the controller has them.";
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
-});
-
-el("feel-test").addEventListener("change", () => {
-  report("flipped the feel test, via " + feelPath + " on " + navigator.userAgent);
 });
 
 el("pads-buzz").addEventListener("change", (event) => {
