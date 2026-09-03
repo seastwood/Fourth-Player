@@ -1399,6 +1399,30 @@ label.optional {
   font-size: .5rem;
   color: var(--dim);
 }
+/* The link box, which is pasted into rather than typed in. The bare `input`
+   rule above dresses the PIN: pixel type, centred, widely letter-spaced --
+   right for six digits and unreadable for forty-three characters of base64.
+   Exactly 1rem, because iOS zooms the whole page in when a field smaller than
+   16px takes focus, and a phone held sideways does not come back out of that
+   gracefully. */
+#key-row { display: flex; flex-direction: column; gap: .35rem; }
+
+input.paste {
+  font: 1rem/1.4 var(--sans);
+  letter-spacing: normal;
+  text-indent: 0;
+  text-align: left;
+  padding: .6rem;
+  border-width: 2px;
+  border-color: var(--dim);
+  color: var(--ink);
+  /* A key longer than the box scrolls inside it rather than making the gate
+     wider than the phone it is on. */
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 input.name {
   font: .8rem/1.4 var(--sans);
   letter-spacing: normal;

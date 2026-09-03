@@ -225,6 +225,35 @@ try:
 except I.InviteDestroyed:
     check(True, "even the correct PIN is refused afterwards")
 
+print("\na fumbled link does not destroy anything")
+# The tally exists for a six-digit PIN, where guessing is the threat. A link
+# is 43 characters of random -- and since it can be pasted in by hand on the
+# plain address, a guest getting their own link wrong could otherwise end the
+# session for everybody already playing.
+s, tok, pin = fresh()
+for i in range(I.MAX_PIN_ATTEMPTS * 2):
+    try:
+        s.join("not-the-link", pin, now=1 + i, address="addr%d" % i)
+    except I.JoinError:
+        pass
+check(not s.destroyed,
+      "%d wrong links leave the invite alive" % (I.MAX_PIN_ATTEMPTS * 2))
+slot, guest = s.join(tok, pin, now=99, address="z")
+check(guest, "and the right link and PIN still get in afterwards")
+
+print("\n...but it is still counted against the address it came from")
+s, tok, pin = fresh()
+for i in range(I.LOCKOUT_AFTER):
+    try:
+        s.join("not-the-link", pin, now=1, address="same")
+    except I.JoinError:
+        pass
+try:
+    s.join(tok, pin, now=1, address="same")
+    check(False, "an address that got the link wrong repeatedly was not slowed")
+except I.LockedOut:
+    check(True, "the address is locked out, which is what slows a stranger")
+
 print("\nper-address lockout escalates")
 s, tok, pin = fresh()
 wrong = "000000" if pin != "000000" else "111111"

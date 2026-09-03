@@ -78,10 +78,68 @@ let guestToken = null, ended = false, retries = 0, retryTimer = null;
  * one more go; a second refusal is a real no and asks for the PIN. */
 let resumeRefused = 0;
 
-const token = location.pathname.startsWith("/j/")
+/* The key out of a link, from whatever it is pasted inside.
+ *
+ * People paste the whole line they were sent, and it arrives with the address
+ * in front of it, a full stop after it, or wrapped in whatever the messaging
+ * app did to it. The key itself is what follows /j/ and stops at the first
+ * slash, question mark or hash -- and a bare key, pasted on its own, is
+ * already that. */
+function keyFrom(text) {
+  let raw = String(text == null ? "" : text).trim();
+  if (!raw) return "";
+  const at = raw.lastIndexOf("/j/");
+  if (at >= 0) {
+    raw = raw.slice(at + 3);
+  } else if (/[:/\s]/.test(raw)) {
+    // An address with no key in it: the plain one, pasted by somebody who did
+    // not have the link. Answering "https" would be worse than answering
+    // nothing, because nothing is what they gave.
+    return "";
+  }
+  raw = raw.split(/[/?#\s]/)[0];
+  // Whatever the message it arrived in wrapped it in, and whatever sentence
+  // it was pasted out of. The key's own alphabet is base64url -- letters,
+  // digits, - and _ -- so none of this can belong to it.
+  raw = raw.replace(/^[<("'\[]+/, "").replace(/[.,;:!>)\]}'"]+$/, "");
+  try {
+    return decodeURIComponent(raw);
+  } catch (_) {
+    return raw;                    // a stray % is not a reason to refuse it
+  }
+}
+
+const linkStore = "fp-link";
+
+function savedKey() {
+  try { return localStorage.getItem(linkStore) || ""; } catch (_) { return ""; }
+}
+
+function rememberKey(key) {
+  try {
+    if (key) localStorage.setItem(linkStore, key);
+  } catch (_) { /* a private window: it will be asked for again */ }
+}
+
+function forgetKey() {
+  try { localStorage.removeItem(linkStore); } catch (_) {}
+}
+
+const pathToken = location.pathname.startsWith("/j/")
   ? decodeURIComponent(location.pathname.slice(3))
   : "";
-const storageKey = "fp:" + token.slice(0, 16);
+/* The key this page is working with: the one it was opened on, or the last one
+ * that worked. It decides which session's guest credential is ours, so it is
+ * settled before anything is read back. */
+let linkKey = pathToken || savedKey();
+let token = pathToken;
+
+/* The guest credential belongs to one session's invite, so it is filed under
+ * it: a key that has been replaced must not hand back a credential the host
+ * has already forgotten. */
+function credKey() {
+  return "fp:" + linkKey.slice(0, 16);
+}
 
 /* ---- the gate ---- */
 
@@ -120,6 +178,15 @@ el("pin-form").addEventListener("submit", (event) => {
   }, 12000);
   const who = (el("who").value || "").trim().slice(0, 16);
   try { localStorage.setItem(nameKey, who); } catch (_) {}
+  // The address this page was opened on wins; then whatever was pasted into
+  // the field; then the last key that worked, which is what an icon on a home
+  // screen relies on. Nothing at all when the host does not require a link:
+  // a stale key sent to a session that no longer wants one is checked anyway
+  // and refused, which would be a strange way to fail a join that should have
+  // succeeded on the PIN alone.
+  const typed = keyFrom(el("key").value);
+  linkKey = pathToken || typed || savedKey();
+  token = pathToken || (linkRequired ? linkKey : "");
   connect({ t: "join", token, pin, name: who, codecs: videoCodecs() });
 });
 
@@ -128,31 +195,86 @@ function myName() {
 }
 
 /* Adding this page to a home screen saves the address it is on, and that
-   address carries an invite that dies with the session -- so the icon works
-   once and then does not. There is no way round that while the link is
-   required: the token *is* the invite.
+   address carries an invite that dies with the session -- so the icon worked
+   once and then did not, whatever the host had chosen.
 
-   When the host has said the PIN is enough, there is: the page drops the token
-   out of the address bar once it is in, so what a home screen captures is the
-   plain address. That icon keeps working, and asks for the PIN each time. */
+   Both halves of that are mended now. The token comes out of the address once
+   a guest is in, so what a home screen captures is the plain address; and the
+   key that worked is remembered, so the plain address still knows which
+   session it belongs to. What the icon asks for on the next launch is the PIN,
+   and the link only when the host has opened a new session since -- which is
+   the one thing a saved key genuinely cannot survive, and there is a box for
+   it on the page for exactly that. */
 let linkRequired = true;
 
 fetch("/mode", { cache: "no-store" })
   .then((r) => r.json())
   .then((mode) => {
     linkRequired = mode.require_link !== false;
+    askForKeyIfNeeded();
     const note = el("gate-home");
     note.hidden = false;
     note.textContent = linkRequired
-      ? "This link is for this session only. Adding it to your home screen "
-        + "will stop working when the host opens a new one."
+      ? "You can add this page to your home screen — it remembers the link you "
+        + "last joined with, and there is a box for a new one when the host "
+        + "opens a new session."
       : "You can add this page to your home screen — next time just open it "
         + "and enter the new PIN.";
   })
-  .catch(() => {});
+  // Unreachable, or answering something that is not JSON. The safe assumption
+  // is the stricter one, which is what linkRequired already says.
+  .catch(() => askForKeyIfNeeded());
+
+/* Whether to ask for the link, and how loudly.
+ *
+ * Three states, and only the last one needs a box: opened on a link, opened
+ * without one but with a key that worked before, and opened with neither --
+ * which is a home screen icon on the day the host opened a new session. */
+function askForKeyIfNeeded() {
+  const row = el("key-row"), note = el("key-note");
+  if (!row || !note) return;
+  if (!linkRequired || pathToken) {
+    row.hidden = true;
+    note.hidden = true;
+    return;
+  }
+  if (linkKey) {
+    row.hidden = true;
+    note.hidden = false;
+    note.textContent = "Using the link you last joined with. If the host has "
+      + "opened a new session since, this will say so and ask for the new one.";
+    return;
+  }
+  row.hidden = false;
+  note.hidden = false;
+  note.textContent = "This session needs its link as well as the PIN. Paste "
+    + "the whole thing — the address, the key, all of it.";
+}
+
+/* After a refusal, put the box where they can reach it.
+ *
+ * The host answers a wrong PIN, an unknown link and an expired one in the same
+ * words on purpose, so that guessing tells a guesser nothing -- which means
+ * this page cannot know which half was wrong either. It shows both, and keeps
+ * the remembered key rather than throwing it away: somebody who mistyped the
+ * PIN would otherwise have to go and find their link again to correct it,
+ * and somebody whose link really has been replaced only has to paste the new
+ * one over the top. Either way the next attempt can succeed. */
+function offerKey() {
+  if (!linkRequired || pathToken) return;
+  const row = el("key-row"), note = el("key-note");
+  if (!row || !note) return;
+  row.hidden = false;
+  note.hidden = false;
+  note.textContent = savedKey()
+    ? "If the host has opened a new session since you last played, the link "
+      + "you had is no longer good. Paste the new one here."
+    : "This session needs its link as well as the PIN. Paste the whole thing "
+      + "— the address, the key, all of it.";
+}
 
 function forgetTokenInAddress() {
-  if (linkRequired || !token) return;
+  if (!pathToken) return;
   try {
     // Same page, plainer address. Done after joining, so a reload before that
     // still has the invite to work with.
@@ -277,7 +399,7 @@ function sessionOver(reason) {
   if (ticker) { clearInterval(ticker); ticker = null; }
   // Nothing is coming back, so stop pretending: drop the saved credential so a
   // reload asks for a PIN rather than silently failing to resume.
-  try { localStorage.removeItem(storageKey); } catch (_) {}
+  try { localStorage.removeItem(credKey()); } catch (_) {}
 }
 
 /* A resume that is never answered must not leave the page saying "rejoining"
@@ -300,12 +422,18 @@ function armRejoinTimer() {
 
 function askForPin(why) {
   guestToken = null;
-  try { localStorage.removeItem(storageKey); } catch (_) {}
+  try { localStorage.removeItem(credKey()); } catch (_) {}
   clearRejoinTimer();
   el("pin").placeholder = "000000";
   el("pin").value = "";
   el("join").disabled = false;
-  fail(why + " Enter the PIN to join again.");
+  // Which secrets to ask for. Telling somebody to enter the PIN, when the
+  // session wants a link as well and this page has none it can trust, is an
+  // instruction that earns the same refusal a second time.
+  const needsLink = linkRequired && !pathToken;
+  offerKey();
+  fail(why + (needsLink ? " Check the link and the PIN, and try again."
+                        : " Enter the PIN to join again."));
 }
 
 function onError(message) {
@@ -332,10 +460,13 @@ function send(message) {
 function joined(message) {
   retries = 0;
   resumeRefused = 0;
+  // It got somebody in, so it is worth keeping: this is what makes the icon on
+  // a home screen work on its own next time.
+  if (linkKey) rememberKey(linkKey);
   clearTimeout(joinTimer);
   clearRejoinTimer();
   if (message.guest) guestToken = message.guest;
-  try { if (message.guest) localStorage.setItem(storageKey, message.guest); } catch (_) {}
+  try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
   seatsFrom(message.pads);
   forgetTokenInAddress();
@@ -1075,7 +1206,7 @@ function reviveNow(why) {
   lastBytes = -1;
   mediaFresh = false;
   if (!guestToken) {
-    try { guestToken = localStorage.getItem(storageKey) || null; } catch (_) {}
+    try { guestToken = localStorage.getItem(credKey()) || null; } catch (_) {}
   }
   if (!guestToken) {
     askForPin("This connection could not be brought back.");
@@ -1401,7 +1532,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03a";
+const CLIENT_BUILD = "2026-09-03b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2768,7 +2899,7 @@ try {
 } catch (_) {}
 
 // A guest whose socket dropped comes back without being asked for the PIN.
-const saved = (() => { try { return localStorage.getItem(storageKey); } catch (_) { return null; } })();
+const saved = (() => { try { return localStorage.getItem(credKey()); } catch (_) { return null; } })();
 if (saved) {
   guestToken = saved;
   el("pin").placeholder = "rejoining…";

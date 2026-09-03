@@ -289,7 +289,13 @@ class Session:
         self.limiter.check(address, now)
 
         if (require_token or token) and not _matches(token, self.token_digest):
-            self._fail(address, now)
+            # Counted against the address, which is what slows somebody down,
+            # but not against the tally that destroys the invite outright.
+            # That tally is there for a six-digit PIN. The link is 43
+            # characters of random, where guessing is not the threat -- and it
+            # can now be pasted in by hand, so a guest fumbling their own link
+            # would otherwise be able to end the session for everybody in it.
+            self._fail(address, now, counts=False)
             raise BadPin("that link is not for this session")
         if not _matches(pin, self.pin_digest):
             self._fail(address, now)
@@ -306,9 +312,11 @@ class Session:
                                   address=address)
         return slot, guest_token
 
-    def _fail(self, address, now):
-        self.pin_attempts += 1
+    def _fail(self, address, now, counts=True):
         self.limiter.record_failure(address, now)
+        if not counts:
+            return
+        self.pin_attempts += 1
         if self.pin_attempts >= MAX_PIN_ATTEMPTS:
             self.destroy()
 

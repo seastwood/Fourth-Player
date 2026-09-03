@@ -29,6 +29,19 @@
   <p class="lede">Someone has opened a game for you to join.</p>
 
   <form id="pin-form" autocomplete="off">
+    <!-- The link key, for a page opened without one. An icon on a home screen
+         is the reason this exists: it saves the address it was added on, and
+         the address that matters carries an invite that dies with the session,
+         so the icon worked once and then did not. The key is 43 characters of
+         random and nobody is typing that off a television, so this is a place
+         to paste the whole link into -- and the last one that worked is
+         remembered, which is what makes the icon work by itself next time. -->
+    <div id="key-row" hidden>
+      <label for="key">Paste the link they sent you</label>
+      <input id="key" name="key" type="text" inputmode="url" class="paste"
+             autocomplete="off" autocapitalize="off" autocorrect="off"
+             spellcheck="false" placeholder="https://&hellip;/j/&hellip;">
+    </div>
     <label for="pin">Enter the PIN shown on their screen</label>
     <!-- Up to twelve, because the host may have set their own PIN rather than
          taking the six random digits, and a longer one is the sensible answer
@@ -43,6 +56,7 @@
     <button type="submit" id="join">Join the game</button>
   </form>
 
+  <p id="key-note" class="footnote" hidden></p>
   <p id="gate-error" class="error" role="alert" hidden></p>
   <p id="gate-home" class="footnote" hidden></p>
   <p class="footnote">No controller? You can use on-screen buttons once you are

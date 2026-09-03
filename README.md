@@ -648,14 +648,32 @@ without spending the invite everybody else is holding. Pair it with `link
 required` if you want the second secret back, or choose more than six digits,
 which is why up to twelve are allowed.
 
-It is also the only way a home-screen icon keeps working. Adding the page to a
-phone's home screen saves the address it is on, and that address carries an
-invite that dies with the session -- so the icon works once. With the link
-required there is no way round that, because the token *is* the invite, and the
-join page says so rather than letting somebody find out next week. With it
-open, the page drops the token out of the address bar once a guest is in, so
-what the home screen captures is the plain address: that icon keeps working and
-asks for the new PIN each time.
+It used to be the only way a home-screen icon kept working. Adding the page to
+a phone's home screen saves the address it is on, and that address carries an
+invite that dies with the session -- so the icon worked once and then did not.
+
+An icon now lands on the plain address whichever way the link setting is
+turned. The token comes out of the address bar as soon as a guest is in, the
+manifest starts at `/` rather than at whatever invite was open when the icon
+was made, and the key that got somebody in is remembered -- so the icon opens,
+recognises the session, and asks for the PIN. When the host has opened a *new*
+session since, which is the one thing a saved key cannot survive, the join page
+says so and shows a box to paste the new link into. The key is 43 characters of
+base64url and nobody is typing that off a television, so that box takes the
+whole link and finds the key inside it: an address, an address with the
+tracking rubbish a chat app added, one wrapped in angle brackets by a mail
+client, or one pasted out of the middle of a sentence. The plain address with
+no key in it at all is the one answer it refuses to guess at -- sending
+`https` as a key earns a refusal that reads exactly like a link that has been
+replaced.
+
+Getting a link wrong is no longer able to end the session, either. Ten wrong
+PINs destroy the invite outright, which is the right answer for six digits
+where guessing is the threat; a link is 43 characters of random, where it is
+not, and now that guests paste one in by hand a few fumbles would otherwise
+take down the game everybody else was already playing. A wrong link still
+counts against the address it came from, so a stranger at the door is still
+slowed down.
 
 That is one secret instead of two, and worth thinking about rather than
 switching on by habit. What makes it defensible is the lockout: six digits,
