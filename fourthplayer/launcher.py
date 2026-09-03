@@ -92,12 +92,82 @@ def _sh(argv, timeout=5):
         pass
 
 
-def _wait_gone(deadline):
+def _wait_gone(deadline, gone=None):
+    gone = gone or (lambda: not running())
     while time.time() < deadline:
-        if not running():
+        if gone():
             return True
         time.sleep(POLL)
-    return not running()
+    return gone()
+
+
+# ---- Steam ------------------------------------------------------------------
+#
+# Steam is not a game and is not in GAME_PROCESSES: `running()` answers "is
+# something playing", and a client sitting on the menu is not that. It is
+# still in the way, so it is closed before a guest's game starts.
+#
+# Closed, rather than pushed behind: it does not need to be there. Kodi starts
+# it when somebody asks for it, which is the whole of what the add-on on the
+# menu is for. Left running it holds a GPU context, a compositor surface and a
+# few hundred megabytes for nothing, and it argues with the game about which
+# of them is fullscreen.
+STEAM_PROCESSES = ("steam", "steamwebhelper", "steamerrorreporter")
+# Longer than a game gets. Steam's own shutdown syncs cloud saves and writes
+# its library state, and cutting that short is somebody's progress in a game
+# this program never even started.
+STEAM_GRACE = 12.0
+STEAM_LIMIT = 20.0
+
+
+def steam_running():
+    """Whether any part of the Steam client is up."""
+    for name in STEAM_PROCESSES:
+        try:
+            done = subprocess.run(["pgrep", "-x", name], capture_output=True,
+                                  timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0:
+            return True
+    return False
+
+
+def stop_steam():
+    """Close Steam completely, and wait until it is actually gone.
+
+    `steam -shutdown` first, because that is the client's own way out: it
+    closes any game it started, syncs the cloud saves, and writes down where
+    everybody was. A signal does none of that, and a guest starting a game
+    here should not cost the person who was playing on the sofa their save.
+
+    Then the usual insistence, for the same reason the game stop has it: an
+    ask that can be ignored for ever is not a stop. TERM after the grace,
+    KILL after that, and the truth reported either way.
+    """
+    if not steam_running():
+        return True
+    exe = shutil.which("steam") or "/usr/games/steam"
+    log.info("closing Steam before starting a game")
+    _sh([exe, "-shutdown"], timeout=15)
+    if _wait_gone(time.time() + STEAM_GRACE, gone=lambda: not steam_running()):
+        log.info("Steam closed itself")
+        return True
+
+    log.warning("Steam did not close within %.0fs; asking less politely",
+                STEAM_GRACE)
+    for name in STEAM_PROCESSES:
+        _sh(["pkill", "-TERM", "-x", name])
+    if _wait_gone(time.time() + (STEAM_LIMIT - STEAM_GRACE) / 2,
+                  gone=lambda: not steam_running()):
+        return True
+    for name in STEAM_PROCESSES:
+        _sh(["pkill", "-KILL", "-x", name])
+    gone = _wait_gone(time.time() + (STEAM_LIMIT - STEAM_GRACE) / 2,
+                      gone=lambda: not steam_running())
+    if not gone:
+        log.error("Steam is still running after SIGKILL")
+    return gone
 
 
 def stop_running():

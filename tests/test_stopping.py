@@ -132,6 +132,57 @@ check(fake.now - fake.termed_at <= launcher.STOP_LIMIT + 1,
       "and the whole business is over inside the limit: %.1fs of %.0fs"
       % (fake.now - fake.termed_at, launcher.STOP_LIMIT))
 
+print("Steam is closed before a guest's game starts")
+fake = wire(Fake(dies_after=0))
+launcher.steam_running = lambda: False
+check(launcher.stop_steam() is True and fake.ran == [],
+      "a machine with no Steam running is not asked to close it")
+
+# Steam that closes when asked: the client's own -shutdown, and nothing else.
+state = {"up": True}
+launcher.steam_running = lambda: state["up"]
+
+
+def shutdown_works(argv, **kw):
+    fake.run(argv, **kw)
+    if "-shutdown" in argv:
+        state["up"] = False
+
+
+fake = wire(Fake())
+launcher.subprocess = type("S", (), {
+    "run": staticmethod(shutdown_works), "SubprocessError": Exception,
+    "TimeoutExpired": Exception})
+launcher.steam_running = lambda: state["up"]
+check(launcher.stop_steam() is True, "it closes")
+check(any("-shutdown" in a for a in fake.ran),
+      "through `steam -shutdown`, which syncs the cloud saves on the way out")
+check(not any(a[0] == "pkill" for a in fake.ran),
+      "and is never signalled when it went quietly -- a signal skips the sync")
+
+# Steam that ignores it.
+state = {"up": True}
+fake = wire(Fake())
+launcher.steam_running = lambda: state["up"]
+
+
+def dies_on_kill(argv, **kw):
+    fake.run(argv, **kw)
+    if argv[0] == "pkill" and "-KILL" in argv:
+        state["up"] = False
+
+
+launcher.subprocess = type("S", (), {
+    "run": staticmethod(dies_on_kill), "SubprocessError": Exception,
+    "TimeoutExpired": Exception})
+check(launcher.stop_steam() is True, "one that ignores the ask is killed")
+order = [a[1] for a in fake.ran if a[0] == "pkill"]
+check(order[0] == "-TERM" and "-KILL" in order,
+      "asked before it is killed, in that order")
+check(launcher.STEAM_GRACE > launcher.STOP_GRACE,
+      "and given longer than a game gets: its shutdown writes a library and "
+      "syncs saves this program never started")
+
 print("the unit does not get to wait ninety seconds")
 source = open(os.path.join(os.path.dirname(HERE), "fourthplayer",
                            "launcher.py")).read()

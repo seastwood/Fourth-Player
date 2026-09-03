@@ -997,6 +997,24 @@ class LiveSession:
         return await self._start_game(row, busy, resume)
 
     async def _start_game(self, row, busy=False, resume=False):
+        # Steam first, and whether or not a game is playing. It is not a game
+        # -- `busy` is about games -- but it is in the way of one: it holds
+        # the screen, a GPU context and the pad it was given, and it does not
+        # need to be there. Kodi starts it when somebody asks for it.
+        #
+        # Before the stop below rather than after, so the two waits do not run
+        # end to end while a guest watches a list that is not answering.
+        if await self.loop.run_in_executor(None, launcher.steam_running):
+            closed = await self.loop.run_in_executor(None, launcher.stop_steam)
+            if not closed:
+                log.warning("Steam would not close; starting %s anyway",
+                            row["label"])
+                # Said, not refused. A game over the top of a Steam that will
+                # not die is untidy; a guest told "no" by a machine that looks
+                # idle to them is worse.
+                self.notify({"t": "note",
+                             "message": "Steam would not close, so the game may "
+                                        "start behind it."})
         if busy:
             # Only the open policy gets here with something already playing,
             # and taking over is what that policy is.
