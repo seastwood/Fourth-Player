@@ -6,13 +6,20 @@ changes. The buzz is what stands in for that, and it is a preference because
 it costs battery, because it is audible in a quiet room, and because a
 direction held for a minute must not buzz for a minute.
 
-Three things are worth holding still here. A page that has never been asked
+Four things are worth holding still here. A page that has never been asked
 buzzes, so the switch cannot be a silent regression for somebody who had the
 feedback before it existed. Nothing calls `navigator.vibrate` except the one
-helper, or the switch would only turn off some of it. And the d-pad buzzes on
-the direction changing rather than on the touch continuing -- pad state goes
-out 125 times a second, and a buzz per frame is a phone that shakes for as
-long as a thumb is down.
+helper, or the switch would only turn off some of it. The d-pad buzzes on the
+direction changing rather than on the touch continuing -- pad state goes out
+125 times a second, and a buzz per frame is a phone that shakes for as long as
+a thumb is down.
+
+And the switch is offered on a browser with no vibrate() at all, which is
+every iPhone. That is not a detail: it went out hidden there the first time,
+on the one phone that most needed it, and somebody went looking for the option
+and found an empty row. Where vibrate() is missing the buzz goes through the
+off-screen switch control instead, which is the one haptic Safari still hands
+a web page.
 """
 import json
 import os
@@ -40,8 +47,16 @@ style = open(os.path.join(ROOT, "web", "style.css")).read()
 print("the buzz is asked for in one place")
 # Every call site goes through the helper, so the switch governs all of them.
 # Two mentions are the helper's own: the support test and the call itself.
-check(source.count("navigator.vibrate") == 2,
-      "navigator.vibrate is only named by buzz() and its support test")
+# Prose about it is fine; a second place that calls it is not.
+check(source.count("navigator.vibrate(") == 1,
+      "navigator.vibrate is called from exactly one place")
+check(source.count("typeof navigator.vibrate") == 1,
+      "and asked about in exactly one place")
+check('id="haptic-switch"' in page and 'type="checkbox" switch' in page,
+      "the page carries a switch control for the phone with no vibrate()")
+check(".haptic-switch" in style and "display: none" not in
+      style.split(".haptic-switch")[1].split("}")[0],
+      "and it is laid out rather than hidden, or it makes no feeling")
 check("if (navigator.vibrate) navigator.vibrate" not in source,
       "no button reaches for the buzz on its own")
 
@@ -78,8 +93,8 @@ def constant(name):
 
 HARNESS = "\n".join(
     [constant("HAPTICS_KEY"), constant("BUZZ_MS")]
-    + [lift(n) for n in ("savedHaptics", "buzz", "paintBuzz", "setHaptics",
-                         "applyDpad", "clearDpad")]) + """
+    + [lift(n) for n in ("tapSwitch", "savedHaptics", "buzz", "paintBuzz",
+                         "setHaptics", "applyDpad", "clearDpad")]) + """
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 
 // A localStorage that starts where the job says it starts, and remembers what
@@ -95,7 +110,16 @@ const buzzes = [];
 const navigator = job.canVibrate
   ? { vibrate: (ms) => { buzzes.push(ms); return true; } }
   : {};
-const canBuzz = typeof navigator.vibrate === "function";
+const canVibrate = typeof navigator.vibrate === "function";
+
+// The off-screen checkbox, and what iOS would feel: a flip.
+const flips = [];
+const box = {
+  checked: false,
+  click() { flips.push(this.checked); },
+  blur() {},
+};
+const document = { activeElement: null };
 
 let hapticsOn = savedHaptics();
 const button = {
@@ -108,7 +132,10 @@ let offered = null;
 const panel = { classList: { toggle: (name, on) => { offered = on; } } };
 const touch = { hidden: !!job.padHidden };
 const el = (id) => (id === "pads-buzz" ? button
-                    : id === "touch" ? touch : panel);
+                    : id === "touch" ? touch
+                    : id === "haptic-switch" ? (job.noSwitch ? null : box)
+                    : panel);
+const canBuzz = canVibrate || !!el("haptic-switch");
 
 // Enough of the d-pad to press: the bits and the lights are somebody else's
 // test, and what this one watches is the buzzing.
@@ -125,7 +152,7 @@ for (const dirs of (job.presses || [])) {
 for (let i = 0; i < (job.taps || 0); i++) buzz();
 paintBuzz();
 process.stdout.write(JSON.stringify({
-  buzzes, stored: store, on: hapticsOn, label: button.textContent,
+  buzzes, flips, stored: store, on: hapticsOn, label: button.textContent,
   pressed: button["aria-pressed"], offered }));
 """
 
@@ -164,16 +191,28 @@ check("fp:haptics" not in out["stored"],
 # hard to check any other way.
 check(out["buzzes"] == [24, 8], "and answers with a buzz of its own")
 
+print("a phone with no vibrate() is offered the switch, and taps another way")
+# The regression this suite exists for: hidden on the iPhone, which is the
+# phone that cannot buzz without the trick and so needs the switch most.
+out = run(canVibrate=False, taps=3)
+check(out["offered"] is True, "the switch is offered on a browser with no vibrate")
+check(out["buzzes"] == [], "nothing is called that is not there")
+check(len(out["flips"]) == 3, "and three taps flip the switch control three times")
+out = run(canVibrate=False, stored={"fp:haptics": "0"}, taps=3)
+check(out["flips"] == [], "the off switch governs that path too")
+out = run(taps=2)
+check(out["flips"] == [] and out["buzzes"] == [8, 8],
+      "a phone with vibrate() uses it and leaves the trick alone")
+
 print("the switch is only offered where it means something")
 out = run()
 check(out["offered"] is True, "with the pad on the screen, it is offered")
-out = run(canVibrate=False)
-check(out["offered"] is False, "a browser with no vibrate is not offered it")
 out = run(padHidden=True)
 check(out["offered"] is False,
-      "and neither is a guest playing on a controller or a keyboard")
-out = run(canVibrate=False, taps=3)
-check(out["buzzes"] == [], "nothing is called that is not there")
+      "a guest playing on a controller or a keyboard is not offered it")
+out = run(canVibrate=False, noSwitch=True)
+check(out["offered"] is False,
+      "and neither is a browser with no way to tap at all")
 
 print("the d-pad buzzes on the direction, not on the frame")
 out = run(presses=[["left"], ["left"], ["left"]])

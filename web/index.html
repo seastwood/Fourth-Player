@@ -374,6 +374,16 @@
   </div>
 </div>
 
+<!-- Not a control anybody uses: it is how an iPhone is made to tap.
+     Safari has no vibrate(), and the haptic its own switch makes when it
+     flips is the one a web page can still reach -- so this is flipped, off
+     screen, when a button is pressed. Laid out rather than display:none,
+     because a control the browser does not animate makes no feeling; hidden
+     from the reading order and from screen readers, because to everyone but
+     a thumb it is not there. See tapSwitch() in app.js. -->
+<input id="haptic-switch" class="haptic-switch" type="checkbox" switch
+       tabindex="-1" aria-hidden="true">
+
 <script src="/static/frame.js"></script>
 <script src="/static/app.js"></script>
 </body>

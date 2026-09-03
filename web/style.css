@@ -1468,6 +1468,21 @@ label.optional {
    phone can vibrate; without both, a buzz switch is a switch for nothing. */
 .pads:not(.touch) .touch-only { display: none; }
 
+/* The off-screen switch that taps an iPhone. Everything here is chosen to
+   keep it laid out and animated while keeping it out of sight and out of the
+   way of a thumb: display:none, visibility:hidden and zero size would each
+   take the feeling with them. */
+.haptic-switch {
+  position: fixed;
+  left: -60px;
+  bottom: 0;
+  width: 40px;
+  height: 24px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
 input.paste {
   font: 1rem/1.4 var(--sans);
   letter-spacing: normal;

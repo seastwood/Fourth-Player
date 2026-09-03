@@ -145,9 +145,18 @@ Glass gives nothing back, so a press buzzes the phone for eight milliseconds —
 long enough to feel, too short to hear across a room. The d-pad buzzes when
 the direction *changes* rather than while it is held, or a direction held for
 a minute would shake the phone for a minute. **Buzz on tap** in **Controls**
-turns it off and on, remembered per device; it is on to start with, and the
-switch only appears on a phone that can vibrate while the on-screen pad is the
-controls being used.
+turns it off and on, remembered per device and on to start with; it is offered
+whenever the on-screen pad is the controls being used.
+
+An iPhone needs a different trick for it. Safari has never shipped the
+vibration API, so `navigator.vibrate` is a no-op there and the pad has always
+felt dead on the phone it is most often played on. What iOS does hand a web
+page is the haptic its own switch control makes when it flips — so there is a
+checkbox with `switch` on it off the side of the screen, and flipping it is
+the tap. It is Apple's to withdraw and nothing depends on it: if it stops
+working the pad is as silent as it was before, and turning the switch on
+answers with a tap, so whether it works on a given phone is something you can
+feel rather than something to look up.
 
 ### Or a keyboard
 

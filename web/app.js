@@ -771,16 +771,54 @@ const DPAD = { up: 12, down: 13, left: 14, right: 15 };
  * for somebody playing a game that holds a direction for minutes. On by
  * default, since that is what this did before there was a switch.
  *
- * Only the on-screen pad buzzes. A physical controller has its own rumble and
- * a keyboard has its own keys, so the switch is hidden in both cases -- as it
- * is on a device that cannot vibrate at all, which is every desktop browser
- * and, deliberately, Safari on iOS. */
+ * Only the on-screen pad buzzes: a physical controller has its own rumble and
+ * a keyboard has its own keys, so the switch is out of the way in both cases.
+ * What it is *not* hidden by is the browser being unable to vibrate. That was
+ * how this first went out and it was exactly backwards -- the one phone that
+ * needs the switch most is the one where the plain call does nothing, and
+ * somebody went looking for the option and found an empty row. */
 const HAPTICS_KEY = "fp:haptics";
 const BUZZ_MS = 8;
 
 // Read once: whether the browser has the call at all cannot change under us,
 // and asking on every button press would be a lookup per frame.
-const canBuzz = typeof navigator.vibrate === "function";
+const canVibrate = typeof navigator.vibrate === "function";
+
+/* The other way to make a phone tap, for the phone that has no vibrate().
+ *
+ * Safari has never shipped the vibration API, so every `navigator.vibrate` in
+ * a web page is a no-op on an iPhone -- which is most of the phones this is
+ * played on, and is why the pad has always felt dead there while feeling
+ * right on Android.
+ *
+ * What iOS does give a web page is the haptic its own switch control makes
+ * when it flips. A checkbox with `switch` on it is that control, and toggling
+ * one taps the phone. So there is one off-screen, flipped and flipped back,
+ * and it is a tap. It is a trick and it is Apple's to withdraw, which is why
+ * nothing depends on it working: if it does nothing, the pad is exactly as
+ * silent as it was before, and the switch that turned it on says so by
+ * tapping when you turn it on.
+ *
+ * The element is off-screen rather than display:none, because a control that
+ * is not laid out is not a control the browser animates, and the animation is
+ * where the feeling comes from. */
+function tapSwitch() {
+  const box = el("haptic-switch");
+  if (!box) return;
+  try {
+    box.checked = !box.checked;
+    // A programmatic click is what iOS answers; the property change on its
+    // own is not a flip as far as the control is concerned.
+    box.click();
+    // It must never take the focus off whatever the guest was doing, and it
+    // is aria-hidden, so a screen reader has nothing to say about it either.
+    if (document.activeElement === box) box.blur();
+  } catch (_) { /* a tap that does not happen is not worth an error */ }
+}
+
+// Whether there is any way at all to answer a press. The switch is offered
+// on the strength of this, and on an iPhone it rests on the trick above.
+const canBuzz = canVibrate || !!el("haptic-switch");
 
 function savedHaptics() {
   let raw = null;
@@ -793,10 +831,15 @@ function savedHaptics() {
 let hapticsOn = savedHaptics();
 
 function buzz(ms = BUZZ_MS) {
-  if (!hapticsOn || !canBuzz) return;
-  // A refusal is normal rather than exceptional: a browser ignores vibrate
-  // until the page has been touched, and throws in a few of them.
-  try { navigator.vibrate(ms); } catch (_) {}
+  if (!hapticsOn) return;
+  if (canVibrate) {
+    // A refusal is normal rather than exceptional: a browser ignores vibrate
+    // until the page has been touched, and throws in a few of them.
+    try { navigator.vibrate(ms); } catch (_) {}
+    return;
+  }
+  // The iPhone's one length, which is whatever the switch makes.
+  tapSwitch();
 }
 
 /* The switch, and the two places its state shows. The panel only carries the
@@ -824,7 +867,8 @@ function setHaptics(on) {
   } catch (_) {}
   paintBuzz();
   // Answer the switch with the thing it switches, so turning it on is its own
-  // demonstration and nobody has to go and find a button to test it.
+  // demonstration -- and on a phone where the trick above does nothing, the
+  // silence here is the honest answer to "does this work on mine?".
   if (hapticsOn) buzz(24);
 }
 
@@ -1895,7 +1939,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03f";
+const CLIENT_BUILD = "2026-09-03g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
