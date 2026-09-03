@@ -496,6 +496,11 @@ function joined(message) {
 async function answer(message) {
   if (pc) { try { pc.close(); } catch (_) {} }
   pc = new RTCPeerConnection({ iceServers: [] });
+  // Per connection, not per page. The page survives a host restart and a
+  // reconnect -- that is the point of it -- so a flag set once at the top of
+  // the file meant the second connection said nothing about its sound, which
+  // is exactly the connection somebody is listening to after a fix.
+  soundTold = false;
 
   // Video and audio arrive as separate tracks. Collect them into one stream
   // rather than replacing srcObject on the second one, which drops the first.
@@ -2143,7 +2148,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03o";
+const CLIENT_BUILD = "2026-09-03p";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
