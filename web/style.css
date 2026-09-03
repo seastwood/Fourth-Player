@@ -1535,10 +1535,12 @@ label.optional {
 /* The controller's own settings, when there is no controller in this. */
 .pads.keys .pad-only { display: none; }
 .pads:not(.keys) .keys-only { display: none; }
-/* The panel carries `touch` while the on-screen pad is the controls it is
+/* The panel carries `onscreen` while the on-screen pad is the controls it is
    about; a buzz switch over a pad that is not on the screen is a switch for
-   nothing. */
-.pads:not(.touch) .touch-only { display: none; }
+   nothing. Named `onscreen` rather than `touch` because `.touch` is the pad
+   itself, and sideways that is a transparent sheet taking no taps -- a name
+   two elements answer to is a rule one of them never asked for. */
+.pads:not(.onscreen) .touch-only { display: none; }
 
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
    keep it laid out and animated while keeping it out of sight and out of the

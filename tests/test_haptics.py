@@ -93,7 +93,7 @@ row = page.split('class="browse-note pads-feel')[1].split("</p>")[0]
 check('id="pads-buzz"' in row, "it has a line of its own")
 check("touch-only" in page.split('class="browse-note pads-feel')[1].split(">")[0],
       "marked as belonging to the on-screen pad")
-check(".pads:not(.touch) .touch-only { display: none; }" in style,
+check(".pads:not(.onscreen) .touch-only { display: none; }" in style,
       "and out of the way when the controls are not the on-screen pad")
 check(".switch-track" in style and ".switch-knob" in style,
       "and it is drawn as a track and a knob, not as a tickbox")
