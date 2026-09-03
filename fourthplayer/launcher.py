@@ -101,28 +101,36 @@ def _wait_gone(deadline, gone=None):
     return gone()
 
 
-# ---- Steam ------------------------------------------------------------------
+# ---- what is in the way of a game -------------------------------------------
 #
-# Steam is not a game and is not in GAME_PROCESSES: `running()` answers "is
-# something playing", and a client sitting on the menu is not that. It is
-# still in the way, so it is closed before a guest's game starts.
+# Steam and Moonlight are not games and are not in GAME_PROCESSES: `running()`
+# answers "is something playing", and a client sitting on its own menu is not
+# that. They are still in the way, so they are closed before a guest's game
+# starts.
 #
-# Closed, rather than pushed behind: it does not need to be there. Kodi starts
-# it when somebody asks for it, which is the whole of what the add-on on the
-# menu is for. Left running it holds a GPU context, a compositor surface and a
-# few hundred megabytes for nothing, and it argues with the game about which
-# of them is fullscreen.
+# Closed rather than pushed behind: neither needs to be there. Kodi starts
+# them when somebody asks, which is the whole of what those two entries on the
+# menu are for. Left running they hold the screen, a GPU context and a few
+# hundred megabytes for nothing, and they argue with the game about which of
+# them is fullscreen.
+#
+# The difference between them is what a polite ask costs. Steam's own
+# -shutdown closes the game it started, syncs the cloud saves and writes its
+# library down, so it is worth waiting on: a guest starting a game here must
+# not cost the person who was on the sofa their save. Moonlight is a client
+# with nothing of its own to lose -- the game is on another machine, and the
+# stream ending is what that machine is already prepared for -- so it gets a
+# signal and a shorter wait.
 STEAM_PROCESSES = ("steam", "steamwebhelper", "steamerrorreporter")
-# Longer than a game gets. Steam's own shutdown syncs cloud saves and writes
-# its library state, and cutting that short is somebody's progress in a game
-# this program never even started.
+MOONLIGHT_PROCESSES = ("moonlight", "moonlight-qt")
 STEAM_GRACE = 12.0
 STEAM_LIMIT = 20.0
+MOONLIGHT_GRACE = 5.0
+MOONLIGHT_LIMIT = 10.0
 
 
-def steam_running():
-    """Whether any part of the Steam client is up."""
-    for name in STEAM_PROCESSES:
+def _any_running(names):
+    for name in names:
         try:
             done = subprocess.run(["pgrep", "-x", name], capture_output=True,
                                   timeout=5)
@@ -133,41 +141,78 @@ def steam_running():
     return False
 
 
-def stop_steam():
-    """Close Steam completely, and wait until it is actually gone.
+def _close(label, names, graceful, grace, limit):
+    """Close something that is in the way. True when it is gone.
 
-    `steam -shutdown` first, because that is the client's own way out: it
-    closes any game it started, syncs the cloud saves, and writes down where
-    everybody was. A signal does none of that, and a guest starting a game
-    here should not cost the person who was playing on the sofa their save.
-
-    Then the usual insistence, for the same reason the game stop has it: an
-    ask that can be ignored for ever is not a stop. TERM after the grace,
-    KILL after that, and the truth reported either way.
+    Ask, wait, insist -- the same shape the game stop has, and for the same
+    reason: an ask that can be ignored for ever is not a stop, and a guest
+    cannot be left watching a list that will not answer.
     """
-    if not steam_running():
+    if not _any_running(names):
         return True
-    exe = shutil.which("steam") or "/usr/games/steam"
-    log.info("closing Steam before starting a game")
-    _sh([exe, "-shutdown"], timeout=15)
-    if _wait_gone(time.time() + STEAM_GRACE, gone=lambda: not steam_running()):
-        log.info("Steam closed itself")
-        return True
-
-    log.warning("Steam did not close within %.0fs; asking less politely",
-                STEAM_GRACE)
-    for name in STEAM_PROCESSES:
+    gone = lambda: not _any_running(names)          # noqa: E731
+    log.info("closing %s before starting a game", label)
+    if graceful:
+        _sh(graceful, timeout=15)
+        if _wait_gone(time.time() + grace, gone=gone):
+            log.info("%s closed itself", label)
+            return True
+        log.warning("%s did not close within %.0fs; asking less politely",
+                    label, grace)
+    for name in names:
         _sh(["pkill", "-TERM", "-x", name])
-    if _wait_gone(time.time() + (STEAM_LIMIT - STEAM_GRACE) / 2,
-                  gone=lambda: not steam_running()):
+    if _wait_gone(time.time() + (limit - grace) / 2, gone=gone):
         return True
-    for name in STEAM_PROCESSES:
+    for name in names:
         _sh(["pkill", "-KILL", "-x", name])
-    gone = _wait_gone(time.time() + (STEAM_LIMIT - STEAM_GRACE) / 2,
-                      gone=lambda: not steam_running())
-    if not gone:
-        log.error("Steam is still running after SIGKILL")
-    return gone
+    left = _wait_gone(time.time() + (limit - grace) / 2, gone=gone)
+    if not left:
+        log.error("%s is still running after SIGKILL", label)
+    return left
+
+
+def steam_running():
+    """Whether any part of the Steam client is up."""
+    return _any_running(STEAM_PROCESSES)
+
+
+def moonlight_running():
+    """Whether Moonlight is up, streaming or on its own list of machines."""
+    return _any_running(MOONLIGHT_PROCESSES)
+
+
+def stop_steam():
+    """Close Steam completely, and wait until it is actually gone."""
+    exe = shutil.which("steam") or "/usr/games/steam"
+    return _close("Steam", STEAM_PROCESSES, [exe, "-shutdown"],
+                  STEAM_GRACE, STEAM_LIMIT)
+
+
+def stop_moonlight():
+    """Close Moonlight, ending whatever it was streaming.
+
+    No graceful command: Moonlight has no -shutdown, and it does not need one.
+    It is a client -- the game is on the other machine, which is already
+    prepared for a stream that stops, because a stream that stops is what a
+    network does on its own. TERM closes the session cleanly.
+    """
+    return _close("Moonlight", MOONLIGHT_PROCESSES, None,
+                  MOONLIGHT_GRACE, MOONLIGHT_LIMIT)
+
+
+def clear_the_screen():
+    """Close everything standing between a guest and their game.
+
+    Returns the names of whatever would not close, which is nearly always
+    nothing and is worth saying when it is not.
+    """
+    stubborn = []
+    for label, running_now, close in (
+            ("Steam", steam_running, stop_steam),
+            ("Moonlight", moonlight_running, stop_moonlight)):
+        if running_now() and not close():
+            stubborn.append(label)
+    return stubborn
 
 
 def stop_running():

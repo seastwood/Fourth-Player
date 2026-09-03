@@ -35,8 +35,17 @@ log = logging.getLogger("fourthplayer.screen")
 # lets guests keep playing while the shell stays out of reach. `kodi` is the
 # menu this all runs under. The rest is the desktop somebody would land on
 # after "switch to desktop", which is the escape worth caring about.
-SHELLS = ("steamwebhelper", "steam", "kodi", "xfdesktop", "xfce4-panel",
-          "xfce4-appfinder", "thunar", "xfce4-session")
+#
+# `moonlight` is the awkward one, and it is here for now rather than for ever.
+# Its chooser and its stream are the same window -- there is no class to tell
+# them apart -- so blocking it costs guests a streamed game they could
+# otherwise have played together, and allowing it hands whoever is holding a
+# pad in another house the keyboard and mouse of a second machine in this one.
+# Between those two, the second is not a thing to do by accident. What it
+# wants instead is the host naming a guest who may: see the note in
+# session.py, and until then this is the safe half of the choice.
+SHELLS = ("steamwebhelper", "steam", "moonlight", "kodi", "xfdesktop",
+          "xfce4-panel", "xfce4-appfinder", "thunar", "xfce4-session")
 
 
 def sh(*argv):

@@ -207,10 +207,10 @@ retargets that click away from the label, so neither is used in this mode —
 release is heard on the window rather than through capture. On Android, where
 `vibrate()` exists, none of this applies and the press path is unchanged.
 
-### Steam gets out of the way
+### Steam and Moonlight get out of the way
 
-A guest starting a game from the web UI closes Steam first — the whole client,
-not just Big Picture. It is not a game and does not count as "something is
+A guest starting a game from the web UI closes Steam and Moonlight first — the
+whole Steam client, not just Big Picture. It is not a game and does not count as "something is
 playing", but it is in the way of one: it holds the screen, a GPU context and
 a few hundred megabytes, and it argues with the game about which of them is
 fullscreen. It does not need to be there either, because Kodi starts it when
@@ -218,7 +218,9 @@ somebody asks for it.
 
 `steam -shutdown` first, because that is the client's own way out: it closes
 any game it started, syncs the cloud saves and writes down where everybody
-was. Only if it is still there after twelve seconds does it get a signal, and
+was. Moonlight gets a signal and a shorter wait instead — it is a client with
+nothing of its own to lose, the game is on another machine, and a stream that
+stops is what that machine is already prepared for. Only if it is still there after twelve seconds does it get a signal, and
 a kill after that — an ask that can be ignored for ever is not a stop, and a
 guest cannot be left watching a list that will not answer. If even that fails
 the game starts anyway and the guest is told why, because a machine that looks

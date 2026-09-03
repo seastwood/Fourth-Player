@@ -48,6 +48,14 @@ check(screen.is_shell("steamwebhelper steam big picture mode"),
       "Steam's own interface does: a store, a browser and a way to the desktop")
 check(screen.is_shell("kodi.bin kodi"),
       "and Kodi, which guests could already drive and should not have been able to")
+# Moonlight is the awkward one: its chooser and its stream are the same
+# window, so this costs guests a streamed game they could otherwise have
+# played together. It is here because the other way round hands somebody in
+# another house the keyboard and mouse of a second machine in this one, and
+# that is not a thing to do by accident. The way out is the host naming a
+# guest who may, not a blanket allow.
+check(screen.is_shell("com.moonlight_stream.moonlight moonlight"),
+      "Moonlight does, for now, and its flatpak's class matches as well")
 check(screen.is_shell(""),
       "and nothing at all, which is where a crashed game leaves somebody")
 check(not screen.is_shell("retroarch mario golf - toadstool tour"),

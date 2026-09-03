@@ -997,24 +997,25 @@ class LiveSession:
         return await self._start_game(row, busy, resume)
 
     async def _start_game(self, row, busy=False, resume=False):
-        # Steam first, and whether or not a game is playing. It is not a game
-        # -- `busy` is about games -- but it is in the way of one: it holds
-        # the screen, a GPU context and the pad it was given, and it does not
-        # need to be there. Kodi starts it when somebody asks for it.
+        # Steam and Moonlight first, and whether or not a game is playing.
+        # Neither is a game -- `busy` is about games -- but both are in the
+        # way of one: they hold the screen, a GPU context and the pad they
+        # were given, and neither needs to be there. Kodi starts them when
+        # somebody asks.
         #
-        # Before the stop below rather than after, so the two waits do not run
-        # end to end while a guest watches a list that is not answering.
-        if await self.loop.run_in_executor(None, launcher.steam_running):
-            closed = await self.loop.run_in_executor(None, launcher.stop_steam)
-            if not closed:
-                log.warning("Steam would not close; starting %s anyway",
-                            row["label"])
-                # Said, not refused. A game over the top of a Steam that will
-                # not die is untidy; a guest told "no" by a machine that looks
-                # idle to them is worse.
-                self.notify({"t": "note",
-                             "message": "Steam would not close, so the game may "
-                                        "start behind it."})
+        # Before the stop below rather than after, so the waits do not run end
+        # to end while a guest watches a list that is not answering.
+        stubborn = await self.loop.run_in_executor(None, launcher.clear_the_screen)
+        if stubborn:
+            names = " and ".join(stubborn)
+            log.warning("%s would not close; starting %s anyway",
+                        names, row["label"])
+            # Said, not refused. A game over the top of something that will
+            # not die is untidy; a guest told "no" by a machine that looks
+            # idle to them is worse.
+            self.notify({"t": "note",
+                         "message": names + " would not close, so the game may "
+                                    "start behind it."})
         if busy:
             # Only the open policy gets here with something already playing,
             # and taking over is what that policy is.

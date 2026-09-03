@@ -133,14 +133,15 @@ check(fake.now - fake.termed_at <= launcher.STOP_LIMIT + 1,
       % (fake.now - fake.termed_at, launcher.STOP_LIMIT))
 
 print("Steam is closed before a guest's game starts")
-fake = wire(Fake(dies_after=0))
-launcher.steam_running = lambda: False
+fake = wire(Fake())
+launcher._any_running = lambda names: False
 check(launcher.stop_steam() is True and fake.ran == [],
       "a machine with no Steam running is not asked to close it")
 
 # Steam that closes when asked: the client's own -shutdown, and nothing else.
 state = {"up": True}
-launcher.steam_running = lambda: state["up"]
+fake = wire(Fake())
+launcher._any_running = lambda names: state["up"]
 
 
 def shutdown_works(argv, **kw):
@@ -149,11 +150,9 @@ def shutdown_works(argv, **kw):
         state["up"] = False
 
 
-fake = wire(Fake())
 launcher.subprocess = type("S", (), {
     "run": staticmethod(shutdown_works), "SubprocessError": Exception,
     "TimeoutExpired": Exception})
-launcher.steam_running = lambda: state["up"]
 check(launcher.stop_steam() is True, "it closes")
 check(any("-shutdown" in a for a in fake.ran),
       "through `steam -shutdown`, which syncs the cloud saves on the way out")
@@ -163,7 +162,7 @@ check(not any(a[0] == "pkill" for a in fake.ran),
 # Steam that ignores it.
 state = {"up": True}
 fake = wire(Fake())
-launcher.steam_running = lambda: state["up"]
+launcher._any_running = lambda names: state["up"]
 
 
 def dies_on_kill(argv, **kw):
@@ -182,6 +181,45 @@ check(order[0] == "-TERM" and "-KILL" in order,
 check(launcher.STEAM_GRACE > launcher.STOP_GRACE,
       "and given longer than a game gets: its shutdown writes a library and "
       "syncs saves this program never started")
+
+print("Moonlight is closed too, and differently")
+state = {"up": True}
+fake = wire(Fake())
+launcher._any_running = lambda names: state["up"] and "moonlight" in names[0]
+
+
+def dies_on_term(argv, **kw):
+    fake.run(argv, **kw)
+    if argv[0] == "pkill" and "-TERM" in argv:
+        state["up"] = False
+
+
+launcher.subprocess = type("S", (), {
+    "run": staticmethod(dies_on_term), "SubprocessError": Exception,
+    "TimeoutExpired": Exception})
+check(launcher.stop_moonlight() is True, "it closes")
+check(not any("-shutdown" in a for a in fake.ran),
+      "with no graceful command, because it has none and needs none: the game "
+      "is on another machine, which is already prepared for a stream to stop")
+check(launcher.MOONLIGHT_GRACE < launcher.STEAM_GRACE,
+      "and a shorter wait than Steam gets, which has saves to sync")
+
+print("both are cleared before a guest's game")
+state = {"steam": True, "moonlight": True}
+fake = wire(Fake())
+launcher._any_running = lambda names: state["steam" if "steam" in names[0] else "moonlight"]
+launcher.stop_steam = lambda: (state.update(steam=False), True)[1]
+launcher.stop_moonlight = lambda: (state.update(moonlight=False), True)[1]
+check(launcher.clear_the_screen() == [],
+      "nothing is in the way once both have gone")
+state = {"steam": True, "moonlight": True}
+launcher.stop_steam = lambda: False         # it would not go
+launcher.stop_moonlight = lambda: (state.update(moonlight=False), True)[1]
+check(launcher.clear_the_screen() == ["Steam"],
+      "what would not close is named, rather than the launch being refused")
+check(state["moonlight"] is False,
+      "and the other one is still closed: one stubborn program is not a "
+      "reason to leave the rest of the screen occupied")
 
 print("the unit does not get to wait ninety seconds")
 source = open(os.path.join(os.path.dirname(HERE), "fourthplayer",
