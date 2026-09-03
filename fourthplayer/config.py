@@ -98,7 +98,12 @@ class Config:
     # changes underneath -- and on the machine this was built for the default
     # sink is one Sunshine created, not the HDMI output you would have guessed.
     audio_device: str = "@DEFAULT_MONITOR@"
-    audio_bitrate_kbps: int = 96
+    # 128 rather than 96. Both are respectable for stereo Opus, and the
+    # difference was academic for as long as the offer said nothing and every
+    # guest decoded it as one channel anyway. Now that both channels arrive,
+    # the extra 32 kb/s buys the top end back on a stream whose whole audio
+    # budget is a rounding error beside the video's.
+    audio_bitrate_kbps: int = 128
     # 10 ms frames. Opus will happily do 20 or 60, and every one of those
     # milliseconds is added to the delay between the television and the guest.
     # 10 ms is the low-latency choice and 20 the robust one: the same sound in

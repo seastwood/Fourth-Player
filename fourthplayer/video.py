@@ -900,9 +900,32 @@ class Peer:
             # every browser expects "opus/48000/2". Stating the caps by hand
             # dropped it, and the sound went with it -- the GStreamer test
             # guest accepts either, so nothing caught it.
+            #
+            # Everything after it becomes the a=fmtp line, and until it was
+            # written there was no a=fmtp line at all. That is not a missing
+            # nicety: RFC 7587 says an Opus stream with nothing said about it
+            # is *mono*, and both browsers believe it. The host has been
+            # encoding 48 kHz stereo and every guest has been folding it down
+            # to one channel on arrival -- a game's music mixed into the
+            # middle of the head, which is exactly what "the sound is poor
+            # while the picture is fine" sounds like.
+            #
+            #   sprop-stereo    what is being sent. The one that matters.
+            #   stereo          what would be accepted back. Nothing is sent
+            #                   this way, so it is a declaration of manners.
+            #   useinbandfec    the encoder has it on; without this the
+            #                   decoder is not told it may use it.
+            #   minptime        matches frame-size on the encoder.
+            #   maxaveragebitrate  what the encoder is actually doing, said in
+            #                   the place a receiver looks for it.
+            cfg = self.stage.cfg
             return Gst.Caps.from_string(
                 "application/x-rtp,media=(string)audio,encoding-name=(string)OPUS,"
-                "payload=(int)97,clock-rate=(int)48000,encoding-params=(string)2")
+                "payload=(int)97,clock-rate=(int)48000,encoding-params=(string)2,"
+                "sprop-stereo=(string)1,stereo=(string)1,"
+                "useinbandfec=(string)1,"
+                f"minptime=(string){cfg.audio_frame_ms},"
+                f"maxaveragebitrate=(string){cfg.audio_bitrate_kbps * 1000}")
         encoding = self.stage.encoding
         # rtcp-fb-nack is what puts "a=rtcp-fb:96 nack" in the offer, and it is
         # the difference between a lost packet costing a frame and costing a

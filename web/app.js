@@ -2122,7 +2122,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03m";
+const CLIENT_BUILD = "2026-09-03n";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2177,6 +2177,51 @@ function noteFreezes(now) {
          ", held back " + (buffer === null ? "?" : buffer + " ms"));
 }
 
+/* What the sound actually turned into on this phone, said once.
+ *
+ * "The sound is poor" cannot be chased from the host, which knows only what it
+ * encoded and sent. The browser knows what it decoded: how many channels it
+ * settled on, which is the whole question when the offer forgot to say; how
+ * many samples the decoder had to invent because the packet carrying them
+ * never arrived, which is what crackle and warble actually are; and what it
+ * was told in the fmtp line, which is the fix under test.
+ *
+ * Once per connection, when enough sound has arrived to mean anything. It is
+ * one line in a log that already carries the picture's health, and it is the
+ * only way to tell a stereo stream folded to mono apart from a stereo stream
+ * arriving in pieces -- the two sound quite different and read the same in a
+ * complaint. */
+let soundTold = false;
+
+async function tellAboutSound() {
+  if (soundTold || !pc || !pc.getStats) return;
+  let sound = null, codec = null;
+  try {
+    const stats = await pc.getStats();
+    const byId = new Map();
+    stats.forEach((r) => byId.set(r.id, r));
+    stats.forEach((r) => {
+      if (r.type === "inbound-rtp" && (r.kind === "audio" || r.mediaType === "audio")) {
+        sound = r;
+      }
+    });
+    if (sound && sound.codecId) codec = byId.get(sound.codecId);
+  } catch (_) { return; }
+  // A second of sound, give or take: before that the concealment figure is
+  // mostly the connection starting up and says nothing about the sound.
+  if (!sound || (sound.totalSamplesReceived || 0) < 48000) return;
+  soundTold = true;
+  const total = sound.totalSamplesReceived || 1;
+  const invented = (sound.concealedSamples || 0) / total * 100;
+  report("sound: "
+    + (codec ? (codec.channels || "?") + " channels at "
+               + Math.round((codec.clockRate || 0) / 1000) + " kHz" : "codec unknown")
+    + ", " + (sound.packetsLost || 0) + " packets lost, "
+    + invented.toFixed(2) + "% of samples invented, jitter "
+    + Math.round((sound.jitter || 0) * 1000) + " ms"
+    + (codec && codec.sdpFmtpLine ? " [" + codec.sdpFmtpLine + "]" : ""));
+}
+
 async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
@@ -2191,6 +2236,7 @@ async function watchMedia() {
   } catch (_) { return; }
   // Before the branches below, every one of which returns.
   noteFreezes(picture);
+  tellAboutSound();
 
   if (bytes > lastBytes) {
     lastBytes = bytes;
