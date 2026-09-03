@@ -70,6 +70,13 @@ const gate = el("gate"), stage = el("stage"), video = el("screen");
 let socket = null, pc = null, input = null;
 let seq = 0, ticker = null, padIndex = null;
 let guestToken = null, ended = false, retries = 0, retryTimer = null;
+/* How many times in a row a resume has been refused. One refusal stops the
+ * page retrying on its own -- hammering a host that has already said no helps
+ * nobody -- but it no longer throws the credential away, because the usual
+ * reason for a refusal is a slot that had not been swept yet, and the sweep is
+ * done by the attempt. So the button, and coming back to the page, each get
+ * one more go; a second refusal is a real no and asks for the PIN. */
+let resumeRefused = 0;
 
 const token = location.pathname.startsWith("/j/")
   ? decodeURIComponent(location.pathname.slice(3))
@@ -182,7 +189,7 @@ function mediaIsLive() {
 }
 
 function reconnectSoon() {
-  if (ended || retryTimer || !guestToken) return;
+  if (ended || retryTimer || !guestToken || resumeRefused) return;
   const delay = Math.min(15000, 1000 * Math.pow(2, retries++));
   if (!mediaIsLive()) setLink("warn");
   retryTimer = setTimeout(() => {
@@ -197,8 +204,12 @@ function connect(hello) {
   socket = new WebSocket(`${scheme}//${location.host}/ws`);
 
   socket.addEventListener("open", () => socket.send(JSON.stringify(hello)));
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", (event) => {
     if (ended) return;
+    // A socket we have already replaced, closing after the fact. Without this
+    // its handler schedules a reconnect on top of the connection that
+    // replaced it, and two sockets answer the same offers.
+    if (socket && event.target !== socket) return;
     // Closed before we were ever let in: say so, rather than leaving a
     // disabled button and a page that appears to have stopped caring.
     if (!gate.hidden) {
@@ -299,10 +310,14 @@ function askForPin(why) {
 
 function onError(message) {
   if (gate.hidden) {
-    // Already playing. A refused resume means the credential is no longer
-    // good -- stop retrying with it rather than hammering the host.
-    guestToken = null;
+    // Already playing. A refused resume stops the page retrying on its own,
+    // rather than hammering a host that has said no -- but the credential is
+    // kept for one deliberate try, because a slot the host had not yet swept
+    // refuses the first attempt and accepts the one after it. Twice is a real
+    // no, and then the PIN is the honest answer.
+    resumeRefused += 1;
     setLink("bad", message.message);
+    if (resumeRefused >= 2) askForPin(message.message);
   } else {
     askForPin(message.message);
   }
@@ -316,6 +331,7 @@ function send(message) {
 
 function joined(message) {
   retries = 0;
+  resumeRefused = 0;
   clearTimeout(joinTimer);
   clearRejoinTimer();
   if (message.guest) guestToken = message.guest;
@@ -1022,6 +1038,73 @@ function clearRenewTimer() {
   if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; }
 }
 
+/* Bring the connection back now, from any state it is in.
+ *
+ * A phone that has been in a pocket for ten minutes comes back to a page whose
+ * timers were frozen, whose socket the system closed without telling anybody,
+ * and whose RTCPeerConnection may still cheerfully report "connected" over a
+ * path that has carried nothing for minutes. Each of the pieces below already
+ * knew how to mend itself and none of them could, because every one was
+ * waiting on a count that had run out while nobody was looking: the socket
+ * backoff had grown to fifteen seconds, the rebuild allowance was spent, and a
+ * single refused resume had thrown the credential away.
+ *
+ * So this is one path rather than four, and it resets the counts as it goes.
+ * The socket is rebuilt rather than reused even when it claims to be open,
+ * because after a long sleep that claim is worth nothing and the alternative
+ * is a `renew` sent into a closed pipe and twenty seconds of waiting to find
+ * out. A fresh socket costs one handshake; the resume that follows carries a
+ * fresh offer with it. */
+let lastRevive = 0;
+
+function reviveNow(why) {
+  if (ended) return;
+  // A restored page fires pageshow and visibilitychange one after the other,
+  // and a second rebuild started on top of the first only throws away a
+  // connection that was on its way.
+  const now = Date.now();
+  if (now - lastRevive < 1000) return;
+  lastRevive = now;
+  clearRejoinTimer();
+  clearRenewTimer();
+  clearMediaTimeout();
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  retries = 0;
+  renewals = 0;
+  stalledSince = 0;
+  lastBytes = -1;
+  mediaFresh = false;
+  if (!guestToken) {
+    try { guestToken = localStorage.getItem(storageKey) || null; } catch (_) {}
+  }
+  if (!guestToken) {
+    askForPin("This connection could not be brought back.");
+    return;
+  }
+  setLink("warn", "reconnecting");
+  const old = socket;
+  try {
+    if (old && old.readyState === WebSocket.OPEN) {
+      old.send(JSON.stringify({
+        t: "report",
+        detail: "[" + CLIENT_BUILD + "] bringing the connection back: " + why }));
+    }
+  } catch (_) { /* saying so is never worth failing over */ }
+  socket = null;                          // so its close handler stands down
+  try { if (old) old.close(); } catch (_) {}
+  try {
+    // "new" rather than "live": the host keeps a working stream when a guest
+    // only lost signalling, and the whole reason for being here is that this
+    // one is not working, whatever it says about itself.
+    connect({ t: "resume", guest: guestToken, name: myName(),
+              codecs: videoCodecs(), media: "new" });
+  } catch (_) {
+    // Nothing to connect to yet -- no network at all, usually. The backoff
+    // was made for this, and it has just been reset to its first step.
+    reconnectSoon();
+  }
+}
+
 function renewSoon(delay, force) {
   if (ended || renewTimer) return;
   if (renewals >= MAX_RENEWALS) {
@@ -1051,26 +1134,47 @@ function renewSoon(delay, force) {
 // The browser tells us when the network comes back, and when the user returns
 // to the tab -- both are exactly when a stale connection needs rebuilding.
 window.addEventListener("online", () => {
-  if (pc && pc.connectionState !== "connected") renewSoon(500);
+  if (!ended && gate.hidden && !mediaIsLive()) reviveNow("the network came back");
 });
+
+/* Back in front of somebody. Whatever counted down while nobody was looking is
+ * reset here: the backoff belongs to the time the page was away, and making
+ * somebody who has just picked their phone up wait out fifteen seconds of it
+ * is the difference between "it mends itself" and "it is broken". */
+function cameBack() {
+  if (ended || !gate.hidden) return;
+  retries = 0;
+  const socketOpen = socket && socket.readyState === WebSocket.OPEN;
+  if (!socketOpen || !pc || pc.connectionState !== "connected") {
+    reviveNow("came back to the page");
+    return;
+  }
+  // Everything still claims to be up. It may even be true, and a short
+  // background usually is, so let it prove it before pulling it down.
+  stalledSince = 0;
+  lastBytes = -1;
+  mediaFresh = false;
+  setTimeout(watchMedia, 500);
+  setTimeout(() => {
+    if (!ended && pc && lastBytes < 0) reviveNow("nothing was moving on return");
+  }, 3000);
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     // Nothing can be assumed about what survives being in the background.
     mediaFresh = false;
     return;
   }
-  if (ended || !pc) return;
-  // Coming back to the tab. Do not trust the connection state -- check whether
-  // anything is moving, and give it a couple of seconds to prove it before
-  // rebuilding, since a brief background is often survivable.
-  stalledSince = 0;
-  lastBytes = -1;
-  mediaFresh = false;
-  setTimeout(watchMedia, 500);
-  setTimeout(() => {
-    if (!ended && pc && lastBytes < 0) renewSoon(0, true);
-  }, 3000);
-  if (pc.connectionState !== "connected") renewSoon(500);
+  cameBack();
+});
+
+/* A page restored from the back/forward cache, which is what a phone does with
+ * a tab it froze rather than discarded. No visibilitychange fires for it: the
+ * page simply resumes, mid-sentence, with a socket the system closed while it
+ * slept. */
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) cameBack();
 });
 
 /* Everything the page has to say goes through here, so it always lands
@@ -1177,6 +1281,16 @@ let noticeTimer = null;
 
 el("notice").addEventListener("click", hideNotice);
 
+// Guarded, unlike the buttons around it, because this one arrived after the
+// page it lives in: a browser holding an older index.html would otherwise
+// throw here at load time and take every listener below it with it.
+if (el("revive")) {
+  el("revive").addEventListener("click", () => {
+    hideNotice();
+    reviveNow("the guest asked for it");
+  });
+}
+
 el("info").addEventListener("click", async () => {
   if (!el("notice").hidden) { hideNotice(); return; }
   const route = await describeRoute();
@@ -1221,6 +1335,8 @@ async function mediaFailed(why) {
   report(why);
   el("prompt").innerHTML =
     "<p><strong>" + why + "</strong></p>" +
+    "<p class=\"footnote\">Reconnect at the top of the screen builds the " +
+    "whole connection again, which is worth a try before anything else.</p>" +
     "<p class=\"footnote\">The page and the PIN reach the host over one port; " +
     "the video takes a different, direct route, and that one is not getting " +
     "through. Usually the host's UDP ports are not forwarded.</p>" +
@@ -1285,7 +1401,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-02a";
+const CLIENT_BUILD = "2026-09-03a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1633,6 +1749,16 @@ function setLink(kind, detail) {
   chip.setAttribute("aria-label", words);
   chip.title = words;
   chip.hidden = false;
+  // The button belongs to exactly the states this pip is not happy in. A
+  // session that has ended is not one of them: nothing is coming back.
+  const button = el("revive");
+  if (button) button.hidden = ended || kind === "ok";
+  // A collapsed hud is a hamburger and nothing else, so a button nobody can
+  // see is no better than the button that was not there. "warn" is not enough
+  // reason to open it -- a connection wobbles and mends itself all the time,
+  // and a hud that opens itself every time is its own annoyance -- but "bad"
+  // is the state somebody has to be given something to do about.
+  if (kind === "bad" && !ended && gate.hidden) showHud(true);
 }
 
 function timeLeft(seconds) {

@@ -74,6 +74,13 @@
          screen reader and for a long press. -->
     <span id="link" class="chip link" title="Connecting"
           aria-label="Connecting"></span>
+    <!-- Beside the pip that says the connection is unwell, because that is
+         the only moment it is worth anything: shown whenever the link is not
+         healthy and put away again when it is. A phone that has been in
+         somebody's pocket comes back to a picture that has stopped, and the
+         page does try to mend that on its own -- but "try again now" is the
+         thing a person reaches for, and there was nothing to reach for. -->
+    <button id="revive" type="button" class="ghost" hidden>Reconnect</button>
     <!-- Hidden until there is something to count down to. -->
     <span id="clock" class="chip" hidden></span>
     <!-- A controller, not a sentence. The closed state only has to say "this

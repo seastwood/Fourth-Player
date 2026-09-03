@@ -926,6 +926,35 @@ A guest being refused also triggers an immediate sweep before the refusal is
 believed: somebody at the door is better served by a slot than by the grace
 period, which exists only so a brief reconnect goes unnoticed.
 
+**A phone that was in a pocket comes back, and there is a button for when it
+does not.** Everything above mends a connection that broke while somebody was
+watching it. A tab that has been in the background for ten minutes is a
+different animal: its timers were frozen, the system closed its socket without
+telling the page, and the peer connection it hands back may still report
+`connected` over a path that has carried nothing since. Every piece of the
+recovery here knew how to mend itself and none of them could, because each was
+waiting on a count that had run out while nobody was looking — the socket
+backoff had grown to its fifteen-second ceiling, the rebuild allowance was
+spent, and a single refused resume had thrown the credential away for good.
+
+Coming back to the page — a `visibilitychange`, or a `pageshow` from the
+back/forward cache, which is what a phone does to a tab it froze rather than
+discarded — now resets all three and rebuilds in one path. The socket is
+replaced rather than reused even when it claims to be open, because after a
+long sleep that claim is worth nothing and the alternative is a renewal sent
+into a closed pipe and twenty seconds of waiting to find out. A refused resume
+no longer burns the credential either: the first refusal stops the page
+retrying on its own, and the next deliberate attempt gets one more go, because
+the usual reason for a refusal is a slot the host had not yet swept — and the
+sweep is done by the attempt. Twice is a real no, and then it asks for the PIN.
+
+And there is now a **Reconnect** button, beside the pip that says the
+connection is unwell. It appears exactly when that pip is not green, it does
+the same thing the page does for itself on return, and it exists because
+"try it again now" is what a person reaches for and there was nothing to reach
+for. A picture that has stopped is also enough to open the chips, so the button
+is on screen rather than behind the hamburger.
+
 **A guest whose branch errors is rebuilt.** The host attributes a pipeline error
 to the guest it came from and re-offers to that one guest; everybody else is
 untouched, and the guest keeps their slot unless the rebuild also fails.
