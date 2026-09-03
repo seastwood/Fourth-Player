@@ -111,6 +111,13 @@ class Config:
     # under a picture that is otherwise fine is usually packet loss rather than
     # bandwidth, and this is the knob for it.
     audio_frame_ms: int = 10
+    # How much sound may wait between the capture and the encoder. It exists
+    # to absorb the encoder or a guest's pipeline hesitating for a moment;
+    # anything longer than this is not a hesitation but a fault, and the
+    # oldest audio is dropped rather than the capture being held up. 120 ms is
+    # far more than a hesitation and far less than a delay anybody notices,
+    # and it is only ever reached when something is already wrong.
+    audio_queue_ms: int = 120
 
     # -- packet size --
     # The RTP packet, before DTLS-SRTP (~16 bytes), UDP (8) and IP (20) are

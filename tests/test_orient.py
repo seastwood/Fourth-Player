@@ -146,10 +146,22 @@ out = run(apply="landscape")
 check(out["locks"] == ["landscape"], "a named choice locks the screen")
 check("landscape" in out["note"], "and says so")
 out = run(apply="any")
-check(out["unlocked"] == 1 and out["locks"] == [],
-      "following the phone unlocks rather than locking to whatever is current")
+# unlock() drops back to the *default*, and an installed app's default is the
+# manifest it was installed with -- which is how an app added while the
+# manifest still said landscape went back to landscape when told to follow the
+# phone. "any" is a lock whose value is every orientation, so it overrides
+# that instead of deferring to it.
+check(out["locks"] == ["any"] and out["unlocked"] == 0,
+      "following the phone locks to any, which beats a stale manifest")
 check("rotation lock" in out["note"],
       "and says the phone's own lock is back in charge, which it is")
+out = run(apply="any", refuse=True)
+check(out["unlocked"] == 1,
+      "a browser that refuses 'any' as a lock gets the old unlock instead")
+check("rotation lock" in out["note"],
+      "and is told the same thing, because the same thing happened")
+out = run(apply="any", throws=True)
+check(out["unlocked"] == 1, "and so does one that throws on it")
 
 print("where it cannot work")
 out = run(canTurn=False, apply="landscape")

@@ -827,15 +827,36 @@ function applyOrient(pick) {
   const note = el("pads-orient-note");
   const say = (text) => { if (note) note.textContent = text; };
   if (!canTurn()) return say("");
-  if (pick === "any") {
-    try { screen.orientation.unlock(); } catch (_) {}
-    return say("Turns with the phone, and with its rotation lock.");
-  }
+  /* "any" is a lock, not the absence of one.
+   *
+   * unlock() was the obvious call and it is the wrong one: it drops back to
+   * the *default*, and for an installed app the default is whatever the
+   * manifest said when the app was installed. An app added to a home screen
+   * while the manifest still asked for landscape therefore went straight back
+   * to landscape on being told to follow the phone -- which is exactly what
+   * it did, while an explicit portrait worked. Chrome refreshes an installed
+   * manifest in its own time, and "reinstall the app" is not an answer to
+   * give somebody about a setting.
+   *
+   * lock("any") is a real lock whose value is every orientation, so it
+   * overrides the manifest instead of deferring to it, and the phone's own
+   * rotation decides. The unlock stays as a fallback for a browser that will
+   * not take "any" as a lock value. */
   let held;
   try {
     held = screen.orientation.lock(pick);
   } catch (exc) {
-    return say("This browser will not turn the screen.");
+    if (pick !== "any") return say("This browser will not turn the screen.");
+    try { screen.orientation.unlock(); } catch (_) {}
+    return say("Turns with the phone, and with its rotation lock.");
+  }
+  if (pick === "any") {
+    if (held && held.catch) {
+      held.catch(() => {
+        try { screen.orientation.unlock(); } catch (_) {}
+      });
+    }
+    return say("Turns with the phone, and with its rotation lock.");
   }
   say("Held in " + pick + ".");
   if (held && held.catch) {
@@ -2122,7 +2143,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03n";
+const CLIENT_BUILD = "2026-09-03o";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3155,10 +3176,44 @@ function openPads() {
   el("prompt").hidden = true;          // it shows through, and says the same
   loadPadMap();
   buildPadsGrid();
+  tellWhatIsOnTop();
   paintKeyMode();
   paintBuzz();
   paintOrient();
   paintPads();
+}
+
+/* Which element a tap on the panel's own buttons would actually reach.
+ *
+ * The complaint: in landscape the buttons along the top of this panel cannot
+ * be pressed -- including the one that closes it -- while in portrait they
+ * are fine. Nothing in the stylesheet says why. The panel is numbered above
+ * the on-screen pad and above the chips, and the only difference sideways is
+ * that the pad stops sitting under the picture and covers the whole stage
+ * instead.
+ *
+ * So rather than guess again: ask the browser. elementFromPoint is the same
+ * hit test a tap goes through, and it names whatever is on top at that point
+ * -- which is the answer, whether it is the pad, a cluster inside it, or the
+ * button itself and the fault is somewhere else entirely.
+ *
+ * Reported once per opening, and only sideways, where the fault is. */
+function tellWhatIsOnTop() {
+  const close = el("pads-close");
+  if (!close || window.innerWidth < window.innerHeight) return;
+  const box = close.getBoundingClientRect();
+  if (!box.width) return;
+  const x = Math.round(box.left + box.width / 2);
+  const y = Math.round(box.top + box.height / 2);
+  const hit = document.elementFromPoint(x, y);
+  const name = (node) => !node ? "nothing"
+    : node.id ? "#" + node.id
+    : node.className ? node.tagName.toLowerCase() + "." + String(node.className).split(" ")[0]
+    : node.tagName.toLowerCase();
+  report("panel close button at " + x + "," + y + " (" + Math.round(box.width)
+         + "x" + Math.round(box.height) + ") is under " + name(hit)
+         + ", inside " + name(hit && hit.parentElement)
+         + "; window " + window.innerWidth + "x" + window.innerHeight);
 }
 
 function closePads() {

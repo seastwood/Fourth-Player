@@ -406,7 +406,24 @@ class Stage:
         self._build(with_audio=bool(self._audio_description))
 
     def _audio_branch(self):
-        """The game's sound, or nothing at all if this machine cannot give it."""
+        """The game's sound, or nothing at all if this machine cannot give it.
+
+        The queue is not decoration. Without one, every element after pulsesrc
+        runs on pulsesrc's own streaming thread -- including the appsink
+        callback, which hands each packet to every guest's pipeline in turn.
+        So a moment's hesitation anywhere in that chain, in any guest, stops
+        the capture being read; PulseAudio's ring buffer overruns; and the
+        samples in it are gone before anything encodes them. GStreamer says so
+        plainly -- "Can't record audio fast enough" -- and the guest hears it
+        as static, because a hole in the sound is exactly what the decoder has
+        to invent its way across. 2.74% of one guest's samples were invented.
+
+        A queue puts a thread boundary there: pulsesrc only ever fills the
+        queue, and the encoding and the handing-out happen on the other side
+        of it. Leaky downstream, so a genuinely stalled encoder drops the
+        oldest audio rather than blocking the capture again -- the whole point
+        is that nothing downstream can ever hold up the microphone.
+        """
         cfg = self.cfg
         for element in ("pulsesrc", "opusenc", "rtpopuspay"):
             if not Gst.ElementFactory.find(element):
@@ -414,6 +431,8 @@ class Stage:
                 return ""
         return (
             f" pulsesrc name=sound device={cfg.audio_device} provide-clock=false "
+            f"! queue name=soundq max-size-time={cfg.audio_queue_ms}000000 "
+            f"max-size-buffers=0 max-size-bytes=0 leaky=downstream "
             f"! audioconvert ! audioresample "
             f"! audio/x-raw,rate=48000,channels=2 "
             f"! opusenc bitrate={cfg.audio_bitrate_kbps * 1000} "
