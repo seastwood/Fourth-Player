@@ -1047,10 +1047,31 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   display: flex;
   gap: .5rem;
   align-items: center;
+  /* Wraps on a narrow screen rather than squeezing. Four controls and a
+     controller's name do not fit across a phone held upright, and what they
+     did instead was shrink the name until it read "< WIRELESS CONTROL" --
+     which is the one thing on that row that says which controller the panel
+     is about. */
+  flex-wrap: wrap;
   flex: 0 0 auto;
   padding: calc(var(--top-safe) + .7rem)
            clamp(.6rem, 3vw, 1.4rem) .7rem;
   border-bottom: 2px solid var(--bg2);
+}
+/* The way out is always at the end of the row, wherever the row ends up. */
+.browser-bar > .ghost:last-child { margin-left: auto; }
+/* The name has a whole row to itself on a narrow screen. `.chip` truncates at
+   46vw, which on a phone turns "Xbox Wireless Controller" into "BOX WIRELESS
+   CONTROLLE" -- clipped at both ends, because a chip's text is centred, so
+   the one thing on that row identifying the controller became the one thing
+   on it that could not be read. */
+.browser-bar > .chip:first-child { min-width: 0; }
+@media (max-width: 30rem) {
+  .browser-bar > .chip:first-child {
+    flex: 1 0 100%;
+    max-width: 100%;
+    text-align: center;
+  }
 }
 
 /* Collapsed to its icon until asked for. A phone in landscape has room for
@@ -1447,12 +1468,24 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    read, and it says the same as this panel's own hint. */
 .stage:has(.pads:not([hidden])) .prompt { visibility: hidden; }
 
+/* One scroller in this panel, and it is the panel.
+ *
+ * This grid used to scroll on its own, which on a desktop is a tidy way to
+ * keep a long list of buttons in view and on a phone is the thing that makes
+ * the whole panel feel broken: a flick lands in whichever scroller happens to
+ * be under the thumb, one of them is a few rows tall, and neither moves the
+ * other. Nested scrolling is a desktop habit. The panel scrolls; everything
+ * in it is simply as tall as it is.
+ *
+ * Narrower cells on a phone, too: 6.2rem left three columns on a 393-wide
+ * screen with the letters crammed at the top of each. Below that width they
+ * are wider and there are fewer of them, which reads far better with a thumb.
+ */
 .pads-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(6.2rem, 1fr));
   gap: .4rem;
   padding: 0 clamp(.6rem, 3vw, 1.4rem);
-  overflow-y: auto;
 }
 /* One cell per button in the standard mapping. Lit means held right now, so
    the answer to "which button is this" is: press it and see what lights. */
@@ -1541,6 +1574,9 @@ label.optional {
    itself, and sideways that is a transparent sheet taking no taps -- a name
    two elements answer to is a rule one of them never asked for. */
 .pads:not(.onscreen) .touch-only { display: none; }
+/* Shown for a controller and for the on-screen pad, hidden for a keyboard --
+   which has "Fix my buttons" for the same job and no diamond to trade. */
+.pads.keys .keys-hidden { display: none; }
 
 /* While the television is in a menu, this pad reaches the page and stops
    there. Dimmed rather than hidden or disabled: it still lights under a
@@ -1577,13 +1613,21 @@ html.held .touch::after {
   z-index: -1;
 }
 
-/* The buzz setting, on its own line. */
+/* A setting and the sentence explaining it. Side by side where there is room
+   and stacked where there is not -- the note is a whole sentence, and a
+   sentence squeezed into the last two inches of a phone's width wraps into a
+   column three words wide. */
 .pads-feel {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: .5rem .75rem;
+  gap: .35rem .75rem;
   padding-bottom: 0;
+}
+.pads-feel .footnote { margin: 0; flex: 1 1 12rem; }
+@media (max-width: 30rem) {
+  /* Under the switch it belongs to, full width, rather than beside it. */
+  .pads-feel .footnote { flex: 1 0 100%; }
 }
 
 /* A switch that looks like a switch. Square, like everything else here: a

@@ -142,8 +142,14 @@ check(out["sends"]["A"] == EAST and out["sends"]["B"] == SOUTH,
 
 print("it is a switch on the panel, and it is remembered")
 check('id="pads-faceswap"' in page, "the panel carries the switch")
-check("touch-only" in page.split('id="pads-faceswap"')[0].rsplit("<p", 1)[-1],
-      "beside the on-screen pad's other settings, and only when it is up")
+check("keys-hidden" in page.split('id="pads-faceswap"')[0].rsplit("<p", 1)[-1],
+      "shown for a controller as well as the on-screen pad: it was two "
+      "controls doing one job, and the one in the panel bar has gone")
+check("pads-swap" not in page and "pads-swap" not in source,
+      "the old Swap A and B button is gone rather than left beside it")
+check("if (faceSwapped())" in source.split("function remapped")[1][:1600],
+      "a controller gets the same swap, applied as it is read rather than "
+      "written into the map -- so Fix my buttons is left alone by it")
 check('localStorage.setItem(FACESWAP_KEY' in source
       and "buildTouchPad" in lift("setFaceSwap"),
       "written down, and the pad rebuilt so one place decides what a key sends")

@@ -51,8 +51,14 @@ def lift(name):
 import re                                                        # noqa: E402
 keys = re.search(r"const STANDARD_KEYS = \[.*?\];", source, re.S).group(0)
 
+# remapped() also applies the face-button swap now -- one switch for the
+# on-screen pad and for a controller, rather than a button in the panel's bar
+# that rewrote the controller's map. This suite is about sticks, so it is
+# lifted with that switch off and the pairs left alone.
 HARNESS = keys + "\n" + lift("shapeStick") + "\n" + lift("shapeAxes") \
     + "\n" + lift("swapSticks") + "\n" + lift("remapped") + """
+const FACE_SWAP = { 0: 1, 1: 0, 2: 3, 3: 2 };
+function faceSwapped() { return false; }
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 let padMap = job.map === undefined ? null : job.map;
 let sticksSwapped = !!job.swapped;

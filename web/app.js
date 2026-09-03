@@ -1078,13 +1078,14 @@ function paintFaceSwap() {
   // trying to line up. The letters on the glass are in front of them; what
   // arrives at the other end is what they cannot see.
   const layout = LAYOUTS[chosenLayout()];
-  const bottom = layout && layout.face
+  const bottom = touchOn && layout && layout.face
     ? (layout.face.find((b) => b.y > 50) || {}).id : "";
   note.textContent = on
-    ? "What you press is sent as the letter on it."
+    ? "A and B traded over, and X and Y with them -- on the on-screen pad and "
+      + "on a controller."
     : (bottom ? "The button marked " + bottom + " is sent as A, which is what "
                 + "its position means on the pad the host presents."
-              : "Sent by position rather than by letter.");
+              : "Each button is sent as the one in its position.");
 }
 
 function setFaceSwap(on) {
@@ -1095,7 +1096,7 @@ function setFaceSwap(on) {
   // The buttons carry the mapping, so the pad is built again rather than
   // patched: one place decides what a key sends, and it is buildTouchPad.
   const key = chosenLayout();
-  if (LAYOUTS[key]) buildTouchPad(LAYOUTS[key]);
+  if (touchOn && LAYOUTS[key]) buildTouchPad(LAYOUTS[key]);
   paintFaceSwap();
 }
 
@@ -2262,7 +2263,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03u";
+const CLIENT_BUILD = "2026-09-03v";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3130,14 +3131,31 @@ function remapped(pad) {
   // Not `!padMap` any more: a controller whose buttons are all correct can
   // still want its sticks the other way round, and returning early here meant
   // it could not have that without first breaking its buttons.
-  if (!padMap && !sticksSwapped && deadzone === 0 && sensitivity === 1) {
+  if (!padMap && !sticksSwapped && !faceSwapped()
+      && deadzone === 0 && sensitivity === 1) {
     return pad;
   }
-  const buttons = !padMap ? pad.buttons : STANDARD_KEYS.map((_n, i) => {
+  let buttons = !padMap ? pad.buttons : STANDARD_KEYS.map((_n, i) => {
     const from = padMap[i];
     return (from == null || !pad.buttons[from])
       ? { pressed: false, value: 0 } : pad.buttons[from];
   });
+  /* The same swap the on-screen pad gets, from the same switch.
+   *
+   * There used to be a button up in the panel's bar that did this by
+   * rewriting the controller's own map -- a second control, doing what looks
+   * from the sofa like the same job, in a different place and by a different
+   * mechanism. One switch now, applied here instead of written into the map,
+   * which keeps it out of "Fix my buttons": somebody who has taught this page
+   * where their controller's buttons are can still trade the pairs over
+   * without disturbing any of that, and can trade them back. */
+  if (faceSwapped()) {
+    const traded = buttons.slice();
+    for (const [from, to] of Object.entries(FACE_SWAP)) {
+      traded[to] = buttons[from] || { pressed: false, value: 0 };
+    }
+    buttons = traded;
+  }
   return { buttons, axes: shapeAxes(swapSticks(pad.axes)), id: pad.id,
            index: pad.index, connected: pad.connected, mapping: pad.mapping };
 }
@@ -3506,18 +3524,6 @@ function finishRemap() {
    the bottom, and the two are then the other way round for them -- their A
    reads as B on the television. Nothing can tell the two apart from the host's
    side, so the person who can see the pad fixes it, in one tap. */
-el("pads-swap").addEventListener("click", () => {
-  padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
-  const a = padMap[0];
-  padMap[0] = padMap[1];
-  padMap[1] = a;
-  try { localStorage.setItem(mapKey(), JSON.stringify(padMap)); } catch (_) {}
-  el("pads-reset").hidden = false;
-  el("pads-hint").textContent =
-    "A and B swapped. Press them to check, and swap back if that made it worse.";
-  report("swapped A and B");
-});
-
 function paintTune() {
   el("pads-deadzone").value = String(Math.round(deadzone * 100));
   el("pads-sens").value = String(Math.round(sensitivity * 100));
