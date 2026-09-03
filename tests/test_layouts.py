@@ -132,8 +132,14 @@ check("buildLayoutPicker()" in startup,
 
 builder = app[app.index("function buildLayoutPicker"):]
 builder = builder[:builder.index("\n}")]
-check("touchOn ? chosenLayout() : \"off\"" in builder,
+# It used to be exactly `touchOn ? chosenLayout() : "off"`, which is still the
+# rule for the two states that put buttons on the glass or take them off it.
+# The keyboard is a third thing to be holding and belongs to neither: it shows
+# nothing on the screen, so "what is on the screen" cannot be asked.
+check('touchOn ? remembered : "off"' in builder,
       "and it starts on the choice that matches what is on the screen")
+check('remembered === "keyboard" ? "keyboard"' in builder,
+      "unless the keyboard was chosen, which shows nothing to match against")
 check("paintPicker()" in builder,
       "with the label painted, since 'off' is renamed to the real controller")
 

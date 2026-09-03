@@ -760,6 +760,17 @@ const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 
 let touchOn = false;
 let touchButtons = 0;
+/* A keyboard, as a set of buttons held. The same shape as the on-screen pad's
+ * mask and merged the same way on the way out, so a key, a thumb and a
+ * controller can all be pressed at once and none of them cancels the others.
+ *
+ * What this is not is a keyboard reaching the host. The wire carries one
+ * thing, a pad frame, and the device each guest is wired to on the other end
+ * declares gamepad capabilities and nothing else -- it cannot express a
+ * keystroke however it is asked to. This is a guest deciding which of their
+ * own keys stands for which button, in their own browser, before any of that. */
+let keyButtons = 0;
+let keyboardOn = false;
 const pointers = new Map();
 
 function makeButton(spec, className) {
@@ -898,7 +909,8 @@ function wireSticks() {
 function chosenLayout() {
   let saved = null;
   try { saved = localStorage.getItem(LAYOUT_KEY); } catch (_) {}
-  return (saved === "off" || LAYOUTS[saved]) ? saved : DEFAULT_LAYOUT;
+  return (saved === "off" || saved === "keyboard" || LAYOUTS[saved])
+    ? saved : DEFAULT_LAYOUT;
 }
 
 /* The panel's copy of the chip's controller menu.
@@ -960,6 +972,12 @@ function buildLayoutPicker() {
   none.value = "off";
   none.textContent = "No on-screen pad";
   picker.appendChild(none);
+  // Beside "off" rather than among the layouts below it: those are shapes of
+  // the same on-screen pad, and this is a different thing to press.
+  const keys = document.createElement("option");
+  keys.value = "keyboard";
+  keys.textContent = "Keyboard";
+  picker.appendChild(keys);
   for (const [key, layout] of Object.entries(LAYOUTS)) {
     const option = document.createElement("option");
     option.value = key;
@@ -970,7 +988,10 @@ function buildLayoutPicker() {
   // controller -- so the value has to say which controller is actually in use.
   // Claiming a layout while no on-screen pad is showing, which is the ordinary
   // state on a desktop, would be the dropdown disagreeing with the screen.
-  picker.value = touchOn ? chosenLayout() : "off";
+  const remembered = chosenLayout();
+  picker.value = remembered === "keyboard" ? "keyboard"
+               : (touchOn ? remembered : "off");
+  if (picker.value === "keyboard") keyboardOn = true;
   paintPicker();
   const choose = (value) => {
     try { localStorage.setItem(LAYOUT_KEY, value); } catch (_) {}
@@ -988,7 +1009,11 @@ let chosenByHand = false;
 let padName = "";
 
 function applyLayoutChoice(key) {
-  if (key === "off") {
+  keyboardOn = key === "keyboard";
+  // Whatever was held on the way out of keyboard mode is let go of here, or it
+  // stays held on somebody else's television.
+  if (!keyboardOn) keyButtons = 0;
+  if (key === "off" || keyboardOn) {
     el("touch").hidden = true;
     releaseAllTouch();
   } else {
@@ -996,6 +1021,7 @@ function applyLayoutChoice(key) {
     buildTouchPad(LAYOUTS[key] || LAYOUTS[DEFAULT_LAYOUT]);
   }
   paintPicker();
+  paintKeyMode();
 }
 
 /* One control, which is also the readout.
@@ -1013,13 +1039,17 @@ function paintPicker() {
     // anything -- it is that controller, so it says so.
     off.textContent = padName || "No on-screen pad";
   }
-  const usingTouch = picker.value !== "off";
+  const usingKeys = picker.value === "keyboard";
+  const usingTouch = picker.value !== "off" && !usingKeys;
   // The colour goes on the chip around the icon, not on the select -- which
   // now carries only the classes that make it invisible, and would lose them
   // if this wrote over className the way it used to.
   const chip = el("padpick");
-  chip.className = "padpick chip " + (usingTouch || padName ? "ok" : "warn");
-  const said = usingTouch
+  chip.className = "padpick chip "
+    + (usingTouch || usingKeys || padName ? "ok" : "warn");
+  const said = usingKeys
+    ? "Keyboard — tap to change, or to see which key is which"
+    : usingTouch
     ? "On-screen controller — tap to change or turn off"
     : (padName ? padName + " — tap to add an on-screen pad"
                : "No controller — tap to add an on-screen pad");
@@ -1143,6 +1173,25 @@ el("use-touch").addEventListener("click", (event) => {
   event.preventDefault();
   showTouch(true);
 });
+
+/* The same offer for somebody at a desk. A laptop has no touchscreen to put
+   buttons on and often no controller either, and this page had nothing to say
+   to them at all. */
+if (el("use-keys")) {
+  el("use-keys").addEventListener("click", (event) => {
+    event.preventDefault();
+    buildLayoutPicker();
+    el("padpick").hidden = false;
+    el("padtype").value = "keyboard";
+    try { localStorage.setItem(LAYOUT_KEY, "keyboard"); } catch (_) {}
+    chosenByHand = true;
+    applyLayoutChoice("keyboard");
+    el("prompt").hidden = true;
+    showNotice("Keyboard controls are on. The arrow keys are the d-pad; "
+               + "<strong>Controls</strong> at the top shows every key and "
+               + "changes any of them.", false);
+  });
+}
 
 function videoRefused() {
   setLink("bad", "no H.264");
@@ -1532,7 +1581,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03b";
+const CLIENT_BUILD = "2026-09-03c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1695,12 +1744,13 @@ function startPadLoop() {
   // A phone with no controller gets the on-screen pad without being asked; a
   // laptop does not, because a mouse cannot use it and it would only be in the
   // way. The link in the prompt covers everyone this guesses wrong about.
-  if (!hasGamepad() && navigator.maxTouchPoints > 0) showTouch(true);
+  if (!hasGamepad() && navigator.maxTouchPoints > 0
+      && chosenLayout() !== "keyboard") showTouch(true);
 
   ticker = setInterval(tick, Math.round(1000 / SEND_HZ));
 
   // Leaving must not leave a button held down on someone else's television.
-  const letGo = () => sendFrame(null, true);
+  const letGo = () => { keyButtons = 0; sendFrame(null, true); };
   window.addEventListener("pagehide", letGo);
   window.addEventListener("beforeunload", letGo);
   document.addEventListener("visibilitychange", () => {
@@ -1745,7 +1795,9 @@ function forgetPad() {
   // Their controller has gone; offer the on-screen one back unless they
   // turned it off deliberately.
   if (!chosenByHand && el("padtype").value !== "off") showTouch(true);
-  else el("prompt").hidden = false;
+  // "Press any button on your controller" is the wrong thing to say to
+  // somebody who is playing on the keyboard and has no controller to press.
+  else if (!keyboardOn) el("prompt").hidden = false;
 }
 
 function hasGamepad() {
@@ -1801,7 +1853,9 @@ function sendFrame(pad, releaseAll) {
   // A physical pad and the on-screen one are merged rather than one replacing
   // the other: whichever is being touched wins by simply being pressed.
   const state = FPFrame.padState(releaseAll ? null : pad);
-  const buttons = releaseAll ? 0 : (state.buttons | touchButtons);
+  // The keyboard joins the same merge for the same reason: whichever is being
+  // pressed wins by being pressed, and nothing has to be turned off first.
+  const buttons = releaseAll ? 0 : (state.buttons | touchButtons | keyButtons);
   // Whichever is being touched wins, exactly as the buttons do: an on-screen
   // stick only overrides the physical one while a thumb is actually on it.
   const axes = releaseAll ? [0, 0, 0, 0, 0, 0] : state.axes.slice();
@@ -1817,7 +1871,7 @@ function sendFrame(pad, releaseAll) {
        did nothing at all: Crazy Taxi would let you drive its menus and not its
        car. Held on screen means held all the way. */
     for (const [bit, axis] of [[6, 4], [7, 5]]) {
-      if (touchButtons & (1 << bit)) axes[axis] = FPFrame.TRIGGER_FULL;
+      if ((touchButtons | keyButtons) & (1 << bit)) axes[axis] = FPFrame.TRIGGER_FULL;
     }
   }
 
@@ -2027,6 +2081,133 @@ const STANDARD_KEYS = [
   ["GUIDE", "home"],
 ];
 const AXIS_NAMES = ["LEFT X", "LEFT Y", "RIGHT X", "RIGHT Y"];
+
+/* Which key stands for which button.
+ *
+ * The arrangement is RetroArch's own, because this console is RetroArch and
+ * anybody who has played an emulator on a keyboard already has it in their
+ * hands: arrows for the d-pad, Z and X on the two buttons a two-button game
+ * uses, A and S above them, Enter for start and the right shift key for
+ * select. The shoulders and triggers take the row above the letters, in the
+ * order they sit on a controller.
+ *
+ * The sticks are not here and cannot be: a key is down or it is not, and a
+ * stick is a position. A game that needs one needs a controller.
+ *
+ * Codes rather than characters, so the map does not change meaning on a French
+ * or German keyboard: KeyZ is the key where Z is on a US layout, whatever is
+ * printed on it. */
+const KEY_STORE = "fp-keys";
+const KEY_DEFAULTS = STANDARD_KEYS.map(() => null);
+[[0, "KeyZ"], [1, "KeyX"], [2, "KeyA"], [3, "KeyS"],
+ [4, "KeyQ"], [5, "KeyW"], [6, "KeyE"], [7, "KeyR"],
+ [8, "ShiftRight"], [9, "Enter"],
+ [12, "ArrowUp"], [13, "ArrowDown"], [14, "ArrowLeft"], [15, "ArrowRight"],
+].forEach(([index, code]) => { KEY_DEFAULTS[index] = code; });
+
+let keyMap = KEY_DEFAULTS.slice();
+
+function loadKeyMap() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(KEY_STORE) || "null"); } catch (_) {}
+  keyMap = saved
+    ? STANDARD_KEYS.map((_n, i) => (typeof saved[i] === "string" ? saved[i] : null))
+    : KEY_DEFAULTS.slice();
+}
+
+function saveKeyMap() {
+  try { localStorage.setItem(KEY_STORE, JSON.stringify(keyMap)); } catch (_) {}
+}
+
+function keysAreDefault() {
+  return KEY_DEFAULTS.every((code, i) => keyMap[i] === code);
+}
+
+/* What to call a key on screen. `event.code` names a position -- "KeyZ",
+   "ArrowUp", "ShiftRight" -- and none of those is what somebody would say out
+   loud about the key under their finger. */
+function keyLabel(code) {
+  if (!code) return "\u2014";
+  const named = {
+    ArrowUp: "\u2191", ArrowDown: "\u2193",
+    ArrowLeft: "\u2190", ArrowRight: "\u2192",
+    Enter: "Enter", NumpadEnter: "Enter", Space: "Space", Tab: "Tab",
+    Escape: "Esc", Backspace: "Backspace", CapsLock: "Caps",
+    ShiftLeft: "L Shift", ShiftRight: "R Shift",
+    ControlLeft: "L Ctrl", ControlRight: "R Ctrl",
+    AltLeft: "L Alt", AltRight: "R Alt",
+    Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[",
+    BracketRight: "]", Backslash: "\\", Semicolon: ";", Quote: "'",
+    Comma: ",", Period: ".", Slash: "/",
+  };
+  if (named[code]) return named[code];
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return "Num " + code.slice(6);
+  return code;
+}
+
+/* Giving one button a key. Whatever had that key takes the one being given up,
+   so the map stays a swap rather than growing a duplicate -- exactly as the
+   controller's own map does, and for the same reason: two buttons on one key
+   means one of them can never be pressed by itself. */
+function bindKeyInto(map, index, code) {
+  const next = map.slice();
+  const was = next[index];
+  const clash = next.findIndex((held, i) => i !== index && held === code);
+  if (clash >= 0) next[clash] = was;
+  next[index] = code;
+  return { map: next, clash };
+}
+
+/* Somebody typing into the PIN box, the name box or the game search is typing,
+   whatever the controls are set to. */
+function typingSomewhere() {
+  const node = document.activeElement;
+  if (!node) return false;
+  const tag = node.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+      || node.isContentEditable === true;
+}
+
+function buttonForKey(code) {
+  const index = keyMap.indexOf(code);
+  return index >= 0 ? index : -1;
+}
+
+window.addEventListener("keydown", (event) => {
+  if (typingSomewhere()) return;
+  // While one button is waiting to be given a key, the next key pressed is the
+  // answer to that question rather than a move in the game.
+  if (keyboardOn && learnTarget >= 0) {
+    event.preventDefault();
+    const target = learnTarget;
+    cancelLearn();
+    bindKey(target, event.code);
+    return;
+  }
+  if (!keyboardOn || !gate.hidden || event.repeat) return;
+  const index = buttonForKey(event.code);
+  if (index < 0) return;
+  // Arrows scroll a page and space presses whatever has focus. Neither is what
+  // somebody holding the d-pad down meant.
+  event.preventDefault();
+  keyButtons |= (1 << index);
+});
+
+// Not conditional on the keyboard being the chosen controls: a key let go of
+// after they were turned off would otherwise stay down for ever.
+window.addEventListener("keyup", (event) => {
+  const index = buttonForKey(event.code);
+  if (index >= 0) keyButtons &= ~(1 << index);
+});
+
+/* A window that loses focus stops sending key-ups, so whatever was held stays
+   held -- which on a television in another house is a character walking into a
+   wall until somebody notices. */
+window.addEventListener("blur", () => { keyButtons = 0; });
+
+loadKeyMap();
 // Which physical button answers for each standard one. null means "as the
 // browser reports it", which is right for every pad it knows.
 let padMap = null;
@@ -2320,6 +2501,7 @@ function openPads() {
   el("prompt").hidden = true;          // it shows through, and says the same
   loadPadMap();
   buildPadsGrid();
+  paintKeyMode();
   paintPads();
 }
 
@@ -2331,7 +2513,7 @@ function closePads() {
   // Only worth saying when there is no other way to play. With a controller
   // attached it is wrong, and with the on-screen pad up it is noise sitting
   // over the picture -- which is what closing this panel used to put back.
-  if (padIndex === null && !touchOn) el("prompt").hidden = false;
+  if (padIndex === null && !touchOn && !keyboardOn) el("prompt").hidden = false;
   if (padsFrame) { cancelAnimationFrame(padsFrame); padsFrame = null; }
 }
 
@@ -2343,7 +2525,8 @@ function buildPadsGrid() {
     cell.className = "key";
     cell.id = "key" + i;
     cell.innerHTML = '<span class="key-name">' + name + "</span>"
-                   + '<span class="key-note">' + note + "</span>";
+                   + '<span class="key-note">' + note + "</span>"
+                   + '<span class="key-bind" id="bind' + i + '"></span>';
     cell.addEventListener("click", () => startLearn(i));
     grid.appendChild(cell);
   });
@@ -2370,10 +2553,11 @@ function paintPads() {
   if (!padsOpen) return;
   const raw = livePad();
   const pad = remapped(raw);
-  setChip("pads-name", padName || (raw ? "controller" : "no controller"),
-          raw ? "ok" : "warn");
+  setChip("pads-name",
+          keyboardOn ? "keyboard" : (padName || (raw ? "controller" : "no controller")),
+          (raw || keyboardOn) ? "ok" : "warn");
 
-  if (learnTarget >= 0 && raw) {
+  if (learnTarget >= 0 && raw && !keyboardOn) {
     /* The same discipline as the full walk: a press only counts once
        everything has been let go of since the last one. Without it the click
        that started this, or a button still held from the previous binding,
@@ -2410,8 +2594,10 @@ function paintPads() {
   } else {
     STANDARD_KEYS.forEach((_n, i) => {
       const cell = el("key" + i);
-      if (cell) cell.classList.toggle("on", !!(pad && pad.buttons[i]
-                                               && pad.buttons[i].pressed));
+      if (!cell) return;
+      const held = (pad && pad.buttons[i] && pad.buttons[i].pressed)
+                || !!(keyButtons & (1 << i));
+      cell.classList.toggle("on", held);
     });
     AXIS_NAMES.forEach((_n, i) => {
       const fill = el("axis" + i);
@@ -2555,9 +2741,11 @@ function startLearn(index) {
   remapArmed = false;                      // let go of the mouse first
   const cell = el("key" + index);
   if (cell) cell.classList.add("learning");
-  el("pads-hint").textContent =
-    "Press the button you want for " + STANDARD_KEYS[index][0]
-    + ". Click it again to cancel.";
+  el("pads-hint").textContent = keyboardOn
+    ? "Press the key you want for " + STANDARD_KEYS[index][0]
+      + ". Click it again to cancel."
+    : "Press the button you want for " + STANDARD_KEYS[index][0]
+      + ". Click it again to cancel.";
 }
 
 function cancelLearn() {
@@ -2571,6 +2759,43 @@ function cancelLearn() {
 /* Whatever already had that button takes the one being given up, so the map
    stays a swap rather than growing a duplicate -- two entries reading the same
    physical button means one of them can never be pressed on its own. */
+/* What the panel shows when the controls are a keyboard: the key on every
+   button, and the buttons a keyboard has nothing to say about out of the way.
+   The sticks are the honest omission -- a key is down or it is not. */
+function paintKeyMode() {
+  const panel = el("pads");
+  if (!panel) return;
+  panel.classList.toggle("keys", keyboardOn);
+  STANDARD_KEYS.forEach((_n, i) => {
+    const bind = el("bind" + i);
+    if (bind) bind.textContent = keyboardOn ? keyLabel(keyMap[i]) : "";
+  });
+  if (!keyboardOn) return;
+  const reset = el("pads-reset");
+  if (reset) reset.hidden = keysAreDefault();
+  const hint = el("pads-hint");
+  if (hint && learnTarget < 0) {
+    hint.textContent = "Nothing here reaches the game. Click a button below, "
+      + "then press the key you want for it.";
+  }
+}
+
+function bindKey(index, code) {
+  const bound = bindKeyInto(keyMap, index, code);
+  keyMap = bound.map;
+  saveKeyMap();
+  // The key that answered the question was pressed, and its key-up will arrive
+  // against the button it has just been given. Start it from nothing.
+  keyButtons = 0;
+  paintKeyMode();
+  el("pads-reset").hidden = keysAreDefault();
+  el("pads-hint").textContent = bound.clash >= 0
+    ? STANDARD_KEYS[index][0] + " is " + keyLabel(code) + ", and "
+      + STANDARD_KEYS[bound.clash][0] + " took the key it gave up."
+    : STANDARD_KEYS[index][0] + " is " + keyLabel(code) + ". Press it to check.";
+  report("bound " + STANDARD_KEYS[index][0] + " to a key");
+}
+
 function bindOne(index, hit) {
   padMap = padMap || STANDARD_KEYS.map((_n, i) => i);
   const was = padMap[index];
@@ -2604,8 +2829,19 @@ el("padtest").addEventListener("click", openPads);
 el("pads-close").addEventListener("click", closePads);
 el("pads-remap").addEventListener("click", startRemap);
 el("pads-reset").addEventListener("click", () => {
-  padMap = null;
   cancelLearn();
+  if (keyboardOn) {
+    // One button, one meaning: undo whatever I did to *these* controls. The
+    // controller's own map is not these controls and is left alone.
+    try { localStorage.removeItem(KEY_STORE); } catch (_) {}
+    loadKeyMap();
+    keyButtons = 0;
+    paintKeyMode();
+    el("pads-reset").hidden = true;
+    el("pads-hint").textContent = "Back to the keys this starts with.";
+    return;
+  }
+  padMap = null;
   deadzone = 0.10;
   sensitivity = 1.0;
   try { localStorage.removeItem(tuneKey()); } catch (_) {}

@@ -59,9 +59,10 @@
   <p id="key-note" class="footnote" hidden></p>
   <p id="gate-error" class="error" role="alert" hidden></p>
   <p id="gate-home" class="footnote" hidden></p>
-  <p class="footnote">No controller? You can use on-screen buttons once you are
-     in. Keyboard and mouse are never accepted &mdash; this connection can only
-     move a gamepad.</p>
+  <p class="footnote">No controller? Once you are in you can use on-screen
+     buttons, or play on the keyboard &mdash; your keys stand in for a pad,
+     inside this page. What reaches the host is only ever a gamepad: this
+     connection cannot type or move a mouse, whatever is pressed here.</p>
  </div>
 </main>
 
@@ -212,7 +213,8 @@
     <p><strong>Press any button on your controller.</strong></p>
     <p class="footnote">Browsers hide gamepads until you use one.
        No controller? <button type="button" id="use-touch" class="linkish">Use
-       on-screen buttons</button></p>
+       on-screen buttons</button>, or <button type="button" id="use-keys"
+       class="linkish">play on the keyboard</button>.</p>
   </div>
 
   <!-- What the browser thinks your controller is doing. Every pad reports a
@@ -222,12 +224,14 @@
   <div id="pads" class="pads" hidden>
     <div class="browser-bar">
       <span id="pads-name" class="chip ok">no controller</span>
-      <button id="pads-swap" type="button" class="ghost">Swap A and B</button>
-      <button id="pads-remap" type="button" class="ghost">Fix my buttons</button>
+      <button id="pads-swap" type="button" class="ghost pad-only">Swap A and
+        B</button>
+      <button id="pads-remap" type="button" class="ghost pad-only">Fix my
+        buttons</button>
       <!-- Some games put the camera on the left stick and the character on the
            right, which is the wrong way round for anybody who did not grow up
            with it. This is that, without asking the game. -->
-      <button id="pads-sticks" type="button" class="ghost"
+      <button id="pads-sticks" type="button" class="ghost pad-only"
               aria-pressed="false">Swap sticks</button>
       <button id="pads-reset" type="button" class="ghost" hidden>Use defaults</button>
       <button id="pads-close" type="button" class="ghost" title="Back to the game">&times;</button>
@@ -239,7 +243,7 @@
       Controls
       <select id="pads-type" class="chip" aria-label="Which controls you use">
       </select>
-      <span id="pads-attached" class="browse-note pads-attached"></span>
+      <span id="pads-attached" class="browse-note pads-attached pad-only"></span>
     </p>
     <p class="browse-note pads-seat">
       You are playing as
@@ -273,11 +277,15 @@
        nothing here reaches the game. Click a button below to rebind just that
        one.</p>
     <div id="pads-grid" class="pads-grid"></div>
-    <div id="pads-axes" class="pads-axes"></div>
+    <div id="pads-axes" class="pads-axes pad-only"></div>
+    <!-- Said once, where the sticks would have been, because it is the first
+         thing somebody looks for when they cannot find them. -->
+    <p class="browse-note keys-only">No sticks: a key is down or it is not, and
+       a stick is a position. Games that need one need a controller.</p>
 
     <!-- Stick shaping. Both are this guest's own, applied on the way out, so
          the game is told nothing and nobody else's controller changes. -->
-    <div class="pads-tune">
+    <div class="pads-tune pad-only">
       <label class="tune" for="pads-deadzone">
         <span class="tune-name">Dead zone</span>
         <input id="pads-deadzone" class="pad-range retro-range" type="range"

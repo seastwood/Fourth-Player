@@ -1407,6 +1407,22 @@ label.optional {
    gracefully. */
 #key-row { display: flex; flex-direction: column; gap: .35rem; }
 
+/* The key a button is bound to, in the cell with its name. Only there when
+   the controls are a keyboard: the cells are otherwise a live picture of a
+   controller, and an empty line under every one of them is furniture. */
+.key-bind {
+  display: block;
+  font: .62rem/1.6 var(--pixel);
+  letter-spacing: .04em;
+  color: var(--accent);
+  text-transform: none;
+}
+.pads:not(.keys) .key-bind { display: none; }
+
+/* The controller's own settings, when there is no controller in this. */
+.pads.keys .pad-only { display: none; }
+.pads:not(.keys) .keys-only { display: none; }
+
 input.paste {
   font: 1rem/1.4 var(--sans);
   letter-spacing: normal;

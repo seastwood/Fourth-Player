@@ -141,6 +141,41 @@ Which buttons exist, what they send and where they sit is data (`LAYOUTS` in
 `web/app.js`), so another controller — one with sticks, say — is an entry in
 that table rather than new code.
 
+### Or a keyboard
+
+An on-screen pad is no use on a laptop: there is no touchscreen to put it on,
+and a mouse cannot hold two buttons down. **Keyboard** is a third choice in the
+same menu, and it turns keys into buttons — the arrow keys for the d-pad, and
+one key each for the four face buttons, both shoulders, both triggers, select
+and start.
+
+The defaults are the arrangement anybody who has played an emulator on a
+keyboard already has in their hands, because this console *is* RetroArch:
+arrows for the d-pad, **Z** and **X** on the two buttons a two-button game
+uses, **A** and **S** above them, **Q W E R** for the shoulders and triggers in
+the order they sit on a controller, **Enter** for start and **right shift** for
+select.
+
+The sticks are missing and cannot be otherwise: a key is down or it is not, and
+a stick is a position. A game that needs one needs a controller, and the panel
+says so where the sticks would have been rather than leaving somebody hunting.
+
+Every binding is shown on the button it belongs to in **Controls**, and
+changing one is clicking that button and pressing the key you want. A key
+already spoken for *trades* with the button it is taken from rather than being
+bound twice — two buttons on one key means one of them can never be pressed by
+itself. **Use defaults** puts the whole set back.
+
+The map is stored as key *positions* (`KeyboardEvent.code`), not letters, so a
+French or German keyboard keeps the same shape under the fingers rather than
+silently rearranging itself. It is this guest's own, kept in their browser, and
+the host is never told any of it: what leaves the page is the pad frame it
+always was, with the keys merged into it exactly as the on-screen buttons are.
+Holding a key, a thumb and a controller at once works, and none of the three
+cancels the others.
+
+`tests/test_keyboard.py` covers the defaults, the labels and the trade.
+
 The letters are the fiddly part, and `tests/test_layouts.py` checks them rather
 than trusting them. The Gamepad API's standard mapping is Xbox-shaped, so index
 1 is the *right* face button — which Nintendo prints as A and Sega prints as C.
@@ -159,6 +194,12 @@ in the server.
 A guest who completely compromises their own browser tab still cannot type a
 character on your machine, because the device they are attached to cannot
 express a keystroke. `tests/test_pads.py` asserts this directly.
+
+Guests can now *play* on a keyboard, and that is not a hole in this: it is the
+guest's own browser deciding that their Z key means the A button, before
+anything is sent. What goes on the wire is the same pad frame it always was.
+The property here is about what the host can be made to do, not about what the
+guest happens to be holding.
 
 The price is real: games that need a keyboard and mouse stay local-only. That
 was a deliberate trade and it should stay one. If remote desktop control is ever
