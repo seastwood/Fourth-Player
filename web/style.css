@@ -1426,6 +1426,16 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   display: flex;
   flex-direction: column;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
+  /* Sideways there is less height than this panel needs -- measured at 317
+     tall in a 297 tall stage on a phone in landscape -- and the stage clips
+     what does not fit. Without this the bottom of the panel is not merely off
+     the screen, it is unreachable: nothing here scrolls by default, and the
+     one thing that could have scrolled was told not to. */
+  overflow-y: auto;
+  /* A panel that has run out of scroll must not hand the gesture to the page
+     behind it, which is a game. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 @supports not (background: color-mix(in srgb, red 50%, transparent)) {
   .pads { background: rgba(16, 14, 40, .94); }

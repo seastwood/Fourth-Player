@@ -2148,7 +2148,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03p";
+const CLIENT_BUILD = "2026-09-03q";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3210,15 +3210,31 @@ function tellWhatIsOnTop() {
   if (!box.width) return;
   const x = Math.round(box.left + box.width / 2);
   const y = Math.round(box.top + box.height / 2);
-  const hit = document.elementFromPoint(x, y);
   const name = (node) => !node ? "nothing"
     : node.id ? "#" + node.id
     : node.className ? node.tagName.toLowerCase() + "." + String(node.className).split(" ")[0]
     : node.tagName.toLowerCase();
+  /* The whole stack at that point, in paint order, rather than only what is
+     on top of it. Chrome on a laptop puts the panel above the pad at this
+     exact size -- checked, not assumed -- so the interesting question is no
+     longer "what is on top" but "where is the panel in the pile, and what is
+     it doing there". elementsFromPoint answers both at once. */
+  const stack = (document.elementsFromPoint
+                 ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)])
+                .slice(0, 6).map(name).join(" > ");
+  const panel = el("pads");
+  const seen = getComputedStyle(panel);
+  const rect = panel.getBoundingClientRect();
   report("panel close button at " + x + "," + y + " (" + Math.round(box.width)
-         + "x" + Math.round(box.height) + ") is under " + name(hit)
-         + ", inside " + name(hit && hit.parentElement)
-         + "; window " + window.innerWidth + "x" + window.innerHeight);
+         + "x" + Math.round(box.height) + "); stack: " + stack
+         + "; pads " + seen.position + " z" + seen.zIndex + " "
+         + seen.pointerEvents + " overflow-y:" + seen.overflowY
+         + " rect " + Math.round(rect.left) + "," + Math.round(rect.top) + " "
+         + Math.round(rect.width) + "x" + Math.round(rect.height)
+         + ", content " + panel.scrollHeight + " in " + panel.clientHeight
+         + "; window " + window.innerWidth + "x" + window.innerHeight
+         + "; top-safe " + getComputedStyle(document.documentElement)
+             .getPropertyValue("--top-safe"));
 }
 
 function closePads() {
