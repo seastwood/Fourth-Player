@@ -287,6 +287,22 @@
       </label>
       <span id="pads-buzz-note" class="footnote"></span>
     </p>
+    <!-- Which way round the screen sits. Not marked as belonging to the
+         on-screen pad: a guest holding a real controller is still looking at
+         the picture, and the picture has a shape. Hidden where the browser
+         cannot turn a screen at all, which is every iPhone -- Safari has no
+         orientation lock, which is also why this was never a complaint there
+         while Android was pinned to landscape by the manifest. -->
+    <p class="browse-note pads-feel" id="orient-row" hidden>
+      <span class="switch-name">Screen</span>
+      <select id="pads-orient" class="chip"
+              aria-label="Which way round the screen sits">
+        <option value="any">Follows the phone</option>
+        <option value="landscape">Always landscape</option>
+        <option value="portrait">Always portrait</option>
+      </select>
+      <span id="pads-orient-note" class="footnote"></span>
+    </p>
     <p class="browse-note pads-seat">
       You are playing as
       <select id="pads-seat" class="chip" aria-label="Which player you are">

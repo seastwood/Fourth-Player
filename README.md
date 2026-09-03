@@ -184,6 +184,21 @@ retargets that click away from the label, so neither is used in this mode —
 release is heard on the window rather than through capture. On Android, where
 `vibrate()` exists, none of this applies and the press path is unchanged.
 
+### Which way round it sits
+
+The manifest asked for landscape, and an installed Android app obeys that
+absolutely: turn the phone, turn off its rotation lock, nothing happens. iOS
+ignores manifest orientation altogether, so the same file produced a phone
+that turned and a phone that would not, and it looked like an Android fault
+rather than a line somebody had written.
+
+The manifest asks for nothing now, and **Screen** in **Controls** is the
+choice: follows the phone, always landscape, always portrait. Remembered per
+device, applied through `screen.orientation.lock`, and offered only where a
+browser has that at all — Chrome does, Safari never has. Chrome refuses the
+lock outside an installed app, which the note under the picker says rather
+than leaving a control that quietly does nothing.
+
 ### Or a keyboard
 
 An on-screen pad is no use on a laptop: there is no touchscreen to put it on,

@@ -786,6 +786,76 @@ const DPAD = { up: 12, down: 13, left: 14, right: 15 };
  * how this first went out and it was exactly backwards -- the one phone that
  * needs the switch most is the one where the plain call does nothing, and
  * somebody went looking for the option and found an empty row. */
+/* Which way round the screen sits, and whose decision that is.
+ *
+ * It was the manifest's: `"orientation": "landscape"`, which an installed
+ * Android app obeys absolutely -- rotate the phone and nothing happens, turn
+ * off the system rotation lock and nothing happens. iOS ignores manifest
+ * orientation entirely, which is why the same file produced a phone that
+ * turned and a phone that would not, and why this only ever looked like an
+ * Android fault.
+ *
+ * The manifest now says "any" and the choice is made here, where somebody can
+ * change their mind. Three answers and no fourth: follow the phone, which is
+ * what a page does when nobody interferes; or hold it one way, which is worth
+ * having on a device whose own rotation lock is off but which keeps turning
+ * itself over on a sofa.
+ *
+ * The lock only exists where a browser implements it -- Chrome does, Safari
+ * has never -- and even there it is refused outside an installed app. Both of
+ * those are said out loud rather than left as a control that does nothing. */
+const ORIENT_KEY = "fp:orient";
+const ORIENTATIONS = ["any", "landscape", "portrait"];
+
+function canTurn() {
+  return !!(window.screen && screen.orientation && screen.orientation.lock);
+}
+
+function savedOrient() {
+  let raw = null;
+  try { raw = localStorage.getItem(ORIENT_KEY); } catch (_) {}
+  return ORIENTATIONS.indexOf(raw) > 0 ? raw : "any";
+}
+
+/* Apply the choice, and say what happened if it was refused.
+ *
+ * A refusal is the ordinary case in a browser tab: Chrome only allows the
+ * lock for an installed app or a fullscreen page, and rejects with a promise
+ * nobody would notice going unhandled. The note is the difference between a
+ * control that is broken and a control that is explaining itself. */
+function applyOrient(pick) {
+  const note = el("pads-orient-note");
+  const say = (text) => { if (note) note.textContent = text; };
+  if (!canTurn()) return say("");
+  if (pick === "any") {
+    try { screen.orientation.unlock(); } catch (_) {}
+    return say("Turns with the phone, and with its rotation lock.");
+  }
+  let held;
+  try {
+    held = screen.orientation.lock(pick);
+  } catch (exc) {
+    return say("This browser will not turn the screen.");
+  }
+  say("Held in " + pick + ".");
+  if (held && held.catch) {
+    held.catch(() => {
+      // Kept rather than reverted: the choice is right and the tab is what is
+      // wrong, and it will be obeyed the moment the app is opened from the
+      // home screen.
+      say("Only the installed app can be held " + pick
+          + " -- add it to your home screen.");
+    });
+  }
+}
+
+function paintOrient() {
+  const row = el("orient-row");
+  if (row) row.hidden = !canTurn();
+  const picker = el("pads-orient");
+  if (picker) picker.value = savedOrient();
+}
+
 const HAPTICS_KEY = "fp:haptics";
 const BUZZ_MS = 8;
 
@@ -2052,7 +2122,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03l";
+const CLIENT_BUILD = "2026-09-03m";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2205,6 +2275,9 @@ function startPadLoop() {
 
   wireTouch();
   wireSticks();
+  // Whatever was chosen last time, applied before anything is on screen, so
+  // the app opens the way round it was left rather than turning as it loads.
+  applyOrient(savedOrient());
   // Filled in here rather than only when the on-screen pad is shown. It was
   // built inside showTouch(), which a desktop with a real controller and no
   // touchscreen never calls -- and the select is in the page from the start
@@ -3038,6 +3111,7 @@ function openPads() {
   buildPadsGrid();
   paintKeyMode();
   paintBuzz();
+  paintOrient();
   paintPads();
 }
 
@@ -3359,6 +3433,17 @@ el("pads-sticks").addEventListener("click", () => {
     ? "Sticks swapped: the left one is now the right one. Push them to check."
     : "Sticks back the way the controller has them.";
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
+});
+
+el("pads-orient").addEventListener("change", (event) => {
+  const pick = ORIENTATIONS.indexOf(event.target.value) > 0
+    ? event.target.value : "any";
+  try {
+    if (pick === "any") localStorage.removeItem(ORIENT_KEY);
+    else localStorage.setItem(ORIENT_KEY, pick);
+  } catch (_) {}
+  applyOrient(pick);
+  report("set the screen to " + pick);
 });
 
 el("pads-buzz").addEventListener("change", (event) => {
