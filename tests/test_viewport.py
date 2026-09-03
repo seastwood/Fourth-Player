@@ -12,6 +12,7 @@ The stage is sized from `visualViewport` instead, and the pad sizes itself
 against the stage. These checks are the cheap part: that no landscape rule has
 gone back to `vh`, and that the measuring code is still wired up.
 """
+import json
 import os
 import re
 import sys
@@ -75,13 +76,17 @@ check('name="apple-mobile-web-app-capable" content="yes"' in html,
       "added to the home screen, it opens without Safari's bars")
 check('rel="manifest"' in html and 'rel="apple-touch-icon"' in html,
       "a manifest and a touch icon are linked")
-check("start_url" not in open(
-          os.path.join(ROOT, "web", "manifest.webmanifest")).read(),
-      "no start_url, so an installed copy keeps the invite it was added with")
+# It used to have no start_url on purpose, so that an installed copy kept the
+# invite it was added with -- which worked until the session it belonged to
+# ended, and then never again. The plain address is the one that keeps working:
+# the page remembers the key that got somebody in and asks for a new one only
+# when the host has opened a new session.
+manifest = json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
+check(manifest.get("start_url") == "/",
+      "an installed copy starts on the plain address, not on a dead invite")
 check(os.path.isfile(os.path.join(ROOT, "web", "icons", "pad-180.png")),
       "the icon it points at exists")
 
-import json
 json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
 print("  ok   the manifest parses")
 

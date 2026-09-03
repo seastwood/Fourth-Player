@@ -93,10 +93,16 @@ check('route == "/mode"' in server, "the host answers what the mode is")
 check('"require_link": self.cfg.require_link' in server,
       "and says which it is, from the setting rather than a guess")
 check('fetch("/mode"' in js, "the page asks")
-check("history.replaceState" in js and "linkRequired" in js,
-      "and drops the invite from the address only when it is not needed")
-check("if (linkRequired || !token) return;" in js,
-      "never while the link is what gets people in")
+# The invite used to be left in the address whenever the link was required,
+# because the address was the only place the key could live and an icon made
+# from it worked once. The key can be pasted on the plain address now and the
+# one that worked is remembered, so the address is tidied either way and what
+# a home screen captures is the one that keeps working.
+check("history.replaceState" in js, "and tidies the invite out of the address")
+check("if (!pathToken) return;" in js,
+      "whenever there was one to tidy, whichever way the link setting is set")
+check("keyFrom(" in js and 'el("key-row")' in js,
+      "with somewhere to put the key back in when it is needed")
 
 print(("FAILED: %d" % len(fails)) if fails else "test_names: all ok")
 sys.exit(1 if fails else 0)
