@@ -284,6 +284,20 @@
       </label>
       <span id="pads-buzz-note" class="footnote"></span>
     </p>
+    <!-- Only on a browser with no vibrate(), which in practice means Safari.
+         This is iOS's own switch control, undressed and flipped by an actual
+         finger -- the one arrangement Apple still plays a haptic for. What it
+         answers is whether this phone can be tapped by a web page at all,
+         which is not a question anything on this side can ask. -->
+    <p class="browse-note pads-feel touch-only" id="feel-row" hidden>
+      <label class="feel-test" for="feel-test">
+        <input id="feel-test" type="checkbox" switch>
+        <span class="switch-name">Feel test</span>
+      </label>
+      <span class="footnote">Flip that with your finger. It is iOS's own
+        switch, and iOS taps the phone when one flips. No tap here means
+        Safari cannot tap this phone at all, and neither can the pad.</span>
+    </p>
     <p class="browse-note pads-seat">
       You are playing as
       <select id="pads-seat" class="chip" aria-label="Which player you are">

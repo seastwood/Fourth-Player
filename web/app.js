@@ -865,10 +865,20 @@ function paintBuzz() {
   box.checked = hapticsOn;
   const note = el("pads-buzz-note");
   if (note) {
-    note.textContent = hapticsOn
-      ? "The pad answers a press. Turn it off if you would rather it did not."
-      : "The pad is quiet.";
+    /* Said plainly rather than left to be discovered by pressing things. A
+       page cannot find out whether a tap actually happened -- there is no
+       answer to read and nothing throws -- so a phone that feels nothing is
+       indistinguishable here from a phone that is buzzing away happily, and
+       the only decent thing to do about that is say which phones cannot. */
+    const caveat = canVibrate ? ""
+      : " Safari has no way to vibrate a phone, so on an iPhone this rests on"
+        + " a trick Apple closed in iOS 26.5 -- newer than that and it does"
+        + " nothing, however it is set.";
+    note.textContent = (hapticsOn ? "The pad answers a press."
+                                  : "The pad is quiet.") + caveat;
   }
+  const feel = el("feel-row");
+  if (feel) feel.hidden = canVibrate || !showing;
 }
 
 function setHaptics(on) {
@@ -1951,7 +1961,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03h";
+const CLIENT_BUILD = "2026-09-03i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3194,6 +3204,10 @@ el("pads-sticks").addEventListener("click", () => {
     ? "Sticks swapped: the left one is now the right one. Push them to check."
     : "Sticks back the way the controller has them.";
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
+});
+
+el("feel-test").addEventListener("change", () => {
+  report("flipped the feel test, via " + feelPath + " on " + navigator.userAgent);
 });
 
 el("pads-buzz").addEventListener("change", (event) => {

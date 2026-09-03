@@ -156,6 +156,10 @@ checkbox with `switch` on it off the side of the screen, and flipping it is
 the tap.
 
 Three conditions, and missing any one of them is silence rather than an error.
+The third has now closed: Apple patched the programmatic path in **iOS 26.5**,
+so a current iPhone cannot be tapped by a web page at all. The switch stays
+because Android still can, and the note under it says plainly which phones
+cannot rather than leaving somebody pressing buttons wondering.
 The flip has to come from clicking the **label**: WebKit plays the feedback
 from the label's activation behaviour and not from a click on the input, which
 is the difference between this working and this doing nothing. It needs a live

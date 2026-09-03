@@ -771,9 +771,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch.has-sticks .stick { width: min(27vw, 135px); }
   .touch.has-sticks .touch-left,
   .touch.has-sticks .touch-right { gap: .5rem; }
+  /* No rule along the top. The pad and the picture do not need a line drawn
+     between them -- the picture stops and the buttons start, which is already
+     the whole of it -- and a bright pink one across the bottom of the screen
+     pulls the eye off the game it is edging. */
   .touch {
     background: var(--bg);
-    border-top: 3px solid var(--edge);
   }
   /* The same size as each other, and bigger than either was. The d-pad had
      been the smaller of the two for no reason worth keeping -- on the pad
@@ -938,6 +941,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     background: var(--bg);
     border-bottom: 2px solid var(--bg2);
     transition: none;
+    /* The rule belongs to the strip of chips: it is what separates them from
+       the picture. Put away, there are no chips -- just the hamburger that
+       brings them back -- and the line was underlining nothing. */
     /* Static, so the `top` the floating version uses to clear the status bar
        does nothing here -- and this is the orientation in which the status bar
        is actually shown. The strip is the first thing on the screen, so it
@@ -946,6 +952,8 @@ select.chip option { background: var(--bg2); color: var(--ink); }
        only place the page is drawn under the bar at all. */
     padding-top: calc(.5rem + var(--top-safe));
   }
+  .hud:not(.show) { border-bottom: 0; }
+
   /* Messages join the flow as well, directly under the chips. Left floating
      they would sit on top of that strip, which is the problem this whole
      arrangement exists to avoid. */
@@ -1554,6 +1562,16 @@ label.optional {
 }
 .switch input:checked ~ .switch-name { color: var(--accent); }
 #pads-buzz-note { margin: 0; }
+
+/* Deliberately undressed: this is Safari's own switch, and the whole point of
+   it is that it is the real control rather than a picture of one. */
+.feel-test {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  cursor: pointer;
+}
+.feel-test input { accent-color: var(--accent); }
 
 input.paste {
   font: 1rem/1.4 var(--sans);

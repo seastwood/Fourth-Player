@@ -228,6 +228,14 @@ out = run(taps=2)
 check(out["flips"] == [] and out["buzzes"] == [8, 8],
       "a phone with vibrate() uses it and leaves the trick alone")
 
+print("a phone that cannot be tapped is told so")
+out = run(canVibrate=False)
+check("Safari" in out["note"] and "26.5" in out["note"],
+      "the note under the switch says why an iPhone may feel nothing")
+out = run()
+check("Safari" not in out["note"],
+      "and says nothing of the sort where vibrate() exists")
+
 print("the switch is only offered where it means something")
 out = run()
 check(out["offered"] is True, "with the pad on the screen, it is offered")
