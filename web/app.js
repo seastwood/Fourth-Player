@@ -347,6 +347,7 @@ async function answer(message) {
   pc.addEventListener("track", (event) => {
     incoming.addTrack(event.track);
     if (video.srcObject !== incoming) video.srcObject = incoming;
+    holdVideoBack(message.jitter);
     startPlayback();
   });
 
@@ -408,6 +409,7 @@ async function answer(message) {
   armMediaTimeout();
 
   await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
+  holdVideoBack(message.jitter);
   const local = await pc.createAnswer();
   await pc.setLocalDescription(local);
   socket.send(JSON.stringify({ t: "answer", sdp: local.sdp }));
@@ -1283,7 +1285,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-08-31i";
+const CLIENT_BUILD = "2026-09-02a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -1294,16 +1296,64 @@ const STALL_LIMIT_MS = 6000;
 const SILENT_LIMIT_MS = 9000;
 let lastBytes = -1, stalledSince = 0, watchdogTimer = null, connectedAt = 0;
 
+/* A freeze is counted by the browser and by nobody else. The host knows what
+ * it sent; it cannot see a picture that stopped for a third of a second and
+ * started again, which is the whole difficulty with the complaint. These
+ * numbers say which of the three it was: packets that never arrived (lost,
+ * and whether asking for them back worked), a host that sent nothing for a
+ * while (no loss, and the host's own log says the same), or a buffer too
+ * small for the way the packets arrived (no loss, nothing missing, and the
+ * held-back figure near zero).
+ *
+ * Reported at most once every quarter minute, because a bad minute would
+ * otherwise fill the host's log with the same sentence. */
+const FREEZE_REPORT_GAP_MS = 15000;
+let lastVideoStat = null, lastFreezeReport = 0;
+
+function heldBackMs(now, before) {
+  const emitted = (now.jitterBufferEmittedCount || 0) -
+                  (before.jitterBufferEmittedCount || 0);
+  if (emitted <= 0) return null;
+  const delay = (now.jitterBufferDelay || 0) - (before.jitterBufferDelay || 0);
+  return Math.round((delay / emitted) * 1000);
+}
+
+function noteFreezes(now) {
+  if (!now) return;
+  const before = lastVideoStat;
+  lastVideoStat = now;
+  if (!before) return;
+  const froze = (now.freezeCount || 0) - (before.freezeCount || 0);
+  if (froze <= 0) return;
+  const at = Date.now();
+  if (at - lastFreezeReport < FREEZE_REPORT_GAP_MS) return;
+  lastFreezeReport = at;
+  const held = Math.round(1000 * ((now.totalFreezesDuration || 0) -
+                                  (before.totalFreezesDuration || 0)));
+  const buffer = heldBackMs(now, before);
+  report("picture froze " + froze + "x for " + held + " ms" +
+         "; lost " + ((now.packetsLost || 0) - (before.packetsLost || 0)) +
+         ", asked back " + ((now.nackCount || 0) - (before.nackCount || 0)) +
+         ", keyframes " + ((now.pliCount || 0) - (before.pliCount || 0)) +
+         ", frames dropped " +
+         ((now.framesDropped || 0) - (before.framesDropped || 0)) +
+         ", held back " + (buffer === null ? "?" : buffer + " ms"));
+}
+
 async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
+  let picture = null;
   try {
     (await pc.getStats()).forEach((r) => {
       if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
         bytes += r.bytesReceived || 0;
+        picture = r;
       }
     });
   } catch (_) { return; }
+  // Before the branches below, every one of which returns.
+  noteFreezes(picture);
 
   if (bytes > lastBytes) {
     lastBytes = bytes;
@@ -1347,6 +1397,33 @@ async function watchMedia() {
 function startWatchdog() {
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(watchMedia, 2000);
+}
+
+/* How much video to hold before drawing it, in milliseconds, as the host asked.
+ *
+ * Every packet of a frame leaves the host in one burst. A wifi hop or a tunnel
+ * spreads that burst out, and Chrome -- which on a quiet network lets its
+ * buffer shrink to almost nothing -- had already decided when to draw the
+ * frame before the last packet of it arrived. The picture holds still and then
+ * catches up, which is what a guest calls a freeze, and no packet was lost so
+ * nothing asks for anything to be resent.
+ *
+ * jitterBufferTarget is the current name for this; playoutDelayHint is the
+ * older one and takes seconds, not milliseconds. Browsers that have neither
+ * are left as they are, which is what they did before. */
+function holdVideoBack(ms) {
+  if (!pc || !(ms > 0)) return;
+  try {
+    pc.getReceivers().forEach((receiver) => {
+      const kind = receiver.track ? receiver.track.kind : "";
+      if (kind && kind !== "video") return;
+      if ("jitterBufferTarget" in receiver) {
+        try { receiver.jitterBufferTarget = ms; } catch (_) {}
+      } else if ("playoutDelayHint" in receiver) {
+        try { receiver.playoutDelayHint = ms / 1000; } catch (_) {}
+      }
+    });
+  } catch (_) { /* an old browser: it plays as it always did */ }
 }
 
 /* ---- the pad ---- */

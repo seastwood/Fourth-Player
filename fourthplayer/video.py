@@ -117,6 +117,20 @@ _host_codecs = None
 # The shortest gap between keyframes forced by guests asking for one.
 KEYFRAME_MIN_GAP = 0.5
 
+# Video is the first feed a guest is given, so it is the first transceiver.
+VIDEO_TRANSCEIVER = 0
+
+# How long the capture may produce nothing before it is worth a line in the
+# log. Six frames at 30 fps, and about a fifth of a second: long enough that
+# nobody would call it smooth, short enough to catch what a guest calls "it
+# froze for a moment".
+STALL_LOG_GAP = 0.2
+
+# And how often that is worth saying. A host that is struggling stalls over and
+# over, and the log this shares already has a source that can put four thousand
+# lines in it in an afternoon.
+STALL_LOG_GAP_QUIET = 5.0
+
 
 def host_codecs(hardware=True):
     """The codecs this host can actually encode, best first.
@@ -317,6 +331,9 @@ class Stage:
         # time while a live peer was dismantled.
         self.worker = PipelineWorker()
         self._last_keyframe = 0.0
+        self._last_sample = {}
+        self._stalls = {}
+        self._said_stall = {}
 
         keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
@@ -672,6 +689,32 @@ class Stage:
     def _on_audio(self, sink):
         return self._forward(sink, "audio")
 
+    def _note_gap(self, kind):
+        """Say so when this host stops producing, rather than only suspecting it.
+
+        A guest whose picture freezes cannot tell a packet lost on the way from
+        a frame that was never encoded -- and the two want opposite fixes. The
+        browser counts what it received, the browser's report says whether it
+        asked for anything back, and this is the other half: what left here,
+        and when it stopped. A gap of several frames is not normal at any frame
+        rate this offers.
+        """
+        now = time.monotonic()
+        last = self._last_sample.get(kind, 0.0)
+        self._last_sample[kind] = now
+        if not last or now - last < STALL_LOG_GAP:
+            return
+        self._stalls[kind] = self._stalls.get(kind, 0) + 1
+        said = self._said_stall.get(kind, 0.0)
+        if said and now - said < STALL_LOG_GAP_QUIET:
+            return
+        self._said_stall[kind] = now
+        count = self._stalls[kind]
+        log.warning("%s stopped for %.0f ms before this packet: nothing was "
+                    "sent, so every guest's picture held still for it "
+                    "(%d gap%s so far)",
+                    kind, (now - last) * 1000, count, "" if count == 1 else "s")
+
     def _forward(self, sink, kind):
         """Hand one encoded packet to every guest.
 
@@ -685,6 +728,7 @@ class Stage:
         sample = sink.emit("pull-sample")
         if sample is None:
             return Gst.FlowReturn.OK
+        self._note_gap(kind)
         buffer = sample.get_buffer()
         caps = sample.get_caps()
         if kind == "video":
@@ -799,8 +843,7 @@ class Peer:
             transceiver = self.webrtc.emit("get-transceiver", index)
             if transceiver is None:
                 break
-            transceiver.set_property(
-                "direction", GstWebRTC.WebRTCRTPTransceiverDirection.SENDONLY)
+            self._one_way(transceiver, index)
             index += 1
 
         # Unreliable and unordered on purpose: pad state is a snapshot, so a
@@ -818,6 +861,27 @@ class Peer:
 
         self._assembled = True
         self._negotiate()
+
+    def _one_way(self, transceiver, index):
+        """This guest receives and never sends, and may ask for a packet again.
+
+        do-nack is what makes webrtcbin offer an rtx payload type and hold
+        what it sent long enough to send it a second time. The caps asking for
+        nack are the other half, and neither half is any use alone: without
+        the caps the browser is never told it may ask, and without this it
+        asks for packets nothing here can still produce.
+        """
+        transceiver.set_property(
+            "direction", GstWebRTC.WebRTCRTPTransceiverDirection.SENDONLY)
+        if index != VIDEO_TRANSCEIVER:
+            # Opus carries its own error correction in the following packet,
+            # so a retransmitted one would arrive after the gap it was for.
+            return
+        try:
+            transceiver.set_property("do-nack", True)
+        except Exception:
+            log.debug("this webrtcbin has no do-nack, so a lost packet still "
+                      "costs a keyframe")
 
     def _rtp_caps(self, kind):
         """The caps this guest's appsrc announces, stated rather than waited for.
@@ -840,9 +904,17 @@ class Peer:
                 "application/x-rtp,media=(string)audio,encoding-name=(string)OPUS,"
                 "payload=(int)97,clock-rate=(int)48000,encoding-params=(string)2")
         encoding = self.stage.encoding
+        # rtcp-fb-nack is what puts "a=rtcp-fb:96 nack" in the offer, and it is
+        # the difference between a lost packet costing a frame and costing a
+        # picture. Without it a guest's only recourse is "send me a keyframe",
+        # which webrtcbin advertises by itself (nack pli, ccm fir) -- so one
+        # dropped packet froze the picture until a whole new keyframe had been
+        # encoded and had arrived, up to two seconds away. With it the browser
+        # asks for the packet it missed and gets it back in a round trip.
         return Gst.Caps.from_string(
             f"application/x-rtp,media=(string)video,encoding-name=(string){encoding},"
-            f"payload=(int)96,clock-rate=(int)90000")
+            f"payload=(int)96,clock-rate=(int)90000,"
+            f"rtcp-fb-nack=(boolean)true")
 
     def _feed(self, kind, caps):
         """One appsrc carrying the encoded stream into this guest's webrtcbin."""
@@ -859,7 +931,22 @@ class Peer:
         # time, so their timestamps mean nothing here. Let the source stamp
         # them on arrival instead of handing webrtcbin times it cannot place.
         src.set_property("do-timestamp", True)
+        # Two limits, and the one that matters is the time. `queue_ms` is
+        # documented as how much encoded video may pile up for a guest before
+        # frames are dropped, and until now nothing read it: the only limit
+        # was two megabytes, which at this bitrate is seconds of video and so
+        # seconds of delay for a guest whose link went quiet for a moment.
+        #
+        # Time rather than bytes because the stream is bursty by nature: every
+        # packet of a frame is pushed at once, and a keyframe is several times
+        # the size of the frames around it. A byte limit worth 60 ms of the
+        # average bitrate would be overrun by every keyframe; a time limit is
+        # not, because the whole burst arrives inside a millisecond of itself.
         src.set_property("max-bytes", 2 * 1024 * 1024)
+        try:
+            src.set_property("max-time", self.stage.cfg.queue_ms * Gst.MSECOND)
+        except Exception:
+            pass                                # older GStreamer: the bytes cap stands
         try:
             src.set_property("leaky-type", 2)      # drop the oldest
         except Exception:
@@ -991,7 +1078,12 @@ class Peer:
         element.emit("set-local-description", offer, Gst.Promise.new())
         text = with_fmtp(offer.sdp.as_text(), self.stage._fmtp)
         log.info("peer %s: offering %s", self.id, describe_sdp(text))
-        self._emit("offer", {"sdp": text, "type": "offer"})
+        # The guest is told how much video to hold before it starts playing.
+        # It is the only end that can do anything about arrival that is
+        # uneven: webrtcbin's own `latency` is the size of a buffer for media
+        # coming *in*, and nothing comes in here.
+        self._emit("offer", {"sdp": text, "type": "offer",
+                             "jitter": self.stage.cfg.jitter_ms})
 
     def _on_ice_candidate(self, _element, mline_index, candidate):
         # Candidate types decide whether anybody outside can reach us at all:

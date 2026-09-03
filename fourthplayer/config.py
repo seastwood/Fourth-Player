@@ -132,10 +132,20 @@ class Config:
     # for three guests sharing one bundled connection each.
     rtp_port_min: int = 40000
     rtp_port_max: int = 40100
-    # The receiver's buffer. Lower is less delay and less tolerance for a
-    # network that arrives unevenly; 30 ms is a reasonable middle for people on
-    # home connections rather than mobile data.
-    jitter_ms: int = 30
+    # The guest's buffer: how much video the browser holds back before
+    # showing it, so a frame that arrives late is still on time. This is sent
+    # to the guest with the offer and applied there, because that is the only
+    # end it can be applied at -- webrtcbin has a `latency` property that reads
+    # like this one and is set from it, but it sizes the buffer for media
+    # coming *in*, and a host that only sends never uses it. Raising this here
+    # therefore did nothing at all until the browser was told.
+    #
+    # 60 ms is two frames at 30 fps. Every packet of a frame is sent in one
+    # burst, and a burst spread out by a wifi hop or a tunnel used to arrive
+    # after the moment Chrome had already decided to draw it -- which is a
+    # picture that holds still and then jumps. Lower is less delay and less
+    # tolerance for that; a guest on mobile data is happier at 100.
+    jitter_ms: int = 60
 
     # -- session --
     # Whether a guest may start a game, and on what terms. See

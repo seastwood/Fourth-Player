@@ -327,10 +327,21 @@ because the encoder is shared: four guests on a bad connection all asking at
 once would otherwise turn the stream into keyframes, which is the one thing
 guaranteed to make a struggling link worse.
 
-If blips are still visible, the other lever is `jitter_ms`, which is 30. Raising
-it to 80 or 120 absorbs brief jitter at the cost of exactly that much added
-delay -- worth trying in that order, since this one costs nothing and that one
-costs latency.
+Asking for a whole new picture is a heavy way to recover from losing one
+packet, though, and for a while it was the only way a guest had. The offer
+named the feedback webrtcbin writes by itself -- `nack pli`, `ccm fir`, both of
+which mean "send me a keyframe" -- and never `nack` on its own, which means
+"send me that packet again". So a single packet lost on a wifi hop cost the
+whole picture until a fresh keyframe had been encoded and had arrived. The
+video caps now ask for it and the video transceiver has `do-nack`, which is
+what makes webrtcbin offer an rtx payload type and keep what it sent long
+enough to send it a second time. Both halves are needed: the caps tell the
+browser it may ask, and do-nack is what can answer.
+
+If blips are still visible, the other lever is `jitter_ms`, which is 60.
+Raising it to 100 or 120 absorbs brief jitter at the cost of exactly that much
+added delay -- worth trying in that order, since this one costs nothing and
+that one costs latency.
 
 Blackouts that recur on a **regular** interval are a different animal, and no
 amount of `jitter_ms` will touch them: they are the signalling socket being cut
@@ -338,6 +349,28 @@ by whatever sits in front of this, not the media. The giveaway is that the
 guest comes back on a new UDP port each time, meaning the peer connection was
 rebuilt rather than interrupted. See `docs/NETWORK.md` -- "The one-minute
 blackouts".
+
+### Which of the three it was, when a guest says it froze
+
+A picture that stops for a moment and starts again is counted by the browser
+and by nobody else. The host knows what it sent; it cannot see what a guest
+saw. So the guest's page reports what its own connection recorded — how many
+freezes, for how long, how many packets were lost, how many it asked back, how
+many keyframes it had to ask for, and how long its buffer was holding frames —
+at most once every fifteen seconds, into the host's log beside everything else
+that guest reported.
+
+Three shapes, three different answers:
+
+* **Packets lost, and asked back.** The link is dropping things. Retransmission
+  is doing its job; if the freezes persist, the bitrate is above what the link
+  carries.
+* **Nothing lost, and the host's own log says `video stopped for … ms`.** The
+  encoder produced nothing for that long, and no amount of buffering at the
+  other end will fill a gap that was never sent.
+* **Nothing lost, nothing missing, and the held-back figure near zero.** The
+  browser is playing frames the moment they arrive and has nothing in hand
+  when one is late. That is what `jitter_ms` is for.
 
 ### If it feels laggy
 
@@ -348,8 +381,17 @@ turning the wrong one costs quality for nothing:
 | Setting | What it does | Trade |
 |---|---|---|
 | `bitrate_kbps` | 1500 by default | **Nothing adapts this.** There is no congestion control — `rtpgccbwe` is not in this distribution — so a bitrate the link cannot carry does not soften the picture, it queues packets and becomes delay. Too low is a soft picture; too high is a laggy one |
-| `queue_ms` | 60 | How much encoded video may pile up per guest when the link is tight. This *is* delay. It was 200, which handed out a fifth of a second the moment a connection got busy |
-| `jitter_ms` | 30 | How long the guest's browser holds frames before playing them. Lower is less delay and more stutter — this is the "buffer a couple of frames" knob, and it trades the opposite way from the other two |
+| `queue_ms` | 60 | How much encoded video may pile up per guest when the link is tight, measured as arrival time rather than bytes — a keyframe is a burst several times the size of an ordinary frame, and a byte limit would be overrun by every one of them. This *is* delay. It was 200, which handed out a fifth of a second the moment a connection got busy |
+| `jitter_ms` | 60 | How long the guest's browser holds frames before playing them. Lower is less delay and more stutter — this is the "buffer a couple of frames" knob, and it trades the opposite way from the other two |
+
+Both of those were written down long before they were connected to anything.
+`queue_ms` was read by nothing at all, and `jitter_ms` was set on webrtcbin's
+`latency` property — which sizes the buffer for media coming *in*, and this
+host only ever sends, so it was inert. The number is now sent to the guest
+with the offer and applied there, on the receiver, which is the only end that
+can hold a frame back. A guest whose picture stops for a moment without a
+single packet being lost is the shape this leaves: the browser had decided
+when to draw a frame before the last packet of it arrived.
 
 Keyframes are every two seconds rather than every one: a keyframe is several
 times the size of the frames around it, so on a thin link one per second is a
