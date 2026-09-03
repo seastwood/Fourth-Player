@@ -166,8 +166,16 @@ switch, which taps the phone.
 Two things follow from that, and both are the price of it. The tap lands as
 you let go rather than as you press, because that is when a switch flips —
 the *button* still registers on `pointerdown`, so the game hears the press
-immediately and only the feeling is late. And it is only the buttons: the
-d-pad and the sticks are dragged rather than tapped, and a drag flips nothing.
+immediately and only the feeling is late. There is no way round that: a flip
+is a click and a click is a release, and the press-time version is exactly
+what Apple closed. The switch fills the face of the button rather than hiding
+in a corner of it, so a thumb that moves while it presses can flip it early,
+which is as close as this gets.
+
+And it is taps only. The d-pad arms carry the same switch, so tapping a
+direction taps back, but sliding from one arm to the next never lets go of
+anything and so flips nothing. The sticks are a drag from beginning to end and
+have no switch at all.
 
 It also means the press cannot swallow its own touch. `preventDefault()` on
 `pointerdown` cancels the click that activates the switch, and pointer capture

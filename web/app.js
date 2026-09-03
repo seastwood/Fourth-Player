@@ -880,9 +880,11 @@ function paintBuzz() {
        indistinguishable here from a phone that is buzzing away happily, and
        the only decent thing to do about that is say which phones cannot. */
     const caveat = canVibrate ? ""
-      : " On an iPhone the tap comes from iOS's own switch, which means it"
-        + " lands as you let go rather than as you press, and only on the"
-        + " buttons -- Safari has no way to vibrate a phone on demand.";
+      : " On an iPhone the tap comes from iOS's own switch, so it lands as you"
+        + " let go of a button rather than as you press it, and a direction"
+        + " slid into rather than tapped does not tap back. Safari has no way"
+        + " to vibrate a phone on demand, and that is the whole of what is"
+        + " left.";
     note.textContent = (hapticsOn ? "The pad answers a press."
                                   : "The pad is quiet.") + caveat;
   }
@@ -1283,16 +1285,28 @@ function wireTouch() {
   const pad = el("dpad");
 
   pad.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    pad.setPointerCapture(event.pointerId);
+    // The same bargain the buttons make: where the feeling comes from a switch
+    // inside the arm, the browser has to be left to finish the touch it
+    // started, so neither the default nor the capture is taken.
+    if (!(hapticsOn && !canVibrate)) {
+      event.preventDefault();
+      pad.setPointerCapture(event.pointerId);
+    }
     pointers.set(event.pointerId, "dpad");
     applyDpad(event);
   });
-  pad.addEventListener("pointermove", (event) => {
+  const movePad = (event) => {
     if (pointers.get(event.pointerId) !== "dpad") return;
-    event.preventDefault();
+    if (event.cancelable) event.preventDefault();
     applyDpad(event);          // sliding across the pad changes direction
-  });
+  };
+  pad.addEventListener("pointermove", movePad);
+  /* Without capture, a thumb that slides past the edge of the d-pad stops
+     being the d-pad's business and the direction it was holding sticks. The
+     window still sees it, and applyDpad works off the pad's own rectangle
+     rather than off what was hit, so a thumb outside it reads as the arm it
+     is nearest -- which is what capture was doing anyway. */
+  window.addEventListener("pointermove", movePad);
   const releasePad = (event) => {
     if (pointers.get(event.pointerId) !== "dpad") return;
     pointers.delete(event.pointerId);
@@ -1300,6 +1314,8 @@ function wireTouch() {
   };
   pad.addEventListener("pointerup", releasePad);
   pad.addEventListener("pointercancel", releasePad);
+  window.addEventListener("pointerup", releasePad);
+  window.addEventListener("pointercancel", releasePad);
 
   el("touch").addEventListener("pointerdown", (event) => {
     const button = event.target.closest(".tbtn");
@@ -2028,7 +2044,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03j";
+const CLIENT_BUILD = "2026-09-03k";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

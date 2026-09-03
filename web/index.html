@@ -359,11 +359,21 @@
     <div class="touch-left">
       <!-- Four arms rather than two crossed bars, so the one being pressed
            can light on its own. -->
+      <!-- Each arm carries the same hidden switch the buttons do, so a tap on
+           a direction taps the phone on a browser that cannot be told to
+           vibrate. Only a tap: sliding from one arm to the next never lets go,
+           and a switch flips when a press ends. Which is why the arms keep
+           their geometry -- the direction is still worked out from where the
+           thumb is, not from which box it landed in. -->
       <div id="dpad" class="dpad" role="group" aria-label="Direction pad">
-        <div class="dpad-arm dpad-up" data-dir="up"></div>
-        <div class="dpad-arm dpad-down" data-dir="down"></div>
-        <div class="dpad-arm dpad-left" data-dir="left"></div>
-        <div class="dpad-arm dpad-right" data-dir="right"></div>
+        <label class="dpad-arm dpad-up" data-dir="up"><input type="checkbox"
+               switch class="tbtn-tap" tabindex="-1" aria-hidden="true"></label>
+        <label class="dpad-arm dpad-down" data-dir="down"><input type="checkbox"
+               switch class="tbtn-tap" tabindex="-1" aria-hidden="true"></label>
+        <label class="dpad-arm dpad-left" data-dir="left"><input type="checkbox"
+               switch class="tbtn-tap" tabindex="-1" aria-hidden="true"></label>
+        <label class="dpad-arm dpad-right" data-dir="right"><input type="checkbox"
+               switch class="tbtn-tap" tabindex="-1" aria-hidden="true"></label>
         <div class="dpad-hat"></div>
       </div>
       <!-- Empty unless the chosen layout has sticks. Built here rather than

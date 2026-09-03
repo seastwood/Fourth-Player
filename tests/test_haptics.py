@@ -228,10 +228,17 @@ out = run(taps=2)
 check(out["flips"] == [] and out["buzzes"] == [8, 8],
       "a phone with vibrate() uses it and leaves the trick alone")
 
+print("the d-pad taps too")
+arms = page.split('id="dpad"')[1].split("</div>")[0]
+check(arms.count('switch class="tbtn-tap"') == 4,
+      "every arm carries the switch that makes a phone tap")
+check(arms.count("<label") == 4,
+      "as a label, which is what a finger activates")
+
 print("a phone that taps a different way is told how")
 out = run(canVibrate=False)
-check("as you let go" in out["note"] and "buttons" in out["note"],
-      "the note says the tap lands on release, and only on the buttons")
+check("as you let go" in out["note"] and "slid into" in out["note"],
+      "the note says the tap lands on release, and what does not tap at all")
 out = run()
 check("as you let go" not in out["note"],
       "and says nothing of the sort where vibrate() exists")
@@ -256,8 +263,11 @@ check(wired.count("if (!bySwitch) {") == 1
       " a prevented pointerdown is a click that never happens")
 check("setPointerCapture" in wired.split("if (!bySwitch) {")[1].split("}")[0],
       "capture too, which would retarget the click away from the label")
-check(wired.count('window.addEventListener("pointerup"') == 1,
-      "and a release that does not need capture to be heard")
+check(wired.count('window.addEventListener("pointerup"') == 2,
+      "and a release that does not need capture to be heard -- for the buttons"
+      " and for the d-pad, both of which gave up capture for this")
+check('window.addEventListener("pointermove", movePad)' in wired,
+      "the d-pad hears a thumb that has slid off it, which capture used to do")
 built = lift_text("makeButton")
 check('createElement("label")' in built and '"switch"' in built,
       "the button itself is a label around a switch, not a <button>")

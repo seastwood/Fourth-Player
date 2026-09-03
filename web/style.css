@@ -654,6 +654,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .dpad-right { top: 33.5%; bottom: 33.5%; right: 0; width: 34%; border-left: 0; }
 
 .dpad-arm.live { background: var(--edge); }
+/* An arm is a label around a switch now, the same as a button. Same ring to
+   take away, same reason. */
+.dpad-arm:focus,
+.dpad-arm:focus-visible,
+.dpad-arm:focus-within { outline: none; }
+.dpad-arm { -webkit-tap-highlight-color: transparent; }
 
 .dpad-hat {
   position: absolute;
@@ -694,12 +700,31 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    only what the touch ends up meaning. */
 .tbtn-tap {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+  /* The whole face of the button rather than a pixel of it, so the finger
+     lands on the switch itself and not merely on a label that stands for one.
+     iOS flips a switch on a swipe as well as on a tap, and a thumb that moves
+     while it presses can flip it under the finger -- which is the closest
+     this can get to the feeling arriving as the button goes down. */
+  inset: 0;
+  width: auto;
+  height: auto;
   margin: 0;
+  opacity: 0;
+  /* Painted by nobody -- but by suppression, never by `appearance: none`.
+     Setting the appearance, the border or the background of a native control
+     is how WebKit is told to stop drawing it natively, and a switch that is
+     no longer a switch plays no haptic: the rendering and the feeling are the
+     same object. So only the ring is taken away, and the ring is what the
+     rectangle across the button was. */
+  outline: none;
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
 }
+.tbtn-tap:focus,
+.tbtn-tap:focus-visible { outline: none; box-shadow: none; }
+.tbtn:focus,
+.tbtn:focus-visible,
+.tbtn:focus-within { outline: none; }
 /* The letter on the key. Its own element now that the button is a label with
    a control inside it, so the two cannot be confused for each other. */
 .tbtn-cap { pointer-events: none; }
