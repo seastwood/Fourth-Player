@@ -49,8 +49,13 @@ if out.returncode != 0:
 layouts = json.loads(out.stdout)
 
 print("both controllers are present and named")
-check(set(layouts) == {"genesis", "nintendo", "nintendo_sticks"},
-      "genesis, nintendo and nintendo_sticks, got %r" % sorted(layouts))
+# Four now: the two diamonds, each with and without sticks. The Xbox pair is
+# the same four buttons with the letters where the wire puts them -- the host
+# presents an Xbox pad, so a game told "east" says B, and on the Nintendo
+# diamond east is printed A.
+check(set(layouts) == {"genesis", "nintendo", "nintendo_sticks",
+                       "xbox", "xbox_sticks"},
+      "both diamonds, with and without sticks, got %r" % sorted(layouts))
 for key, layout in layouts.items():
     check(bool(layout.get("name")), "%s has a name for the picker" % key)
 

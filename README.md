@@ -136,6 +136,29 @@ which. Two layouts, remembered per device:
 - **Mega Drive** — d-pad, A B C across, START.
 - **Super Nintendo** — d-pad, the X/Y/A/B diamond, LB/RB and LT/RT, SELECT and
   START.
+- **Xbox** — the same four buttons with the letters where the host's own pad
+  puts them (see below), BACK and START.
+
+Each of the diamonds also comes **+ sticks**, sharing its buttons with the
+plain version rather than copying them.
+
+### Which letter the game hears
+
+Everything on the pad is sent by **position**: the top button sends the
+standard mapping's north, the right sends east. The host presents an Xbox pad,
+where east *is* B — and on the Super Nintendo diamond, east is printed **A**.
+So a game that names its buttons says "B" when you press the key marked A, and
+"X" when you press Y. That is what the layout means rather than a fault, and
+there are two different ways to want it fixed:
+
+- **Pick the Xbox layout** and the letters move to where the wire puts them.
+  Right when the *game* is telling you which button to press.
+- **Swap A/B and X/Y** in Controls and what is *sent* moves to where the
+  letters are. Right when the letters on the glass should match the letters in
+  a Super Nintendo game's own menus.
+
+Neither is a substitute for the other, which is why both are there. The swap
+is remembered per device and applies to whichever layout is up.
 
 Which buttons exist, what they send and where they sit is data (`LAYOUTS` in
 `web/app.js`), so another controller — one with sticks, say — is an entry in

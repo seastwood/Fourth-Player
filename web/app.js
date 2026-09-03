@@ -718,6 +718,42 @@ const LAYOUTS = {
     centre: [{ id: "START", button: 9 }],
   },
 
+  /* The same four buttons, labelled the way the wire labels them.
+   *
+   * Everything on this pad is sent by *position*: the top button sends the
+   * standard mapping's north, the right sends east, and so on. That is
+   * correct and it is not the whole story, because the host presents an Xbox
+   * pad -- so a game reads east as B. On the Nintendo diamond, east is
+   * printed A. Press the button marked A and the game is told B, which is
+   * exactly the complaint: "it thinks A is B, and X is Y".
+   *
+   * This layout puts the letters where that game expects them. Nothing about
+   * what is sent changes; only what is printed on the key. A guest playing
+   * something that names its buttons picks this and reads its prompts
+   * straight; a guest playing a Super Nintendo game picks the other and reads
+   * the box art straight. Neither is a fix for the other, which is why both
+   * are here. */
+  xbox: {
+    name: "Xbox",
+    faceAspect: 1,
+    face: [
+      { id: "Y", button: 3, x: 35, y: 2 },
+      { id: "X", button: 2, x: 2, y: 35 },
+      { id: "B", button: 1, x: 68, y: 35 },
+      { id: "A", button: 0, x: 35, y: 68 },
+    ],
+    shoulders: [
+      { id: "LT", button: 6, side: "left", row: 0 },
+      { id: "RT", button: 7, side: "right", row: 0 },
+      { id: "LB", button: 4, side: "left", row: 1 },
+      { id: "RB", button: 5, side: "right", row: 1 },
+    ],
+    centre: [
+      { id: "BACK", button: 8 },
+      { id: "START", button: 9 },
+    ],
+  },
+
   nintendo: {
     name: "Super Nintendo",
     faceAspect: 1,
@@ -768,7 +804,44 @@ LAYOUTS.nintendo_sticks = {
   ],
 };
 
+/* And the same again for the Xbox letters, because a guest who picked those
+   picked them to play something that names its buttons -- and the things that
+   name their buttons are the ones that want two sticks as well. Shared from
+   the layout above for the same reason: one diamond, not two that drift. */
+LAYOUTS.xbox_sticks = {
+  name: "Xbox + sticks",
+  faceAspect: 1,
+  face: LAYOUTS.xbox.face,
+  shoulders: LAYOUTS.xbox.shoulders,
+  centre: LAYOUTS.xbox.centre,
+  sticks: LAYOUTS.nintendo_sticks.sticks,
+};
+
 const DEFAULT_LAYOUT = "nintendo";
+
+/* Trading the two pairs of face buttons over, for the guest who would rather
+ * keep the letters where their hand expects them.
+ *
+ * A different question from picking the Xbox layout, and both are worth
+ * having. That one moves the *letters* to where the wire puts them, so a game
+ * saying "press A" names the button under your thumb. This moves what is
+ * *sent*, so the button marked A sends what a game will call A -- which is
+ * what somebody wants when the letters on the glass should match the letters
+ * in a Super Nintendo game's own menus.
+ *
+ * Only the diamond. Shoulders, select and start have one name each and
+ * nothing to trade with.
+ */
+const FACE_SWAP = { 0: 1, 1: 0, 2: 3, 3: 2 };
+const FACESWAP_KEY = "fp:faceswap";
+
+function faceSwapped() {
+  try { return localStorage.getItem(FACESWAP_KEY) === "1"; } catch (_) { return false; }
+}
+
+function sentAs(button) {
+  return faceSwapped() && button in FACE_SWAP ? FACE_SWAP[button] : button;
+}
 const LAYOUT_KEY = "fp:layout";
 
 const DPAD = { up: 12, down: 13, left: 14, right: 15 };
@@ -994,6 +1067,38 @@ function paintBuzz() {
   }
 }
 
+function paintFaceSwap() {
+  const box = el("pads-faceswap");
+  if (!box) return;
+  const on = faceSwapped();
+  box.checked = on;
+  const note = el("pads-faceswap-note");
+  if (!note) return;
+  // Named by what a game will be told, because that is the thing somebody is
+  // trying to line up. The letters on the glass are in front of them; what
+  // arrives at the other end is what they cannot see.
+  const layout = LAYOUTS[chosenLayout()];
+  const bottom = layout && layout.face
+    ? (layout.face.find((b) => b.y > 50) || {}).id : "";
+  note.textContent = on
+    ? "What you press is sent as the letter on it."
+    : (bottom ? "The button marked " + bottom + " is sent as A, which is what "
+                + "its position means on the pad the host presents."
+              : "Sent by position rather than by letter.");
+}
+
+function setFaceSwap(on) {
+  try {
+    if (on) localStorage.setItem(FACESWAP_KEY, "1");
+    else localStorage.removeItem(FACESWAP_KEY);
+  } catch (_) {}
+  // The buttons carry the mapping, so the pad is built again rather than
+  // patched: one place decides what a key sends, and it is buildTouchPad.
+  const key = chosenLayout();
+  if (LAYOUTS[key]) buildTouchPad(LAYOUTS[key]);
+  paintFaceSwap();
+}
+
 function setHaptics(on) {
   hapticsOn = !!on;
   try {
@@ -1070,7 +1175,8 @@ function buildTouchPad(layout) {
   face.innerHTML = "";
   face.style.aspectRatio = String(layout.faceAspect || 1.55);
   for (const spec of layout.face) {
-    const button = makeButton(spec, "tbtn tbtn-face");
+    const button = makeButton({ ...spec, button: sentAs(spec.button) },
+                              "tbtn tbtn-face");
     button.style.left = spec.x + "%";
     button.style.top = spec.y + "%";
     face.appendChild(button);
@@ -2156,7 +2262,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03t";
+const CLIENT_BUILD = "2026-09-03u";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3215,6 +3321,7 @@ function openPads() {
   buildPadsGrid();
   paintKeyMode();
   paintBuzz();
+  paintFaceSwap();
   paintOrient();
   paintPads();
 }
@@ -3548,6 +3655,14 @@ el("pads-orient").addEventListener("change", (event) => {
   } catch (_) {}
   applyOrient(pick);
   report("set the screen to " + pick);
+});
+
+el("pads-faceswap").addEventListener("change", (event) => {
+  setFaceSwap(event.target.checked);
+  el("pads-hint").textContent = event.target.checked
+    ? "A and B traded, and X and Y with them. Press them in the game to check."
+    : "Back to sending each button by where it sits.";
+  report("face buttons " + (event.target.checked ? "swapped" : "unswapped"));
 });
 
 el("pads-buzz").addEventListener("change", (event) => {
