@@ -20,6 +20,10 @@ because we declare the same capability set.
 import logging
 import os
 
+from evdev import ecodes
+
+from . import pads as padlib
+
 log = logging.getLogger("fourthplayer.retroarch")
 
 AUTOCONFIG_DIRS = (
@@ -38,17 +42,7 @@ input_device_display_name = "{display}"
 input_vendor_id = "{vendor}"
 input_product_id = "{product}"
 
-input_b_btn = "0"
-input_a_btn = "1"
-input_y_btn = "2"
-input_x_btn = "3"
-input_l_btn = "4"
-input_r_btn = "5"
-input_select_btn = "6"
-input_start_btn = "7"
-input_menu_toggle_btn = "8"
-input_l3_btn = "9"
-input_r3_btn = "10"
+{buttons}
 input_l2_axis = "+2"
 input_r2_axis = "+5"
 input_up_btn = "h0up"
@@ -92,14 +86,44 @@ input_l2_axis_label = "LT"
 input_r2_axis_label = "RT"
 input_select_btn_label = "Back"
 input_start_btn_label = "Start"
-input_menu_toggle_btn_label = "Guide"
-input_l3_btn_label = "Left Thumb"
+{guide_label}input_l3_btn_label = "Left Thumb"
 input_r3_btn_label = "Right Thumb"
 input_up_btn_label = "D-Pad Up"
 input_down_btn_label = "D-Pad Down"
 input_left_btn_label = "D-Pad Left"
 input_right_btn_label = "D-Pad Right"
 """
+
+
+# Which RetroArch setting each declared evdev code is, by name. The *numbers*
+# are not written down anywhere: RetroArch assigns them by ascending evdev code
+# over exactly the codes the device declares, so they are counted out of that
+# list rather than typed here. Typed twice, they drift -- and the way that
+# drift shows up is a guest pressing the left stick and opening the emulator's
+# menu, because dropping one button slid every button above it down by one.
+BUTTON_SETTINGS = {
+    ecodes.BTN_A: "b",
+    ecodes.BTN_B: "a",
+    ecodes.BTN_X: "y",
+    ecodes.BTN_Y: "x",
+    ecodes.BTN_TL: "l",
+    ecodes.BTN_TR: "r",
+    ecodes.BTN_SELECT: "select",
+    ecodes.BTN_START: "start",
+    ecodes.BTN_MODE: "menu_toggle",
+    ecodes.BTN_THUMBL: "l3",
+    ecodes.BTN_THUMBR: "r3",
+}
+
+
+def button_lines(guide=True):
+    """The `input_*_btn = "n"` block, numbered the way RetroArch will number it."""
+    lines = []
+    for index, code in enumerate(sorted(padlib.button_codes(guide))):
+        name = BUTTON_SETTINGS.get(code)
+        if name:
+            lines.append('input_%s_btn = "%d"' % (name, index))
+    return "\n".join(lines)
 
 
 def profile_dir():
@@ -122,8 +146,14 @@ def profile_dir():
     return None
 
 
-def write_profiles(names, display=None):
-    """Write one profile per pad name. Returns the paths written."""
+def write_profiles(names, display=None, guide=True):
+    """Write one profile per pad name. Returns the paths written.
+
+    `guide` must be the same answer the pads were built with. A profile that
+    names a button the device does not have is not a cosmetic mismatch: every
+    button above it is numbered differently, and RetroArch would bind the
+    wrong ones.
+    """
     directory = profile_dir()
     if directory is None:
         log.info("no RetroArch autoconfig directory found; skipping profiles")
@@ -131,8 +161,12 @@ def write_profiles(names, display=None):
     written = []
     for index, name in enumerate(names, start=1):
         path = os.path.join(directory, f"{name}.cfg")
-        body = TEMPLATE.format(name=name, vendor=VENDOR_ID, product=PRODUCT_ID,
-                               display=display or f"Remote player {index}")
+        body = TEMPLATE.format(
+            name=name, vendor=VENDOR_ID, product=PRODUCT_ID,
+            display=display or f"Remote player {index}",
+            buttons=button_lines(guide),
+            guide_label=('input_menu_toggle_btn_label = "Guide"\n'
+                         if guide else ""))
         try:
             with open(path, "w") as handle:
                 handle.write(body)

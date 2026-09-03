@@ -292,10 +292,14 @@ class LiveSession:
         self.codec = (self.cfg.codec or "auto").lower()
         policy = (getattr(self.cfg, "guest_launch", "off") or "off").lower()
         self.launch_policy = policy if policy in LAUNCH_POLICIES else "off"
-        self.pads = padlib.PadSet(self.slots)
+        self.pads = padlib.PadSet(self.slots,
+                                  guide=self.cfg.guest_guide_button)
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
-        retroarch.write_profiles(list(self.pads.names))
+        # The same answer the pads were built with, or RetroArch binds by
+        # numbers the device does not use.
+        retroarch.write_profiles(list(self.pads.names),
+                                 guide=self.cfg.guest_guide_button)
         self.stage = Stage(self.cfg, self.loop,
                            codec=None if self.codec == "auto" else self.codec)
         self.stage.start()

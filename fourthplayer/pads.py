@@ -48,19 +48,45 @@ _TRIGGER_MAP = [(P.AX_LT, e.ABS_Z), (P.AX_RT, e.ABS_RZ)]
 TRIGGER_MAX = 255
 
 
-def capabilities():
+def button_codes(guide=True):
+    """The evdev codes a guest's pad declares, in the order it declares them.
+
+    One list, because two things read it and they must not drift: this, which
+    builds the device, and retroarch.py, which writes the profile RetroArch
+    matches against it. RetroArch numbers buttons by ascending evdev code over
+    exactly the codes declared here, so a code removed from this list renumbers
+    every button above it -- drop BTN_MODE and the thumb sticks slide from 9
+    and 10 to 8 and 9. Left to two hand-written lists, that would show up as
+    pressing the left stick opening the emulator's menu.
+    """
+    codes = [code for _, code in _BUTTON_MAP]
+    if not guide:
+        codes = [code for code in codes if code != e.BTN_MODE]
+    return codes
+
+
+def capabilities(guide=True):
     """Exactly a gamepad, and deliberately nothing else.
 
     This dict is the security boundary the whole design leans on: there is no
     EV_KEY entry for a letter, no EV_REL for a mouse. A guest cannot type on
     this machine because the device they are wired to cannot express a
     keystroke -- not because a check refuses to forward one.
+
+    `guide` is the same argument one button further. The guide button is the
+    Steam button: held in front of a running game it opens the overlay, and the
+    overlay is a store with a saved card in it. Withholding a guest's frames
+    while Steam's own interface is in front does not cover that, because the
+    game still has the foreground while the overlay is up. So the button is not
+    declared, and a device that does not declare it cannot press it -- there is
+    nothing to filter and nothing to get wrong. It is also what RetroArch binds
+    its menu to, which a guest has no more business opening.
     """
     stick = AbsInfo(value=0, min=-32768, max=32767, fuzz=16, flat=128, resolution=0)
     trigger = AbsInfo(value=0, min=0, max=TRIGGER_MAX, fuzz=0, flat=0, resolution=0)
     hat = AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)
     return {
-        e.EV_KEY: [code for _, code in _BUTTON_MAP],
+        e.EV_KEY: button_codes(guide),
         e.EV_ABS: [
             (e.ABS_X, stick), (e.ABS_Y, stick), (e.ABS_RX, stick), (e.ABS_RY, stick),
             (e.ABS_Z, trigger), (e.ABS_RZ, trigger),
@@ -69,14 +95,22 @@ def capabilities():
     }
 
 
-def to_events(state):
+def to_events(state, guide=True):
     """Translate a decoded frame into (type, code, value) triples.
 
     Split out from the device so it can be tested without a kernel: given a
     PadState this is a pure function, and `tests/test_pads.py` leans on that.
+
+    A guide press on a pad that never declared one is not written. The device
+    would ignore it -- uinput drops codes outside the declared set -- but a
+    write that is known to go nowhere is better not made than relied upon to
+    be discarded.
     """
     out = []
+    allowed = set(button_codes(guide))
     for bit, code in _BUTTON_MAP:
+        if code not in allowed:
+            continue
         out.append((e.EV_KEY, code, 1 if state.pressed(bit) else 0))
     for axis, code in _STICK_MAP:
         out.append((e.EV_ABS, code, state.axis(axis)))
@@ -97,9 +131,10 @@ def to_events(state):
 class VirtualPad:
     """One guest's pad. Writes only what changed, and opens on silence."""
 
-    def __init__(self, name, now=None):
+    def __init__(self, name, now=None, guide=True):
         self.name = name
-        self._ui = UInput(capabilities(), name=name, vendor=VENDOR,
+        self.guide = guide
+        self._ui = UInput(capabilities(guide), name=name, vendor=VENDOR,
                           product=PRODUCT, version=VERSION, bustype=BUSTYPE)
         self._last = {}
         # Per sender, not per pad. One counter was enough while a pad had one
@@ -149,10 +184,10 @@ class VirtualPad:
             if not self._senders:
                 self.release_all()
             else:
-                self._write(to_events(self._merged()))
+                self._write(to_events(self._merged(), self.guide))
             return True
         self._senders[key] = [state.seq, state]
-        self._write(to_events(self._merged()))
+        self._write(to_events(self._merged(), self.guide))
         self.released = False
         return True
 
@@ -163,7 +198,7 @@ class VirtualPad:
         if not self._senders:
             self.release_all()
         else:
-            self._write(to_events(self._merged()))
+            self._write(to_events(self._merged(), self.guide))
 
     def _merged(self):
         """One pad state from everybody currently on this pad.
@@ -217,7 +252,7 @@ class VirtualPad:
         if self.released:
             return
         self._senders.clear()
-        self._write(to_events(P.PadState()))
+        self._write(to_events(P.PadState(), self.guide))
         self.released = True
 
     def _write(self, events):
@@ -260,9 +295,13 @@ class PadSet:
     playing, in whatever mixture.
     """
 
-    def __init__(self, count, label="Fourth Player", now=None):
+    def __init__(self, count, label="Fourth Player", now=None, guide=True):
         self._now = now or time.monotonic
         self._label = label
+        # Whether these pads have a guide button at all. See capabilities():
+        # it is the Steam button and RetroArch's menu button, and a guest has
+        # no business opening either.
+        self._guide = guide
         # The names are fixed for the life of the session even though the
         # devices come and go: RetroArch's per-device profiles are written
         # against them, and the picker reads them out of pad-names.json.
@@ -284,7 +323,8 @@ class PadSet:
         """
         pad = self.pads[index]
         if pad is None:
-            pad = VirtualPad(self.names[index], now=self._now)
+            pad = VirtualPad(self.names[index], now=self._now,
+                             guide=self._guide)
             self.pads[index] = pad
         return pad
 

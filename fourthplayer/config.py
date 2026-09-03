@@ -132,6 +132,13 @@ class Config:
     # those. Off makes this exactly what it was before, which is the right
     # setting for a machine with no Steam on it and nobody but the household
     # on the link.
+    # The guide button -- the Steam button, and the one RetroArch binds its own
+    # menu to. Off means a guest's pad does not declare it at all, so there is
+    # nothing to press rather than something to filter. It is the one press
+    # that reaches past everything else here: the overlay it opens comes up
+    # over a *running game*, so the game still has the foreground and the rule
+    # below sees nothing wrong.
+    guest_guide_button: bool = False
     guest_input_needs_a_game: bool = True
     # Matched against the focused window's class and name, lowercased. A
     # blocklist, and deliberately: the failure an allowlist produces is a
