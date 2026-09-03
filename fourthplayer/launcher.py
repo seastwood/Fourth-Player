@@ -73,34 +73,81 @@ def running():
     return False
 
 
-def stop_running():
-    """Ask whatever is playing to close, and wait a moment for it to.
+# How long a game gets to close politely, and how long the whole business is
+# allowed to take. A GameCube core writes its memory card and shuts a GPU
+# context down on the way out, which is seconds rather than the instant a
+# Mega Drive core takes -- so the grace has to be generous enough for the
+# slowest emulator here, and the limit short enough that a guest is not left
+# looking at a list that does nothing.
+STOP_GRACE = 8.0
+STOP_LIMIT = 14.0
+POLL = 0.25
 
-    Only reached under the policy that lets a guest start a game over the top
-    of one -- which is what that policy means, and why it is not the default.
-    TERM rather than KILL because RetroArch writes its save memory on the way
-    out, and the difference between the two signals is somebody's progress.
-    """
-    # The unit as well as the process. Killing only the process leaves systemd
-    # holding the unit open for as long as it takes to notice, and a game
-    # started in that window was refused the name.
-    systemctl = shutil.which("systemctl")
-    if systemctl:
-        try:
-            subprocess.run([systemctl, "--user", "stop", UNIT_PREFIX + "*"],
-                           capture_output=True, timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            pass
-    for name in ("retroarch", "ra_players.py"):
-        try:
-            subprocess.run(["pkill", "-TERM", "-f", name], timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            pass
-    for _ in range(20):                       # up to four seconds
+
+def _sh(argv, timeout=5):
+    """Run one command; nothing here is worth an exception."""
+    try:
+        subprocess.run(argv, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _wait_gone(deadline):
+    while time.time() < deadline:
         if not running():
             return True
-        time.sleep(0.2)
+        time.sleep(POLL)
     return not running()
+
+
+def stop_running():
+    """Close whatever is playing, and do not come back until it is gone.
+
+    TERM first, because RetroArch writes its save memory on the way out and
+    the difference between the two signals is somebody's progress. But TERM
+    on its own is a request, and this used to be nothing but requests: ask
+    systemd to stop the unit, ask the processes to quit, wait four seconds,
+    and report failure if anything was still there.
+
+    Four seconds was not the half of it. `systemctl stop` blocks until the
+    unit is really gone, and a transient unit's default TimeoutStopSec is
+    ninety seconds -- so the call sat there until this gave up on it after
+    ten, then the poll gave up after four more, and the guest was told the
+    game "would not close" while systemd was still patiently waiting for it.
+    Meanwhile nothing had escalated, so it never would have.
+
+    So: ask, wait properly, and then insist. --no-block means systemd gets on
+    with the stop while this watches the processes itself, which is the thing
+    the answer actually depends on. Every game process is asked, not the two
+    that were listed here while `running()` looked for three -- a game started
+    through the PC-games wrapper answered "yes I am running" to one function
+    and was not addressed by the other, which is a stalemate by construction.
+    """
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        # Fire and watch, rather than block: what matters is whether the game
+        # is gone, and this process can see that for itself.
+        _sh([systemctl, "--user", "stop", "--no-block", UNIT_PREFIX + "*"])
+    for name in GAME_PROCESSES:
+        _sh(["pkill", "-TERM", "-f", name])
+    if _wait_gone(time.time() + STOP_GRACE):
+        return True
+
+    # It had its chance. A save that is lost here is worth less than a
+    # television nobody can start a game on, and every second past the grace
+    # is a second of a guest watching a list that will not answer.
+    log.warning("nothing closed within %.0fs; killing what is left",
+                STOP_GRACE)
+    if systemctl:
+        _sh([systemctl, "--user", "kill", "--signal=SIGKILL",
+             UNIT_PREFIX + "*"])
+    for name in GAME_PROCESSES:
+        _sh(["pkill", "-KILL", "-f", name])
+    gone = _wait_gone(time.time() + (STOP_LIMIT - STOP_GRACE))
+    if not gone:
+        log.error("something is still running after SIGKILL: %s",
+                  ", ".join(GAME_PROCESSES))
+    return gone
 
 
 def player_ports():
@@ -238,7 +285,14 @@ def launch(row, display=":0", resume=False):
     runner = shutil.which("systemd-run")
     if runner:
         command = [runner, "--user", "--collect", "--quiet",
-                   "--unit", new_unit_name()]
+                   "--unit", new_unit_name(),
+                   # systemd's own escalation, matched to ours. Left at its
+                   # default a transient unit gets ninety seconds between the
+                   # TERM and the KILL, which is ninety seconds of a
+                   # television holding the last frame of a game that has
+                   # already been told to quit.
+                   "-p", "TimeoutStopSec=%ds" % int(STOP_GRACE),
+                   "-p", "KillMode=mixed"]
         for key, value in env.items():
             command += ["--setenv", "%s=%s" % (key, value)]
         command += ["--"] + argv
