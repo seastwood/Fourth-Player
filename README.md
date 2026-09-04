@@ -216,8 +216,24 @@ everybody, with a count on the button of what has been said since you last
 looked, and a short line over the picture when something arrives so you need
 not open a panel to find out whether it was worth opening.
 
-**The room is in it too.** **Ctrl+Shift+C** opens the chat window in Kodi at
-any time — to answer, and to start something when nobody has said anything
+**The room is in it too, and not through Kodi.** **Ctrl+Shift+C** opens a chat
+composer *on the overlay* — the same process that draws the QR card over
+fullscreen games — so it answers while a game is running. That is the whole
+point: kodi-retrobox **closes Kodi to launch a game**, so a Kodi keymap gives
+you a shortcut that works in the menus and does nothing at the one moment
+somebody wants it. The overlay reads the keyboards directly, the way
+`approve.py` reads the pads, and does not care what is on screen or whether
+Kodi exists.
+
+While the composer is open it **holds the keyboard**, which is not politeness:
+without it every letter also reaches the game underneath, and RetroArch binds
+letters to save states and shaders — typing "hello" into a game would be five
+hotkeys. If the grab fails the composer says so on the card rather than
+letting somebody find out by watching a save state load. It lets go on Enter,
+on Escape, and on its own after 45 seconds, because nothing that holds a
+keyboard may hold it for ever.
+
+**Ctrl+Shift+C** also opens the chat window in Kodi at any time — to answer, and to start something when nobody has said anything
 yet, because "we are starting in five minutes" is a message somebody sends
 rather than a reply. A message from a guest also appears on the television as
 a card saying *Ctrl+Shift+C to reply*, and the join card at the start of a

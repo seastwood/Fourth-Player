@@ -43,6 +43,7 @@ import cairo  # noqa: E402
 import qrcode  # noqa: E402
 
 from .approve import Shoulders  # noqa: E402
+from .chatkey import ChatKey  # noqa: E402
 
 CONTROL_SOCKET = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
@@ -58,6 +59,13 @@ JOINED_SECONDS = 5.0
 # -- somebody is playing a game while it appears, and the first read is
 # usually "something appeared" rather than the words.
 CHAT_SECONDS = 9.0
+# How long a composer nobody is typing into stays open. It holds the keyboard
+# while it is up, so it must not be able to hold it for ever: a machine whose
+# keyboard goes nowhere is worse than a message that did not get sent, and the
+# person it happens to is playing a game at the time.
+COMPOSE_IDLE = 45.0
+# How much of the conversation the composer shows above the box.
+COMPOSE_LINES = 6
 # The key that opens the chat window in Kodi. It is written on the card
 # because a message you cannot answer is a worse thing to be shown than no
 # message: the whole point of putting it on the screen is that the person in
@@ -147,6 +155,15 @@ class Overlay(Gtk.Window):
         self.known = None
         self.joined = None           # (name, until) while somebody is new
         self.chat = None             # (from, text, until) while one is fresh
+        # The composer: None when closed, otherwise what has been typed so
+        # far. Open, this window stops being a card and becomes the one place
+        # in the room where the conversation can be read and answered --
+        # including while a game is running, which is the whole reason it is
+        # here rather than in Kodi. Kodi is closed when a game is playing.
+        self.typing = None
+        self.typed_at = 0.0
+        self.grabbed = False
+        self.chatkey = ChatKey()
         self.chat_seen = None        # the newest id shown, None until first poll
         self.shoulders = Shoulders()
         self.hold = 0.0
@@ -171,6 +188,10 @@ class Overlay(Gtk.Window):
 
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self.connect("button-press-event", self.on_click)
+        # Keystrokes only ever arrive while the composer holds the keyboard;
+        # on_key returns False and does nothing at any other time.
+        self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
+        self.connect("key-press-event", self.on_key)
         self.connect("draw", self.on_draw)
         self.connect("realize", self.on_realize)
         self.connect("destroy", Gtk.main_quit)
@@ -330,6 +351,104 @@ class Overlay(Gtk.Window):
             shape = cairo.Region()
         window.input_shape_combine_region(shape, 0, 0)
 
+    def watch_keys(self):
+        """Twenty times a second: has somebody asked for the chat?
+
+        Read from the keyboards rather than taken from Kodi, because when a
+        game is running Kodi is not merely behind it -- kodi-retrobox closes
+        Kodi to launch a game. A shortcut that needs Kodi is a shortcut that
+        works everywhere except while playing, which is where it was wanted.
+        """
+        try:
+            if self.chatkey.pressed():
+                self.open_composer()
+            if (self.typing is not None
+                    and time.monotonic() - self.typed_at > COMPOSE_IDLE):
+                # It holds the keyboard while it is open. Nothing that holds a
+                # keyboard may hold it for ever.
+                self.close_composer()
+        except Exception:
+            print("overlay: reading the keyboard failed", file=sys.stderr)
+            traceback.print_exc()
+            self.close_composer()
+        return True
+
+    def open_composer(self):
+        """Take the keyboard and show the conversation."""
+        if self.typing is not None:
+            return
+        self.typing = ""
+        self.typed_at = time.monotonic()
+        self.grab_keyboard()
+        self.reposition()
+        self.queue_draw()
+
+    def close_composer(self):
+        self.typing = None
+        self.release_keyboard()
+        self.reposition()
+        self.queue_draw()
+
+    def grab_keyboard(self):
+        """Hold the keyboard while somebody is typing.
+
+        Not politeness: without it every letter also reaches the game
+        underneath, and RetroArch binds letters to things like save states and
+        shaders. Typing "hello" into a game would be five hotkeys.
+
+        A failed grab is not fatal and must not be silent -- the composer says
+        so, because typing into a game by accident is a worse surprise than
+        being told to quit to the menu first.
+        """
+        window = self.get_window()
+        if window is None:
+            return
+        seat = window.get_display().get_default_seat()
+        try:
+            status = seat.grab(window, Gdk.SeatCapabilities.KEYBOARD, True,
+                               None, None, None, None)
+        except Exception:
+            status = None
+        self.grabbed = status == Gdk.GrabStatus.SUCCESS
+
+    def release_keyboard(self):
+        if not self.grabbed:
+            return
+        self.grabbed = False
+        window = self.get_window()
+        if window is None:
+            return
+        try:
+            window.get_display().get_default_seat().ungrab()
+        except Exception:
+            pass
+
+    def on_key(self, _widget, event):
+        """Every keystroke while the composer is open, and none otherwise."""
+        if self.typing is None:
+            return False
+        self.typed_at = time.monotonic()
+        name = Gdk.keyval_name(event.keyval)
+        if name == "Escape":
+            self.close_composer()
+            return True
+        if name in ("Return", "KP_Enter"):
+            said = self.typing.strip()
+            self.close_composer()
+            if said:
+                ask({"cmd": "say", "text": said})
+            return True
+        if name == "BackSpace":
+            self.typing = self.typing[:-1]
+        else:
+            char = chr(Gdk.keyval_to_unicode(event.keyval) or 0)
+            # Printable only. Control characters are what turn one line into
+            # two, and the host would strip them anyway.
+            if char and char.isprintable():
+                self.typing = (self.typing + char)[:240]
+        self.queue_draw()
+        return True
+
     def watch_pad(self):
         try:
             return self._watch_pad()
@@ -374,6 +493,13 @@ class Overlay(Gtk.Window):
         return True
 
     def reposition(self):
+        if self.typing is not None:
+            self.resize(560, 260)
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            area = monitor.get_geometry()
+            self.move(area.x + area.width - 560 - MARGIN, area.y + MARGIN)
+            return
         if self.chat and not self.pending:
             self.resize(430, 132)
             display = Gdk.Display.get_default()
@@ -426,7 +552,9 @@ class Overlay(Gtk.Window):
         ctx.set_line_width(1.5)
         ctx.stroke()
 
-        if self.pending:
+        if self.typing is not None:
+            self.draw_composer(ctx, width, height)
+        elif self.pending:
             self.draw_ask(ctx, width, height)
         elif self.chat:
             self.draw_chat(ctx, width, height)
@@ -437,6 +565,44 @@ class Overlay(Gtk.Window):
         else:
             self.draw_badge(ctx, width, height)
         return False
+
+    def draw_composer(self, ctx, width, height):
+        """The conversation, and the line being typed into it."""
+        text(ctx, CARD_PAD, CARD_PAD + 2, "CHAT", 11, (0.90, 0.61, 0.25),
+             bold=True)
+        if not self.grabbed:
+            # Said rather than hidden: without the grab every letter also
+            # reaches the game, and finding that out by watching a save state
+            # load is a poor way to learn it.
+            text(ctx, CARD_PAD + 60, CARD_PAD + 2,
+                 "keyboard is held by the game -- typing may reach it", 10,
+                 (0.90, 0.45, 0.35))
+        lines = (self.status.get("chat") or [])[-COMPOSE_LINES:]
+        y = CARD_PAD + 26
+        for message in lines:
+            who = (message.get("from") or "?")[:14]
+            text(ctx, CARD_PAD, y, who, 11, (0.90, 0.61, 0.25), bold=True)
+            said, _rest = wrap_two(message.get("text") or "", 44)
+            text(ctx, CARD_PAD + 110, y, said, 13, (0.89, 0.91, 0.95))
+            y += 22
+        if not lines:
+            text(ctx, CARD_PAD, y, "Nothing said yet.", 13, (0.62, 0.66, 0.72))
+            y += 22
+
+        box = height - CARD_PAD - 34
+        rounded(ctx, CARD_PAD, box, width - CARD_PAD * 2, 30, 6)
+        ctx.set_source_rgba(0.09, 0.11, 0.16, 0.95)
+        ctx.fill_preserve()
+        ctx.set_source_rgba(0.90, 0.61, 0.25, 0.7)
+        ctx.set_line_width(1.2)
+        ctx.stroke()
+        # The tail of what has been typed, so a long message keeps its cursor
+        # in view rather than scrolling off the right of the box.
+        showing = self.typing[-52:]
+        text(ctx, CARD_PAD + 10, box + 8, (showing or "Say something") + "_",
+             13, (0.89, 0.91, 0.95) if self.typing else (0.45, 0.49, 0.56))
+        text(ctx, CARD_PAD, height - 14, "Enter sends  ·  Escape closes", 10,
+             (0.62, 0.66, 0.72))
 
     def draw_chat(self, ctx, width, height):
         who, said, _until = self.chat
@@ -597,6 +763,10 @@ def main(argv=None):
     else:
         GLib.timeout_add_seconds(POLL_SECONDS, overlay.poll)
         GLib.timeout_add(50, overlay.watch_pad)
+        # The same rate as the pads, and for the same reason: this is a
+        # keystroke somebody made, and a fifth of a second between making it
+        # and the window appearing feels like the machine hesitating.
+        GLib.timeout_add(50, overlay.watch_keys)
     Gtk.main()
     return 0
 

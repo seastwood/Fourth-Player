@@ -145,6 +145,29 @@ check(".textContent = message.text" in heard and ".innerHTML" not in heard,
       "and the page puts them in the DOM as text, never as markup -- this is "
       "the one place another person's words reach this page")
 
+print("the room can reach it with Kodi closed, which is when it matters")
+overlay_src = open(os.path.join(ROOT, "fourthplayer", "overlay.py")).read()
+check("from .chatkey import ChatKey" in overlay_src,
+      "the overlay watches the keyboard itself rather than waiting for Kodi "
+      "to pass a keypress on -- kodi-retrobox closes Kodi to run a game, so "
+      "a Kodi shortcut is one that works everywhere except while playing")
+compose = overlay_src.split("def open_composer")[1].split("\n    def ")[0]
+check("grab_keyboard" in compose,
+      "opening the composer takes the keyboard")
+grab = overlay_src.split("def grab_keyboard")[1].split("\n    def ")[0]
+check("RetroArch" in grab or "hotkeys" in grab,
+      "and why is written down: without it every letter also reaches the "
+      "game, and RetroArch binds letters to save states and shaders")
+key_handler = overlay_src.split("def on_key(")[1].split("\n    def ")[0]
+check("Escape" in key_handler and "close_composer" in key_handler,
+      "escape lets go of it")
+check("COMPOSE_IDLE" in overlay_src,
+      "and so does time: nothing that holds a keyboard may hold it for ever, "
+      "and the person it would happen to is playing a game")
+check("self.grabbed" in overlay_src.split("def draw_composer")[1][:600],
+      "a grab that failed is said on the card rather than left to be "
+      "discovered when a letter loads a save state")
+
 print("the room can see it and answer it")
 overlay = open(os.path.join(ROOT, "fourthplayer", "overlay.py")).read()
 check("def draw_chat" in overlay,
