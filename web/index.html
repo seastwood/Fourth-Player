@@ -310,9 +310,27 @@
         <span class="switch-track" aria-hidden="true">
           <span class="switch-knob"></span>
         </span>
-        <span class="switch-name">Buzz on tap</span>
+        <span class="switch-name">Haptic feedback</span>
       </label>
       <span id="pads-buzz-note" class="footnote"></span>
+    </p>
+    <!-- How hard. Eight milliseconds was the only length there had ever been,
+         and on Android that is at the edge of what the motor can render: it
+         has to spin up and stop again inside the pulse, so a short one arrives
+         weak and reads as late rather than as light. A longer pulse is the
+         fix, and how much longer is a phone-by-phone matter -- the motors
+         differ -- so it is offered rather than chosen here. No effect on an
+         iPhone, where the length is whatever the switch control makes and is
+         not ours to set; the note says so there. -->
+    <p class="browse-note pads-feel touch-only" id="buzz-strength-row">
+      <span class="switch-name">Strength</span>
+      <select id="pads-buzz-strength" class="chip"
+              aria-label="How strong the haptic feedback is">
+        <option value="light">Light</option>
+        <option value="medium">Medium</option>
+        <option value="strong">Strong</option>
+      </select>
+      <span id="pads-buzz-strength-note" class="footnote"></span>
     </p>
     <!-- The other half of the same complaint. The pad is drawn as a Nintendo
          diamond and sent as an Xbox pad, so the button printed A arrives as B

@@ -1028,7 +1028,22 @@ function paintOrient() {
 }
 
 const HAPTICS_KEY = "fp:haptics";
-const BUZZ_MS = 8;
+const STRENGTH_KEY = "fp:haptics-strength";
+
+/* How long the buzz is, which on Android is the same question as how hard it
+ * feels and how soon.
+ *
+ * Eight milliseconds was the only length there had ever been. A phone's motor
+ * has to spin up and stop again inside the pulse, and at eight there is
+ * barely time to do either -- so the tap arrives faint, and a faint tap reads
+ * as a late one even when it was sent the instant the finger landed. Longer
+ * pulses are firmer and, to a thumb, sooner.
+ *
+ * Which length is right differs by phone, because the motors do, so it is
+ * offered rather than decided here. Medium is the default: the old eight is
+ * still there as Light for anyone who preferred it. */
+const BUZZ_MS = { light: 8, medium: 20, strong: 35 };
+const DEFAULT_STRENGTH = "medium";
 
 // Read once: whether the browser has the call at all cannot change under us,
 // and asking on every button press would be a lookup per frame.
@@ -1084,8 +1099,18 @@ function savedHaptics() {
 
 let hapticsOn = savedHaptics();
 
-function buzz(ms = BUZZ_MS) {
+function savedStrength() {
+  let raw = null;
+  try { raw = localStorage.getItem(STRENGTH_KEY); } catch (_) {}
+  return Object.prototype.hasOwnProperty.call(BUZZ_MS, raw)
+    ? raw : DEFAULT_STRENGTH;
+}
+
+let hapticStrength = savedStrength();
+
+function buzz(ms) {
   if (!hapticsOn) return;
+  if (ms === undefined) ms = BUZZ_MS[hapticStrength] || BUZZ_MS[DEFAULT_STRENGTH];
   if (canVibrate) {
     // A refusal is normal rather than exceptional: a browser ignores vibrate
     // until the page has been touched, and throws in a few of them.
@@ -1171,6 +1196,34 @@ function setFaceSwap(on) {
   paintFaceSwap();
 }
 
+function paintStrength() {
+  const row = el("buzz-strength-row");
+  const picker = el("pads-buzz-strength");
+  if (!row || !picker) return;
+  picker.value = hapticStrength;
+  // Only meaningful where the length is ours to set. On an iPhone the tap is
+  // whatever the switch control makes, so offering three of them would be
+  // three settings that do the same nothing.
+  row.hidden = !canVibrate || !hapticsOn;
+  const note = el("pads-buzz-strength-note");
+  if (note) {
+    note.textContent = hapticStrength === "light"
+      ? "Short. On some phones the motor barely has time to move."
+      : (hapticStrength === "strong" ? "Longest, and the firmest to a thumb."
+                                     : "");
+  }
+}
+
+function setStrength(which) {
+  if (!Object.prototype.hasOwnProperty.call(BUZZ_MS, which)) return;
+  hapticStrength = which;
+  try { localStorage.setItem(STRENGTH_KEY, which); } catch (_) {}
+  paintStrength();
+  // Answer the choice with the thing it chooses: picking a strength should
+  // feel like that strength, not be read about.
+  buzz();
+}
+
 function setHaptics(on) {
   hapticsOn = !!on;
   try {
@@ -1178,6 +1231,7 @@ function setHaptics(on) {
     else localStorage.setItem(HAPTICS_KEY, "0");
   } catch (_) {}
   paintBuzz();
+  paintStrength();          // the strength row belongs to the switch above it
   // Answer the switch with the thing it switches, so turning it on is its own
   // demonstration -- and on a phone where none of this works, the silence is
   // the honest answer to "does it work on mine?".
@@ -1345,10 +1399,10 @@ function wireSticks() {
     well.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       well.setPointerCapture(event.pointerId);
+      buzz();                       // before the work, for the same reason
       stickHeld[event.pointerId] = well;
       well.classList.add("live");
       moveStick(well, event);
-      buzz();
     });
     well.addEventListener("pointermove", (event) => {
       if (stickHeld[event.pointerId] !== well) return;
@@ -1482,6 +1536,7 @@ function applyLayoutChoice(key) {
   paintPicker();
   paintKeyMode();
   paintBuzz();
+  paintStrength();
 }
 
 /* One control, which is also the readout.
@@ -1625,15 +1680,19 @@ function wireTouch() {
       event.preventDefault();
       button.setPointerCapture(event.pointerId);
     }
+    // First, before the bit and before the send. Both are quick, but the
+    // whole complaint about this on Android was that the tap felt late, and
+    // there is no reason for anything at all to happen between the finger
+    // landing and the phone answering it. In switch mode the feeling comes
+    // from the label being activated by the finger that is already on it, and
+    // calling buzz() as well would be a second tap on the phones where the
+    // scripted one still works.
+    if (!bySwitch) buzz();
     pointers.set(event.pointerId, button);
     button.classList.add("live");
     setBit(Number(button.dataset.button), true);
     pressedAt = event.timeStamp;
     sendNow();
-    // In switch mode the feeling comes from the label being activated by the
-    // finger that is already on it. Calling buzz() as well would be a second
-    // tap on the phones where the scripted one still works.
-    if (!bySwitch) buzz();
   });
   const releaseButton = (event) => {
     const button = pointers.get(event.pointerId);
@@ -1675,6 +1734,7 @@ function releaseAllTouch() {
 function showTouch(on, layout) {
   touchOn = on;
   paintBuzz();
+  paintStrength();
   // The picker stays available whether or not the pad is showing -- otherwise
   // turning it off is a one-way door.
   buildLayoutPicker();
@@ -2371,7 +2431,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04g";
+const CLIENT_BUILD = "2026-09-04h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3793,6 +3853,7 @@ function openPads() {
   buildPadsGrid();
   paintKeyMode();
   paintBuzz();
+  paintStrength();
   paintFaceSwap();
   paintOrient();
   paintPads();
@@ -4133,6 +4194,14 @@ el("pads-buzz").addEventListener("change", (event) => {
   report("turned the buzz " + (hapticsOn ? "on" : "off") + ", via " + feelPath
          + " on " + navigator.userAgent);
 });
+
+if (el("pads-buzz-strength")) {
+  el("pads-buzz-strength").addEventListener("change", (event) => {
+    setStrength(event.target.value);
+    report("haptic strength " + hapticStrength + " ("
+           + BUZZ_MS[hapticStrength] + " ms), via " + feelPath);
+  });
+}
 
 el("padtest").addEventListener("click", openPads);
 el("pads-close").addEventListener("click", closePads);

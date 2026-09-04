@@ -111,9 +111,22 @@ def constant(name):
     return re.search(r"^const " + name + r" = .*$", source, re.M).group(0)
 
 
+# The length of one ordinary buzz, read from the source rather than written
+# down here as well. These checks are about how many buzzes there are, not how
+# long each one is, and spelling the length out made them fail the day it
+# became a setting instead of a single number.
+DEFAULT_STRENGTH = re.search(
+    r'const DEFAULT_STRENGTH = "(\w+)"', source).group(1)
+DEFAULT_MS = int(re.search(
+    r"\b%s:\s*(\d+)" % DEFAULT_STRENGTH,
+    re.search(r"const BUZZ_MS = \{[^}]*\}", source).group(0)).group(1))
+
+
 HARNESS = "\n".join(
-    [constant("HAPTICS_KEY"), constant("BUZZ_MS")]
-    + [lift(n) for n in ("tapSwitch", "savedHaptics", "buzz", "paintBuzz",
+    [constant("HAPTICS_KEY"), constant("STRENGTH_KEY"),
+     constant("BUZZ_MS"), constant("DEFAULT_STRENGTH")]
+    + [lift(n) for n in ("tapSwitch", "savedHaptics", "savedStrength", "buzz",
+                         "paintBuzz", "paintStrength", "setStrength",
                          "setHaptics", "applyDpad", "clearDpad")]) + """
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 
@@ -141,6 +154,7 @@ const tapBox = { checked: false, click() { deadClicks.push(1); } };
 const tapLabel = { click() { tapBox.checked = !tapBox.checked; flips.push(1); } };
 
 let hapticsOn = savedHaptics();
+let hapticStrength = savedStrength();
 // The visible switch is a checkbox, and its state is the checkbox's state.
 const box = { checked: null };
 const note = { textContent: "" };
@@ -149,8 +163,15 @@ const note = { textContent: "" };
 let offered = null;
 const panel = { classList: { toggle: (name, on) => { offered = on; } } };
 const touch = { hidden: !!job.padHidden };
+// The strength row, which is only offered where the length is ours to set.
+const strengthRow = { hidden: null };
+const strengthPicker = { value: null };
+const strengthNote = { textContent: "" };
 const el = (id) => (id === "pads-buzz" ? box
                     : id === "pads-buzz-note" ? note
+                    : id === "buzz-strength-row" ? strengthRow
+                    : id === "pads-buzz-strength" ? strengthPicker
+                    : id === "pads-buzz-strength-note" ? strengthNote
                     : id === "touch" ? touch
                     : id === "haptic-label" ? (job.noSwitch ? null : tapLabel)
                     : id === "haptic-tap" ? tapBox
@@ -170,6 +191,29 @@ function paintDpad() {}
 const sends = [];
 function sendNow() { sends.push(1); }
 function dpadDirections(event) { return event.dirs; }
+
+if (job.do === "strengths") {
+  // Each in turn, so the test sees the actual length each one sends rather
+  // than the table this file could have copied.
+  const felt = {};
+  for (const which of ["light", "medium", "strong"]) {
+    buzzes.length = 0;
+    setStrength(which);
+    felt[which] = buzzes[0];
+  }
+  // A value from an older page, or a hand-edited store.
+  buzzes.length = 0;
+  setStrength("enormous");
+  process.stdout.write(JSON.stringify({
+    defaultMs: BUZZ_MS[DEFAULT_STRENGTH],
+    light: felt.light, medium: felt.medium, strong: felt.strong,
+    remembered: store[STRENGTH_KEY],
+    answered: felt.strong === BUZZ_MS.strong,
+    nonsenseIgnored: hapticStrength,
+    rowHidden: strengthRow.hidden,
+  }));
+  process.exit(0);
+}
 
 if (job.set !== undefined) setHaptics(job.set);
 for (const dirs of (job.presses || [])) {
@@ -196,7 +240,7 @@ def run(stored=None, canVibrate=True, **job):
 print("a page that has never been asked buzzes")
 out = run(taps=3)
 check(out["on"] is True, "with nothing stored, the buzz is on")
-check(out["buzzes"] == [8, 8, 8], "and three taps are three buzzes")
+check(out["buzzes"] == [DEFAULT_MS] * 3, "and three taps are three buzzes")
 check(out["checked"] is True, "and the switch is drawn on")
 
 print("a page that was told no stays told")
@@ -215,7 +259,7 @@ check("fp:haptics" not in out["stored"],
       "turning it back on clears the key rather than storing the default")
 # Turning it on answers with the thing it turns on: a switch for a feeling is
 # hard to check any other way.
-check(out["buzzes"] == [30, 8], "and answers with a buzz of its own")
+check(out["buzzes"] == [30, DEFAULT_MS], "and answers with a buzz of its own")
 
 print("a phone with no vibrate() is offered the switch, and taps another way")
 # The regression this suite exists for: hidden on the iPhone, which is the
@@ -231,7 +275,7 @@ check(out["flipped"] is True,
 out = run(canVibrate=False, stored={"fp:haptics": "0"}, taps=3)
 check(out["flips"] == [], "the off switch governs that path too")
 out = run(taps=2)
-check(out["flips"] == [] and out["buzzes"] == [8, 8],
+check(out["flips"] == [] and out["buzzes"] == [DEFAULT_MS] * 2,
       "a phone with vibrate() uses it and leaves the trick alone")
 
 print("the d-pad taps too")
@@ -282,16 +326,64 @@ check("interactive content nested in a" in source,
 
 print("the d-pad buzzes on the direction, not on the frame")
 out = run(presses=[["left"], ["left"], ["left"]])
-check(out["buzzes"] == [8], "a thumb held on one arm buzzes once")
+check(out["buzzes"] == [DEFAULT_MS], "a thumb held on one arm buzzes once")
 out = run(presses=[["left"], ["left", "up"], ["up"]])
-check(out["buzzes"] == [8, 8, 8],
+check(out["buzzes"] == [DEFAULT_MS] * 3,
       "sliding through a diagonal buzzes for each direction it becomes")
 check(out["sends"] == 3,
       "and each of those goes on the wire at once, not at the next tick")
 out = run(presses=[["left"], None, ["left"]])
-check(out["buzzes"] == [8, 8], "and letting go and pressing again is two")
+check(out["buzzes"] == [DEFAULT_MS, DEFAULT_MS],
+      "and letting go and pressing again is two")
 out = run(presses=[[]])
 check(out["buzzes"] == [], "the dead middle of the pad is not a press")
+
+print("\nand it is answered before anything else is done")
+press = lift_text("wireTouch")
+# The *button* handler, not the d-pad one above it. Anchoring on the first
+# pointerdown in this function found the d-pad, which has always buzzed before
+# it sends -- so the check passed while the buttons still buzzed last, which
+# is the case that was being complained about.
+inside = press[press.index('el("touch").addEventListener("pointerdown"'):]
+inside = inside[:inside.index("releaseButton")]
+# Code only. The comment beside this explains why buzz() is where it is, and
+# searching the comments found the word "buzz()" before the send no matter
+# where the call actually was -- which passed happily with the call left last.
+inside = "\n".join(line for line in inside.split("\n")
+                   if not line.strip().startswith(("//", "*", "/*")))
+check(inside.index("buzz()") < inside.index("sendNow()"),
+      "the phone is told to buzz before the press is put on the wire -- the "
+      "whole complaint on Android was that the tap felt late, and nothing "
+      "should sit between the finger landing and the answer")
+check("Haptic feedback" in page,
+      "and the setting is called what it is rather than how it works")
+
+print("\nhow hard the buzz is")
+# Eight milliseconds was the only length there had ever been, and on Android a
+# pulse that short leaves the motor no time to spin up and stop again: it
+# arrives faint, and a faint tap reads as a late one. That was the complaint.
+out = run(canVibrate=True, do="strengths")
+check(out["defaultMs"] > 8,
+      "the length out of the box is longer than the eight it used to be, "
+      "got %s" % out["defaultMs"])
+check(out["light"] == 8,
+      "and the old eight is still there for anybody who preferred it, got %s"
+      % out["light"])
+check(out["strong"] > out["medium"] > out["light"],
+      "the three are actually different lengths: %s" % [
+          out["light"], out["medium"], out["strong"]])
+check(out["remembered"] == "strong",
+      "the choice is kept for the next visit, got %r" % out["remembered"])
+check(out["answered"], "and choosing one answers with that strength, so it is "
+      "felt rather than read about")
+check(out["nonsenseIgnored"] == "strong",
+      "a strength this page does not know is ignored rather than turning the "
+      "buzz into nothing, got %r" % out["nonsenseIgnored"])
+
+out = run(canVibrate=False, do="strengths")
+check(out["rowHidden"] is True,
+      "and the row is not offered on a phone where the length is not ours to "
+      "set -- an iPhone's tap is whatever its switch makes")
 
 print()
 if fails:
