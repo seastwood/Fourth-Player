@@ -602,9 +602,73 @@ function startPlayback() {
   }).catch(() => {
     video.muted = true;
     video.play().catch(() => {});
-    el("unmute").hidden = false;
-    showHud(true);          // stays until they tap it, then behaves normally
+    chaseSound();
   });
+}
+
+/* ---- sound that comes back by itself ----
+ *
+ * The browser's rule is that a gesture must have happened, not that it must
+ * have been aimed at the sound. A guest who resumes a session has made none
+ * yet, so the picture arrives silent through no choice of theirs -- but they
+ * joined to play, so there is always something next: a pad button, a tap on
+ * the picture, a key. Take that, whatever it was, and ask again.
+ *
+ * Volume at zero is never touched by any of this. That is somebody turning
+ * their own sound off on purpose, and turning it back on for them would be
+ * the rudest thing this could do. Only sound the browser silenced is chased.
+ */
+const SOUND_GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+let chasingSound = false;
+
+function soundWanted() {
+  return savedVolume() > 0;
+}
+
+/* Unmute, and say whether it took. Called straight out of a gesture handler
+   so that play() still counts as user-driven -- anything deferred, even by a
+   promise tick, is not a gesture any more as far as the browser cares. */
+function bringSoundBack() {
+  if (!soundWanted()) return Promise.resolve(false);
+  if (!video.volume) video.volume = savedVolume();
+  video.muted = false;
+  let attempt;
+  try { attempt = video.play(); } catch (_) { attempt = null; }
+  return Promise.resolve(attempt).then(() => {
+    if (video.muted) return false;
+    el("unmute").hidden = true;
+    return true;
+  }).catch(() => {
+    video.muted = true;                  // a muted picture beats a frozen one
+    video.play().catch(() => {});
+    return false;
+  });
+}
+
+function chaseSound() {
+  if (chasingSound || !soundWanted()) return;
+  chasingSound = true;
+
+  const stop = () => {
+    chasingSound = false;
+    SOUND_GESTURES.forEach((kind) =>
+      document.removeEventListener(kind, go, true));
+  };
+  // Capture-phase and passive: this watches the gesture, it never takes it.
+  // A press on the on-screen pad has to reach the pad.
+  const go = () => {
+    bringSoundBack().then((won) => {
+      if (won) { stop(); return; }
+      // A gesture happened and the sound still did not come back, so waiting
+      // for another one is not going to help. This is where the button earns
+      // its place -- and only here, which is why it is usually never seen.
+      stop();
+      el("unmute").hidden = false;
+      showHud(true);
+    });
+  };
+  SOUND_GESTURES.forEach((kind) =>
+    document.addEventListener(kind, go, { capture: true, passive: true }));
 }
 
 el("unmute").addEventListener("click", () => {
@@ -2265,7 +2329,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04c";
+const CLIENT_BUILD = "2026-09-04d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3959,10 +4023,11 @@ function resumeVideo() {
   if (attempt && attempt.catch) {
     attempt.catch(() => {
       // Autoplay rules can refuse a silent restart. Muting is allowed, and a
-      // muted picture beats a frozen one; the sound button gets it back.
+      // muted picture beats a frozen one; the next thing they do gets the
+      // sound back without their having to know any of this happened.
       video.muted = true;
-      el("unmute").hidden = false;
       video.play().catch(() => {});
+      chaseSound();
     });
   }
 }
