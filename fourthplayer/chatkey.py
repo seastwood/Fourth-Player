@@ -48,6 +48,7 @@ class ChatKey:
         self.down = set()          # (path, code) currently held
         self.scanned = 0.0
         self.fired = False         # held since the last time this said yes
+        self.taken = []            # devices grabbed while somebody is typing
         self.ok = True
         try:
             import evdev
@@ -74,6 +75,11 @@ class ChatKey:
 
     def rescan(self, now=None):
         if not self.evdev:
+            return
+        if self.taken:
+            # Not while somebody is typing: closing these devices would hand
+            # the keyboard back to the game mid-message, and the next letter
+            # would land in it.
             return
         self.scanned = now if now is not None else time.monotonic()
         self.down.clear()
@@ -128,6 +134,70 @@ class ChatKey:
             return False
         return all(any((path, code) in self.down for code in pair)
                    for pair in self.modifiers)
+
+    def hold(self):
+        """Take the keyboards away from everything else, and say if it worked.
+
+        EVIOCGRAB, not an X grab, and the difference is the whole point.
+        RetroArch's input driver here is udev: it reads these devices directly
+        and never asks X anything, so an X keyboard grab is invisible to it.
+        The first version of this used one, and typing a message into a game
+        pressed the game's hotkeys -- `h` is RetroArch's reset, so a word with
+        an h in it restarted somebody's game.
+
+        A kernel grab stops every other reader: the game, the window manager,
+        Kodi if it is up. Which also means this must be given back reliably --
+        and is, three ways: on close, on the idle timeout, and by the kernel
+        itself if this process dies, because the grab lives on the open file
+        and dies with it.
+        """
+        if not self.evdev:
+            return False
+        held = []
+        for device in self.devices:
+            try:
+                device.grab()
+            except (OSError, IOError):
+                continue
+            held.append(device)
+        self.taken = held
+        # All of them or none is not the test: a machine with two keyboards
+        # and one grabbed is still a machine where the game hears the other.
+        # It is worth saying, and it is not worth refusing over.
+        return bool(held) and len(held) == len(self.devices)
+
+    def let_go(self):
+        """Give the keyboards back. Safe to call when holding nothing."""
+        for device in self.taken:
+            try:
+                device.ungrab()
+            except (OSError, IOError):
+                pass
+        self.taken = []
+
+    def typed(self):
+        """Key presses since the last look, as (code, pressed) pairs.
+
+        Raw codes rather than characters: what a code means depends on the
+        layout somebody chose, and the overlay has GDK to ask about that. This
+        module's job is to read the wire.
+        """
+        out = []
+        for device in list(self.devices):
+            try:
+                for event in device.read():
+                    if event.type == self.evdev.ecodes.EV_KEY:
+                        out.append((event.code, event.value))
+                        where = (device.path, event.code)
+                        if event.value:
+                            self.down.add(where)
+                        else:
+                            self.down.discard(where)
+            except BlockingIOError:
+                continue
+            except OSError:
+                self.scanned = 0.0
+        return out
 
     def pressed(self, now=None):
         """True once per press of the combination. False the rest of the time.

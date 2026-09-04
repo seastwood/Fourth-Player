@@ -101,6 +101,7 @@ def watcher(devices):
     key.down = set()
     key.scanned = 0.0
     key.fired = False
+    key.taken = []
     key.ok = True
     key.evdev = FakeEvdev(devices)
     e = Codes
@@ -162,6 +163,45 @@ key.pressed(now=100.0 + chatkey.ChatKey.RESCAN_SECONDS + 1)
 check(key.scanned > 100.0,
       "and repeated, because a wireless keyboard that sleeps comes back on a "
       "different node")
+
+print("holding the keyboards while somebody types")
+
+
+class Grabbable(Device):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.grabs = 0
+        self.refuse = False
+
+    def grab(self):
+        if self.refuse:
+            raise OSError("device busy")
+        self.grabs += 1
+
+    def ungrab(self):
+        self.grabs -= 1
+
+
+one = Grabbable("/dev/input/event3", "USB Keyboard", KEYBOARD)
+two = Grabbable("/dev/input/event4", "Other Keyboard", KEYBOARD)
+key = watcher([one, two])
+check(key.hold() is True and one.grabs == 1 and two.grabs == 1,
+      "every keyboard in the room is taken, not just the one that opened it")
+key.rescan(now=200.0)
+check(one.grabs == 1,
+      "and a rescan does not quietly hand them back mid-message -- the next "
+      "letter would land in the game")
+key.let_go()
+check(one.grabs == 0 and two.grabs == 0, "and they all come back")
+
+two.refuse = True
+key = watcher([one, two])
+check(key.hold() is False,
+      "one keyboard that will not be taken is a failure worth reporting: the "
+      "game can still hear that one")
+check(one.grabs == 1, "the others are still held, so typing mostly works")
+key.let_go()
+check(one.grabs == 0, "and letting go is safe whatever was held")
 
 print("and a machine with no evdev at all")
 key = chatkey.ChatKey.__new__(chatkey.ChatKey)

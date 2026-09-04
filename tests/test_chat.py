@@ -155,12 +155,23 @@ compose = overlay_src.split("def open_composer")[1].split("\n    def ")[0]
 check("grab_keyboard" in compose,
       "opening the composer takes the keyboard")
 grab = overlay_src.split("def grab_keyboard")[1].split("\n    def ")[0]
-check("RetroArch" in grab or "hotkeys" in grab,
-      "and why is written down: without it every letter also reaches the "
-      "game, and RetroArch binds letters to save states and shaders")
-key_handler = overlay_src.split("def on_key(")[1].split("\n    def ")[0]
-check("Escape" in key_handler and "close_composer" in key_handler,
+check("udev" in grab and "X grab" in grab,
+      "at the kernel and not through X, and why is written down: RetroArch's "
+      "input driver here is udev, so it reads the devices directly and an X "
+      "grab is invisible to it -- `h` is its reset key, and a message with an "
+      "h in it restarted somebody's game")
+chatkey_src = open(os.path.join(ROOT, "fourthplayer", "chatkey.py")).read()
+check("device.grab()" in chatkey_src and "EVIOCGRAB" in chatkey_src,
+      "which means an exclusive grab on the devices themselves")
+check("dies with it" in chatkey_src,
+      "given back by the kernel if this process dies, which is the one "
+      "failure nobody could undo from a controller")
+key_handler = overlay_src.split("def take_typing")[1].split("\n    def ")[0]
+check("KEY_ESC" in key_handler and "close_composer" in key_handler,
       "escape lets go of it")
+check("translate_keyboard_state" in key_handler,
+      "and the letters come from the layout somebody chose rather than a "
+      "table that would have been right for one keyboard")
 check("COMPOSE_IDLE" in overlay_src,
       "and so does time: nothing that holds a keyboard may hold it for ever, "
       "and the person it would happen to is playing a game")

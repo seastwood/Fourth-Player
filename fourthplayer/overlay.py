@@ -188,10 +188,9 @@ class Overlay(Gtk.Window):
 
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self.connect("button-press-event", self.on_click)
-        # Keystrokes only ever arrive while the composer holds the keyboard;
-        # on_key returns False and does nothing at any other time.
-        self.add_events(Gdk.EventMask.KEY_PRESS_MASK)
-        self.connect("key-press-event", self.on_key)
+        # No key handler: while the composer is open the keyboards are held at
+        # the kernel, so X delivers nothing to anybody -- including this
+        # window. The typing is read from the devices themselves.
         self.connect("draw", self.on_draw)
         self.connect("realize", self.on_realize)
         self.connect("destroy", Gtk.main_quit)
@@ -360,7 +359,10 @@ class Overlay(Gtk.Window):
         works everywhere except while playing, which is where it was wanted.
         """
         try:
-            if self.chatkey.pressed():
+            if self.typing is not None:
+                # While it is open, every keystroke belongs to the message.
+                self.take_typing()
+            elif self.chatkey.pressed():
                 self.open_composer()
             if (self.typing is not None
                     and time.monotonic() - self.typed_at > COMPOSE_IDLE):
@@ -390,64 +392,66 @@ class Overlay(Gtk.Window):
         self.queue_draw()
 
     def grab_keyboard(self):
-        """Hold the keyboard while somebody is typing.
+        """Hold the keyboards while somebody is typing.
 
-        Not politeness: without it every letter also reaches the game
-        underneath, and RetroArch binds letters to things like save states and
-        shaders. Typing "hello" into a game would be five hotkeys.
+        Not an X grab. RetroArch's input driver on this machine is udev: it
+        reads the keyboard devices directly and never asks X, so an X grab is
+        invisible to it. That was the first attempt, and what it produced was
+        a message typed into a running game -- `h` is RetroArch's reset, so a
+        word with an h in it restarted somebody's game.
 
-        A failed grab is not fatal and must not be silent -- the composer says
-        so, because typing into a game by accident is a worse surprise than
-        being told to quit to the menu first.
+        This takes the devices at the kernel instead, which stops every other
+        reader: the game, the window manager, and Kodi if it is up.
         """
-        window = self.get_window()
-        if window is None:
-            return
-        seat = window.get_display().get_default_seat()
-        try:
-            status = seat.grab(window, Gdk.SeatCapabilities.KEYBOARD, True,
-                               None, None, None, None)
-        except Exception:
-            status = None
-        self.grabbed = status == Gdk.GrabStatus.SUCCESS
+        self.grabbed = self.chatkey.hold()
 
     def release_keyboard(self):
-        if not self.grabbed:
-            return
+        self.chatkey.let_go()
         self.grabbed = False
-        window = self.get_window()
-        if window is None:
-            return
-        try:
-            window.get_display().get_default_seat().ungrab()
-        except Exception:
-            pass
 
-    def on_key(self, _widget, event):
-        """Every keystroke while the composer is open, and none otherwise."""
-        if self.typing is None:
-            return False
-        self.typed_at = time.monotonic()
-        name = Gdk.keyval_name(event.keyval)
-        if name == "Escape":
-            self.close_composer()
-            return True
-        if name in ("Return", "KP_Enter"):
-            said = self.typing.strip()
-            self.close_composer()
-            if said:
-                ask({"cmd": "say", "text": said})
-            return True
-        if name == "BackSpace":
-            self.typing = self.typing[:-1]
-        else:
-            char = chr(Gdk.keyval_to_unicode(event.keyval) or 0)
-            # Printable only. Control characters are what turn one line into
-            # two, and the host would strip them anyway.
+    def take_typing(self):
+        """Turn key presses into the line being written.
+
+        The codes are raw, because what a key means depends on the layout
+        somebody chose. GDK knows that -- it is the same table X uses to
+        decide what the keyboard does -- so the translation is asked for
+        rather than guessed at with a table of my own, which would have been
+        right for one keyboard and wrong for anybody else's.
+        """
+        keymap = Gdk.Keymap.get_for_display(Gdk.Display.get_default())
+        for code, value in self.chatkey.typed():
+            if not value:                       # a release
+                continue
+            self.typed_at = time.monotonic()
+            name = self.chatkey.evdev.ecodes.KEY.get(code, "")
+            if name == "KEY_ESC":
+                return self.close_composer()
+            if name in ("KEY_ENTER", "KEY_KPENTER"):
+                said = self.typing.strip()
+                self.close_composer()
+                if said:
+                    ask({"cmd": "say", "text": said})
+                return
+            if name == "KEY_BACKSPACE":
+                self.typing = self.typing[:-1]
+                continue
+            # evdev codes and X keycodes differ by the same eight everywhere,
+            # which is how X has numbered them since it was reading a PS/2
+            # controller.
+            shifted = any(
+                (path, mod) in self.chatkey.down
+                for path, mod in [(d.path, m) for d in self.chatkey.devices
+                                  for m in (self.chatkey.evdev.ecodes.KEY_LEFTSHIFT,
+                                            self.chatkey.evdev.ecodes.KEY_RIGHTSHIFT)])
+            state = Gdk.ModifierType.SHIFT_MASK if shifted else 0
+            ok, keyval, _group, _level, _consumed = keymap.translate_keyboard_state(
+                code + 8, state, 0)
+            if not ok:
+                continue
+            char = chr(Gdk.keyval_to_unicode(keyval) or 0)
             if char and char.isprintable():
                 self.typing = (self.typing + char)[:240]
         self.queue_draw()
-        return True
 
     def watch_pad(self):
         try:
