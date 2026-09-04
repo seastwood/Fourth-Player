@@ -233,24 +233,32 @@ letting somebody find out by watching a save state load. It lets go on Enter,
 on Escape, and on its own after 45 seconds, because nothing that holds a
 keyboard may hold it for ever.
 
-**Ctrl+Shift+C** also opens the chat window in Kodi at any time — to answer, and to start something when nobody has said anything
-yet, because "we are starting in five minutes" is a message somebody sends
-rather than a reply. A message from a guest also appears on the television as
-a card saying *Ctrl+Shift+C to reply*, and the join card at the start of a
-session carries the same line, so it is learned once rather than only
-discovered when somebody speaks.
+It opens **at any time**, not only in answer to something: the person in the
+room may want to say the first thing, and "we are starting in five minutes" is
+a message rather than a reply. A message from a guest also appears on the
+television as a card saying *Ctrl+Shift+C to reply*, and the join card at the
+start of a session carries the same line, so it is learned once rather than
+discovered only when somebody speaks.
 
-Reading needs nothing but eyes; answering opens Kodi's own keyboard, which is
-a real keyboard where there is one and the on-screen one where there is not.
+It closes on **Escape** and nothing else. Enter sends and leaves it up,
+because a conversation is not one message and the answer usually arrives while
+you are still looking at what you sent. After a long silence it hands the
+keyboard back and stays open, saying which of the two states it is in:
+somebody reading is not somebody who has finished, but a keyboard held while
+they read is a keyboard the game cannot have.
+
+There is deliberately **no chat in the Kodi add-on**. There was, and the two
+fought — the overlay takes those keys at the kernel, so a Kodi keymap on the
+same combination opened both windows on one press. No keymap is installed any
+more either; there is nothing left for it to open.
 
 Not a single key, and the reason is worth keeping: **F8 was the first choice
 and F8 is Kodi's screenshot key**, so pressing it photographed the television.
 Kodi's own keymap claims nearly every unmodified letter and eight function
 keys; what it claims nothing for is ctrl+shift with c, j, q, u, w, y or z —
 read out of `/usr/share/kodi/system/keymaps/keyboard.xml` rather than assumed.
-The keymap is installed by `install/install.sh`, because a card telling
-somebody to press a key that does nothing is worse than a card that says
-nothing at all.
+Reading it from the devices rather than binding it in Kodi is what makes it
+work when Kodi is not running at all.
 
 Sixty lines are remembered so somebody joining an hour in is not joining
 blind, and nothing is written to disk: an evening's conversation, not a record
