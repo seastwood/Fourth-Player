@@ -248,6 +248,14 @@
         <option value="4">4 players</option>
         <option value="5+">5 or more</option>
       </select>
+      <!-- Ending what is playing, which saves it: RetroArch writes its state
+           on the way out and loads it again next time, so "end" and "save"
+           are the same act rather than two. Here rather than on the pad
+           because it belongs with starting a game, and it is governed by the
+           same permission -- an owner who wants to be asked before a game
+           starts is asked before one ends. Hidden when nothing is playing. -->
+      <button id="endgame" type="button" class="chip" hidden
+              title="Save and end the game on the television">End game</button>
       <button id="browse-close" type="button" class="ghost"
               title="Back to the game">&times;</button>
     </div>

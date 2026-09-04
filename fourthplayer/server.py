@@ -280,6 +280,13 @@ class Server:
                         guest, str(message.get("game") or ""),
                         resume=bool(message.get("resume")))
                     await outbox.put({"t": "launchresult", **result})
+                elif kind == "endgame":
+                    # Ending the game, which saves it: see request_stop. The
+                    # answer comes back on the same message the game list
+                    # already listens to, so a refusal or an "ask the owner"
+                    # is shown the same way there.
+                    result = await self.session.request_stop(guest)
+                    await outbox.put({"t": "launchresult", **result})
                 elif kind == "report":
                     # What the guest's own browser sees. The host can only
                     # know what it sent; whether any of it arrived is visible

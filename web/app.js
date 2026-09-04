@@ -2555,7 +2555,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04s";
+const CLIENT_BUILD = "2026-09-04t";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4240,6 +4240,7 @@ function seatsFrom(message) {
   padSeats = { count: message.count || 0, who: message.who || {},
                ports: message.ports || {}, playing: !!message.playing };
   paintSeats();
+  paintEndGame();          // whether there is a game to end has just changed
 }
 
 el("pads-seat").addEventListener("change", (ev) => {
@@ -4779,10 +4780,20 @@ function showToast(what, footnote) {
   }, TOAST_MS);
 }
 
+function paintEndGame() {
+  const button = el("endgame");
+  if (!button) return;
+  // Only when there is a game to end and the owner allows starting them at
+  // all. Under "approve" it is offered and the owner is asked, the same as
+  // starting one.
+  button.hidden = launchMode === "off" || !(padSeats && padSeats.playing);
+}
+
 function launchPolicy(message) {
   launchMode = (message && message.policy) || "off";
   // No point offering a button that can only ever refuse.
   el("games").hidden = launchMode === "off";
+  paintEndGame();
   if (launchMode === "off") closeBrowser();
   const waiting = message && message.pending;
   if (waiting) {
@@ -5084,6 +5095,12 @@ function launchResult(message) {
     countdown("You asked for " + message.label, message.seconds);
     return;
   }
+  if (message.stopped) {
+    // The host says whether it closed on its own or had to be stopped, and
+    // that is the difference between a save that was written and one that
+    // was not. It sends the words; this only has to not talk over them.
+    return;
+  }
   showNotice("<p><strong>" + escapeText(message.label)
              + "</strong> is starting&hellip;</p>", false);
 }
@@ -5110,6 +5127,17 @@ el("q").addEventListener("blur", () => {
 });
 
 el("games").addEventListener("click", openBrowser);
+/* Ending the game. Asked about first, because it is somebody else's evening:
+   the person holding this phone may be the fourth player in a room where
+   three people are mid-race. */
+if (el("endgame")) {
+  el("endgame").addEventListener("click", () => {
+    if (!confirm("End the game on the television?\n\nIt is saved first, and "
+                 + "carries on from here next time.")) return;
+    send({ t: "endgame" });
+  });
+}
+
 el("browse-close").addEventListener("click", closeBrowser);
 for (const id of ("q fsystem fplayers").split(" ")) {
   el(id).addEventListener("input", filterShelf);

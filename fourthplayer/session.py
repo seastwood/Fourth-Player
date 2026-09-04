@@ -1138,6 +1138,67 @@ class LiveSession:
 
         return await self._start_game(row, busy, resume)
 
+    async def request_stop(self, guest):
+        """A guest has asked to end the game. Returns what to tell them.
+
+        Gated exactly as starting one is. Ending the game is not a smaller act
+        than starting one -- somebody in the room is playing it -- so an owner
+        who wants to be asked before a game starts is asked before one ends.
+
+        The saving is the ordinary stop: RetroArch is configured to write its
+        state on the way out and to load it again next time, and stop_running
+        sends TERM and waits for exactly that reason. There is no separate
+        save step to get wrong, and a game that ignores TERM long enough is
+        killed by the same path that has always killed it.
+        """
+        if self.launch_policy == "off":
+            return {"ok": False, "error": "The owner has not turned on "
+                                          "starting and stopping games from "
+                                          "here."}
+        playing = await self.loop.run_in_executor(None, launcher.running)
+        if not playing:
+            return {"ok": False, "error": "Nothing is playing."}
+
+        if self.launch_policy == "approve":
+            if self.pending:
+                return {"ok": False,
+                        "error": "Someone else has just asked. Wait for that "
+                                 "to be answered."}
+            self.pending = {
+                "kind": "stop",
+                "id": "", "resume": False,
+                "label": "ending the game",
+                "short": "",
+                "who": guest.label if guest is not None else "someone",
+                "how": "saving first",
+                "slot": guest.slot if guest is not None else None,
+                "deadline": self._now() + APPROVAL_SECONDS,
+            }
+            log.info("%s asked to end the game; waiting for the owner",
+                     self.pending["who"])
+            self.notify({"t": "launchpolicy", **self.launch_state()})
+            return {"ok": True, "state": "pending",
+                    "seconds": round(APPROVAL_SECONDS),
+                    "label": "ending the game"}
+
+        return await self._stop_game()
+
+    async def _stop_game(self):
+        """Close what is playing, giving it time to write its save."""
+        went = await self.loop.run_in_executor(None, launcher.stop_running)
+        if not went:
+            # It was killed rather than asked, which is the case where a save
+            # can be lost. Said plainly rather than reported as a clean stop.
+            self.notify({"t": "note",
+                         "message": "The game would not close on its own and "
+                                    "had to be stopped. Anything since its "
+                                    "last save may not have been kept."})
+        else:
+            self.notify({"t": "note",
+                         "message": "The game has been closed and the "
+                                    "television is back at the menu."})
+        return {"ok": True, "stopped": True, "clean": bool(went)}
+
     async def _start_game(self, row, busy=False, resume=False):
         # Steam and Moonlight first, and whether or not a game is playing.
         # Neither is a game -- `busy` is about games -- but both are in the
@@ -1185,8 +1246,15 @@ class LiveSession:
         """The owner said yes. Returns what happened, for the control socket."""
         if not self.pending:
             return {"ok": False, "error": "nothing is waiting"}
-        row = self.catalogue.find(self.pending["id"])
+        kind = self.pending.get("kind", "start")
         who, label = self.pending["who"], self.pending["label"]
+        if kind == "stop":
+            self.pending = None
+            log.info("owner approved ending the game for %s", who)
+            result = await self._stop_game()
+            self.notify({"t": "launchpolicy", **self.launch_state()})
+            return result
+        row = self.catalogue.find(self.pending["id"])
         resume = self.pending.get("resume", False)
         self.pending = None
         if row is None:
