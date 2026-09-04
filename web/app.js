@@ -2265,7 +2265,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04a";
+const CLIENT_BUILD = "2026-09-04b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2812,9 +2812,14 @@ function heardChat(message) {
 let chatToast = null;
 
 function paintChatBadge() {
-  const badge = el("chatnew");
-  badge.textContent = chatUnread > 9 ? "9+" : String(chatUnread);
-  badge.hidden = chatUnread === 0;
+  el("chatnew").hidden = chatUnread === 0;
+  // The dot says there is something; the label says how much, because a dot
+  // is nothing at all to a screen reader.
+  el("chatbtn").setAttribute(
+    "aria-label",
+    chatUnread === 0 ? "Chat"
+      : "Chat, " + chatUnread + (chatUnread === 1 ? " new message"
+                                                  : " new messages"));
 }
 
 function openChat() {

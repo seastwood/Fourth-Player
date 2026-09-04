@@ -145,6 +145,19 @@ check(".textContent = message.text" in heard and ".innerHTML" not in heard,
       "and the page puts them in the DOM as text, never as markup -- this is "
       "the one place another person's words reach this page")
 
+print("the unread dot")
+page = open(os.path.join(ROOT, "web", "index.html")).read()
+check('<span id="chatnew" class="chat-new" hidden></span>' in page,
+      "is a dot with nothing written in it: whether there is something to "
+      "read is the question from across a room, and how many is answered by "
+      "opening it")
+badge = app.split("function paintChatBadge")[1].split("\n}")[0]
+check("aria-label" in badge and "new message" in badge,
+      "and the count goes on the button's label, because a dot is nothing at "
+      "all to a screen reader")
+check("hidden = chatUnread === 0" in badge,
+      "shown exactly when something is unread")
+
 print("the room can reach it with Kodi closed, which is when it matters")
 overlay_src = open(os.path.join(ROOT, "fourthplayer", "overlay.py")).read()
 check("from .chatkey import ChatKey" in overlay_src,

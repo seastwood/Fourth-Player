@@ -134,7 +134,11 @@
         <rect class="chat-dot" x="7.2" y="5" width="1.6" height="1.6"/>
         <rect class="chat-dot" x="9.9" y="5" width="1.6" height="1.6"/>
       </svg>
-      <span id="chatnew" class="chat-new" hidden>0</span>
+      <!-- A dot, not a number. Whether there is something to read is the
+           whole question from across a room with a game on; how many there
+           are is answered by opening it. The count still goes on the button's
+           label, where a screen reader will say it. -->
+      <span id="chatnew" class="chat-new" hidden></span>
     </button>
     <!-- The speaker shows the level at a glance -- no waves, one wave, two --
          and opens the slider when tapped. Its own level, not the

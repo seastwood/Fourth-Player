@@ -1680,23 +1680,28 @@ html.held .touch::after {
 }
 .chat-btn .chat-dot { fill: currentColor; stroke: none; }
 
-/* How many have been said since this page last looked. */
+/* Something has been said since this page last looked.
+   Square, like everything else here: at six pixels a square reads as a dot
+   and a circle reads as the only round thing on the screen. */
 .chat-new {
-  /* On the corner of the bubble rather than beside it: in the chip row there
-     is no width to spare, and a badge that widens the button pushes whatever
-     is next to it off the screen. */
   position: absolute;
-  top: -.35rem;
-  right: -.35rem;
-  padding: 0 .25rem;
+  top: -.2rem;
+  right: -.2rem;
+  width: .42rem;
+  height: .42rem;
   background: var(--edge);
-  color: var(--bg);
-  font-family: var(--pixel);
-  font-size: .45rem;
-  /* Its own, because `.ghost.icon` sets line-height to 0 so the svg sits flush
-     -- inherited, that made the badge sixteen pixels wide and none tall. */
-  line-height: 1.6;
+  /* A ring of the panel's own colour, so the dot stays visible where it
+     overlaps the button's border rather than merging into it. */
+  box-shadow: 0 0 0 2px var(--bg);
 }
+@media (prefers-reduced-motion: no-preference) {
+  .chat-new { animation: chat-dot .18s steps(2, end); }
+}
+@keyframes chat-dot {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
+}
+
 .chat-toast strong { color: var(--accent); }
 
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
