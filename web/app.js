@@ -2371,7 +2371,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04f";
+const CLIENT_BUILD = "2026-09-04g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4187,10 +4187,50 @@ function escapeText(text) {
 function somebodyArrived(message) {
   const mine = el("slot").textContent;
   if (!mine || mine === "—" || message.label === mine) return;
-  showNotice("<p><strong>" + escapeText(message.label)
-             + "</strong> joined.</p>"
-             + '<p class="footnote">' + message.guests + " of "
-             + message.slots + " playing</p>", false);
+  // A toast, not the notice. The notice opens the chips and takes the picture
+  // out of the stripped-back view to make room for itself -- worth it for
+  // "there is no video", and much too much for "somebody joined" arriving in
+  // the middle of a game.
+  showToast(message.label + " joined", message.guests + " of " + message.slots);
+}
+
+/* ---- toast ----
+ *
+ * One line over the picture, for the things that are worth knowing and not
+ * worth interrupting for. It changes no layout: absolutely positioned, no
+ * pointer events, and it never asks for the chips or leaves immersive mode.
+ */
+const TOAST_MS = 3600;
+let toastTimer = null;
+
+function showToast(what, footnote) {
+  const box = el("toast");
+  if (!box) return;                     // an older page than this build
+  box.innerHTML = "";
+  const line = document.createElement("span");
+  line.className = "toast-what";
+  line.textContent = what;
+  box.appendChild(line);
+  if (footnote) {
+    const note = document.createElement("span");
+    note.className = "toast-note";
+    note.textContent = footnote;
+    box.appendChild(note);
+  }
+  box.hidden = false;
+  // Restarting the animation needs the class off and a reflow read between,
+  // or a second arrival while the first is still fading does nothing at all.
+  box.classList.remove("show");
+  void box.offsetWidth;
+  box.classList.add("show");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastTimer = null;
+    box.classList.remove("show");
+    // Hidden only after it has faded, or it vanishes instead of fading.
+    setTimeout(() => { if (!box.classList.contains("show")) box.hidden = true; },
+               400);
+  }, TOAST_MS);
 }
 
 function launchPolicy(message) {

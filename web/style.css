@@ -1601,6 +1601,47 @@ html.held .touch::after {
   pointer-events: none;
 }
 
+/* ---- toast --------------------------------------------------------------
+   One line over the picture for something worth knowing and not worth
+   interrupting for. The notice above it opens the chips and takes the stage
+   out of the stripped-back view to fit itself in; this deliberately changes
+   no layout at all -- it is out of flow, it never takes a pointer, and it
+   goes on its own. Bottom left, because the top is where the chips appear and
+   the middle is the game. */
+.toast {
+  position: absolute;
+  left: .6rem;
+  bottom: calc(var(--bottom-safe, 0px) + .6rem);
+  z-index: 5;                      /* under the notice and the panels */
+  max-width: min(22rem, 70vw);
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  padding: .45rem .6rem;
+  background: rgba(16, 14, 40, .88);
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+  pointer-events: none;            /* never in the way of the game */
+  opacity: 0;
+  transform: translateY(.4rem);
+  transition: opacity .28s ease, transform .28s ease;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast-what {
+  font-family: var(--pixel);
+  font-size: .5rem;
+  line-height: 1.6;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-note { font-size: .72rem; color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: opacity .28s ease; transform: none; }
+}
+
 /* ---- chat --------------------------------------------------------------
    The panel is the controls panel's shape, because it is the same kind of
    thing: a mode that takes the screen while it is open. What differs is that
@@ -1795,7 +1836,6 @@ html.held .touch::after {
   35%      { transform: scale(1.65); }
 }
 
-.chat-toast strong { color: var(--accent); }
 
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
    keep it laid out and animated while keeping it out of sight and out of the

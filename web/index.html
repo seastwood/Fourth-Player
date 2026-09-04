@@ -204,6 +204,14 @@
        why there was no picture were themselves invisible. -->
   <div id="notice" class="notice" role="status" hidden></div>
 
+  <!-- Small things that do not deserve the notice above: somebody joining,
+       mainly. The notice opens the chips and drops the picture out of the
+       stripped-back view to make room for itself, which is the right trade
+       for "there is no video" and quite the wrong one for "Ada joined" while
+       somebody is playing. This never touches the layout: it sits over the
+       picture, says one line, and goes. -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
   <!-- The game list. Everything in it comes from the host over the same
        socket as everything else; the ids are meaningless anywhere but this
        session, and a game not in this list cannot be asked for. -->
