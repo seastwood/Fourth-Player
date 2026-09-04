@@ -1027,6 +1027,37 @@ function paintOrient() {
   if (picker) picker.value = savedOrient();
 }
 
+/* How long the browser took to give us a touch it had already had.
+ *
+ * event.timeStamp is when the touch happened; performance.now() at the top of
+ * the handler is when this page heard about it. The gap is the browser's,
+ * not ours -- a main thread busy decoding video, or a compositor deciding
+ * whether a finger is a scroll -- and no amount of moving our own work
+ * earlier shortens it. Worth measuring because "the buzz feels late" has two
+ * quite different causes and they are not tellable apart by feel.
+ *
+ * Reported once every few dozen presses, not per press: this is a diagnosis,
+ * not a stream. */
+const LAG_EVERY = 40;
+let lagSeen = [];
+
+function noteTouchLag(event) {
+  const lag = performance.now() - event.timeStamp;
+  // Some browsers stamp events on a different clock; a nonsense figure is
+  // worse than none.
+  if (!(lag >= 0 && lag < 2000)) return;
+  lagSeen.push(lag);
+  if (lagSeen.length < LAG_EVERY) return;
+  const sorted = lagSeen.slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  report("touch to page: median " + median.toFixed(1) + " ms, worst "
+         + sorted[sorted.length - 1].toFixed(1) + " ms over " + sorted.length
+         + " presses (buzz " + (canVibrate ? BUZZ_MS[hapticStrength] + " ms"
+                                           : SWITCH_TAPS[hapticStrength] + " taps")
+         + ")");
+  lagSeen = [];
+}
+
 const HAPTICS_KEY = "fp:haptics";
 const STRENGTH_KEY = "fp:haptics-strength";
 
@@ -1071,6 +1102,17 @@ const canVibrate = typeof navigator.vibrate === "function";
  * Apple's to withdraw -- reportedly withdrawn in iOS 26.5 -- so nothing here
  * depends on it working. Where it does nothing the pad is exactly as silent
  * as it was before there was a switch. */
+/* How many switch taps each strength is on a phone whose only haptic is one
+ * fixed tap. The length is not ours to set there -- iOS decides what a switch
+ * feels like -- so the only dimension left is how many, and two in quick
+ * succession do feel firmer than one. Spaced far enough apart to be felt
+ * separately and close enough to read as one event.
+ *
+ * Well inside the second or so that Apple's gesture grant lasts, which is
+ * what lets the later ones happen at all. */
+const SWITCH_TAPS = { light: 1, medium: 2, strong: 3 };
+const SWITCH_GAP_MS = 45;
+
 function tapSwitch() {
   const label = el("haptic-label");
   if (!label) return;
@@ -1117,8 +1159,11 @@ function buzz(ms) {
     try { navigator.vibrate(ms); } catch (_) {}
     return;
   }
-  // The iPhone's one length, which is whatever the switch makes.
+  // The iPhone has one length, whatever the switch makes, so strength is a
+  // count rather than a duration.
+  const times = SWITCH_TAPS[hapticStrength] || 1;
   tapSwitch();
+  for (let i = 1; i < times; i++) setTimeout(tapSwitch, i * SWITCH_GAP_MS);
 }
 
 /* The switch, and the places its state shows. The panel only carries the row
@@ -1201,16 +1246,22 @@ function paintStrength() {
   const picker = el("pads-buzz-strength");
   if (!row || !picker) return;
   picker.value = hapticStrength;
-  // Only meaningful where the length is ours to set. On an iPhone the tap is
-  // whatever the switch control makes, so offering three of them would be
-  // three settings that do the same nothing.
-  row.hidden = !canVibrate || !hapticsOn;
+  // Offered wherever there is any feedback at all to make stronger. What
+  // changes differs: a phone that can be told to vibrate gets a longer pulse,
+  // and one whose only haptic is a switch gets more taps, because the length
+  // of those is iOS's to decide and not ours.
+  row.hidden = !canBuzz || !hapticsOn;
   const note = el("pads-buzz-strength-note");
   if (note) {
-    note.textContent = hapticStrength === "light"
-      ? "Short. On some phones the motor barely has time to move."
-      : (hapticStrength === "strong" ? "Longest, and the firmest to a thumb."
-                                     : "");
+    note.textContent = canVibrate
+      ? (hapticStrength === "light"
+         ? "Short. On some phones the motor barely has time to move."
+         : (hapticStrength === "strong" ? "Longest, and the firmest to a thumb."
+                                        : ""))
+      : (SWITCH_TAPS[hapticStrength] > 1
+         ? SWITCH_TAPS[hapticStrength] + " taps, which is as firm as this "
+           + "phone lets a web page be."
+         : "One tap.");
   }
 }
 
@@ -1657,6 +1708,30 @@ function wireTouch() {
   window.addEventListener("pointerup", releasePad);
   window.addEventListener("pointercancel", releasePad);
 
+  /* The buzz, before anything else this page does with the touch.
+   *
+   * Its own listener, in the capture phase, so it runs before the handler
+   * below and before whatever that does with the event. On Android the whole
+   * complaint is that the tap feels late, and the fix for that is not to have
+   * anything at all between the finger landing and the phone answering.
+   *
+   * On a phone whose only haptic is the switch, this is also what makes the
+   * feeling arrive on the press rather than on the release. The switch is
+   * flipped from script here; the label the finger is actually on activates
+   * on release, as it always did, and where the scripted flip is ignored --
+   * Apple closed that path in iOS 26.5 -- the release one is still there. So
+   * the press is answered where it can be, and where it cannot, nothing is
+   * lost that was there before.
+   *
+   * How long the browser took to hand us the touch is worth knowing on the
+   * way past: "it feels late" is either this page being slow or the browser
+   * being slow to say anything, and those have different answers. */
+  el("touch").addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".tbtn")) return;
+    noteTouchLag(event);
+    buzz();
+  }, { capture: true });
+
   el("touch").addEventListener("pointerdown", (event) => {
     const button = event.target.closest(".tbtn");
     if (!button) return;
@@ -1680,14 +1755,7 @@ function wireTouch() {
       event.preventDefault();
       button.setPointerCapture(event.pointerId);
     }
-    // First, before the bit and before the send. Both are quick, but the
-    // whole complaint about this on Android was that the tap felt late, and
-    // there is no reason for anything at all to happen between the finger
-    // landing and the phone answering it. In switch mode the feeling comes
-    // from the label being activated by the finger that is already on it, and
-    // calling buzz() as well would be a second tap on the phones where the
-    // scripted one still works.
-    if (!bySwitch) buzz();
+    // The buzz already happened, in the capture-phase listener above.
     pointers.set(event.pointerId, button);
     button.classList.add("live");
     setBit(Number(button.dataset.button), true);
@@ -2431,7 +2499,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04h";
+const CLIENT_BUILD = "2026-09-04i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

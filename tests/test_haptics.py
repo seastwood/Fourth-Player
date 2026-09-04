@@ -124,11 +124,19 @@ DEFAULT_MS = int(re.search(
 
 HARNESS = "\n".join(
     [constant("HAPTICS_KEY"), constant("STRENGTH_KEY"),
-     constant("BUZZ_MS"), constant("DEFAULT_STRENGTH")]
+     constant("BUZZ_MS"), constant("DEFAULT_STRENGTH"),
+     constant("SWITCH_TAPS"), constant("SWITCH_GAP_MS")]
     + [lift(n) for n in ("tapSwitch", "savedHaptics", "savedStrength", "buzz",
                          "paintBuzz", "paintStrength", "setStrength",
                          "setHaptics", "applyDpad", "clearDpad")]) + """
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
+
+// The later switch taps are scheduled rather than made at once. Run them
+// straight away here: what the test is counting is how many there are, and
+// waiting 45 ms a time for real would only make it slow.
+const later = [];
+const setTimeout = (fn) => { later.push(fn); return 0; };
+function settle() { while (later.length) later.shift()(); }
 
 // A localStorage that starts where the job says it starts, and remembers what
 // was done to it -- the point being what the *next* visit would read.
@@ -196,10 +204,14 @@ if (job.do === "strengths") {
   // Each in turn, so the test sees the actual length each one sends rather
   // than the table this file could have copied.
   const felt = {};
+  const tapsFor = {};
   for (const which of ["light", "medium", "strong"]) {
     buzzes.length = 0;
+    flips.length = 0;
     setStrength(which);
+    settle();
     felt[which] = buzzes[0];
+    tapsFor[which] = flips.length;
   }
   // A value from an older page, or a hand-edited store.
   buzzes.length = 0;
@@ -211,6 +223,7 @@ if (job.do === "strengths") {
     answered: felt.strong === BUZZ_MS.strong,
     nonsenseIgnored: hapticStrength,
     rowHidden: strengthRow.hidden,
+    tapsFor,
   }));
   process.exit(0);
 }
@@ -219,8 +232,9 @@ if (job.set !== undefined) setHaptics(job.set);
 for (const dirs of (job.presses || [])) {
   if (dirs === null) clearDpad(); else applyDpad({ dirs });
 }
-for (let i = 0; i < (job.taps || 0); i++) buzz();
+for (let i = 0; i < (job.taps || 0); i++) { buzz(); settle(); }
 paintBuzz();
+paintStrength();
 process.stdout.write(JSON.stringify({
   buzzes, flips, deadClicks, sends: sends.length, stored: store, on: hapticsOn,
   checked: box.checked, note: note.textContent, flipped: tapBox.checked,
@@ -267,11 +281,22 @@ print("a phone with no vibrate() is offered the switch, and taps another way")
 out = run(canVibrate=False, taps=3)
 check(out["offered"] is True, "the switch is offered on a browser with no vibrate")
 check(out["buzzes"] == [], "nothing is called that is not there")
-check(len(out["flips"]) == 3, "and three taps flip the switch control three times")
+# Each press is now as many flips as the chosen strength is taps -- the only
+# dimension left on a phone where the length of a tap is iOS's to decide.
+DEFAULT_TAPS = int(re.search(
+    r"\b%s:\s*(\d+)" % DEFAULT_STRENGTH,
+    re.search(r"const SWITCH_TAPS = \{[^}]*\}", source).group(0)).group(1))
+check(len(out["flips"]) == 3 * DEFAULT_TAPS,
+      "and three presses are three presses' worth of taps: %d at %d each, "
+      "got %d" % (3, DEFAULT_TAPS, len(out["flips"])))
 check(out["deadClicks"] == [],
       "through the label, never the input -- WebKit plays nothing for the input")
-check(out["flipped"] is True,
-      "and the box is left flipped, not put back where it started")
+# Where it ends up depends on whether the strength is an odd or even number
+# of taps, and that is not the point. The point is that script never writes
+# .checked back: WebKit plays the haptic for the label's activation, and a
+# control put back by hand is a control that was not activated.
+check(".checked = !" not in lift_text("tapSwitch"),
+      "and the box is left wherever the taps leave it, never written back")
 out = run(canVibrate=False, stored={"fp:haptics": "0"}, taps=3)
 check(out["flips"] == [], "the off switch governs that path too")
 out = run(taps=2)
@@ -340,21 +365,23 @@ check(out["buzzes"] == [], "the dead middle of the pad is not a press")
 
 print("\nand it is answered before anything else is done")
 press = lift_text("wireTouch")
-# The *button* handler, not the d-pad one above it. Anchoring on the first
-# pointerdown in this function found the d-pad, which has always buzzed before
-# it sends -- so the check passed while the buttons still buzzed last, which
-# is the case that was being complained about.
-inside = press[press.index('el("touch").addEventListener("pointerdown"'):]
-inside = inside[:inside.index("releaseButton")]
-# Code only. The comment beside this explains why buzz() is where it is, and
-# searching the comments found the word "buzz()" before the send no matter
-# where the call actually was -- which passed happily with the call left last.
-inside = "\n".join(line for line in inside.split("\n")
-                   if not line.strip().startswith(("//", "*", "/*")))
-check(inside.index("buzz()") < inside.index("sendNow()"),
-      "the phone is told to buzz before the press is put on the wire -- the "
-      "whole complaint on Android was that the tap felt late, and nothing "
-      "should sit between the finger landing and the answer")
+first = press.index('el("touch").addEventListener("pointerdown"')
+second = press.index('el("touch").addEventListener("pointerdown"', first + 1)
+capture = press[first:second]
+main = press[second:press.index("releaseButton", second)]
+# Code only: the comment beside the main handler mentions buzz() to explain
+# where it went, and searching comments made this pass while the call was
+# demonstrably last.
+main = "\n".join(line for line in main.split("\n")
+                 if not line.strip().startswith(("//", "*", "/*")))
+check("buzz()" in capture and "{ capture: true }" in capture,
+      "the buzz is its own listener, in the capture phase, so it runs before "
+      "everything else this page does with the touch")
+check("buzz()" not in main,
+      "and the handler that sets the bit and sends the frame does not buzz "
+      "again -- one press is one answer")
+check(capture.index("buzz()") < capture.index("}"),
+      "with nothing before it in there worth the delay")
 check("Haptic feedback" in page,
       "and the setting is called what it is rather than how it works")
 
@@ -381,9 +408,14 @@ check(out["nonsenseIgnored"] == "strong",
       "buzz into nothing, got %r" % out["nonsenseIgnored"])
 
 out = run(canVibrate=False, do="strengths")
-check(out["rowHidden"] is True,
-      "and the row is not offered on a phone where the length is not ours to "
-      "set -- an iPhone's tap is whatever its switch makes")
+check(out["rowHidden"] is False,
+      "the row is offered on a phone with no vibrate() as well -- the length "
+      "of a tap is iOS's to decide, but how many there are is not")
+check(out["tapsFor"]["strong"] > out["tapsFor"]["light"],
+      "and strength there is a count of taps rather than a duration: %s"
+      % out["tapsFor"])
+check(out["buzzes"] == [] if out.get("buzzes") is not None else True,
+      "with nothing called that the phone does not have")
 
 print()
 if fails:
