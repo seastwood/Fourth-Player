@@ -336,6 +336,19 @@ function reconnectSoon() {
 }
 
 function connect(hello) {
+  // Every resume gets a deadline, not just the one on the load path.
+  //
+  // Reconnect sent a resume and armed nothing, so a resume that was never
+  // answered -- which is what a page returning from a long spell in the
+  // background usually gets, its slot swept and its token burned -- left the
+  // chip saying "reconnecting" and nothing else ever happening. Refreshing
+  // worked because that is the one path that did arm a deadline. Pressing the
+  // button that exists for exactly this did not.
+  // Only if one is not already running: reconnectSoon() retries on a backoff,
+  // and re-arming per attempt would push the deadline out for ever on a
+  // connection that keeps failing quickly -- which is the same "stuck on
+  // reconnecting" this is meant to end, reached by a different road.
+  if (hello && hello.t === "resume" && !rejoinTimer) armRejoinTimer();
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${scheme}//${location.host}/ws`);
 
@@ -430,12 +443,24 @@ function clearRejoinTimer() {
   if (rejoinTimer) { clearTimeout(rejoinTimer); rejoinTimer = null; }
 }
 
+/* Long enough for a slow phone on a slow network to finish a resume, short
+   enough that somebody is not left staring at a chip. A resume that lands
+   clears this in joined(), so this only ever fires on one that did not. */
+// Covers the whole attempt, retries and all, rather than each try -- so it
+// has to be long enough for a couple of backoff steps on a slow network.
+const REJOIN_LIMIT_MS = 20000;
+
 function armRejoinTimer() {
   clearRejoinTimer();
   rejoinTimer = setTimeout(() => {
     rejoinTimer = null;
-    if (!gate.hidden) askForPin("That did not get you back in.");
-  }, 12000);
+    // Whichever screen they are on. This used to be `if (!gate.hidden)` --
+    // only when the join screen was already showing, which is the one case
+    // where nobody needs to be sent to it. Somebody who was playing, and is
+    // the person this was written for, got nothing. A resume that lands
+    // clears the timer, so there is no need to ask again whether it did.
+    if (!ended) askForPin("That did not get you back in.");
+  }, REJOIN_LIMIT_MS);
 }
 
 function askForPin(why) {
@@ -2556,7 +2581,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04o";
+const CLIENT_BUILD = "2026-09-04p";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -5130,7 +5155,6 @@ if (saved) {
   guestToken = saved;
   el("pin").placeholder = "rejoining…";
   el("join").disabled = true;
-  armRejoinTimer();
   connect({ t: "resume", guest: saved, name: myName(),
             codecs: videoCodecs(), media: "new" });
 }
