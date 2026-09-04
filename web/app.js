@@ -2555,7 +2555,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04u";
+const CLIENT_BUILD = "2026-09-04v";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4807,12 +4807,31 @@ function paintEndGame() {
   // Only when there is a game and the owner allows starting and stopping them
   // at all. Under "approve" they are offered and the owner is asked, the same
   // as starting one.
-  const can = launchMode !== "off" && !!(padSeats && padSeats.playing);
+  const playing = !!(padSeats && padSeats.playing);
+  const allowed = launchMode !== "off";
+  const can = allowed && playing;
   actions.hidden = !can;
-  none.hidden = can;
-  none.textContent = launchMode === "off"
-    ? "The owner has not turned on starting and stopping games from here."
-    : "Nothing is playing.";
+
+  // What is on, by name, above the buttons that change it.
+  const now = el("game-now");
+  const named = playing && padSeats && padSeats.game;
+  if (now) {
+    now.hidden = !named;
+    now.textContent = named ? "Playing: " + padSeats.game : "";
+  }
+
+  // And when nothing is on, the last thing that was.
+  const back = el("game-continue");
+  const last = !playing && allowed && padSeats && padSeats.last;
+  if (back) {
+    back.hidden = !last;
+    if (last) el("continuegame").textContent = "Continue " + padSeats.last.label;
+  }
+
+  none.hidden = can || !!last;
+  none.textContent = allowed
+    ? "Nothing is playing."
+    : "The owner has not turned on starting and stopping games from here.";
 }
 
 function launchPolicy(message) {
@@ -5175,6 +5194,16 @@ if (el("restartgame")) {
     send({ t: "restart" });
   });
 }
+if (el("continuegame")) {
+  el("continuegame").addEventListener("click", () => {
+    // No confirmation: nothing is playing, so this interrupts nobody. The
+    // two above it stop something somebody is in the middle of, which is the
+    // difference.
+    const last = padSeats && padSeats.last;
+    if (last) send({ t: "launch", game: last.id, resume: true });
+  });
+}
+
 for (const name of ["controls", "game"]) {
   const pick = el("tab-" + name + "-pick");
   if (pick) pick.addEventListener("click", () => showTab(name));

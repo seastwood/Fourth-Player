@@ -134,12 +134,26 @@
          several buttons wide on a phone and words were being truncated. -->
     <button id="padtest" type="button" class="ghost icon"
             aria-label="Options" title="Options">
+      <!-- A gear: teeth around a ring with a hub in the middle. The first
+           go at this was spokes radiating from a circle, which is a sun. -->
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor"
-                stroke-width="2.2"/>
-        <path d="M12 2.6v3.2M12 18.2v3.2M2.6 12h3.2M18.2 12h3.2M5.3 5.3l2.3 2.3M16.4 16.4l2.3 2.3M18.7 5.3l-2.3 2.3M7.6 16.4l-2.3 2.3"
-              fill="none" stroke="currentColor" stroke-width="2.2"
-              stroke-linecap="square"/>
+        <g fill="currentColor">
+          <rect x="10.8" y="1.6" width="2.4" height="3.4"/>
+          <rect x="10.8" y="19" width="2.4" height="3.4"/>
+          <rect x="1.6" y="10.8" width="3.4" height="2.4"/>
+          <rect x="19" y="10.8" width="3.4" height="2.4"/>
+          <rect x="10.8" y="1.6" width="2.4" height="3.4"
+                transform="rotate(45 12 12)"/>
+          <rect x="10.8" y="19" width="2.4" height="3.4"
+                transform="rotate(45 12 12)"/>
+          <rect x="1.6" y="10.8" width="3.4" height="2.4"
+                transform="rotate(45 12 12)"/>
+          <rect x="19" y="10.8" width="3.4" height="2.4"
+                transform="rotate(45 12 12)"/>
+        </g>
+        <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor"
+                stroke-width="3"/>
+        <circle cx="12" cy="12" r="2.4" fill="currentColor"/>
       </svg>
     </button>
     <!-- Guests can see each other's controllers moving and cannot say a word
@@ -443,7 +457,18 @@
     <!-- The game on the television. Everything here happens to everybody in
          the room, which is why each one asks first. -->
     <div id="tab-game" class="tab-panel" role="tabpanel" hidden>
+      <!-- What is on the television, said before the buttons that change
+           it. "End game" over an unnamed screen asks somebody to remember
+           what they are about to stop. -->
+      <p class="browse-note" id="game-now" hidden></p>
       <p class="browse-note" id="game-none">Nothing is playing.</p>
+
+      <!-- When nothing is on, the last thing that was. The tab is otherwise
+           an apology, and this is the one useful thing to say in it. -->
+      <div id="game-continue" hidden>
+        <button id="continuegame" type="button" class="choice"></button>
+        <p class="footnote">Carries on from where it was left.</p>
+      </div>
 
       <div id="game-actions" hidden>
         <button id="endgame" type="button" class="choice">End game</button>

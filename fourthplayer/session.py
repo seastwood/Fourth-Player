@@ -929,6 +929,13 @@ class LiveSession:
             playing = bool(launcher.running())
         except Exception:
             playing = False
+        # The row for whatever is on now, or was on last. Both come from the
+        # same place, which is the point: "what am I ending" and "what would
+        # I continue" are the same question asked at different moments.
+        try:
+            row = self.playing_now()
+        except Exception:
+            row = None
         return {
             "count": len(names),
             # Whether a game is running at all, which is not the same as
@@ -945,6 +952,14 @@ class LiveSession:
             # not bound to a port at all.
             "ports": {str(i): ports[name]
                       for i, name in enumerate(names) if name in ports},
+            # What is on the television, by name. Worth saying next to the
+            # buttons that end it: "End game" over an unnamed screen asks
+            # somebody to remember what they are about to stop.
+            "game": (row or {}).get("label", "") if playing else "",
+            # And, when nothing is on, what was on last -- so the tab that is
+            # otherwise an apology can offer to put it back.
+            "last": ({"id": row["id"], "label": row["label"]}
+                     if row and not playing else None),
         }
 
     def people(self):

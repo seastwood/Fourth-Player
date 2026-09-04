@@ -172,14 +172,40 @@ if HAVE_HOST:
     os.remove(where)
     loop.close()
 
+    print("\nwhat the page is told about the television")
+    live, guest = a_session("open")
+    fake.playing = True
+    live.last_started = {"id": "abc", "label": "Advance Wars", "path": "/a.gba"}
+    live.pads = None
+    state = live.pad_state()
+    check(state.get("game") == "Advance Wars",
+          "the game on now is named, so 'End game' is not asking somebody to "
+          "remember what they are about to stop; got %r" % state.get("game"))
+    check(state.get("last") is None,
+          "and nothing is offered to continue while it is still playing")
+
+    fake.playing = False
+    state = live.pad_state()
+    check(state.get("game") == "",
+          "with nothing on, nothing is named")
+    check(state.get("last") and state["last"]["label"] == "Advance Wars",
+          "and the last one is offered instead, which is the only useful "
+          "thing that tab can say when the television is idle")
+    check(state["last"]["id"] == "abc",
+          "by id, so continuing it goes through the ordinary launch")
+
 print("\nthe page")
 page = open(os.path.join(ROOT, "web", "index.html")).read()
 app = open(os.path.join(ROOT, "web", "app.js")).read()
 check('id="endgame"' in page, "there is a button")
 paint = app[app.index("function paintEndGame()"):]
 paint = paint[:paint.index("\nfunction ")]
-check("launchMode === \"off\"" in paint and "playing" in paint,
-      "shown only when a game is playing and the owner allows it at all")
+check("launchMode" in paint and "padSeats.playing" in paint,
+      "shown on both counts: whether the owner allows starting and stopping "
+      "at all, and whether there is anything to stop")
+check("actions.hidden = !can" in paint,
+      "and the destructive group is what that hides, not the whole tab -- "
+      "continuing the last game is offered on a television that is idle")
 check('send({ t: "endgame" })' in app, "and it asks the host")
 check(app.count("confirm(") >= 2,
       "and restarting asks too, separately: it is the one of these that "
@@ -189,6 +215,21 @@ check('id="tab-game"' in page and 'id="tab-controls"' in page,
 check('aria-label="Options"' in page,
       "and the button that opens it is an options icon rather than a word")
 check("function showTab(" in app, "the tabs switch")
+check('id="game-now"' in page and 'id="continuegame"' in page,
+      "the tab names what is playing, and offers the last game when nothing "
+      "is")
+cont = app[app.index('el("continuegame").addEventListener'):]
+cont = cont[:cont.index("\n}")]
+check("confirm(" not in cont,
+      "continuing is not confirmed: nothing is playing, so it interrupts "
+      "nobody -- which is what makes it different from the two above it")
+check('resume: true' in cont,
+      "and it continues rather than restarting, which is the whole word")
+gear = page[page.index('aria-label="Options"'):]
+gear = gear[:gear.index("</button>")]
+check(gear.count("<rect") >= 8 and "r=\"2.4\"" in gear,
+      "and the options icon is a gear -- teeth around a ring with a hub -- "
+      "rather than spokes radiating from a circle, which is a sun")
 repick = app[app.index('el("pads-repick").hidden'):]
 repick = repick[:repick.index("\n")]
 check("padSeats.playing" in repick and "launchMode" not in repick,
