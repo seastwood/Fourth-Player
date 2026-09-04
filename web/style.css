@@ -1067,7 +1067,10 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    on it that could not be read. */
 .browser-bar > .chip:first-child { min-width: 0; }
 @media (max-width: 30rem) {
-  .browser-bar > .chip:first-child {
+  /* Not in the chat panel, whose first chip is the word "Chat" and needs no
+     room: this is for a controller's name, which is long and is the one thing
+     on that row worth reading. */
+  .pads:not(.chat) .browser-bar > .chip:first-child {
     flex: 1 0 100%;
     max-width: 100%;
     text-align: center;
@@ -1597,6 +1600,72 @@ html.held .touch::after {
   color: var(--accent);
   pointer-events: none;
 }
+
+/* ---- chat --------------------------------------------------------------
+   The panel is the controls panel's shape, because it is the same kind of
+   thing: a mode that takes the screen while it is open. What differs is that
+   it has to keep its footing while the keyboard comes up on a phone -- hence
+   a column with one scrolling part and the form pinned under it, rather than
+   a page that scrolls as a whole. */
+.chat { display: flex; flex-direction: column; }
+.chat-log {
+  flex: 1 1 auto;
+  min-height: 0;                 /* or the log refuses to scroll inside flex */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .6rem clamp(.6rem, 3vw, 1.4rem);
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+}
+.chat-line {
+  margin: 0;
+  font-size: .9rem;
+  line-height: 1.45;
+  color: var(--ink);
+  /* A name and a sentence, wrapping under each other rather than beside: a
+     long name should not squeeze what somebody said into a column. */
+  overflow-wrap: anywhere;
+}
+.chat-who {
+  font-family: var(--pixel);
+  font-size: .5rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-right: .5rem;
+}
+.chat-form {
+  flex: 0 0 auto;
+  display: flex;
+  /* Stated, because the bare `form` rule above makes every form on this page
+     a column -- which is right for the join form it was written for, where a
+     label sits over a field, and wrong here, where a box and a Send button
+     belong on one line. Inherited quietly, it put Send on its own row under a
+     full-width field and looked like a styling choice somebody had made. */
+  flex-direction: row;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem clamp(.6rem, 3vw, 1.4rem)
+           calc(.8rem + env(safe-area-inset-bottom, 0px));
+  border-top: 2px solid var(--bg2);
+}
+/* `input.paste` is 100% wide, which is right for the link box it was written
+   for and wrong in a row with a button beside it: the button wrapped onto its
+   own line under a full-width field. */
+.chat-form .paste { flex: 1 1 auto; width: auto; min-width: 0; }
+.chat-form .choice { flex: 0 0 auto; align-self: stretch; }
+/* How many have been said since this page last looked. */
+.chat-new {
+  display: inline-block;
+  margin-left: .35rem;
+  padding: 0 .3rem;
+  background: var(--edge);
+  color: var(--bg);
+  font-family: var(--pixel);
+  font-size: .45rem;
+}
+.chat-toast strong { color: var(--accent); }
 
 /* The off-screen switch that taps an iPhone. Everything here is chosen to
    keep it laid out and animated while keeping it out of sight and out of the

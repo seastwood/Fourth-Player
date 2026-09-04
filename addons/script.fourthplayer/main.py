@@ -11,6 +11,7 @@ a slot means all belong to the server, which can be tested without Kodi.
 
 import json
 import os
+import sys
 
 import xbmc
 import xbmcgui
@@ -278,6 +279,11 @@ def extend_session(status=None):
         notify("%d minutes left." % (reply.get("remaining", 0) // 60))
     else:
         notify(reply.get("error", "Could not add time."), error=True)
+
+
+def open_chat():
+    """The chat window, from the menu or straight from a key."""
+    panels.show_chat(lambda since: C.chat(since), C.say)
 
 
 def choose_driver(status):
@@ -725,6 +731,18 @@ def answer_request(waiting):
 
 
 def main():
+    # A key on the keyboard opens chat without going through the menu, which
+    # is what the card on the television tells the room to press. Argument
+    # rather than a second add-on: it is the same program, told which door it
+    # came in by.
+    if len(sys.argv) > 1 and sys.argv[1] == "chat":
+        status = C.status()
+        if not status.get("open"):
+            notify("No session is open.")
+            return
+        open_chat()
+        return
+
     try:
         status = C.status()
     except C.NotRunning:
@@ -765,6 +783,7 @@ def main():
              lambda: panels.show_invite(C.status, new_invite)),
             ("New link and PIN…", lambda: new_invite_asked(status)),
             ("Can guests start games?…", lambda: choose_policy(status)),
+            ("Chat with the players…", open_chat),
             ("Who is playing…", lambda: panels.show_monitor(C.status)),
             ("Add more time…", lambda: extend_session(status)),
             ("Who may drive the screen…", lambda: choose_driver(C.status())),

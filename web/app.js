@@ -391,6 +391,8 @@ function connect(hello) {
       case "arrived":       return somebodyArrived(message);
       case "pads":          return seatsFrom(message);
       case "hold":          return holdInput(message);
+      case "chat":          return heardChat(message);
+      case "chatlog":       return (message.messages || []).forEach(heardChat);
       case "note":          return showNotice(
         "<p>" + escapeText(message.message) + "</p>", false);
       case "launchdenied":  return showNotice(
@@ -2263,7 +2265,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03x";
+const CLIENT_BUILD = "2026-09-03y";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2742,6 +2744,113 @@ function holdInput(message) {
     hideNotice();
   }
 }
+
+/* ---- chat ----------------------------------------------------------------
+ *
+ * Guests can watch each other play and cannot say a word to each other, which
+ * is a strange way to spend an evening together. This is a line of text from
+ * whoever is holding a pad to everybody -- the other guests and the room,
+ * because the person on the sofa is playing too.
+ *
+ * Nothing is kept here beyond the session. The page holds what it has been
+ * told and forgets it on reload; the host holds the last sixty lines so
+ * somebody joining late is not joining blind. A chat that outlives the
+ * evening is a different thing to own, and nobody asked for that one.
+ */
+let chatSeen = 0;               // the newest message id this page has shown
+let chatUnread = 0;
+
+function chatOpen() {
+  return !el("chat").hidden;
+}
+
+function heardChat(message) {
+  if (!message || !message.text) return;
+  if (message.id && message.id <= chatSeen) return;   // already on the page
+  chatSeen = Math.max(chatSeen, message.id || 0);
+  const log = el("chat-log");
+  const line = document.createElement("p");
+  line.className = "chat-line";
+  const who = document.createElement("span");
+  who.className = "chat-who";
+  who.textContent = message.from || "somebody";
+  const said = document.createElement("span");
+  said.className = "chat-said";
+  // textContent, never innerHTML: this is the one place another person's
+  // words reach this page, and the host does not escape them because
+  // escaping belongs where the medium is known. Here the medium is a DOM.
+  said.textContent = message.text;
+  line.append(who, said);
+  log.appendChild(line);
+  // Only the last hundred stay in the page. A conversation nobody scrolled
+  // back through is not worth the memory on a phone.
+  while (log.children.length > 100) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+
+  if (chatOpen()) return;
+  chatUnread += 1;
+  paintChatBadge();
+  // A short line over the picture, so somebody playing does not have to open
+  // a panel to find out whether it was worth opening. It takes itself away
+  // again -- and only if it is still the notice on screen, because anything
+  // that arrived after it has more right to be there than a message somebody
+  // has now had six seconds to read.
+  const toast = '<p class="footnote chat-toast"><strong>'
+    + escapeText(message.from || "") + "</strong> "
+    + escapeText(message.text.slice(0, 90)) + "</p>";
+  showNotice(toast, false);
+  clearTimeout(chatToast);
+  chatToast = setTimeout(() => {
+    if (!el("notice").hidden && lastNotice === toast) hideNotice();
+  }, 6000);
+}
+
+let chatToast = null;
+
+function paintChatBadge() {
+  const badge = el("chatnew");
+  badge.textContent = chatUnread > 9 ? "9+" : String(chatUnread);
+  badge.hidden = chatUnread === 0;
+}
+
+function openChat() {
+  el("chat").hidden = false;
+  chatUnread = 0;
+  paintChatBadge();
+  // Everything said before this page was looking. Asked for rather than
+  // pushed, so a guest who joins an hour in gets the conversation and a guest
+  // who never opens chat is never sent it.
+  send({ t: "chatlog", since: chatSeen });
+  const box = el("chat-text");
+  // Not focused on a phone: focus opens the keyboard over the game, and
+  // somebody opening chat to *read* it did not ask for that.
+  if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+    box.focus({ preventScroll: true });
+  }
+  el("chat-log").scrollTop = el("chat-log").scrollHeight;
+}
+
+function closeChat() {
+  el("chat").hidden = true;
+  el("chat-text").blur();
+}
+
+el("chatbtn").addEventListener("click", () => {
+  if (chatOpen()) closeChat(); else openChat();
+});
+el("chat-close").addEventListener("click", closeChat);
+el("chat-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const box = el("chat-text");
+  const text = box.value.trim();
+  if (!text) return;
+  send({ t: "chat", message: text });
+  box.value = "";
+  // Not echoed locally: it comes back from the host with everybody else's,
+  // in the order the host put them in, which is the order everyone else sees.
+  // A page that draws its own first shows a different conversation from the
+  // one being had.
+});
 
 /* ---- chrome ---- */
 

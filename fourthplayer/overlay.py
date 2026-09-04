@@ -54,6 +54,15 @@ CARD_SECONDS = 120
 # How long "somebody joined" stays up. Long enough to read from a sofa without
 # looking for it, short enough not to sit on a game.
 JOINED_SECONDS = 5.0
+# How long a line of chat stays on the television. Long enough to read twice
+# -- somebody is playing a game while it appears, and the first read is
+# usually "something appeared" rather than the words.
+CHAT_SECONDS = 9.0
+# The key that opens the chat window in Kodi. It is written on the card
+# because a message you cannot answer is a worse thing to be shown than no
+# message: the whole point of putting it on the screen is that the person in
+# the room is in the conversation rather than being talked about.
+REPLY_KEY = "F8"
 
 MARGIN = 28
 QR_PIXELS = 190
@@ -75,6 +84,27 @@ def ask(request):
         return json.loads(data or b"{}")
     except (OSError, ValueError):
         return {"ok": False, "open": False}
+
+
+def wrap_two(said, per_line):
+    """Two lines of at most `per_line`, breaking on a space where there is one.
+
+    Deliberately not a full layout: this is a card on a television with room
+    for two lines, and the chat window is where the rest of a long message is
+    read. Ending mid-word with an ellipsis says "there is more" better than a
+    line that stops neatly and looks complete.
+    """
+    said = " ".join(str(said).split())
+    if len(said) <= per_line:
+        return said, ""
+    cut = said.rfind(" ", 0, per_line + 1)
+    first = said[:cut] if cut > per_line // 2 else said[:per_line]
+    rest = said[len(first):].strip()
+    if len(rest) <= per_line:
+        return first, rest
+    cut = rest.rfind(" ", 0, per_line - 1)
+    second = (rest[:cut] if cut > per_line // 2 else rest[:per_line - 1])
+    return first, second.rstrip() + "\u2026"
 
 
 def qr_surface(text, size=QR_PIXELS):
@@ -108,6 +138,8 @@ class Overlay(Gtk.Window):
         # announced the moment this window opens.
         self.known = None
         self.joined = None           # (name, until) while somebody is new
+        self.chat = None             # (from, text, until) while one is fresh
+        self.chat_seen = None        # the newest id shown, None until first poll
         self.shoulders = Shoulders()
         self.hold = 0.0
         # A hold that was already under way when the request arrived does not
@@ -190,6 +222,21 @@ class Overlay(Gtk.Window):
                            time.monotonic() + JOINED_SECONDS)
         self.known = here
 
+        # Anything said since the last poll. Only the newest is shown -- two
+        # cards cannot both be on a television at once, and the newest is the
+        # one somebody is waiting on an answer to.
+        lines = status.get("chat") or []
+        newest = lines[-1] if lines else None
+        if self.chat_seen is None:
+            # Whatever was said before this overlay started is history, not
+            # news: a card for it would be shown to somebody who has already
+            # had the conversation.
+            self.chat_seen = status.get("chat_last") or 0
+        elif newest and newest.get("id", 0) > self.chat_seen:
+            self.chat_seen = newest["id"]
+            self.chat = (newest.get("from") or "Guest", newest.get("text") or "",
+                         time.monotonic() + CHAT_SECONDS)
+
         was = self.pending
         self.pending = (status.get("launch") or {}).get("pending")
         if self.pending and not was:
@@ -207,6 +254,8 @@ class Overlay(Gtk.Window):
             self.expanded = False
         if self.joined and time.monotonic() >= self.joined[1]:
             self.joined = None
+        if self.chat and time.monotonic() >= self.chat[2]:
+            self.chat = None
         self.reposition()
         self.queue_draw()
         return True
@@ -317,6 +366,13 @@ class Overlay(Gtk.Window):
         return True
 
     def reposition(self):
+        if self.chat and not self.pending:
+            self.resize(430, 132)
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            area = monitor.get_geometry()
+            self.move(area.x + area.width - 430 - MARGIN, area.y + MARGIN)
+            return
         if self.joined and not self.pending:
             self.resize(330, 96)
             display = Gdk.Display.get_default()
@@ -364,6 +420,8 @@ class Overlay(Gtk.Window):
 
         if self.pending:
             self.draw_ask(ctx, width, height)
+        elif self.chat:
+            self.draw_chat(ctx, width, height)
         elif self.joined:
             self.draw_joined(ctx, width, height)
         elif self.expanded and self.qr:
@@ -371,6 +429,21 @@ class Overlay(Gtk.Window):
         else:
             self.draw_badge(ctx, width, height)
         return False
+
+    def draw_chat(self, ctx, width, height):
+        who, said, _until = self.chat
+        text(ctx, CARD_PAD, CARD_PAD + 2, who[:22].upper(), 11,
+             (0.90, 0.61, 0.25), bold=True)
+        # Two lines of it, cut where it stops fitting rather than at a word
+        # count, and the rest left in the chat window where it can be read
+        # properly. A card that grows with what somebody typed is a card that
+        # covers a game.
+        first, second = wrap_two(said, 34)
+        text(ctx, CARD_PAD, CARD_PAD + 26, first, 17, (0.89, 0.91, 0.95))
+        if second:
+            text(ctx, CARD_PAD, CARD_PAD + 50, second, 17, (0.89, 0.91, 0.95))
+        text(ctx, CARD_PAD, height - CARD_PAD - 12,
+             "%s to reply" % REPLY_KEY, 12, (0.62, 0.66, 0.72))
 
     def draw_joined(self, ctx, width, height):
         name, _until = self.joined

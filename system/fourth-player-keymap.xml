@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One key, for the person in the room.
+
+     A message from a guest appears on the television as a card, and that card
+     says "F8 to reply". This is what makes that true. Without it the card is
+     an instruction to press a key that does nothing, which is worse than not
+     mentioning replying at all.
+
+     F8 rather than a letter, because Kodi's own bindings own most letters (c
+     is the context menu, i is information) and taking one of those off
+     somebody's remote to add a chat key is a poor trade. The function keys
+     are free, and a keyboard is what this is for.
+
+     Installed to ~/.kodi/userdata/keymaps/fourth-player.xml. Kodi merges every
+     file in that directory, so this adds a key and changes nothing else. -->
+<keymap>
+  <global>
+    <keyboard>
+      <f8>RunScript(script.fourthplayer,chat)</f8>
+    </keyboard>
+  </global>
+</keymap>

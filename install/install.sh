@@ -76,6 +76,27 @@ sed "s|%h/fourth-player|$REPO|" "$REPO/system/fourth-player.service" \
 systemctl --user daemon-reload
 echo "enable it with: systemctl --user enable --now fourth-player"
 
+say "the chat key"
+# The card that appears on the television when a guest says something tells
+# the room "F8 to reply". This is what makes that true, and it is why the
+# keymap is installed rather than suggested: an instruction on a screen that
+# does nothing is worse than no instruction.
+#
+# Kodi merges every file in this directory, so it adds one key and changes
+# nothing else about anybody's remote.
+if [ -d "$HOME/.kodi/userdata" ]; then
+  mkdir -p "$HOME/.kodi/userdata/keymaps"
+  install -m 0644 "$REPO/system/fourth-player-keymap.xml" \
+    "$HOME/.kodi/userdata/keymaps/fourth-player.xml"
+  echo "F8 opens chat (~/.kodi/userdata/keymaps/fourth-player.xml)"
+  if pgrep -x kodi.bin >/dev/null 2>&1 && [ -x /usr/bin/kodi-send ]; then
+    kodi-send --action="ReloadKeymaps" >/dev/null 2>&1 || true
+    echo "asked the running Kodi to reload its keymaps"
+  fi
+else
+  echo "no ~/.kodi/userdata yet; run Kodi once, then run this again"
+fi
+
 say "the Kodi add-on"
 if [ -d "$HOME/.kodi/addons" ]; then
   ln -sfn "$REPO/addons/script.fourthplayer" "$HOME/.kodi/addons/script.fourthplayer"

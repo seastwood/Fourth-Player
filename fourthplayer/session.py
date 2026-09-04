@@ -45,6 +45,21 @@ log = logging.getLogger("fourthplayer.session")
 
 SWEEP_INTERVAL = 0.05
 
+# ---- chat ------------------------------------------------------------------
+#
+# Guests can see each other's controllers moving and cannot say a word to each
+# other, which is a strange way to play together. So: a line of text, from
+# whoever is holding a pad, to everybody -- including the television, because
+# the person in the room is playing too and a conversation they cannot see is
+# one happening about them.
+#
+# Deliberately small. No history beyond the session, no names beyond the ones
+# guests already chose, nothing kept on disk. A chat that outlives the evening
+# is a different thing to own.
+CHAT_KEEP = 60              # messages remembered, for somebody joining late
+CHAT_LIMIT = 240            # characters, after which it is cut
+CHAT_GAP = 0.4              # seconds one guest must leave between messages
+
 # Where a live session is written down so a restart does not end it. The
 # process has segfaulted inside the GPU's video driver more than once, and
 # systemd puts it straight back -- but everything about the session lived in
@@ -262,6 +277,10 @@ class LiveSession:
         # are the same for everybody and some are not, and this is the first
         # that is not.
         self.on_notice_one = None
+        # What has been said this session, and when each guest last spoke.
+        self.chat = []
+        self._chat_id = 0
+        self._chat_at = {}
         self.driver = None
         # And what it was granted against. A permission to drive Moonlight is
         # not a permission to drive Steam's store, and the way somebody gets
@@ -1190,6 +1209,42 @@ class LiveSession:
             if shell in front:
                 return True, shell
         return True, "the desktop"
+
+    def say(self, who, text, slot=None):
+        """Put one line in front of everybody. Returns the message, or None.
+
+        `who` is a label rather than a guest, because the television speaks
+        here too and it is not sitting in a slot.
+
+        Everything a browser sends is suspect: this is the one place in the
+        program where a guest's own words reach other people's screens, so the
+        text is cut to length, stripped of the control characters that make a
+        line lie about how long it is, and rate limited per sender. It is not
+        escaped here -- the page and the overlay each escape for their own
+        medium, which is where escaping belongs.
+        """
+        text = " ".join(str(text or "").split())[:CHAT_LIMIT]
+        if not text:
+            return None
+        now = self._now()
+        if slot is not None:
+            last = self._chat_at.get(slot, 0.0)
+            if now - last < CHAT_GAP:
+                return None
+            self._chat_at[slot] = now
+        self._chat_id += 1
+        message = {"id": self._chat_id, "from": who, "text": text,
+                   "at": time.time(), "slot": slot}
+        self.chat.append(message)
+        del self.chat[:-CHAT_KEEP]
+        self.notify({"t": "chat", **message})
+        log.info("chat: %s: %s", who, text)
+        return message
+
+    def recent_chat(self, since=0):
+        """Messages after `since`, for a page that has just joined or a
+        television that polls."""
+        return [m for m in self.chat if m["id"] > since]
 
     def name_a_driver(self, slot):
         """Let one guest drive what is in front, or nobody. Returns the label.

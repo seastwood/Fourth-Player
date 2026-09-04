@@ -208,6 +208,21 @@ class Server:
                     # game was running.
                     await outbox.put({"t": "pads", "yours": guest.pad_index,
                                       **self.session.pad_state()})
+                elif kind == "chat":
+                    said = self.session.say(guest.label, message.get("message"),
+                                            slot=guest.slot)
+                    if said is None:
+                        # Empty, or too soon after their last one. Not worth an
+                        # error on somebody's screen: the page stops them
+                        # sending an empty line, and a rate limit that
+                        # complains is a rate limit somebody argues with.
+                        pass
+                elif kind == "chatlog":
+                    # Everything said before this page arrived, so somebody
+                    # joining mid-conversation is not joining it blind.
+                    await outbox.put({"t": "chatlog",
+                                      "messages": self.session.recent_chat(
+                                          int(message.get("since") or 0))})
                 elif kind == "repick":
                     try:
                         self.session.request_repick(guest)
@@ -431,6 +446,21 @@ class Server:
         try:
             if command == "status":
                 return self._status()
+            if command == "chat":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session is open"}
+                return {"ok": True,
+                        "messages": self.session.recent_chat(
+                            int(request.get("since") or 0))}
+            if command == "say":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session is open"}
+                # The television's own name, so a guest can tell the room from
+                # the people in it. Not a guest label: nobody in the room
+                # claimed a slot.
+                said = self.session.say(request.get("as") or "Television",
+                                        request.get("text"))
+                return {"ok": bool(said), "message": said}
             if command == "drive":
                 # Which guest may drive whatever is in front. From here only:
                 # this socket is the host's own machine, and a guest cannot
@@ -710,6 +740,10 @@ class Server:
             # Who may drive what is in front, if anybody, and what it was
             # granted against -- so the add-on can offer to take it back and
             # say what it is for.
+            # The last few lines, so the overlay can show what was just said
+            # without a second round trip on every poll.
+            "chat": self.session.recent_chat(max(0, self.session._chat_id - 3)),
+            "chat_last": self.session._chat_id,
             "driver": self.session.driver,
             "driver_shell": self.session.driver_shell,
             "held": self.session.input_held,

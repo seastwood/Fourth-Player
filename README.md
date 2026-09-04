@@ -207,6 +207,34 @@ retargets that click away from the label, so neither is used in this mode —
 release is heard on the window rather than through capture. On Android, where
 `vibrate()` exists, none of this applies and the press path is unchanged.
 
+### Talking to each other
+
+Guests can watch each other play and, until now, could not say a word — which
+is a strange way to spend an evening together. **Chat** in the corner of the
+page opens the conversation: a line of text from whoever is holding a pad to
+everybody, with a count on the button of what has been said since you last
+looked, and a short line over the picture when something arrives so you need
+not open a panel to find out whether it was worth opening.
+
+**The room is in it too.** A message appears on the television as a card that
+says *F8 to reply*, and F8 opens the chat window in Kodi — reading needs
+nothing but eyes, and answering opens Kodi's own keyboard, which is a real
+keyboard where there is one and the on-screen one where there is not. The
+keymap that makes F8 work is installed by `install/install.sh`, because a card
+telling somebody to press a key that does nothing is worse than a card that
+says nothing at all.
+
+Sixty lines are remembered so somebody joining an hour in is not joining
+blind, and nothing is written to disk: an evening's conversation, not a record
+of one. Messages are cut to 240 characters, flattened to a single line, and
+rate limited per person — the television is not, because nobody in the room is
+a stranger to the people it is talking to.
+
+Nothing escapes anybody's words on the way through. The host passes them on as
+typed; the page puts them in the DOM as text and never as markup, and the
+television draws them with Cairo. Escaping belongs where the medium is known,
+and a string escaped for one of those is wrong in the other.
+
 ### Naming somebody who may drive
 
 A guest's controller is held while a menu is in front rather than a game. That
