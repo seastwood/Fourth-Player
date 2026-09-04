@@ -173,6 +173,32 @@ def main(argv=None):
     steam_drop = steam_sub.add_parser("remove", help="stop offering one")
     steam_drop.add_argument("game", nargs="+")
 
+    # Accounts. Only here: the web may hand out capabilities that already
+    # exist, and may never create one. Making an account, resetting a second
+    # factor and adding a Steam game are all acts of creation, so all three
+    # happen sitting in front of the machine or not at all.
+    admin = sub.add_parser("admin", help="the accounts guests can log in to")
+    admin_sub = admin.add_subparsers(dest="admin_command", required=True)
+    admin_add = admin_sub.add_parser("add", help="create an account")
+    admin_add.add_argument("name")
+    admin_add.add_argument("--can", nargs="*", default=None, metavar="CAPABILITY",
+                           help="what it may do; the first account gets grant")
+    admin_sub.add_parser("list", help="every account and what it may do")
+    admin_can = admin_sub.add_parser("can", help="show or set what an account may do")
+    admin_can.add_argument("name")
+    admin_can.add_argument("capability", nargs="*",
+                           help="the complete list; none at all shows it instead")
+    admin_pass = admin_sub.add_parser("passwd", help="change an account's password")
+    admin_pass.add_argument("name")
+    admin_2fa = admin_sub.add_parser("reset-2fa", help="new authenticator secret")
+    admin_2fa.add_argument("name")
+    admin_forget = admin_sub.add_parser(
+        "forget-devices", help="sign out every remembered device")
+    admin_forget.add_argument("name")
+    admin_drop = admin_sub.add_parser("remove", help="delete an account")
+    admin_drop.add_argument("name")
+    admin_drop.add_argument("--yes", action="store_true", help="do not ask")
+
     sub.add_parser("check", help="report whether this machine can host")
     sub.add_parser("write-config", help="write the default config file")
 
@@ -225,6 +251,9 @@ def main(argv=None):
 
     if args.command == "steam":
         return _steam(args)
+
+    if args.command == "admin":
+        return _admin(args)
 
     if args.command == "check":
         return _check(cfg)
@@ -364,6 +393,181 @@ def _monitor_sources():
                 if "\t" in line and ".monitor" in line]
     except Exception:
         return []
+
+
+def _admin(args):
+    """Create and edit accounts.
+
+    Local, like `steam`: it edits a file rather than the running session, so
+    it works whether or not a session is open. A change takes effect at the
+    next login; anybody already logged in keeps what they had until their
+    socket closes, which is the same rule the rest of the program follows.
+    """
+    import getpass
+    import subprocess
+    from . import accounts
+
+    def ask_password(who):
+        """Twice, and never from the command line.
+
+        A password given as an argument is in `ps`, in the shell history and
+        in whatever the terminal scrolled back to. Asking is not politeness.
+
+        Piped in, it is read as two plain lines instead. That is how an
+        install script creates the first account, and it gives up nothing:
+        stdin is not in `ps` either, and anybody who can pipe to this command
+        is already at a shell on the machine, which is further in than any
+        password here would take them.
+        """
+        if not sys.stdin.isatty():
+            lines = [sys.stdin.readline().rstrip("\n"),
+                     sys.stdin.readline().rstrip("\n")]
+        else:
+            lines = [getpass.getpass("A password for %s: " % who),
+                     getpass.getpass("And again: ")]
+        if len(lines[0]) < 8:
+            print("A password needs to be at least eight characters. "
+                  "Nothing was changed.")
+            return None
+        if lines[0] != lines[1]:
+            print("Those did not match. Nothing was changed.")
+            return None
+        return lines[0]
+
+    def show_secret(name, secret):
+        """The one time the secret is ever printed."""
+        print()
+        print("Set up an authenticator app for %s now -- this is shown once." % name)
+        print()
+        print("  secret:  %s" % secret)
+        print("  or URI:  %s" % accounts.otpauth(name, secret))
+        # A nicety when the tool happens to be installed. The secret above is
+        # the real answer; this only saves typing it.
+        try:
+            subprocess.run(["qrencode", "-t", "ANSIUTF8",
+                            accounts.otpauth(name, secret)], check=True)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        print()
+
+    try:
+        if args.admin_command == "add":
+            first = not accounts.all_accounts()
+            can = args.can
+            if can is None:
+                # The first account is the way in, so it gets the bit that can
+                # hand out the others. Later accounts start with nothing,
+                # because an account that can do nothing is a safe mistake and
+                # an account that can do everything is not.
+                can = ["grant"] if first else []
+            for cap in can:
+                accounts.check_capability(cap)
+            password = ask_password(args.name)
+            if password is None:
+                return 1
+            account, secret = accounts.add(args.name, password, can)
+            print("Created %s." % account["name"])
+            if first:
+                print("This is the first account, so it may grant capabilities "
+                      "to the others.")
+            print("It may: %s" % (" ".join(account["can"]) or "nothing yet"))
+            show_secret(account["name"], secret)
+            return 0
+
+        if args.admin_command == "list":
+            everyone = accounts.all_accounts()
+            if not everyone:
+                print("There are no accounts. Make one with: "
+                      "fourth-player admin add <name>")
+                return 0
+            for account in everyone:
+                seen = account.get("last_seen") or 0
+                devices = len([d for d in account.get("devices", [])
+                               if d.get("expires", 0) > time.time()])
+                print("  %-16s %-32s %s%s" % (
+                    account["name"],
+                    " ".join(account.get("can") or []) or "-",
+                    ("last seen " + time.strftime("%d %b %H:%M", time.localtime(seen)))
+                    if seen else "never logged in",
+                    (", %d remembered device%s" % (devices, "" if devices == 1 else "s"))
+                    if devices else ""))
+            return 0
+
+        if args.admin_command == "can":
+            account = accounts.find(args.name)
+            if account is None:
+                print("There is no account called %r." % args.name)
+                return 1
+            if not args.capability:
+                print("%s may: %s" % (account["name"],
+                                      " ".join(account.get("can") or []) or "nothing"))
+                print("Available: %s, or steam:<appid>"
+                      % ", ".join(accounts.CAPABILITIES))
+                return 0
+            account = accounts.set_capabilities(args.name, args.capability)
+            print("%s may now: %s" % (account["name"],
+                                      " ".join(account["can"]) or "nothing"))
+            if "grant" in account["can"]:
+                print("Note: grant lets this account give itself the rest.")
+            return 0
+
+        if args.admin_command == "passwd":
+            if accounts.find(args.name) is None:
+                print("There is no account called %r." % args.name)
+                return 1
+            password = ask_password(args.name)
+            if password is None:
+                return 1
+            accounts.set_password(args.name, password)
+            print("The password for %s was changed." % args.name)
+            return 0
+
+        if args.admin_command == "reset-2fa":
+            account, secret = accounts.reset_totp(args.name)
+            print("%s has a new authenticator secret, and every remembered "
+                  "device was signed out." % account["name"])
+            show_secret(account["name"], secret)
+            return 0
+
+        if args.admin_command == "forget-devices":
+            gone = accounts.forget_devices(args.name)
+            print("Signed out %d remembered device%s for %s."
+                  % (gone, "" if gone == 1 else "s", args.name))
+            return 0
+
+        if args.admin_command == "remove":
+            account = accounts.find(args.name)
+            if account is None:
+                print("There is no account called %r." % args.name)
+                return 1
+            # Deleting the last account that can grant leaves a session nobody
+            # can administer from a phone. It is recoverable -- `admin add` is
+            # right here -- but not by anybody who is not at the console, so
+            # it is worth one question.
+            granters = [a for a in accounts.all_accounts()
+                        if "grant" in (a.get("can") or [])]
+            last = [a["name"] for a in granters] == [account["name"]]
+            if last and not args.yes:
+                print("%s is the only account that can grant capabilities."
+                      % account["name"])
+                print("Removing it leaves nobody who can administer a session "
+                      "from a phone.")
+                if input("Remove it anyway? [y/N] ").strip().lower() not in ("y", "yes"):
+                    print("Nothing was changed.")
+                    return 1
+            accounts.remove(args.name)
+            print("Removed %s, and any devices it had remembered."
+                  % account["name"])
+            return 0
+
+    except accounts.AccountError as exc:
+        print("%s" % exc)
+        return 1
+    except (KeyboardInterrupt, EOFError):
+        print("\nNothing was changed.")
+        return 1
+
+    return 1
 
 
 def _steam(args):
