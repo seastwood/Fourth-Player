@@ -2260,9 +2260,37 @@ async function report(what) {
   } catch (_) { /* reporting must never break anything */ }
 }
 
+/* mediaFailed borrows the prompt -- the "press any button" hint -- to explain
+ * itself, because it is the one box on the page big enough for the
+ * explanation. Two things follow from borrowing it, and neither was handled.
+ *
+ * It has to be given back. The hint's own words were overwritten, so once a
+ * failure had been shown the prompt said "the video connection could not be
+ * rebuilt" every time anything asked for the controller hint afterwards.
+ *
+ * And it has to be dismissible. The click-to-close on the page is attached to
+ * the notice, which is a different element; this one had no way out at all,
+ * so a guest whose video came back was left reading a stale failure over a
+ * working picture until they closed the page and opened it again. */
+let promptHint = null;              // the hint's own words, before a failure
+let promptFailed = false;
+
+function clearMediaFailure() {
+  if (!promptFailed) return;
+  promptFailed = false;
+  if (promptHint !== null) el("prompt").innerHTML = promptHint;
+  el("prompt").hidden = true;
+  // The renewals that were spent failing should not count against the next
+  // hiccup: without this the very next one is over the limit immediately and
+  // says it could not be rebuilt without trying.
+  renewals = 0;
+}
+
 async function mediaFailed(why) {
   setLink("bad", "no video");
   showHud(true);
+  if (promptHint === null) promptHint = el("prompt").innerHTML;
+  promptFailed = true;
   el("prompt").hidden = false;
   const route = await describeRoute();
   report(why);
@@ -2273,7 +2301,16 @@ async function mediaFailed(why) {
     "<p class=\"footnote\">The page and the PIN reach the host over one port; " +
     "the video takes a different, direct route, and that one is not getting " +
     "through. Usually the host's UDP ports are not forwarded.</p>" +
-    "<p class=\"footnote\">" + route + "</p>";
+    "<p class=\"footnote\">" + route + "</p>" +
+    "<p class=\"footnote\"><button type=\"button\" " +
+    "class=\"linkish prompt-close\">Close this</button></p>";
+  // Found by class off the prompt, not by id: this button is written here
+  // rather than living in index.html, and every id el() reaches for is
+  // supposed to be in the page -- there is a test that says so, and it is
+  // right to. A node that only exists sometimes should not claim a name that
+  // the whole document shares.
+  const close = el("prompt").querySelector(".prompt-close");
+  if (close) close.addEventListener("click", clearMediaFailure);
 }
 
 /* Which pair of addresses the browser settled on, in words. This is the fact
@@ -2334,7 +2371,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04e";
+const CLIENT_BUILD = "2026-09-04f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2469,6 +2506,10 @@ async function watchMedia() {
     // actually worked.
     setLink("ok");
     if (!el("notice").hidden && lastNotice.includes("could not")) hideNotice();
+    // And the explanation of a failure that is plainly over. This is the case
+    // that sent people to reload the page: the picture was fine and the panel
+    // over it still said the connection could not be rebuilt.
+    clearMediaFailure();
     return;
   }
   if (lastBytes < 0) {
