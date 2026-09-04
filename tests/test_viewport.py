@@ -112,6 +112,17 @@ for rel in sorted(named):
 # square, so the maskable one is padded -- and if that padding is ever lost,
 # the ring loses its edge on somebody's home screen and nothing here would
 # have said so.
+# Clear around the circle, everywhere except the maskable one. Left square,
+# the drawing is a black tile on the Kodi menu and a black box on the join
+# page's gradient -- which is what it looked like before somebody said so.
+for rel in sorted(named):
+    path = os.path.join(ROOT, "web", rel)
+    if not os.path.isfile(path) or "maskable" in rel:
+        continue
+    corner = Image.open(path).convert("RGBA").getpixel((1, 1))[3]
+    check(corner == 0, "%s is clear at the corner, not a black square; "
+          "alpha %d" % (rel, corner))
+
 maskable = [e["src"] for e in manifest.get("icons", [])
             if "maskable" in (e.get("purpose") or "")]
 check(len(maskable) == 1, "there is one maskable icon")
@@ -122,6 +133,11 @@ if maskable:
     check(len(edge) <= 3,
           "and its edge is flat background rather than artwork, which is what "
           "being cropped safely means; got %d colours" % len(edge))
+    solid = Image.open(os.path.join(
+        ROOT, "web", maskable[0].replace("/static/", ""))).convert("RGBA")
+    check(solid.getpixel((1, 1))[3] == 255,
+          "and it is opaque, unlike the rest: a launcher crops this one and "
+          "paints nothing behind it, so a clear corner would be a hole")
 
 json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
 print("  ok   the manifest parses")

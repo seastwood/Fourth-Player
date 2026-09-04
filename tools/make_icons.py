@@ -7,11 +7,14 @@ menu. Kept as a script rather than a folder of files somebody has to remember
 to redo, because the day the drawing changes is the day five stale copies of
 the old one start disagreeing with it.
 
-The maskable one is padded on purpose. Android crops a maskable icon to
-whatever shape the launcher likes, and it only promises to keep the middle
-80%; this drawing is a circle that nearly fills its square, so cropping it
-uncropped would shave the ring off. Padding it to about three-quarters puts
-the whole circle inside the part that survives.
+Everything is cut to the circle: the drawing is a circle on a near-black
+square, and left square it reads as a sticker -- a black tile on the Kodi
+menu, a black box on the join page's gradient.
+
+The maskable one is the exception, and has to be. A launcher crops it to
+whatever shape it likes and paints nothing behind it, so transparency there is
+a hole rather than a rounded corner; it is also padded, because only the
+middle 80% is promised and this circle nearly fills its square.
 """
 import os
 import sys
@@ -40,6 +43,36 @@ def write(image, path):
     print("   %-28s %s" % (os.path.basename(path), image.size))
 
 
+def round_off(master, size):
+    """The drawing at `size`, with everything outside its circle cut away.
+
+    The drawing is a circle on a near-black square. Left square it reads as a
+    sticker: a black tile on the Kodi menu, a black box on the join page's
+    gradient. Everything outside the circle becomes transparent, so what is
+    left is the circle.
+
+    The radius is measured off the drawing rather than assumed -- the artwork
+    runs from 25 to 1228 across a 1254 square, which is the middle 96%, so
+    0.48 of the width is its edge. The last pixel and a half is faded rather
+    than cut, or the circle has a staircase on it at small sizes.
+    """
+    art = master.resize((size, size), Image.LANCZOS).convert("RGBA")
+    middle = (size - 1) / 2.0
+    radius = size * 0.48
+    soft = max(1.0, size / 128.0)
+    pixels = art.load()
+    for y in range(size):
+        for x in range(size):
+            dx, dy = x - middle, y - middle
+            away = (dx * dx + dy * dy) ** 0.5
+            if away > radius:
+                pixels[x, y] = (0, 0, 0, 0)
+            elif away > radius - soft:
+                r, g, b, a = pixels[x, y]
+                pixels[x, y] = (r, g, b, int(a * (radius - away) / soft))
+    return art
+
+
 def main():
     if not os.path.exists(MASTER):
         sys.exit("no master drawing at %s" % MASTER)
@@ -48,49 +81,24 @@ def main():
     os.makedirs(into, exist_ok=True)
 
     for size in sorted(PLAIN):
-        write(master.resize((size, size), Image.LANCZOS),
+        write(round_off(master, size),
               os.path.join(into, "icon-%d.png" % size))
 
+    # The one that stays a filled square, and has to.
+    #
+    # A launcher crops a maskable icon to whatever shape it likes and paints
+    # nothing behind it, so transparency here is a hole rather than a rounded
+    # corner. It is padded as well: only the middle 80% is promised, and this
+    # circle nearly fills its square, so uncropped it would lose its ring.
     inner = int(MASKABLE * SAFE)
     padded = Image.new("RGBA", (MASKABLE, MASKABLE), BACKGROUND)
     art = master.resize((inner, inner), Image.LANCZOS)
     padded.alpha_composite(art, ((MASKABLE - inner) // 2,) * 2)
     write(padded, os.path.join(into, "icon-maskable-%d.png" % MASKABLE))
 
-    # The Kodi menu tile, which is 256 like every other tile on that menu.
-    write(master.resize((256, 256), Image.LANCZOS),
-          os.path.join(ROOT, "media", "menu-tile.png"))
-
-    # And one with the corners cut away, for the join page.
-    #
-    # The drawing is a circle on a near-black square. On a home screen that is
-    # right -- the launcher wants a square and rounds it itself -- but on the
-    # join page, which is a purple gradient, the square reads as a sticker
-    # somebody stuck on top. Everything outside the circle becomes
-    # transparent, measured off the drawing rather than assumed: the artwork
-    # runs from 25 to 1228 across a 1254 square, so the circle is the middle
-    # 96% of it.
-    write(round_off(master), os.path.join(into, "icon-round-192.png"))
-
-
-def round_off(master, size=192):
-    """The drawing with everything outside its circle made transparent."""
-    art = master.resize((size, size), Image.LANCZOS).convert("RGBA")
-    middle = (size - 1) / 2.0
-    radius = size * 0.48                  # the circle in the drawing, measured
-    pixels = art.load()
-    for y in range(size):
-        for x in range(size):
-            dx, dy = x - middle, y - middle
-            away = (dx * dx + dy * dy) ** 0.5
-            if away > radius:
-                pixels[x, y] = (0, 0, 0, 0)
-            elif away > radius - 1.5:
-                # One pixel of softened edge, so the circle does not have a
-                # staircase on it at this size.
-                r, g, b, a = pixels[x, y]
-                pixels[x, y] = (r, g, b, int(a * (radius - away) / 1.5))
-    return art
+    # The Kodi menu tile, 256 like every other tile on that menu, and clear
+    # around the circle like every other tile on that menu.
+    write(round_off(master, 256), os.path.join(ROOT, "media", "menu-tile.png"))
 
 
 if __name__ == "__main__":
