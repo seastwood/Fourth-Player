@@ -129,7 +129,19 @@
               aria-label="Controller"></select>
     </span>
     <button id="games" type="button" class="ghost" hidden>Games</button>
-    <button id="padtest" type="button" class="ghost">Controls</button>
+    <!-- Options: how your own controller behaves on one tab, what the
+         television is doing on the other. An icon because this bar is
+         several buttons wide on a phone and words were being truncated. -->
+    <button id="padtest" type="button" class="ghost icon"
+            aria-label="Options" title="Options">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor"
+                stroke-width="2.2"/>
+        <path d="M12 2.6v3.2M12 18.2v3.2M2.6 12h3.2M18.2 12h3.2M5.3 5.3l2.3 2.3M16.4 16.4l2.3 2.3M18.7 5.3l-2.3 2.3M7.6 16.4l-2.3 2.3"
+              fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="square"/>
+      </svg>
+    </button>
     <!-- Guests can see each other's controllers moving and cannot say a word
          to each other, which is a strange way to play together. The count is
          what has been said since this page last looked at it. -->
@@ -248,14 +260,6 @@
         <option value="4">4 players</option>
         <option value="5+">5 or more</option>
       </select>
-      <!-- Ending what is playing, which saves it: RetroArch writes its state
-           on the way out and loads it again next time, so "end" and "save"
-           are the same act rather than two. Here rather than on the pad
-           because it belongs with starting a game, and it is governed by the
-           same permission -- an owner who wants to be asked before a game
-           starts is asked before one ends. Hidden when nothing is playing. -->
-      <button id="endgame" type="button" class="chip" hidden
-              title="Save and end the game on the television">End game</button>
       <button id="browse-close" type="button" class="ghost"
               title="Back to the game">&times;</button>
     </div>
@@ -305,6 +309,19 @@
       <button id="pads-reset" type="button" class="ghost" hidden>Use defaults</button>
       <button id="pads-close" type="button" class="ghost" title="Back to the game">&times;</button>
     </div>
+
+    <!-- Two things live in here and they are not the same thing: how your own
+         controller behaves, and what the television is doing. Tabs rather
+         than one long panel, because scrolling past every button binding to
+         reach "end game" is a poor way to find it. -->
+    <div class="tabs" role="tablist">
+      <button id="tab-controls-pick" type="button" class="tab is-on"
+              role="tab" aria-selected="true"
+              aria-controls="tab-controls">Controls</button>
+      <button id="tab-game-pick" type="button" class="tab" role="tab"
+              aria-selected="false" aria-controls="tab-game">Game</button>
+    </div>
+    <div id="tab-controls" class="tab-panel" role="tabpanel">
     <!-- The same choice as the chip at the top, offered again here because
          this is the panel somebody opens when the controls are what they are
          thinking about, and hunting back to a chip for it is a puzzle. -->
@@ -391,29 +408,8 @@
       <select id="pads-seat" class="chip" aria-label="Which player you are">
       </select>
       <span id="pads-seat-note" class="warn" hidden></span>
-      <!-- The way out when the seat you want is not one the running game has:
-           only the television can add a port, and only by starting the game
-           again, which it knows how to do without losing the game. -->
-      <button id="pads-repick" type="button" class="ghost" hidden>Repick
-        player slots</button>
     </p>
 
-    <!-- Asked before it happens, because it happens to everybody: the game on
-         the television stops for a moment and every player has to choose a
-         slot again. Somebody tapping a button in a phone menu should know
-         that before the screen changes under four other people. -->
-    <div id="repick-ask" class="repick-ask" hidden>
-      <p class="repick-title">Repick player slots?</p>
-      <p class="footnote">The game closes for a moment and the player picker
-         comes up on the television. <strong>Everyone playing chooses their
-         slot again</strong>, then the same game carries on from exactly where
-         it is now.</p>
-      <p class="footnote">Your place in the game is kept, and so is every
-         save.</p>
-      <button id="repick-yes" type="button" class="choice">Yes, repick
-        slots</button>
-      <button id="repick-no" type="button" class="ghost">Cancel</button>
-    </div>
     <p id="pads-hint" class="browse-note">Press anything on your controller —
        nothing here reaches the game. Click a button below to rebind just that
        one.</p>
@@ -441,6 +437,51 @@
       </label>
       <p class="footnote">A dead zone ignores a stick that will not sit still.
          Sensitivity above 100% reaches full tilt sooner.</p>
+    </div>
+    </div>
+
+    <!-- The game on the television. Everything here happens to everybody in
+         the room, which is why each one asks first. -->
+    <div id="tab-game" class="tab-panel" role="tabpanel" hidden>
+      <p class="browse-note" id="game-none">Nothing is playing.</p>
+
+      <div id="game-actions" hidden>
+        <button id="endgame" type="button" class="choice">End game</button>
+        <p class="footnote">Saves where you are and puts the television back
+           to its menu. It carries on from here next time.</p>
+
+        <button id="restartgame" type="button" class="choice">Restart
+          game</button>
+        <p class="footnote">Starts the same game again from the beginning.
+           Your save is left where it is.</p>
+
+      </div>
+
+      <!-- Outside the group above, and deliberately: repicking is not
+           starting a game. It reopens the picker on a game that is already
+           running, so it follows its own rule -- there is a game -- rather
+           than the owner's rule about who may start one. -->
+      <button id="pads-repick" type="button" class="choice" hidden>Repick
+        player slots</button>
+      <p id="pads-repick-note" class="footnote" hidden>Closes the game for a
+         moment so everybody chooses a slot again, then carries on exactly
+         where it is.</p>
+    <!-- Asked before it happens, because it happens to everybody: the game on
+         the television stops for a moment and every player has to choose a
+         slot again. Somebody tapping a button in a phone menu should know
+         that before the screen changes under four other people. -->
+    <div id="repick-ask" class="repick-ask" hidden>
+      <p class="repick-title">Repick player slots?</p>
+      <p class="footnote">The game closes for a moment and the player picker
+         comes up on the television. <strong>Everyone playing chooses their
+         slot again</strong>, then the same game carries on from exactly where
+         it is now.</p>
+      <p class="footnote">Your place in the game is kept, and so is every
+         save.</p>
+      <button id="repick-yes" type="button" class="choice">Yes, repick
+        slots</button>
+      <button id="repick-no" type="button" class="ghost">Cancel</button>
+    </div>
     </div>
   </div>
 

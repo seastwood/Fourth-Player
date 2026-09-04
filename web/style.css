@@ -1658,6 +1658,55 @@ html.held .touch::after {
   pointer-events: none;
 }
 
+/* ---- tabs inside the options panel --------------------------------------
+   Two rows of things that are not the same thing: how your own controller
+   behaves, and what the television is doing. A tab each, because scrolling
+   past every button binding to reach "end game" is a poor way to find it. */
+.tabs {
+  display: flex;
+  gap: .3rem;
+  padding: .5rem clamp(.6rem, 3vw, 1.4rem) 0;
+  flex: 0 0 auto;
+}
+.tab {
+  flex: 0 0 auto;
+  min-height: 2.2rem;
+  padding: .45rem .9rem;
+  border: 2px solid var(--dim);
+  border-bottom: none;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--pixel);
+  font-size: .5rem;
+  line-height: 1.5;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.tab.is-on {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.tab-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* It scrolls, and the stage above refuses gestures to keep pinch off the
+     picture, so it asks for the one it needs. */
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  border-top: 2px solid var(--dim);
+}
+/* The game tab's actions are decisions, not settings: full width, spaced, and
+   each with its consequence written under it. */
+#tab-game .choice {
+  display: block;
+  width: 100%;
+  margin: .9rem 0 .3rem;
+}
+#tab-game .footnote { margin: 0 0 .2rem; }
+
 /* ---- the controllers on this machine ------------------------------------
    A row each, name on the left and what it is doing on the right, with one
    button. Rows rather than a picker because "which of these is player three"

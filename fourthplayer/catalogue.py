@@ -199,6 +199,16 @@ class Catalogue:
         self.refresh()
         return self._rows.get(key)
 
+    def rows(self):
+        """Every row, paths and all. For this program, not for a guest.
+
+        listing() is what a page gets and deliberately carries no paths;
+        this is for the host asking itself which of its own games is the one
+        currently on the television.
+        """
+        self.refresh()
+        return list(self._rows.values())
+
     def systems(self):
         self.refresh()
         seen = {}

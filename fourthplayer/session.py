@@ -277,6 +277,8 @@ class LiveSession:
     # the same reason the guest has them: a session built without __init__ --
     # which is how some tests make one -- is still asked who is driving.
     driver = None
+    # The row this session last put on the television, for "start it again".
+    last_started = None
 
     def __init__(self, cfg, loop, now=time.monotonic):
         self.cfg = cfg
@@ -1138,6 +1140,57 @@ class LiveSession:
 
         return await self._start_game(row, busy, resume)
 
+    # Where kodi-retrobox records what it last put on the television. Read
+    # rather than asked for, the same coupling through data the catalogue and
+    # the pad names already use: that project needs no knowledge of this one.
+    LAST_GAME = os.path.expanduser("~/.local/state/retroarch/last-game.json")
+
+    def playing_now(self):
+        """The catalogue row for whatever is on the television, or None.
+
+        Two ways of knowing, because there are two ways a game gets started.
+        One this session started is remembered outright. One somebody put on
+        from the television is found by the path kodi-retrobox writes down --
+        without which "restart" would only ever work for games started from a
+        phone, which is not most of them.
+        """
+        if self.last_started is not None:
+            return self.last_started
+        try:
+            with open(self.LAST_GAME) as handle:
+                rom = (json.load(handle) or {}).get("rom")
+        except (OSError, ValueError):
+            return None
+        if not rom:
+            return None
+        for row in self.catalogue.rows():
+            if row.get("path") == rom:
+                return row
+        return None
+
+    async def request_restart(self, guest):
+        """Start the game that is playing again, from the beginning.
+
+        Gated as starting one is, and it is a start: what it replaces is the
+        game somebody is in the middle of.
+        """
+        if self.launch_policy == "off":
+            return {"ok": False, "error": "The owner has not turned on "
+                                          "starting and stopping games from "
+                                          "here."}
+        playing = await self.loop.run_in_executor(None, launcher.running)
+        if not playing:
+            return {"ok": False, "error": "Nothing is playing."}
+        row = self.playing_now()
+        if row is None:
+            return {"ok": False,
+                    "error": "This cannot tell which game is on the "
+                             "television, so it cannot start it again. Pick "
+                             "it from the list instead."}
+        # resume=False on purpose: "restart" is from the beginning. Ending the
+        # game is the way to stop and keep your place.
+        return await self.request_launch(guest, row["id"], resume=False)
+
     async def request_stop(self, guest):
         """A guest has asked to end the game. Returns what to tell them.
 
@@ -1235,6 +1288,9 @@ class LiveSession:
                                  "Try again in a moment."}
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
+        # Remembered so "start it again" knows what "it" is, without having to
+        # go and read what the television wrote down.
+        self.last_started = row
         if problem:
             return {"ok": False, "error": problem}
         self.notify({"t": "starting", "label": row["label"],

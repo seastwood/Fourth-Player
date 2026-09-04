@@ -2555,7 +2555,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04t";
+const CLIENT_BUILD = "2026-09-04u";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4193,6 +4193,9 @@ function paintSeats() {
   // numbers were known, which meant that the one time it was most wanted --
   // a game running whose players could not be read -- it was hidden.
   el("pads-repick").hidden = !padSeats.playing;
+  // Its explanation goes with it, rather than sitting under a button that is
+  // not there.
+  if (el("pads-repick-note")) el("pads-repick-note").hidden = !padSeats.playing;
   if (padsStale) {
     note.hidden = false;
     note.textContent = "Not connected to the host just now, so which "
@@ -4780,13 +4783,36 @@ function showToast(what, footnote) {
   }, TOAST_MS);
 }
 
+/* Which tab is showing. Two things live in this panel and they are not the
+   same thing: how your own controller behaves, and what the television is
+   doing. */
+function showTab(which) {
+  for (const name of ["controls", "game"]) {
+    const panel = el("tab-" + name);
+    const pick = el("tab-" + name + "-pick");
+    const on = name === which;
+    if (panel) panel.hidden = !on;
+    if (pick) {
+      pick.classList.toggle("is-on", on);
+      pick.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  if (which === "game") paintEndGame();
+}
+
 function paintEndGame() {
-  const button = el("endgame");
-  if (!button) return;
-  // Only when there is a game to end and the owner allows starting them at
-  // all. Under "approve" it is offered and the owner is asked, the same as
-  // starting one.
-  button.hidden = launchMode === "off" || !(padSeats && padSeats.playing);
+  const actions = el("game-actions");
+  const none = el("game-none");
+  if (!actions || !none) return;
+  // Only when there is a game and the owner allows starting and stopping them
+  // at all. Under "approve" they are offered and the owner is asked, the same
+  // as starting one.
+  const can = launchMode !== "off" && !!(padSeats && padSeats.playing);
+  actions.hidden = !can;
+  none.hidden = can;
+  none.textContent = launchMode === "off"
+    ? "The owner has not turned on starting and stopping games from here."
+    : "Nothing is playing.";
 }
 
 function launchPolicy(message) {
@@ -5136,6 +5162,22 @@ if (el("endgame")) {
                  + "carries on from here next time.")) return;
     send({ t: "endgame" });
   });
+}
+if (el("restartgame")) {
+  el("restartgame").addEventListener("click", () => {
+    // Spelled out, because "restart" is the one of these that throws
+    // something away: it is the same game from the beginning, not a reload of
+    // where everybody is.
+    if (!confirm("Start this game again from the beginning?\n\nEverybody "
+                 + "playing goes back to the start. Your save is left where "
+                 + "it is -- end the game instead to keep your place."))
+      return;
+    send({ t: "restart" });
+  });
+}
+for (const name of ["controls", "game"]) {
+  const pick = el("tab-" + name + "-pick");
+  if (pick) pick.addEventListener("click", () => showTab(name));
 }
 
 el("browse-close").addEventListener("click", closeBrowser);

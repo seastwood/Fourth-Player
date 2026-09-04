@@ -125,6 +125,51 @@ if HAVE_HOST:
     result = loop.run_until_complete(live.approve_launch())
     check(result.get("stopped") is True and fake.stops == 1,
           "and approving it ends the game")
+
+    print("\nstarting the same game again")
+    live, guest = a_session("open")
+    fake.playing, fake.stops = True, 0
+    live.last_started = None
+    live.LAST_GAME = "/nonexistent/last-game.json"
+    out = loop.run_until_complete(live.request_restart(guest))
+    check(out["ok"] is False and "cannot tell which game" in out["error"],
+          "with nothing to go on it says so rather than guessing at a game")
+
+    asked = {}
+
+    async def fake_launch(g, game_id, resume=False):
+        asked["id"], asked["resume"] = game_id, resume
+        return {"ok": True, "state": "starting"}
+
+    live.request_launch = fake_launch
+    live.last_started = {"id": "abc123", "label": "A Game", "path": "/g.gba"}
+    out = loop.run_until_complete(live.request_restart(guest))
+    check(asked.get("id") == "abc123", "the game it started is the one it restarts")
+    check(asked.get("resume") is False,
+          "from the beginning, not from the save -- ending the game is the "
+          "way to keep your place, and restart is the one that does not")
+
+    live, guest = a_session("off")
+    fake.playing = True
+    out = loop.run_until_complete(live.request_restart(guest))
+    check(out["ok"] is False, "and it is refused where starting a game is")
+
+    print("\nand a game somebody put on from the television")
+    live, guest = a_session("open")
+    fake.playing = True
+    live.last_started = None
+    import json as _json
+    import tempfile as _tempfile
+    where = _tempfile.mktemp()
+    with open(where, "w") as handle:
+        _json.dump({"rom": "/home/retro/Games/x.gba"}, handle)
+    live.LAST_GAME = where
+    live.catalogue.rows = lambda: [{"id": "zz", "path": "/home/retro/Games/x.gba"}]
+    found = live.playing_now()
+    check(found and found["id"] == "zz",
+          "is found by the path the television wrote down, so restart is not "
+          "only for games started from a phone")
+    os.remove(where)
     loop.close()
 
 print("\nthe page")
@@ -136,6 +181,19 @@ paint = paint[:paint.index("\nfunction ")]
 check("launchMode === \"off\"" in paint and "playing" in paint,
       "shown only when a game is playing and the owner allows it at all")
 check('send({ t: "endgame" })' in app, "and it asks the host")
+check(app.count("confirm(") >= 2,
+      "and restarting asks too, separately: it is the one of these that "
+      "throws something away")
+check('id="tab-game"' in page and 'id="tab-controls"' in page,
+      "the panel has a tab each for the controller and the television")
+check('aria-label="Options"' in page,
+      "and the button that opens it is an options icon rather than a word")
+check("function showTab(" in app, "the tabs switch")
+repick = app[app.index('el("pads-repick").hidden'):]
+repick = repick[:repick.index("\n")]
+check("padSeats.playing" in repick and "launchMode" not in repick,
+      "and repicking follows its own rule -- there is a game -- rather than "
+      "the owner's rule about who may start one, which it never did before")
 check("confirm(" in app,
       "after asking the person pressing it, because it is somebody else's "
       "evening: the phone holding this may be the fourth player in a room "
