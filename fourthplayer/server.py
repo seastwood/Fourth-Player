@@ -62,6 +62,14 @@ CONTROL_SOCKET = os.path.join(
 # read alike, so guessing tells the guesser nothing about which half was wrong.
 REFUSED = "That link or PIN is not valid."
 
+# Why a guest was turned away, in a word the page can act on rather than a
+# sentence it would have to match. "credential" and "closed" mean there is
+# nothing to resume and the honest next step is the PIN screen; "full" and
+# "locked" mean the credential was fine and waiting is the answer. The page
+# used to treat all of them alike and could not tell "your link is stale"
+# from "come back in a minute".
+ERROR_REASONS = ("credential", "closed", "full", "locked", "request")
+
 
 class Server:
     def __init__(self, cfg: Config):
@@ -169,7 +177,8 @@ class Server:
                 if kind in ("join", "resume") and guest is None:
                     guest = await self._admit(socket_, message, outbox)
                 elif guest is None:
-                    await outbox.put({"t": "error", "message": REFUSED})
+                    await outbox.put({"t": "error", "message": REFUSED,
+                                      "reason": "credential"})
                 elif kind == "answer":
                     sdp = message.get("sdp", "")
                     # Port 0 on the video section is a refusal. Worth a line in
@@ -197,7 +206,12 @@ class Server:
                         now_on = self.session.set_pad(
                             guest, int(message.get("pad", 0)))
                     except (ValueError, TypeError) as exc:
-                        await outbox.put({"t": "error", "message": str(exc)})
+                        # About the thing they just asked for, not about
+                        # whether they are allowed in. The page counts
+                        # refusals to decide when a credential is dead, and a
+                        # seat it could not take is not evidence of that.
+                        await outbox.put({"t": "error", "reason": "request",
+                                          "message": str(exc)})
                     else:
                         await outbox.put({"t": "pads", "yours": now_on,
                                           **self.session.pad_state()})
@@ -239,7 +253,12 @@ class Server:
                     try:
                         self.session.request_repick(guest)
                     except (ValueError, OSError) as exc:
-                        await outbox.put({"t": "error", "message": str(exc)})
+                        # About the thing they just asked for, not about
+                        # whether they are allowed in. The page counts
+                        # refusals to decide when a credential is dead, and a
+                        # seat it could not take is not evidence of that.
+                        await outbox.put({"t": "error", "reason": "request",
+                                          "message": str(exc)})
                     else:
                         await outbox.put({
                             "t": "note",
@@ -313,7 +332,8 @@ class Server:
         """
         address = self._address(socket_)
         if self.session is None or not self.session.open:
-            await outbox.put({"t": "error", "message": "There is no session open."})
+            await outbox.put({"t": "error", "reason": "closed",
+                              "message": "There is no session open."})
             return None
         try:
             if message.get("t") == "resume":
@@ -326,6 +346,7 @@ class Server:
                     socket_, address, message.get("name", ""))
         except invites.LockedOut as exc:
             await outbox.put({"t": "error", "retry_after": round(exc.seconds),
+                              "reason": "locked",
                               "message": f"Too many tries. Wait {round(exc.seconds)}s."})
             return None
         except invites.SessionFull:
@@ -341,15 +362,16 @@ class Server:
                         message.get("token", ""), str(message.get("pin", "")),
                         socket_, address, message.get("name", ""))
                 except invites.JoinError:
-                    await outbox.put({"t": "error",
+                    await outbox.put({"t": "error", "reason": "full",
                                       "message": "Every player slot is taken."})
                     return None
             else:
-                await outbox.put({"t": "error",
+                await outbox.put({"t": "error", "reason": "full",
                                   "message": "Every player slot is taken."})
                 return None
         except invites.JoinError:
-            await outbox.put({"t": "error", "message": REFUSED})
+            await outbox.put({"t": "error", "message": REFUSED,
+                              "reason": "credential"})
             return None
         except asyncio.TimeoutError:
             # The pipeline worker is wedged behind a teardown that will not

@@ -442,6 +442,7 @@ function askForPin(why) {
   guestToken = null;
   try { localStorage.removeItem(credKey()); } catch (_) {}
   clearRejoinTimer();
+  backToGate();
   el("pin").placeholder = "000000";
   el("pin").value = "";
   el("join").disabled = false;
@@ -454,19 +455,70 @@ function askForPin(why) {
                         : " Enter the PIN to join again."));
 }
 
-function onError(message) {
-  if (gate.hidden) {
-    // Already playing. A refused resume stops the page retrying on its own,
-    // rather than hammering a host that has said no -- but the credential is
-    // kept for one deliberate try, because a slot the host had not yet swept
-    // refuses the first attempt and accepts the one after it. Twice is a real
-    // no, and then the PIN is the honest answer.
-    resumeRefused += 1;
-    setLink("bad", message.message);
-    if (resumeRefused >= 2) askForPin(message.message);
-  } else {
-    askForPin(message.message);
+/* Put the join screen back.
+ *
+ * The page went one way only: gate.hidden = true on the way in and nothing
+ * that ever set it back. So asking for the PIN again wrote the reason into
+ * the gate's error box while the gate was hidden, and somebody watching a
+ * chip that said "That link or PIN is not valid" had no way to act on it --
+ * the page had told them the answer and left them on a screen with no way to
+ * give it.
+ *
+ * The picture stops here as well. A stream left running behind the join
+ * screen is somebody else's game still making noise at a person being asked
+ * for a PIN. */
+function backToGate() {
+  if (!gate.hidden) return;                // already there
+  if (ticker) { clearInterval(ticker); ticker = null; }
+  if (video) {
+    try { video.pause(); } catch (_) {}
+    video.srcObject = null;
   }
+  try { if (pc) pc.close(); } catch (_) {}
+  pc = null;
+  input = null;
+  stage.hidden = true;
+  gate.hidden = false;
+  hideNotice();
+  // Whatever it was showing belongs to a session this page is no longer in.
+  setLink("");
+}
+
+/* Refusals this page cannot wait out: there is nothing to resume, and the
+   only way forward is the PIN. Anything else -- a full session, a lockout --
+   leaves the credential worth keeping. */
+const HOPELESS = ["credential", "closed"];
+
+function onError(message) {
+  if (!gate.hidden) {
+    askForPin(message.message);
+    return;
+  }
+  // Already playing.
+  //
+  // Only refusals about getting in count towards a dead credential. An error
+  // about the thing they just asked for -- a seat already taken, a picker
+  // that cannot open with no game running -- is not evidence that the link is
+  // stale, and counting it meant two failed seat changes threw somebody back
+  // to the PIN screen.
+  if (message.reason === "request") {
+    setLink("bad", message.message);
+    return;
+  }
+  resumeRefused += 1;
+  setLink("bad", message.message);
+
+  // The host says why. A stale link or an ended session cannot come good by
+  // being tried again, so the PIN screen goes back up at once rather than
+  // after a second refusal -- and the second refusal never came, because the
+  // first one stops the page retrying. That is how somebody ended up looking
+  // at "That link or PIN is not valid" with nothing to do about it.
+  const hopeless = HOPELESS.includes(message.reason)
+    // An older host that says no reason at all: fall back to its words, which
+    // are fixed strings on the other side of this connection.
+    || (!message.reason && /link or PIN is not valid|no session open/i
+                             .test(message.message || ""));
+  if (hopeless || resumeRefused >= 2) askForPin(message.message);
 }
 
 function send(message) {
@@ -2504,7 +2556,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04n";
+const CLIENT_BUILD = "2026-09-04o";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
