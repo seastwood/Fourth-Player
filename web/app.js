@@ -2265,7 +2265,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04b";
+const CLIENT_BUILD = "2026-09-04c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2794,22 +2794,26 @@ function heardChat(message) {
   if (chatOpen()) return;
   chatUnread += 1;
   paintChatBadge();
-  // A short line over the picture, so somebody playing does not have to open
-  // a panel to find out whether it was worth opening. It takes itself away
-  // again -- and only if it is still the notice on screen, because anything
-  // that arrived after it has more right to be there than a message somebody
-  // has now had six seconds to read.
-  const toast = '<p class="footnote chat-toast"><strong>'
-    + escapeText(message.from || "") + "</strong> "
-    + escapeText(message.text.slice(0, 90)) + "</p>";
-  showNotice(toast, false);
-  clearTimeout(chatToast);
-  chatToast = setTimeout(() => {
-    if (!el("notice").hidden && lastNotice === toast) hideNotice();
-  }, 6000);
+  pulseChatDot();
 }
 
-let chatToast = null;
+/* The dot, told that something just arrived.
+ *
+ * There was a banner here: the message itself, over the picture, for six
+ * seconds. It said more and it was the wrong thing -- somebody is watching a
+ * game, and a box that appears over it is an interruption whether or not the
+ * message was urgent. The dot is already the answer to "is there anything to
+ * read"; all it was missing was a way to say "and one just came".
+ *
+ * The animation restarts on every message, which is what makes a second one
+ * arriving feel different from the first one still sitting there.
+ */
+function pulseChatDot() {
+  const dot = el("chatnew");
+  dot.classList.remove("arrived");
+  void dot.offsetWidth;          // the reflow that lets it start again
+  dot.classList.add("arrived");
+}
 
 function paintChatBadge() {
   el("chatnew").hidden = chatUnread === 0;

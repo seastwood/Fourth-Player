@@ -157,6 +157,16 @@ check("aria-label" in badge and "new message" in badge,
       "all to a screen reader")
 check("hidden = chatUnread === 0" in badge,
       "shown exactly when something is unread")
+heard = app.split("function heardChat")[1].split("\nfunction ")[0]
+check("showNotice" not in heard,
+      "and a message arriving does not put a banner over the picture: "
+      "somebody is watching a game, and a box over it is an interruption "
+      "whether or not the message was urgent")
+check("pulseChatDot()" in heard,
+      "the dot says one just came, instead")
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+check("chat-beat" in css and "prefers-reduced-motion: no-preference" in css,
+      "with an animation, and none at all for somebody who asked for none")
 
 print("the room can reach it with Kodi closed, which is when it matters")
 overlay_src = open(os.path.join(ROOT, "fourthplayer", "overlay.py")).read()

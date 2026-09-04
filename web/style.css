@@ -1695,11 +1695,21 @@ html.held .touch::after {
   box-shadow: 0 0 0 2px var(--bg);
 }
 @media (prefers-reduced-motion: no-preference) {
+  /* Appearing: two steps, the same motion as everything else here. */
   .chat-new { animation: chat-dot .18s steps(2, end); }
+  /* And something arriving: three slow beats, then still. Long enough to
+     catch the corner of an eye that is on the game, small enough that it is
+     not asking to be looked at. It replaces a banner that covered the
+     picture, which was the complaint. */
+  .chat-new.arrived { animation: chat-beat 1.1s ease-in-out 3; }
 }
 @keyframes chat-dot {
   from { transform: scale(0); }
   to   { transform: scale(1); }
+}
+@keyframes chat-beat {
+  0%, 100% { transform: scale(1); }
+  35%      { transform: scale(1.65); }
 }
 
 .chat-toast strong { color: var(--accent); }
