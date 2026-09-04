@@ -2785,16 +2785,6 @@ function hasGamepad() {
   return Array.from(pads).some((p) => p && p.connected);
 }
 
-/* The pad as it is right now, for a send that is not waiting for the timer.
-
-   tick() does more than this -- it notices a controller arriving or leaving --
-   and that part belongs on a timer. Reading the buttons does not. */
-function livePad() {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const pad = padIndex !== null ? pads[padIndex] : null;
-  return pad && pad.connected ? pad : null;
-}
-
 /* Send the pad now, because something on the glass just changed.
  *
  * The timer runs at 125 Hz, so waiting for it costs up to 8 ms -- small, but
@@ -3964,6 +3954,19 @@ function buildPadsGrid() {
   });
 }
 
+/* The pad as it is right now, for a send that is not waiting for the timer.
+ *
+ * tick() does more than this -- it notices a controller arriving or leaving --
+ * and that part belongs on a timer. Reading the buttons does not.
+ *
+ * There were two of these, both at the top level, and the second silently
+ * replaced the first: the strict one that was commented and the one that
+ * falls back to any connected pad, which is the one that has actually been
+ * running. Kept as it runs, with the explanation the other one had.
+ *
+ * That fallback is deliberate for one controller and wrong for two: it means
+ * a seat will take whatever pad is connected rather than the pad it was given.
+ * Anything that lets one page drive two seats has to start here. */
 function livePad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let pad = padIndex !== null ? pads[padIndex] : null;
