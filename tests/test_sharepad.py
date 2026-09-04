@@ -11,6 +11,7 @@ playing.
 """
 import os
 import sys
+import time
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -167,6 +168,11 @@ def guest(live, slot, name):
     g = GuestConnection.__new__(GuestConnection)
     g.session, g.slot, g.name, g.label = live, slot, name, name
     g.pad_index = slot
+    # Changing seats now tells everybody who is in the room, and that list
+    # says how long each person has been here. The rest of what it reads has
+    # a default on the class; a joining time cannot sensibly have one.
+    g.joined_at = time.monotonic()
+    g.media_since = time.monotonic()
     live.guests[slot] = g
     return g
 

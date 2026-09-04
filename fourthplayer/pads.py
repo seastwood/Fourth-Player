@@ -131,6 +131,14 @@ def to_events(state, guide=True):
 class VirtualPad:
     """One guest's pad. Writes only what changed, and opens on silence."""
 
+    # Whether this pad offers a guide button at all. Class-level so a pad that
+    # writes its own __init__ -- which is how the tests make one that records
+    # instead of opening uinput -- still answers for it. False is the right
+    # default twice over: it matches the configuration default, and a pad that
+    # wrongly claims no guide button sends nothing, while one that wrongly
+    # claims to have it hands guests the Steam menu.
+    guide = False
+
     def __init__(self, name, now=None, guide=True):
         self.name = name
         self.guide = guide

@@ -47,6 +47,7 @@ try:
     # off it takes the interpreter down with it.
     from gi.repository import Gst, GstWebRTC, GstSdp, GLib  # noqa: F401
     from fourthplayer import video
+    from fourthplayer.config import Config
 except (ImportError, ValueError) as exc:
     print("SKIPPED: %s -- needs the GStreamer bindings, which live on the host"
           % exc)
@@ -65,6 +66,10 @@ def check(cond, msg):
 
 class FakeStage:
     encoding = "H264"
+    # _rtp_caps reads the stage's config for the audio bitrate and the Opus
+    # options that go into the fmtp line. A stage without one is not a stage
+    # the caps builder can work from.
+    cfg = Config()
 
 
 class FakePeer:
