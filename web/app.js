@@ -2504,7 +2504,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04m";
+const CLIENT_BUILD = "2026-09-04n";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4830,7 +4830,7 @@ function filterShelf() {
   const needle = el("q").value.trim().toLowerCase();
   const system = el("fsystem").value;
   const players = el("fplayers").value;
-  const shown = shelfRows.filter((row) => {
+  shelfShown = shelfRows.filter((row) => {
     if (system && row.system !== system) return false;
     // A game with no known player count answers only to "any": guessing that
     // it is one-player would hide two-player games from the filter that
@@ -4841,36 +4841,129 @@ function filterShelf() {
   });
 
   const shelf = el("shelf");
+  // The old marker goes with the old list. Left observed, it is a detached
+  // node the observer holds on to for the life of the page.
+  if (shelfWatcher) shelfWatcher.disconnect();
   shelf.innerHTML = "";
-  if (!shown.length) {
+  shelfDrawn = 0;
+  if (!shelfShown.length) {
     shelf.innerHTML = '<p class="browse-note">Nothing matches that.</p>';
+    el("browse-note").hidden = true;
     return;
   }
-  const fragment = document.createDocumentFragment();
-  for (const row of shown.slice(0, 400)) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "card";
-    card.setAttribute("role", "listitem");
-    card.dataset.id = row.id;
-    const art = row.art
-      ? '<img class="box" loading="lazy" alt="" src="/art/' + row.id + '">'
-      : '<span class="box box-none" aria-hidden="true">' + escapeText(row.short) + "</span>";
-    const count = row.players
-      ? (row.players >= 5 ? "5+ players" : row.players + (row.players === 1 ? " player" : " players"))
-      : "";
-    card.innerHTML = art
-      + '<span class="card-name">' + escapeText(row.label) + "</span>"
-      + '<span class="card-meta">' + escapeText(row.short)
-      + (count ? " &middot; " + count : "") + "</span>";
-    card.addEventListener("click", () => askFor(row));
-    fragment.appendChild(card);
-  }
-  shelf.appendChild(fragment);
-  el("browse-note").hidden = shown.length <= 400;
-  el("browse-note").textContent =
-    shown.length > 400 ? "Showing the first 400 of " + shown.length + "." : "";
+  drawMore();
+  // Back to the top: the list underneath has changed, and leaving somebody
+  // three hundred games down a list they have just replaced is disorienting.
+  shelf.scrollTop = 0;
 }
+
+/* One card. Pulled out of the loop because the loop now runs many times --
+   a chunk at a time, as somebody scrolls -- rather than once over everything. */
+function makeCard(row) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "card";
+  card.setAttribute("role", "listitem");
+  card.dataset.id = row.id;
+  const art = row.art
+    ? '<img class="box" loading="lazy" alt="" src="/art/' + row.id + '">'
+    : '<span class="box box-none" aria-hidden="true">' + escapeText(row.short) + "</span>";
+  const count = row.players
+    ? (row.players >= 5 ? "5+ players" : row.players + (row.players === 1 ? " player" : " players"))
+    : "";
+  card.innerHTML = art
+    + '<span class="card-name">' + escapeText(row.label) + "</span>"
+    + '<span class="card-meta">' + escapeText(row.short)
+    + (count ? " &middot; " + count : "") + "</span>";
+  card.addEventListener("click", () => askFor(row));
+  return card;
+}
+
+/* The next chunk, and the marker that asks for the one after it.
+ *
+ * A library here can be thousands of games. Drawing all of them costs a phone
+ * seconds of stalled main thread and the memory of a card apiece, and the
+ * first screenful is the only part anybody looks at before typing in the
+ * search box -- so the rest is drawn when somebody actually goes looking for
+ * it. The search itself still runs over the whole library, because the whole
+ * library is here; it is the drawing that is rationed, not the finding.
+ *
+ * This replaces a hard stop at 400 games and a line explaining that the rest
+ * were not shown. */
+const SHELF_CHUNK = 48;
+
+function drawMore() {
+  const shelf = el("shelf");
+  if (shelfDrawn >= shelfShown.length) return;
+  const end = Math.min(shelfDrawn + SHELF_CHUNK, shelfShown.length);
+  const fragment = document.createDocumentFragment();
+  for (let i = shelfDrawn; i < end; i++) fragment.appendChild(makeCard(shelfShown[i]));
+  shelfDrawn = end;
+
+  // The marker always ends up last, so it moves down as the list grows.
+  const marker = shelfMarker();
+  shelf.insertBefore(fragment, marker);
+  const more = shelfDrawn < shelfShown.length;
+  marker.hidden = !more;
+  if (more) watchShelfEnd(marker);
+  paintShelfCount();
+}
+
+function shelfMarker() {
+  // Found by class off the shelf rather than by id: it is written into the
+  // page rather than living in it, and every id el() reaches for is supposed
+  // to be in index.html. There is a test that says so.
+  const shelf = el("shelf");
+  let marker = shelf.querySelector(".shelf-end");
+  if (!marker) {
+    marker = document.createElement("div");
+    marker.className = "shelf-end";
+    marker.textContent = "Loading more\u2026";
+  }
+  shelf.appendChild(marker);             // always the last thing in the list
+  return marker;
+}
+
+let shelfWatcher = null;
+
+function watchShelfEnd(marker) {
+  if (!window.IntersectionObserver) {
+    // Old enough to have no observer: fall back to asking on scroll, which
+    // costs a comparison per scroll event and works everywhere.
+    const shelf = el("shelf");
+    if (!shelf.dataset.watching) {
+      shelf.dataset.watching = "1";
+      shelf.addEventListener("scroll", () => {
+        if (shelf.scrollTop + shelf.clientHeight > shelf.scrollHeight - 400) {
+          drawMore();
+        }
+      });
+    }
+    return;
+  }
+  if (!shelfWatcher) {
+    shelfWatcher = new IntersectionObserver((entries) => {
+      // Only when it is actually on screen. rootMargin gives it a screenful of
+      // warning, so the next chunk is there before the scroll reaches it and
+      // the list never visibly stops.
+      if (entries.some((entry) => entry.isIntersecting)) drawMore();
+    }, { root: el("shelf"), rootMargin: "600px" });
+  }
+  shelfWatcher.observe(marker);
+}
+
+function paintShelfCount() {
+  const note = el("browse-note");
+  const total = shelfShown.length;
+  note.hidden = total <= SHELF_CHUNK;
+  // The whole number, always -- somebody searching wants to know how many
+  // matched, not how many happen to be drawn.
+  note.textContent = total + (total === 1 ? " game" : " games");
+}
+
+// The filtered list, and how much of it has been drawn so far.
+let shelfShown = [];
+let shelfDrawn = 0;
 
 let chosen = null;
 

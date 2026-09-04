@@ -1676,6 +1676,17 @@ html.held .touch::after {
 /* Comfortably tappable, and never the widest thing in the row. */
 .pad-seat-do { flex: 0 0 auto; min-height: 2rem; cursor: pointer; }
 
+/* The end of the shelf: where the next chunk is asked for.
+   Across the whole grid rather than sitting in one cell, so it reads as the
+   bottom of the list and not as a card that failed to load. */
+.shelf-end {
+  grid-column: 1 / -1;
+  padding: 1rem .5rem 1.4rem;
+  text-align: center;
+  font-size: .78rem;
+  color: var(--dim);
+}
+
 /* ---- toast --------------------------------------------------------------
    One line over the picture for something worth knowing and not worth
    interrupting for. The notice above it opens the chips and takes the stage

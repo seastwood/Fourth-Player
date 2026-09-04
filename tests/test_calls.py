@@ -46,6 +46,7 @@ PROVIDED = {
     "fetch", "setTimeout", "setInterval", "clearTimeout", "clearInterval",
     "requestAnimationFrame", "cancelAnimationFrame", "alert", "confirm",
     "WebSocket", "RTCPeerConnection", "RTCRtpReceiver", "MediaStream",
+    "IntersectionObserver",
     "AbortController", "Event", "CustomEvent", "URL", "URLSearchParams",
     "Blob", "FileReader", "Image", "Audio", "getComputedStyle", "matchMedia",
     "reportError",
