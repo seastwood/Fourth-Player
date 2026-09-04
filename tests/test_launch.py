@@ -49,6 +49,12 @@ def build_catalogue(tmp):
     cat.PLAYLIST_DIR = plists
     cat.PLAYERS = os.path.join(tmp, "gameplayers.json")
     cat.THUMB_DIR = os.path.join(tmp, "thumbs")
+    # The catalogue has a second source now -- Steam games the owner has put
+    # on a list -- and this is a test about playlists. Pointed at nothing, so
+    # what it counts is the library it built and not whatever Steam happens to
+    # have installed on the machine running the suite.
+    cat.steamgames.STEAM_ROOTS = ()
+    cat.steamgames.CHOSEN = os.path.join(tmp, "no-steam-list.txt")
     return cat.Catalogue(), rom, core
 
 

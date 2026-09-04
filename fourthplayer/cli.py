@@ -158,6 +158,21 @@ def main(argv=None):
     kick = sub.add_parser("kick", help="remove one guest")
     kick.add_argument("slot", type=int)
 
+    # Which Steam games guests may start. Its own list, because a Steam
+    # library is mostly things the owner would not hand to a stranger on a
+    # phone, and on the console this was written for four of the six installed
+    # "games" are Proton and the Steam runtime.
+    steam = sub.add_parser("steam", help="choose which Steam games guests get")
+    steam_sub = steam.add_subparsers(dest="steam_command", required=True)
+    steam_sub.add_parser("installed", help="what Steam has on this machine")
+    steam_sub.add_parser("list", help="what guests are offered")
+    steam_add = steam_sub.add_parser("add", help="offer one to guests")
+    steam_add.add_argument("game", nargs="+",
+                           help="a name or an appid; the name need not match "
+                                "Valve's capitalisation")
+    steam_drop = steam_sub.add_parser("remove", help="stop offering one")
+    steam_drop.add_argument("game", nargs="+")
+
     sub.add_parser("check", help="report whether this machine can host")
     sub.add_parser("write-config", help="write the default config file")
 
@@ -207,6 +222,9 @@ def main(argv=None):
         cfg.save()
         print(f"wrote {CONFIG_PATH}")
         return 0
+
+    if args.command == "steam":
+        return _steam(args)
 
     if args.command == "check":
         return _check(cfg)
@@ -346,6 +364,68 @@ def _monitor_sources():
                 if "\t" in line and ".monitor" in line]
     except Exception:
         return []
+
+
+def _steam(args):
+    """Read and edit the list of Steam games guests may start.
+
+    Local: this touches a file, not the running session, so it works whether
+    or not a session is open and needs no control socket.
+    """
+    from . import steamgames
+
+    if args.steam_command == "installed":
+        here = steamgames.installed()
+        if not here:
+            print("Steam has no games installed here, or Steam is not "
+                  "installed at all.")
+            return 0
+        picked = {g["appid"] for g in steamgames.offered()}
+        for game in here:
+            print("  %-9s %-40s %s" % (
+                game["appid"], game["name"],
+                "offered" if game["appid"] in picked else ""))
+        return 0
+
+    if args.steam_command == "list":
+        offered = steamgames.offered()
+        for game in offered:
+            print("  %-9s %s" % (game["appid"], game["name"]))
+        # Said plainly, because a name on the list that matches nothing
+        # installed is the likeliest reason a game is not showing up.
+        known = {g["name"].lower() for g in offered} | {g["appid"] for g in offered}
+        for want in steamgames.chosen():
+            if want.lower() not in known and want not in known:
+                print("  (not installed, so not offered: %s)" % want)
+        if not offered:
+            print("No Steam games are offered to guests.")
+        return 0
+
+    wanted = " ".join(args.game).strip()
+    have = steamgames.chosen()
+    if args.steam_command == "add":
+        match = next((g for g in steamgames.installed()
+                      if wanted.lower() in g["name"].lower()
+                      or wanted == g["appid"]), None)
+        if match is None:
+            print("Steam has nothing installed matching %r." % wanted)
+            print("Try: fourth-player steam installed")
+            return 1
+        if any(w.lower() == match["name"].lower() or w == match["appid"]
+               for w in have):
+            print("%s is already offered." % match["name"])
+            return 0
+        steamgames.write_chosen(have + [match["name"]])
+        print("Guests can now start %s." % match["name"])
+        return 0
+
+    kept = [w for w in have if w.lower() != wanted.lower() and w != wanted]
+    if len(kept) == len(have):
+        print("%r is not on the list." % wanted)
+        return 1
+    steamgames.write_chosen(kept)
+    print("Guests can no longer start %s." % wanted)
+    return 0
 
 
 def _check(cfg):

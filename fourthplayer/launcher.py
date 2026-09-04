@@ -54,6 +54,12 @@ REQUIRED_BIOS = {
 # screen to be free first.
 GAME_PROCESSES = ("retroarch", "ra_players.py", "pcgame_launch.py")
 
+# The Steam game this server last started, if any. A Steam game has no process
+# name worth looking for -- it is whatever the developer called their binary --
+# so the appid is remembered and Steam's own marker is looked for instead.
+# Cleared when it is stopped, and when it is found to have gone on its own.
+_steam_appid = None
+
 
 def running():
     """Whether something is already on the television.
@@ -70,6 +76,16 @@ def running():
             continue
         if done.returncode == 0:
             return True
+    # And a Steam game, which is a game on the television by every measure
+    # that matters even though it is nothing like the others.
+    global _steam_appid
+    if _steam_appid is not None:
+        if steam_game_running(_steam_appid):
+            return True
+        # It has closed itself -- somebody quit it from the game's own menu.
+        # Forgetting it here is what stops the next question being answered
+        # with a game that ended half an hour ago.
+        _steam_appid = None
     return False
 
 
@@ -124,6 +140,9 @@ def _wait_gone(deadline, gone=None):
 STEAM_PROCESSES = ("steam", "steamwebhelper", "steamerrorreporter")
 MOONLIGHT_PROCESSES = ("moonlight", "moonlight-qt")
 STEAM_GRACE = 12.0
+# A game gets longer than Steam does: this is the window in which it writes
+# whatever it writes on the way out.
+STEAM_GAME_GRACE = 10.0
 STEAM_LIMIT = 20.0
 MOONLIGHT_GRACE = 5.0
 MOONLIGHT_LIMIT = 10.0
@@ -215,6 +234,36 @@ def clear_the_screen():
     return stubborn
 
 
+def stop_steam_game():
+    """Close the Steam game this server started, and Steam with it.
+
+    Asked of the game first and Steam second, in that order and not the other:
+    Steam shutting down under a game that is still saving is how progress goes
+    missing. TERM to the game, a moment to write whatever it writes, and then
+    Steam is closed the way it is closed everywhere else here.
+
+    Returns True if the screen is clear afterwards.
+    """
+    global _steam_appid
+    appid = _steam_appid
+    if appid is None:
+        return True
+    log.info("closing Steam game %s", appid)
+    _sh(["pkill", "-TERM", "-f", "AppId=%s" % appid])
+    until = time.time() + STEAM_GAME_GRACE
+    while time.time() < until:
+        if not steam_game_running(appid):
+            break
+        time.sleep(0.3)
+    else:
+        log.warning("Steam game %s ignored TERM; killing it", appid)
+        _sh(["pkill", "-KILL", "-f", "AppId=%s" % appid])
+    _steam_appid = None
+    # And Steam itself, which the guest asked to be rid of as much as the
+    # game: a Steam left sitting on Big Picture is still holding the screen.
+    return stop_steam()
+
+
 def stop_running():
     """Close whatever is playing, and do not come back until it is gone.
 
@@ -238,6 +287,10 @@ def stop_running():
     through the PC-games wrapper answered "yes I am running" to one function
     and was not addressed by the other, which is a stalemate by construction.
     """
+    # A Steam game is closed its own way, and takes Steam with it.
+    if _steam_appid is not None:
+        return stop_steam_game()
+
     systemctl = shutil.which("systemctl")
     if systemctl:
         # Fire and watch, rather than block: what matters is whether the game
@@ -327,12 +380,43 @@ def ports_from_config(path):
     return ports
 
 
+def steam_game(row):
+    """The appid, if this row is a Steam game rather than a ROM."""
+    return row.get("appid") if row.get("kind") == "steam" else None
+
+
+def steam_game_running(appid):
+    """Whether that Steam game is on the screen now.
+
+    Named apart from steam_running(), which asks whether Steam itself is up.
+    Two functions called the same thing in one file is how the later one
+    silently replaces the earlier, and this file already has one that other
+    code depends on.
+
+    By the marker Steam puts on the command line of everything it starts --
+    `reaper SteamLaunch AppId=274190 --` -- rather than by the game's own
+    process name, which is whatever the developer called it and is not
+    written down anywhere this can read.
+    """
+    try:
+        done = subprocess.run(["pgrep", "-f", "AppId=%s" % appid],
+                              capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def preflight(row):
     """Why this game cannot start, or None.
 
     Every one of these otherwise presents as the screen going black and coming
     straight back, with nothing said anywhere.
     """
+    appid = steam_game(row)
+    if appid:
+        if not (shutil.which("steam") or os.path.exists("/usr/games/steam")):
+            return "Steam is not installed on this machine."
+        return None
     if not os.path.exists(PICKER):
         return "This box cannot start games from here."
     if not os.path.exists(row["path"]):
@@ -355,6 +439,14 @@ def build_argv(row, resume=False):
     and dropping them into the middle of somebody else's saved game -- then
     overwriting it on exit -- is not a thing to do without being asked.
     """
+    appid = steam_game(row)
+    if appid:
+        # Steam starts itself if it is not already up, and then the game.
+        # There is no picker and no shader: this is somebody else's program,
+        # and what it does with a controller is between them and it.
+        exe = shutil.which("steam") or "/usr/games/steam"
+        return [exe, "-applaunch", str(appid)]
+
     argv = [PICKER]
     if not resume:
         argv += ["--fresh"]
@@ -395,6 +487,13 @@ def launch(row, display=":0", resume=False):
         return problem
 
     argv = build_argv(row, resume)
+    appid = steam_game(row)
+    if appid:
+        # Remembered before the launch rather than after: `steam -applaunch`
+        # returns immediately and the game arrives in its own time, so a
+        # question asked in between has to be answered with "yes, that one".
+        global _steam_appid
+        _steam_appid = str(appid)
     env = {"DISPLAY": display,
            "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
     runner = shutil.which("systemd-run")

@@ -20,6 +20,8 @@ import json
 import logging
 import os
 
+from . import steamgames
+
 log = logging.getLogger("fourthplayer.catalogue")
 
 PLAYLIST_DIR = os.path.expanduser("~/.local/share/retroarch/plists")
@@ -150,9 +152,13 @@ class Catalogue:
 
     def _fingerprint(self):
         """Cheap enough to check on every request, exact enough to notice a
-        game being added -- sync_games.py rewrites the playlist file."""
+        game being added -- sync_games.py rewrites the playlist file.
+
+        The Steam list is in here too: putting a game on it has to show up
+        without restarting the server, the same as dropping in a ROM does.
+        """
         marks = []
-        for path in (PLAYLIST_DIR, PLAYERS):
+        for path in (PLAYLIST_DIR, PLAYERS, steamgames.CHOSEN):
             try:
                 marks.append(os.stat(path).st_mtime_ns)
             except OSError:
@@ -189,6 +195,25 @@ class Catalogue:
                     "path": path,
                     "core_path": core,
                 }
+        # And the Steam games the owner has put on the list, which are games
+        # on this television by every measure a guest cares about even though
+        # nothing else about them is like a ROM: no core, no file, no player
+        # count anybody has written down.
+        for game in steamgames.offered():
+            key = game_id("Steam", game["appid"])
+            rows[key] = {
+                "id": key,
+                "label": game["name"],
+                "system": "Steam",
+                "short": "STEAM",
+                "players": 0,
+                "kind": "steam",
+                "appid": game["appid"],
+                # Named for what they are, so anything reading a row and
+                # expecting a file finds an empty one rather than a lie.
+                "path": "",
+                "core_path": "",
+            }
         self._rows = rows
         self._stamp = stamp
         log.info("catalogue: %d games across %d systems",
