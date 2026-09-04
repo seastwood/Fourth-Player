@@ -216,13 +216,25 @@ everybody, with a count on the button of what has been said since you last
 looked, and a short line over the picture when something arrives so you need
 not open a panel to find out whether it was worth opening.
 
-**The room is in it too.** A message appears on the television as a card that
-says *F8 to reply*, and F8 opens the chat window in Kodi — reading needs
-nothing but eyes, and answering opens Kodi's own keyboard, which is a real
-keyboard where there is one and the on-screen one where there is not. The
-keymap that makes F8 work is installed by `install/install.sh`, because a card
-telling somebody to press a key that does nothing is worse than a card that
-says nothing at all.
+**The room is in it too.** **Ctrl+Shift+C** opens the chat window in Kodi at
+any time — to answer, and to start something when nobody has said anything
+yet, because "we are starting in five minutes" is a message somebody sends
+rather than a reply. A message from a guest also appears on the television as
+a card saying *Ctrl+Shift+C to reply*, and the join card at the start of a
+session carries the same line, so it is learned once rather than only
+discovered when somebody speaks.
+
+Reading needs nothing but eyes; answering opens Kodi's own keyboard, which is
+a real keyboard where there is one and the on-screen one where there is not.
+
+Not a single key, and the reason is worth keeping: **F8 was the first choice
+and F8 is Kodi's screenshot key**, so pressing it photographed the television.
+Kodi's own keymap claims nearly every unmodified letter and eight function
+keys; what it claims nothing for is ctrl+shift with c, j, q, u, w, y or z —
+read out of `/usr/share/kodi/system/keymaps/keyboard.xml` rather than assumed.
+The keymap is installed by `install/install.sh`, because a card telling
+somebody to press a key that does nothing is worse than a card that says
+nothing at all.
 
 Sixty lines are remembered so somebody joining an hour in is not joining
 blind, and nothing is written to disk: an evening's conversation, not a record

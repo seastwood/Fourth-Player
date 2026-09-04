@@ -266,7 +266,7 @@ def show_chat(get_chat, say):
          "[B]Chat[/B]", "0xFFE69B40"),
         (card_x + pad, card_y + card_h - pad - line, card_w - pad * 2, line,
          "[COLOR FF949CAC]Press OK or space to say something · back to "
-         "close[/COLOR]", "0xFF949CAC"),
+         "close · Ctrl+Shift+C opens this any time[/COLOR]", "0xFF949CAC"),
     ])
 
     rows = []

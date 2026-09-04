@@ -62,7 +62,15 @@ CHAT_SECONDS = 9.0
 # because a message you cannot answer is a worse thing to be shown than no
 # message: the whole point of putting it on the screen is that the person in
 # the room is in the conversation rather than being talked about.
-REPLY_KEY = "F8"
+#
+# Ctrl+Shift+C rather than a bare key, and that is not caution for its own
+# sake: F8 was tried first and F8 is Kodi's screenshot key, so pressing it
+# took a picture of the television instead of opening the chat. Kodi's own
+# keymap binds nearly every unmodified letter and eight of the function keys.
+# It binds nothing at all to ctrl+shift with c, j, q, u, w, y or z -- checked
+# against `/usr/share/kodi/system/keymaps/keyboard.xml` rather than guessed --
+# and of those, c is the one somebody will remember.
+REPLY_KEY = "Ctrl+Shift+C"
 
 MARGIN = 28
 QR_PIXELS = 190
@@ -390,7 +398,7 @@ class Overlay(Gtk.Window):
             # something, so it is allowed to be in the way.
             self.move(area.x + (area.width - self.ASK_WIDTH) // 2, area.y + MARGIN)
             return
-        width, height = (400, 300) if self.expanded else (168, 44)
+        width, height = (400, 316) if self.expanded else (168, 44)
         if not self.expanded or not self.status.get("url"):
             width, height = (168, 44) if not self.expanded else (400, 132)
         self.resize(width, height)
@@ -527,6 +535,8 @@ class Overlay(Gtk.Window):
         text(ctx, left, CARD_PAD + 78, "PIN", 11, (0.62, 0.66, 0.72), bold=True)
         text(ctx, left, CARD_PAD + 96, self.status.get("pin") or "--", 26,
              (0.89, 0.91, 0.95), bold=True)
+        text(ctx, left, CARD_PAD + 136, "%s to chat" % REPLY_KEY, 11,
+             (0.62, 0.66, 0.72))
         text(ctx, CARD_PAD, height - 30, self.summary(), 12, (0.62, 0.66, 0.72))
 
     def draw_badge(self, ctx, width, height):

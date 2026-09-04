@@ -1,22 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- One key, for the person in the room.
+<!-- One combination, for the person in the room.
 
-     A message from a guest appears on the television as a card, and that card
-     says "F8 to reply". This is what makes that true. Without it the card is
-     an instruction to press a key that does nothing, which is worse than not
-     mentioning replying at all.
+     Chat, at any time: to answer the card that appears when a guest says
+     something, and to start a conversation when nobody has said anything yet.
+     The card is a prompt, not the only way in.
 
-     F8 rather than a letter, because Kodi's own bindings own most letters (c
-     is the context menu, i is information) and taking one of those off
-     somebody's remote to add a chat key is a poor trade. The function keys
-     are free, and a keyboard is what this is for.
+     Ctrl+Shift+C, and the "why not a single key" is worth writing down. F8
+     was the first choice and F8 is Kodi's screenshot key, so pressing it
+     photographed the television instead. Kodi's own keymap claims nearly
+     every unmodified letter and eight function keys; what it does not claim
+     is ctrl+shift with c, j, q, u, w, y or z. That was read out of
+     /usr/share/kodi/system/keymaps/keyboard.xml rather than assumed, and c is
+     the one somebody will remember.
 
      Installed to ~/.kodi/userdata/keymaps/fourth-player.xml. Kodi merges every
-     file in that directory, so this adds a key and changes nothing else. -->
+     file in that directory, so this adds one combination and changes nothing
+     else about anybody's remote. -->
 <keymap>
   <global>
     <keyboard>
-      <f8>RunScript(script.fourthplayer,chat)</f8>
+      <c mod="ctrl,shift">RunScript(script.fourthplayer,chat)</c>
     </keyboard>
   </global>
 </keymap>
