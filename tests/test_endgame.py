@@ -61,6 +61,11 @@ if HAVE_HOST:
     fake = FakeLauncher()
     S.launcher.running = fake.running
     S.launcher.stop_running = fake.stop_running
+    # And no Steam game, whatever this machine is actually doing. playing_now()
+    # asks the real launcher whether one is on, so without this the answers
+    # here depended on whether somebody was playing something at the time --
+    # which is how this passed on one run and failed on the next.
+    S.launcher.steam_game_now = lambda: None
 
     def a_session(policy):
         live = LiveSession(Config(), loop)

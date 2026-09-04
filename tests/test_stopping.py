@@ -67,7 +67,12 @@ class Fake:
                 self.killed_at = self.now
             if not self.ignores_kill:
                 self.dies_after = 0        # a killed process is gone at once
-        return None
+        # Something reads output now, not only exit codes: finding a Steam
+        # game means reading pgrep's lines. These tests are about a machine
+        # with no Steam game on it, so it finds nothing -- said explicitly,
+        # because returning None here was an AttributeError the moment
+        # anything looked at stdout.
+        return type("Done", (), {"returncode": 1, "stdout": "", "stderr": ""})()
 
     def time(self):
         return self.now

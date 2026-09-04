@@ -1169,6 +1169,22 @@ class LiveSession:
         without which "restart" would only ever work for games started from a
         phone, which is not most of them.
         """
+        # A Steam game first, and whoever started it: it is the one kind that
+        # can be identified outright, by the appid Steam marks it with, rather
+        # than inferred from what this server last did.
+        try:
+            appid = launcher.steam_game_now()
+        except Exception:
+            appid = None
+        if appid:
+            for row in self.catalogue.rows():
+                if row.get("appid") == appid:
+                    return row
+            # Playing, and not on the guest list. Named honestly rather than
+            # reported as nothing: somebody looking at the tab can still end
+            # it, and "Steam game" is truer than silence.
+            return {"id": "", "label": "a Steam game", "appid": appid,
+                    "kind": "steam"}
         if self.last_started is not None:
             return self.last_started
         try:

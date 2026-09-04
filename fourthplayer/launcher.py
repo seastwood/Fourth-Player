@@ -77,15 +77,18 @@ def running():
         if done.returncode == 0:
             return True
     # And a Steam game, which is a game on the television by every measure
-    # that matters even though it is nothing like the others.
+    # that matters even though it is nothing like the others. Asked of the
+    # machine rather than of what this server remembers starting: most games
+    # on this box are started from the television, and one of those is still
+    # a game somebody may want to end from a phone.
     global _steam_appid
-    if _steam_appid is not None:
-        if steam_game_running(_steam_appid):
-            return True
-        # It has closed itself -- somebody quit it from the game's own menu.
-        # Forgetting it here is what stops the next question being answered
-        # with a game that ended half an hour ago.
-        _steam_appid = None
+    playing = steam_game_now()
+    if playing:
+        _steam_appid = playing
+        return True
+    # Nothing is there. Forgetting what we started stops the next question
+    # being answered with a game that ended half an hour ago.
+    _steam_appid = None
     return False
 
 
@@ -245,9 +248,11 @@ def stop_steam_game():
     Returns True if the screen is clear afterwards.
     """
     global _steam_appid
-    appid = _steam_appid
+    appid = _steam_appid or steam_game_now()
     if appid is None:
-        return True
+        # No game, but Steam itself may still be sitting on Big Picture and
+        # holding the television, which is the other half of what was asked.
+        return stop_steam() if steam_running() else True
     log.info("closing Steam game %s", appid)
     _sh(["pkill", "-TERM", "-f", "AppId=%s" % appid])
     until = time.time() + STEAM_GAME_GRACE
@@ -287,8 +292,10 @@ def stop_running():
     through the PC-games wrapper answered "yes I am running" to one function
     and was not addressed by the other, which is a stalemate by construction.
     """
-    # A Steam game is closed its own way, and takes Steam with it.
-    if _steam_appid is not None:
+    # A Steam game is closed its own way, and takes Steam with it. Asked of
+    # the machine, so a game started from the television is stopped by this
+    # too -- which is most of them.
+    if steam_game_now() is not None:
         return stop_steam_game()
 
     systemctl = shutil.which("systemctl")
@@ -383,6 +390,32 @@ def ports_from_config(path):
 def steam_game(row):
     """The appid, if this row is a Steam game rather than a ROM."""
     return row.get("appid") if row.get("kind") == "steam" else None
+
+
+def steam_game_now():
+    """The appid of whatever Steam game is playing, or None.
+
+    Steam marks everything it launches -- `reaper SteamLaunch AppId=1671210`
+    -- so this finds a game whoever started it, which is the point. Tracking
+    only what this server launched meant a game somebody put on from the
+    television was invisible here: the options tab said nothing was playing
+    while it plainly was, and there was no way to end it from a phone.
+
+    The pattern is bracketed so it cannot match the process asking. pgrep -f
+    reads whole command lines, this program's included, and a search for
+    "AppId=" written plainly finds itself.
+    """
+    try:
+        done = subprocess.run(["pgrep", "-af", "AppId[=]"],
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in (done.stdout or "").splitlines():
+        found = re.search(r"AppId=(\d+)", line)
+        if found:
+            return found.group(1)
+    return None
 
 
 def steam_game_running(appid):

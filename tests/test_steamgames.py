@@ -148,12 +148,36 @@ check(source.count("def steam_running(") == 1
       "later silently replaces the earlier")
 stop = source[source.index("def stop_steam_game("):]
 stop = stop[:stop.index("\ndef ")]
-check(stop.index("pkill") < stop.index("stop_steam()"),
+# After the early return, which mentions stop_steam() for the case where
+# there is no game at all -- the ordering being checked is the one in the
+# path that closes a game.
+closing = stop[stop.index("log.info"):]
+check(closing.index("pkill") < closing.index("stop_steam()"),
       "the game is closed before Steam is, because Steam going down under a "
       "game that is still saving is how progress goes missing")
 check("AppId=%s" in stop,
       "and it is found by the marker Steam puts on what it launches, since "
       "the game's own process name is whatever its developer chose")
+
+print("\nand a game somebody started from the television")
+source = open(os.path.join(ROOT, "fourthplayer", "launcher.py")).read()
+now = source[source.index("def steam_game_now("):]
+now = now[:now.index("\ndef ")]
+check('"AppId[=]"' in now,
+      "the search pattern is bracketed, so pgrep -f -- which reads whole "
+      "command lines including this program's -- cannot find the process "
+      "asking the question")
+running = source[source.index("def running("):]
+running = running[:running.index("\ndef ")]
+check("steam_game_now()" in running,
+      "whether something is playing is asked of the machine, not of what this "
+      "server remembers starting -- most games on this box are started from "
+      "the television, and one of those is still a game somebody may want to "
+      "end from a phone")
+stop = source[source.index("def stop_running("):]
+stop = stop[:stop.index("\ndef ")]
+check("steam_game_now()" in stop,
+      "and so is stopping one")
 
 print()
 if fails:
