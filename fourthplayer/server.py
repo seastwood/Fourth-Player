@@ -176,7 +176,8 @@ class Server:
                     # the log, because from the host everything else looks
                     # perfect: the peer connects, input flows, and the guest
                     # sits in front of a black screen.
-                    if re.search(r"^m=video 0[ ]", sdp, re.M):
+                    if (not guest.input_only
+                            and re.search(r"^m=video 0[ ]", sdp, re.M)):
                         log.warning("%s: their browser refused the video "
                                     "-- freeing the slot", guest.label)
                         # They will never see a picture, so holding the slot
@@ -303,6 +304,13 @@ class Server:
                 log.info("%s: signalling closed, media left alone", guest.label)
 
     async def _admit(self, socket_, message, outbox):
+        """Let somebody in, and remember whether they brought a screen.
+
+        A guest who says `input: "only"` is a controller sitting beside
+        somebody who already has the picture -- a second person on one sofa.
+        They get a seat and a pad like anybody else; what they do not get is a
+        second copy of the encode down the same wire.
+        """
         address = self._address(socket_)
         if self.session is None or not self.session.open:
             await outbox.put({"t": "error", "message": "There is no session open."})
@@ -367,6 +375,13 @@ class Server:
 
         guest.outbox = outbox
         guest.socket = socket_
+        # Before the codec is settled and before the peer is built, because
+        # both of those ask whether there is a picture to negotiate at all.
+        # Sticky across a resume: a second controller that reconnects is still
+        # a second controller, and re-offering it video would put a screen it
+        # never asked for down a wire that already carries one.
+        guest.input_only = (str(message.get("input", "")).lower() == "only"
+                            or bool(guest.input_only))
 
         # What this browser says it can decode. Settled before their peer is
         # built, because the offer has to describe what they will actually be
@@ -393,6 +408,9 @@ class Server:
             "remaining": None if self.session.unlimited
                          else round(self.session.remaining()),
             "resumed_media": keep_media,
+            # Said back, so a page that asked for a controller-only connection
+            # can tell it was given one rather than assuming.
+            "input_only": guest.input_only,
             # So the page knows whether to offer a game list at all, rather
             # than showing a button that always refuses.
             "launch": self.session.launch_state(),

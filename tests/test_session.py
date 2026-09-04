@@ -82,8 +82,12 @@ class FakeStage:
         self.made = 0
         self.mutations = Inline()
 
-    def add_peer(self, peer_id, on_signal, configure=None):
+    def add_peer(self, peer_id, on_signal, configure=None, media=True):
         self.made += 1
+        # Recorded: whether a guest was given the picture is now a property of
+        # the guest, and a second controller on somebody's sofa must not be
+        # handed a second copy of the encode.
+        self.media = media
         peer = FakePeer(peer_id)
         if configure is not None:
             configure(peer)

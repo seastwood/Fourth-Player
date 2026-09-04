@@ -196,6 +196,11 @@ el("pin-form").addEventListener("submit", (event) => {
   const typed = keyFrom(el("key").value);
   linkKey = pathToken || typed || savedKey();
   token = pathToken || (linkRequired ? linkKey : "");
+  // Kept in memory, never stored: a second controller on this machine claims
+  // a seat of its own, which means claiming it the same way this one did.
+  // Asking somebody to read the PIN off the television a second time to seat
+  // the person next to them would be a poor answer to "make it simple".
+  sessionPin = pin;
   connect({ t: "join", token, pin, name: who, codecs: videoCodecs() });
 });
 
@@ -2499,7 +2504,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04k";
+const CLIENT_BUILD = "2026-09-04l";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2703,11 +2708,35 @@ function holdVideoBack(ms) {
 
 function startPadLoop() {
   window.addEventListener("gamepadconnected", (event) => {
-    padIndex = event.gamepad.index;
-    el("prompt").hidden = true;
-    describePad(event.gamepad);
+    // Only if this page has not already got one. It used to take whatever
+    // arrived, so plugging a second controller in moved this player's seat
+    // onto somebody else's pad -- which was wrong on its own and is the whole
+    // problem when the second pad is meant to be a second player.
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const held = padIndex !== null && pads[padIndex] && pads[padIndex].connected;
+    if (!held) {
+      padIndex = event.gamepad.index;
+      el("prompt").hidden = true;
+      describePad(event.gamepad);
+    }
+    paintControllers();
   });
-  window.addEventListener("gamepaddisconnected", forgetPad);
+  window.addEventListener("gamepaddisconnected", (event) => {
+    // A seated controller being unplugged takes its seat with it: the host
+    // would free it eventually on silence, and "eventually" is a player port
+    // nobody can use in the meantime.
+    if (event && event.gamepad && extras.has(event.gamepad.index)) {
+      dropExtra(event.gamepad.index);
+      return;
+    }
+    // Only this page's own controller going is a reason to offer the glass
+    // back. Somebody else's pad leaving is not this player's problem.
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (padIndex === null || !pads[padIndex] || !pads[padIndex].connected) {
+      forgetPad();
+    }
+    paintControllers();
+  });
 
   wireTouch();
   wireSticks();
@@ -2797,7 +2826,16 @@ function sendNow() {
   sendFrame(remapped(livePad()), false);
 }
 
+/* The extra seats, on the page's own clock. Deliberately not on sendNow():
+   that fires when something on *this* page's glass changed, and nothing a
+   thumb does here has anything to do with the controller somebody else is
+   holding. */
+
 function tick() {
+  // Every seated controller, whatever else this page is doing. Before the
+  // page's own frame rather than after it: a second player's buttons are not
+  // less urgent than the first's.
+  sendExtras();
   /* Deliberately before the channel check below. Which controller is attached
      is worth showing whether or not there is anywhere to send its buttons yet,
      and polling rather than trusting the events matters on iOS, where
@@ -2805,7 +2843,7 @@ function tick() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let pad = padIndex !== null ? pads[padIndex] : null;
   if (pad && !pad.connected) pad = null;
-  if (!pad) pad = Array.from(pads).find((p) => p && p.connected) || null;
+  if (!pad) pad = firstFreePad(pads);
   if (pad && padIndex === null) {
     padIndex = pad.index;
     el("prompt").hidden = true;
@@ -3142,6 +3180,289 @@ function paintPerson() {
   });
   box.appendChild(list);
   box.hidden = false;
+}
+
+
+/* ---- another controller on this machine ---------------------------------
+ *
+ * Two people on one sofa, one screen, two pads. The second of them needs a
+ * seat of their own -- their own player port, their own row in the list --
+ * and does not need a second copy of the picture they are already looking at.
+ *
+ * So an extra controller opens a connection of its own that asks for input
+ * only. To the host it is an ordinary guest: a seat, a pad, a name, a place
+ * in the seat picker. Nothing about the host's model of a session had to
+ * learn that a guest can be plural, which is where the bugs would have been.
+ *
+ * Nothing here joins by itself. A machine with three pads plugged in is
+ * usually one person and two spares, so a controller is only seated when
+ * somebody says so.
+ *
+ * Each one is a whole object rather than another branch in the page's
+ * globals: the page has one socket, one peer and one sequence number, and
+ * teaching all of that to be a list is how a working connection gets broken
+ * on behalf of a second one.
+ */
+let sessionPin = "";
+const extras = new Map();          // gamepad index -> ExtraPlayer
+
+function extraFor(index) {
+  return extras.get(index) || null;
+}
+
+/* Which controllers are attached, and what each one is doing. The list the
+   panel draws and the thing the "add" decision is made from. */
+function attachedPads() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const out = [];
+  for (const pad of pads) {
+    if (!pad || !pad.connected) continue;
+    const extra = extraFor(pad.index);
+    out.push({
+      index: pad.index,
+      name: shortPadName(pad.id),
+      mine: pad.index === padIndex,          // drives this page's own seat
+      extra,
+      seat: pad.index === padIndex ? "you"
+            : (extra ? extra.seatName() : null),
+    });
+  }
+  return out;
+}
+
+class ExtraPlayer {
+  /* One more seat, driven by one more controller on this machine. */
+  constructor(index, name) {
+    this.index = index;                 // the gamepad, as the browser numbers it
+    this.name = name;
+    this.socket = null;
+    this.pc = null;
+    this.input = null;
+    this.seq = 0;
+    this.slot = null;
+    this.label = "";
+    this.state = "joining";
+    this.error = "";
+    this.closed = false;
+  }
+
+  seatName() {
+    if (this.state === "playing") return this.label || "playing";
+    if (this.state === "failed") return this.error || "could not join";
+    return "joining\u2026";
+  }
+
+  open() {
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    this.socket = new WebSocket(`${scheme}//${location.host}/ws`);
+    this.socket.addEventListener("open", () => {
+      this.socket.send(JSON.stringify({
+        t: "join",
+        token: linkKey || "",
+        pin: sessionPin,
+        // Named after the controller rather than the person, because the
+        // person is already in the list under their own name and two rows
+        // called the same thing help nobody.
+        name: (myName() || "Guest") + " " + (extras.size + 1),
+        // The whole point: a seat and a pad, and no second encode of a
+        // picture that is already on the screen in front of them.
+        input: "only",
+        codecs: [],
+      }));
+    });
+    this.socket.addEventListener("message", (event) => this.heard(event));
+    this.socket.addEventListener("close", () => {
+      if (this.closed) return;
+      this.state = "failed";
+      this.error = "disconnected";
+      paintControllers();
+    });
+    this.socket.addEventListener("error", () => {
+      if (this.closed) return;
+      this.state = "failed";
+      this.error = "could not connect";
+      paintControllers();
+    });
+  }
+
+  async heard(event) {
+    let message;
+    try { message = JSON.parse(event.data); } catch (_) { return; }
+    if (message.t === "joined") {
+      this.slot = message.slot;
+      this.label = message.label || ("Player " + (message.slot + 1));
+      paintControllers();
+      return;
+    }
+    if (message.t === "error") {
+      this.state = "failed";
+      // The host's own words. "Every player slot is taken" is the answer
+      // somebody needs, and inventing a friendlier one would lose it.
+      this.error = message.message || "refused";
+      paintControllers();
+      return;
+    }
+    if (message.t === "offer") return await this.answer(message);
+    if (message.t === "ice" && this.pc) {
+      try {
+        await this.pc.addIceCandidate({ candidate: message.candidate,
+                                        sdpMLineIndex: message.sdpMLineIndex });
+      } catch (_) { /* a candidate that arrives late is not news */ }
+    }
+  }
+
+  async answer(message) {
+    if (this.pc) { try { this.pc.close(); } catch (_) {} }
+    this.pc = new RTCPeerConnection({ iceServers: [] });
+    this.pc.addEventListener("datachannel", (event) => {
+      this.input = event.channel;
+      this.input.binaryType = "arraybuffer";
+      this.input.addEventListener("open", () => {
+        this.state = "playing";
+        paintControllers();
+      });
+      this.input.addEventListener("close", () => {
+        if (this.closed) return;
+        this.state = "failed";
+        this.error = "controller offline";
+        paintControllers();
+      });
+    });
+    this.pc.addEventListener("icecandidate", (event) => {
+      if (event.candidate && this.socket && this.socket.readyState === 1) {
+        this.socket.send(JSON.stringify({
+          t: "ice",
+          candidate: event.candidate.candidate,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+        }));
+      }
+    });
+    try {
+      await this.pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
+      const reply = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(reply);
+      if (this.socket && this.socket.readyState === 1) {
+        this.socket.send(JSON.stringify({ t: "answer", sdp: reply.sdp }));
+      }
+    } catch (exc) {
+      this.state = "failed";
+      this.error = "could not start";
+      paintControllers();
+    }
+  }
+
+  /* One frame, from this controller only. No on-screen pad and no keyboard
+     merged in: those belong to the person holding the page, and this seat is
+     somebody else. */
+  send() {
+    if (!this.input || this.input.readyState !== "open") return;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = pads[this.index];
+    if (!pad || !pad.connected) return;
+    const state = FPFrame.padState(pad);
+    if (this.input.bufferedAmount > BACKLOG_LIMIT) return;
+    try {
+      this.input.send(FPFrame.buildRaw(state.buttons, state.axes, this.seq,
+                                       false));
+      this.seq = (this.seq + 1) & 0xffff;
+    } catch (_) { /* a closing channel is not news */ }
+  }
+
+  close() {
+    this.closed = true;
+    // Everything down, in the order that leaves nothing behind: the pad first,
+    // so the host hears the release rather than inferring it from silence.
+    try {
+      if (this.input && this.input.readyState === "open") {
+        this.input.send(FPFrame.buildRaw(0, [0, 0, 0, 0, 0, 0], this.seq, true));
+      }
+    } catch (_) {}
+    try { if (this.pc) this.pc.close(); } catch (_) {}
+    try { if (this.socket) this.socket.close(); } catch (_) {}
+  }
+}
+
+function addExtra(index) {
+  if (extras.has(index) || index === padIndex) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const pad = pads[index];
+  if (!pad || !pad.connected) return;
+  const player = new ExtraPlayer(index, shortPadName(pad.id));
+  extras.set(index, player);
+  player.open();
+  paintControllers();
+  report("seating a second controller: " + player.name);
+}
+
+function dropExtra(index) {
+  const player = extras.get(index);
+  if (!player) return;
+  player.close();
+  extras.delete(index);
+  paintControllers();
+}
+
+// Every extra seat's frame, on the same clock as this page's own.
+function sendExtras() {
+  for (const player of extras.values()) player.send();
+}
+
+// A page going away takes its extra seats with it, or the host holds them
+// until the dead-man sweep notices.
+window.addEventListener("pagehide", () => {
+  for (const player of extras.values()) player.close();
+});
+
+
+/* The controllers plugged into this machine, and what each is doing.
+ *
+ * Written as rows with one button each rather than a picker: "which of these
+ * is player three" is a question about a specific controller, and the answer
+ * somebody wants to give is "that one". A row per pad, tappable, reads the
+ * same on a phone and across a room.
+ */
+function paintControllers() {
+  const box = el("pad-seats");
+  if (!box) return;
+  const found = attachedPads();
+  box.innerHTML = "";
+
+  if (found.length < 2 && !extras.size) {
+    // One controller is the ordinary case and needs no list at all: the row
+    // above already names it. This appears when there is a choice to make.
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+
+  for (const pad of found) {
+    const row = document.createElement("div");
+    row.className = "pad-seat" + (pad.mine ? " is-mine" : "");
+
+    const name = document.createElement("span");
+    name.className = "pad-seat-name";
+    name.textContent = pad.name;
+    row.appendChild(name);
+
+    const said = document.createElement("span");
+    said.className = "pad-seat-state";
+    said.textContent = pad.mine ? "yours"
+                     : (pad.extra ? pad.extra.seatName() : "not playing");
+    row.appendChild(said);
+
+    if (!pad.mine) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chip pad-seat-do";
+      const seated = !!pad.extra;
+      button.textContent = seated ? "Remove" : "Add player";
+      button.addEventListener("click", () => {
+        if (seated) dropExtra(pad.index); else addExtra(pad.index);
+      });
+      row.appendChild(button);
+    }
+    box.appendChild(row);
+  }
 }
 
 /* ---- chat ----------------------------------------------------------------
@@ -3912,6 +4233,7 @@ function openPads() {
   paintKeyMode();
   paintBuzz();
   paintStrength();
+  paintControllers();
   paintFaceSwap();
   paintOrient();
   paintPads();
@@ -3971,7 +4293,18 @@ function livePad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let pad = padIndex !== null ? pads[padIndex] : null;
   if (pad && !pad.connected) pad = null;
-  return pad || Array.from(pads).find((p) => p && p.connected) || null;
+  return pad || firstFreePad(pads);
+}
+
+/* A connected controller that is not already somebody else's seat.
+ *
+ * The fallback used to be "any connected pad", which is right while there is
+ * only ever one. Once a second controller can be seated as its own player,
+ * that fallback would quietly merge their buttons into this page's frame:
+ * two people pressing one player. */
+function firstFreePad(pads) {
+  return Array.from(pads).find(
+    (p) => p && p.connected && !extras.has(p.index)) || null;
 }
 
 function paintPads() {

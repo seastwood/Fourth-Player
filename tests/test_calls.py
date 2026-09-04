@@ -59,16 +59,54 @@ PROVIDED = {
 # into JavaScript that nothing defined. Comments go the same way: an example
 # written in prose is not a call either.
 def code_only(text):
-    """The source with string literals and comments blanked out."""
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)      # block comments
-    text = re.sub(r"(?m)//.*$", " ", text)                    # line comments
-    for quote in ("'", '"', "`"):
-        # Non-greedy, honouring backslash escapes, and never across a newline
-        # for the two quote kinds that cannot span one.
-        across = "" if quote == "`" else "\n"
-        text = re.sub(r"%s(?:\\.|[^%s\\%s])*%s" % (quote, quote, across, quote),
-                      " ", text, flags=re.S if quote == "`" else 0)
-    return text
+    """The source with string literals and comments blanked out.
+
+    One left-to-right scan rather than a pass per kind, because the passes
+    were order-dependent and the order was wrong. Line comments were stripped
+    before strings, so the `//` inside
+
+        new WebSocket(`${scheme}//${location.host}/ws`)
+
+    was read as a comment and deleted, leaving an unclosed backtick. That was
+    survivable while the page had exactly one of those; the moment a second
+    one appeared, the orphaned quote paired with it and sixty thousand
+    characters of code -- and every definition in them -- vanished from this
+    audit. It reported two dozen perfectly good functions as undefined.
+
+    A scanner cannot get that wrong: inside a string, `//` is text; outside
+    one, it is a comment.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        here = text[i]
+        if here == "/" and text.startswith("/*", i):
+            shut = text.find("*/", i + 2)
+            i = n if shut < 0 else shut + 2
+            out.append(" ")
+        elif here == "/" and text.startswith("//", i):
+            shut = text.find("\n", i)
+            i = n if shut < 0 else shut
+            out.append(" ")
+        elif here in "'\"`":
+            quote, i = here, i + 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    i += 1
+                    break
+                # Only a template literal may cross a line; the other two
+                # ending at one is what stops a stray quote eating the file.
+                if text[i] == "\n" and quote != "`":
+                    break
+                i += 1
+            out.append(" ")
+        else:
+            out.append(here)
+            i += 1
+    return "".join(out)
 
 
 everything = code_only(everything)
@@ -78,6 +116,10 @@ defined = set(PROVIDED)
 for pattern in (r"function\s+([A-Za-z_$][\w$]*)",
                 r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=",
                 r"([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?function",
+                # A class method: `heard(event) {`. It is a definition and it
+                # reads exactly like a call, which is how three perfectly real
+                # methods came to be reported as called and never defined.
+                r"(?m)^\s{2,}(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{",
                 r"\bclass\s+([A-Za-z_$][\w$]*)"):
     defined.update(re.findall(pattern, everything))
 

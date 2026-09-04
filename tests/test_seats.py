@@ -1,21 +1,35 @@
-"""Changing which player you are, without stopping the game.
+"""Seating a second controller from the same machine.
 
-A game that is running has bound its player ports to devices and will not
-revisit that until it restarts. So somebody who joins halfway through, or a
-second person arriving after one player claimed, could only be given controls
-by stopping the game and starting it again -- which is what was reported.
+Two people on one sofa, one screen, two pads. The second of them gets a seat
+of their own -- their own player port and their own row in everybody's list --
+over a connection that carries the input channel and no picture, because they
+are already looking at the first one's.
 
-Moving them onto the pad that is already player 2 does it instantly, because
-that pad is already player 2. This is that move.
+The rule that shapes all of it: nothing is seated by itself. A machine with
+three controllers plugged in is usually one person and two spares, so a pad
+only becomes a player when somebody says so.
+
+Three things here were wrong before this and would be wrong again:
+
+  * gamepadconnected took whatever pad arrived. Plugging a second controller
+    in moved this player's seat onto it -- which was already wrong with one
+    player and is fatal when the second pad is meant to be a second person.
+  * The fallback for "which pad am I reading" was "any connected one", which
+    would have merged a seated player's buttons into this page's own frame:
+    two people pressing one player.
+  * A seated controller being unplugged has to give its seat back. The host
+    would free it on silence eventually, and eventually is a player port
+    nobody can use.
 """
+import json
 import os
+import re
+import shutil
+import subprocess
 import sys
-import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT)
-from fourthplayer.session import GuestConnection, LiveSession
 
 fails = []
 
@@ -26,127 +40,153 @@ def check(cond, msg):
         fails.append(msg)
 
 
-class Pad:
-    def __init__(self, name):
-        self.name, self.path = name, "/dev/input/" + name
-        self.released = 0
-        self.adopted = 0
-
-    def release_all(self):
-        self.released += 1
-
-    def forget(self, sender=None):
-        # VirtualPad drops one sender's share here; a stand-in has only ever
-        # had the one sender, so letting go of everything is the same thing.
-        self.release_all()
-
-    def adopt_new_sender(self, sender=None):
-        self.adopted += 1
+source = open(os.path.join(ROOT, "web", "app.js")).read()
+page = open(os.path.join(ROOT, "web", "index.html")).read()
 
 
-class FakePads(list):
-    """A stand-in for PadSet: seats with names, whose devices come and go.
-
-    Modelled on the real thing rather than on a plain list, because the real
-    thing stopped being one: an empty seat has no device, so reading a name
-    must not conjure one, and letting a seat go has to be something a caller
-    can do.
-    """
-
-    def __init__(self, pads):
-        super().__init__(pads)
-        self.released = []
-
-    @property
-    def names(self):
-        return [p.name for p in self]
-
-    def name_for(self, index):
-        return self[index].name
-
-    def release(self, index):
-        self.released.append(index)
-        return True
+def lift(name):
+    start = source.index("function " + name + "(")
+    depth = 0
+    for j in range(source.index("{", start), len(source)):
+        if source[j] == "{":
+            depth += 1
+        elif source[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:j + 1]
+    raise AssertionError(name)
 
 
-def session_with(n):
-    live = LiveSession.__new__(LiveSession)
-    live.pads = FakePads([Pad("pad%d" % i) for i in range(n)])
-    live.guests = {}
-    live.on_notice = lambda m: live.notices.append(m)
-    live.notices = []
-    live.publish_pad_names = lambda: None
-    return live
+print("nothing is seated by itself")
+connected = source[source.index('window.addEventListener("gamepadconnected"'):]
+connected = connected[:connected.index('window.addEventListener("gamepaddisconnected"')]
+check("addExtra" not in connected,
+      "a controller arriving does not claim a seat -- three pads plugged in "
+      "is usually one person and two spares")
+# Checked as a condition rather than as a word: the first version of this
+# looked for "if (!held)" and passed happily with `held` set to a constant.
+held = re.search(r"const held = ([^;]+);", connected)
+check(bool(held), "whether this page already has a pad is worked out")
+if held:
+    said = held.group(1)
+    check("padIndex" in said and "pads[padIndex]" in said and "connected" in said,
+          "from the pad it is actually holding and whether that is still "
+          "there -- so a second controller cannot steal the first player's "
+          "seat; got %r" % said.strip())
+
+gone = source[source.index('window.addEventListener("gamepaddisconnected"'):]
+gone = gone[:gone.index("\n  wireTouch();")]
+check("dropExtra" in gone,
+      "and a seated controller being unplugged gives its seat back rather "
+      "than leaving a player port nobody can use")
+
+print("\nand a seated controller is nobody else's to read")
+check("firstFreePad" in lift("livePad"),
+      "the fallback skips pads that are already somebody's seat")
+free = lift("firstFreePad")
+check("extras.has(p.index)" in free,
+      "which is what makes it a free one; otherwise two people press one "
+      "player")
+
+print("\nthe connection it opens")
+extra = source[source.index("class ExtraPlayer"):]
+extra = extra[:extra.index("\nfunction addExtra")]
+check('input: "only"' in extra,
+      "asks for a controller-only connection: one screen gets encoded once, "
+      "however many controllers are around it")
+check('"codecs": []' in extra or "codecs: []" in extra,
+      "and offers no codecs, having no use for a picture")
+check("FPFrame.buildRaw" in extra and "touchButtons" not in extra,
+      "and sends that controller alone -- the glass and the keyboard belong "
+      "to the person holding the page, and this seat is somebody else")
+check("release_all" in extra or "true))" in extra,
+      "and lets go of its buttons on the way out, rather than leaving one "
+      "held for the host to time out")
+
+print("\nand the page keeps what it needs to seat one")
+check("sessionPin" in source,
+      "the PIN is remembered for the life of the page")
+check("localStorage.setItem(nameKey" in source or "sessionPin =" in source,
+      "in memory rather than stored -- asking somebody to read it off the "
+      "television again to seat the person beside them is not simple")
+check("pad-seats" in page, "and there is somewhere to draw the list")
+check(source.count("function paintControllers(") == 1
+      and source.count("function paintSeats(") == 1,
+      "and the two painters have two names: paintSeats was already the "
+      "player-port picker, and a second one by that name would have "
+      "silently replaced it")
+
+if not shutil.which("node"):
+    print("\nSKIPPED the drawing: node is not installed")
+    sys.exit(1 if fails else 0)
+
+harness = """
+'use strict';
+const extras = new Map();
+for (const seated of %(seated)s) extras.set(seated, { seatName: () => "Guest 3" });
+let padIndex = %(mine)s;
+const connected = %(pads)s;
+global.navigator = { getGamepads: () => connected };
+global.shortPadName = (id) => id;
+
+%(code)s
+
+const out = { attached: attachedPads().map((p) => ({
+  index: p.index, mine: p.mine, seat: p.seat })) };
+// Explicitly null rather than undefined, which JSON drops entirely.
+const free = firstFreePad(connected);
+out.free = free ? free.index : null;
+console.log(JSON.stringify(out));
+""" 
+
+code = "\n\n".join([lift("extraFor"), lift("attachedPads"), lift("firstFreePad")])
 
 
-def guest_on(live, slot, name):
-    g = GuestConnection.__new__(GuestConnection)
-    g.session, g.slot, g.name = live, slot, name
-    g.pad_index = slot
-    g.label = name
-    # Changing seats now tells everybody who is in the room, and that list
-    # says how long each person has been here -- so a stand-in guest needs a
-    # joining time like a real one. The rest of what the list reads has a
-    # default on the class.
-    g.joined_at = time.monotonic()
-    g.media_since = time.monotonic()
-    live.guests[slot] = g
-    return g
+def run(pads, mine, seated=()):
+    job = harness % {"code": code, "mine": json.dumps(mine),
+                     "pads": json.dumps(pads),
+                     "seated": json.dumps(list(seated))}
+    done = subprocess.run([shutil.which("node"), "-e", job],
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr[-600:])
+    return json.loads(done.stdout)
 
 
-print("a guest can take an empty pad")
-live = session_with(4)
-a = guest_on(live, 0, "Ann")
-check(a.pad.name == "pad0", "they start on the pad matching their slot")
-live.set_pad(a, 2)
-check(a.pad_index == 2 and a.pad.name == "pad2", "and can move to another")
-check(live.pads[0].released == 1,
-      "letting go of the one they left, so nothing is stuck down on it")
-check(live.pads[2].adopted == 1,
-      "and the new one starts a fresh sequence rather than rejecting them")
+print("\nwhat the list says with two controllers and one player")
+out = run([{"index": 0, "connected": True, "id": "Xbox Wireless Controller"},
+           {"index": 1, "connected": True, "id": "8BitDo Pro 2"}], 0)
+check(len(out["attached"]) == 2, "both controllers are listed")
+check(out["attached"][0]["mine"] is True and out["attached"][0]["seat"] == "you",
+      "the one this page is playing on says so")
+check(out["attached"][1]["mine"] is False
+      and out["attached"][1]["seat"] is None,
+      "and the other is listed as playing nothing, waiting to be asked")
+# firstFreePad is the fallback for a page whose own pad has gone. Its job is
+# to skip pads that are *somebody else's seat* -- this page's own pad is not
+# one of those, so returning it is right.
+check(out["free"] == 0,
+      "with nobody seated, the fallback is happy to return this page's own pad")
 
-print("taking a pad somebody else is on swaps the two")
-live = session_with(4)
-a = guest_on(live, 0, "Ann")
-b = guest_on(live, 1, "Bob")
-live.set_pad(a, 1)
-check(a.pad_index == 1, "the one who asked gets the pad they asked for")
-check(b.pad_index == 0, "and the other takes the one just vacated: %d" % b.pad_index)
-check(live.pads[0].released >= 1 and live.pads[1].released >= 1,
-      "both are let go of first, so neither is left holding a direction")
+print("\nand once the second controller is seated, it is off limits")
+out = run([{"index": 0, "connected": False, "id": "Xbox Wireless Controller"},
+           {"index": 1, "connected": True, "id": "8BitDo Pro 2"}], 0, seated=[1])
+check(out["free"] is None,
+      "this page's pad is gone and the only one left belongs to another "
+      "player, so it reads nothing rather than reading their buttons")
+seated_row = [r for r in out["attached"] if r["index"] == 1]
+check(seated_row and seated_row[0]["seat"] == "Guest 3",
+      "and the list says whose seat it is")
 
-print("and nobody ends up sharing a pad")
-seats = [g.pad_index for g in live.guests.values()]
-check(len(set(seats)) == len(seats), "one guest per pad: %s" % seats)
+print("\nand a controller that is switched off is not on the list")
+out = run([{"index": 0, "connected": True, "id": "Xbox Wireless Controller"},
+           {"index": 1, "connected": False, "id": "8BitDo Pro 2"}], 0)
+check(len(out["attached"]) == 1, "only the one that is actually there")
 
-print("a pad that does not exist is refused, counted the way a person counts")
-live = session_with(3)
-a = guest_on(live, 0, "Ann")
-for bad in (3, 99, -1):
-    try:
-        live.set_pad(a, bad)
-        check(False, "pad %s is refused" % bad)
-    except ValueError as exc:
-        # Not "player": which player a pad is belongs to the running game,
-        # not to its position in this list. Controllers are what this counts.
-        check("controller" in str(exc), "pad %s is refused: %s" % (bad, exc))
-check(a.pad_index == 0, "and they stay where they were")
-
-print("asking for the pad you are already on does nothing at all")
-live = session_with(3)
-a = guest_on(live, 0, "Ann")
-live.set_pad(a, 0)
-check(live.pads[0].released == 0, "no release, so no interruption to play")
-
-print("everybody is told who is where")
-live = session_with(3)
-a = guest_on(live, 0, "Ann")
-guest_on(live, 1, "Bob")
-live.set_pad(a, 2)
-told = [m for m in live.notices if m.get("t") == "pads"]
-check(told and told[-1]["who"].get("2") == "Ann",
-      "the pad map goes out: %s" % (told[-1]["who"] if told else None))
-check(told and told[-1]["count"] == 3, "with how many there are")
-
-print(("FAILED: %d" % len(fails)) if fails else "test_seats: all ok")
-sys.exit(1 if fails else 0)
+print()
+if fails:
+    print("FAILED: %d" % len(fails))
+    for line in fails:
+        print("  " + line)
+    sys.exit(1)
+print("test_seats: all ok")

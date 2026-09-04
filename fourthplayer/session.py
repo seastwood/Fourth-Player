@@ -157,6 +157,12 @@ class GuestConnection:
     peer = None
     frames = 0
     held_frames = 0
+    # A guest who brought a controller and no screen: somebody sitting beside
+    # a player who already has the picture. Their peer carries the input
+    # channel and nothing else. In every other way they are an ordinary guest
+    # -- their own seat, their own pad, their own name, their own row in the
+    # list -- because that is what the rest of this already understands.
+    input_only = False
 
     def __init__(self, session, slot, socket, name=""):
         self.session = session
@@ -660,7 +666,8 @@ class LiveSession:
             peer.on_dead = lambda why: self._peer_died(guest, peer, why)
 
         job = functools.partial(self.stage.add_peer,
-                                f"slot{guest.slot}", on_signal, configure)
+                                f"slot{guest.slot}", on_signal, configure,
+                                not guest.input_only)
         try:
             peer = await asyncio.wait_for(
                 self.loop.run_in_executor(self.stage.mutations, job),
@@ -971,6 +978,7 @@ class LiveSession:
                 # their seat number and is absent when no game has bound it.
                 "player": ports.get(pad_name),
                 "here": g.has_media(),
+                "input_only": bool(g.input_only),
                 "seconds": round(time.monotonic() - g.joined_at),
                 "driving": g.slot == self.driver,
                 "rtt": health.get("rtt"),

@@ -602,12 +602,15 @@ class Stage:
 
     # -- peers --------------------------------------------------------------
 
-    def add_peer(self, peer_id, on_signal, configure=None):
+    def add_peer(self, peer_id, on_signal, configure=None, media=True):
         """Attach one guest. `on_signal(kind, payload)` is called on the asyncio loop.
 
         `configure` runs after the peer exists and before it is wired up, which
         is the only window in which its callbacks can be set without racing the
         first thing it does.
+
+        `media=False` builds a peer with the input channel and no picture, for
+        a second controller on a machine that already has one.
         """
         started = time.monotonic()
         # A peer left over under this name is wreckage, not a guest: the only
@@ -629,7 +632,7 @@ class Stage:
         if not self.ensure_playing():
             raise RuntimeError("the capture pipeline is not running")
 
-        peer = Peer(self, peer_id, on_signal)
+        peer = Peer(self, peer_id, on_signal, media=media)
         if configure is not None:
             configure(peer)
         try:
@@ -774,12 +777,21 @@ class Stage:
 
 
 class Peer:
-    """One guest's webrtcbin: a send-only video track and an input channel."""
+    """One guest's webrtcbin: a send-only video track and an input channel.
 
-    def __init__(self, stage, peer_id, on_signal):
+    Or, for a guest who only brought a controller, the input channel alone.
+    Two people on one sofa share one screen and need one picture between them,
+    so the second controller's peer carries no media: it costs an ICE
+    negotiation and a data channel, and not a second copy of the encode.
+    """
+
+    def __init__(self, stage, peer_id, on_signal, media=True):
         self.stage = stage
         self.id = peer_id
         self._on_signal = on_signal
+        # Whether this one gets the picture. False for a guest who is sitting
+        # next to somebody who already has it.
+        self.media = media
         self.channel = None
         self.on_input = None          # set by the session; called with raw bytes
         self.on_dead = None           # called when the media connection is over
@@ -849,10 +861,13 @@ class Peer:
         self._connect(self.webrtc, "notify::ice-connection-state", self._on_ice_state)
 
         # Video first so the offer's m-lines come out in that order and
-        # transceiver 0 is always the picture.
-        self._feed("video", None)
-        if self.stage.has_audio:
-            self._feed("audio", None)
+        # transceiver 0 is always the picture. A peer that carries no media
+        # gets neither, and its offer is the data channel by itself -- which
+        # is a legal offer and the whole point of it.
+        if self.media:
+            self._feed("video", None)
+            if self.stage.has_audio:
+                self._feed("audio", None)
 
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("this guest's pipeline would not start")

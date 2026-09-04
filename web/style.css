@@ -1616,6 +1616,45 @@ html.held .touch::after {
   pointer-events: none;
 }
 
+/* ---- the controllers on this machine ------------------------------------
+   A row each, name on the left and what it is doing on the right, with one
+   button. Rows rather than a picker because "which of these is player three"
+   is answered by pointing at a controller, and a row is the same target on a
+   phone as across a room. It only appears when there is a choice to make. */
+.pad-seats {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  margin: .5rem 0 0;
+}
+.pad-seat {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;                 /* a long controller name on a narrow phone */
+  padding: .35rem .5rem;
+  border: 2px solid var(--bg2);
+  background: rgba(16, 14, 40, .6);
+}
+.pad-seat.is-mine { border-color: var(--dim); }
+.pad-seat-name {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .8rem;
+  color: var(--ink);
+}
+.pad-seat-state {
+  flex: 0 0 auto;
+  font-size: .72rem;
+  color: var(--dim);
+}
+.pad-seat.is-mine .pad-seat-state { color: var(--accent); }
+/* Comfortably tappable, and never the widest thing in the row. */
+.pad-seat-do { flex: 0 0 auto; min-height: 2rem; cursor: pointer; }
+
 /* ---- toast --------------------------------------------------------------
    One line over the picture for something worth knowing and not worth
    interrupting for. The notice above it opens the chips and takes the stage
