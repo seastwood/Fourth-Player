@@ -10,6 +10,7 @@ that pad is already player 2. This is that move.
 """
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -83,6 +84,12 @@ def guest_on(live, slot, name):
     g.session, g.slot, g.name = live, slot, name
     g.pad_index = slot
     g.label = name
+    # Changing seats now tells everybody who is in the room, and that list
+    # says how long each person has been here -- so a stand-in guest needs a
+    # joining time like a real one. The rest of what the list reads has a
+    # default on the class.
+    g.joined_at = time.monotonic()
+    g.media_since = time.monotonic()
     live.guests[slot] = g
     return g
 

@@ -391,6 +391,7 @@ function connect(hello) {
       case "arrived":       return somebodyArrived(message);
       case "pads":          return seatsFrom(message);
       case "hold":          return holdInput(message);
+      case "people":        return peopleFrom(message);
       case "chat":          return heardChat(message);
       case "chatlog":       return (message.messages || []).forEach(heardChat);
       case "note":          return showNotice(
@@ -489,6 +490,10 @@ function joined(message) {
   }
   gate.hidden = true;
   stage.hidden = false;
+  // Which guest this page is. Kept as the number rather than the name because
+  // two people are free to call themselves the same thing, and "which of
+  // these is me" has to have exactly one answer.
+  mySlot = typeof message.slot === "number" ? message.slot : mySlot;
   setChip("slot", message.label, "ok");
   setLink("");
   showHud();
@@ -2329,7 +2334,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04d";
+const CLIENT_BUILD = "2026-09-04e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2433,17 +2438,26 @@ async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
   let picture = null;
+  let path = null;
   try {
     (await pc.getStats()).forEach((r) => {
       if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
         bytes += r.bytesReceived || 0;
         picture = r;
       }
+      // The pair actually carrying the media. Its round trip time is the
+      // ping that matters here -- the one the buttons travel over -- and it
+      // is not the same as the time to the web server.
+      if (r.type === "candidate-pair" && (r.nominated || r.state === "succeeded")
+          && r.currentRoundTripTime != null) {
+        path = r;
+      }
     });
   } catch (_) { return; }
   // Before the branches below, every one of which returns.
   noteFreezes(picture);
   tellAboutSound();
+  reportHealth(picture, path);
 
   if (bytes > lastBytes) {
     lastBytes = bytes;
@@ -2809,6 +2823,168 @@ function holdInput(message) {
   }
 }
 
+/* ---- how this connection is running, and who else is here ----------------
+ *
+ * The host cannot measure any of this. Round trip time and lost packets are
+ * properties of the path to *this* guest, and the host only ever sees its own
+ * end of it -- so each page measures itself and says so, and the host is the
+ * place they are collected and handed back out.
+ *
+ * Sent on a slow clock of its own rather than on every stats poll: the poll
+ * is a second, and a message a second per guest to keep a panel up to date
+ * that is usually closed is a poor trade.
+ */
+const HEALTH_EVERY_MS = 4000;
+let healthSent = 0;
+let lastLost = null;                 // to turn running totals into a rate
+
+function reportHealth(picture, path) {
+  const now = Date.now();
+  if (now - healthSent < HEALTH_EVERY_MS) return;
+  healthSent = now;
+
+  const rtt = path && path.currentRoundTripTime != null
+    ? Math.round(path.currentRoundTripTime * 1000) : null;
+
+  // Loss since the last report, not since the connection began. A run of bad
+  // minutes an hour ago should not still be showing as this guest's state
+  // now, and a lifetime average is exactly what would do that.
+  let loss = null;
+  if (picture) {
+    const lost = picture.packetsLost || 0;
+    const got = picture.packetsReceived || 0;
+    if (lastLost && got >= lastLost.got) {
+      const dLost = Math.max(0, lost - lastLost.lost);
+      const dGot = got - lastLost.got;
+      if (dLost + dGot > 0) loss = (dLost / (dLost + dGot)) * 100;
+    }
+    lastLost = { lost, got };
+  }
+
+  send({ t: "health", rtt,
+         loss: loss == null ? null : Math.round(loss * 10) / 10,
+         fps: picture && picture.framesPerSecond != null
+           ? Math.round(picture.framesPerSecond) : null });
+}
+
+/* Who is in the room. Kept here rather than read out of the DOM so that a
+   redraw -- which happens whenever anybody joins, leaves or changes seat --
+   does not lose which person the reader had open. */
+let mySlot = null;
+let people = [];
+let personOpen = null;               // slot, or null for nobody
+let peopleTimer = 0;
+const PEOPLE_EVERY_MS = 5000;
+
+function peopleFrom(message) {
+  people = Array.isArray(message.people) ? message.people : [];
+  paintPeople();
+}
+
+function askPeople() {
+  if (chatOpen()) send({ t: "people" });
+}
+
+/* A ping is only meaningful next to a sense of what is good. These bands are
+   the ones that match what the game feels like: under 50ms is indistinguishable
+   from sitting on the sofa, 150ms is where a fast game starts to feel late,
+   and past 300ms everybody notices. */
+function pingBand(rtt) {
+  if (rtt == null) return "";
+  if (rtt < 50) return "is-good";
+  if (rtt < 150) return "is-fair";
+  return "is-poor";
+}
+
+function saidTime(seconds) {
+  if (seconds == null) return "";
+  if (seconds < 60) return Math.round(seconds) + "s";
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return mins + " min";
+  const hours = Math.floor(mins / 60);
+  return hours + "h " + (mins % 60) + "m";
+}
+
+function paintPeople() {
+  const strip = el("chat-people");
+  if (!strip) return;
+  strip.innerHTML = "";
+  people.forEach((person) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chat-person-chip"
+      + (person.slot === mySlot ? " is-me" : "")
+      + (person.here === false ? " is-away" : "")
+      + (person.slot === personOpen ? " is-open" : "");
+    chip.setAttribute("role", "tab");
+    chip.setAttribute("aria-selected", person.slot === personOpen ? "true" : "false");
+
+    const dot = document.createElement("span");
+    dot.className = "chat-person-ping " + pingBand(person.rtt);
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode(
+      person.name + (person.slot === mySlot ? " (you)" : "")));
+
+    chip.addEventListener("click", () => {
+      personOpen = personOpen === person.slot ? null : person.slot;
+      paintPeople();
+    });
+    strip.appendChild(chip);
+  });
+  if (!people.length) {
+    const empty = document.createElement("span");
+    empty.className = "browse-note";
+    empty.textContent = "Nobody else is connected.";
+    strip.appendChild(empty);
+  }
+  paintPerson();
+}
+
+function paintPerson() {
+  const box = el("chat-person");
+  if (!box) return;
+  const person = people.find((p) => p.slot === personOpen);
+  if (!person) { box.hidden = true; box.innerHTML = ""; return; }
+
+  const facts = [];
+  // The controller first: it is the thing they can point at, and the question
+  // behind "who is on player 2" is nearly always this one.
+  facts.push(["Controller",
+              person.pad_name || ("Pad " + ((person.pad || 0) + 1))]);
+  facts.push(["In the game",
+              person.player != null ? "Player " + person.player
+                : "not bound to a player yet"]);
+  facts.push(["Ping", person.rtt == null ? "not measured yet"
+              : person.rtt + " ms"]);
+  if (person.loss != null) {
+    facts.push(["Picture lost", person.loss.toFixed(1) + "%"]);
+  }
+  if (person.fps != null) facts.push(["Frame rate", person.fps + " per second"]);
+  facts.push(["Connected for", saidTime(person.seconds)]);
+  if (person.here === false) {
+    facts.push(["Right now", "no picture is reaching them"]);
+  }
+  if (person.driving) facts.push(["Allowed to", "use the screen directly"]);
+  if (person.held) {
+    facts.push(["Presses held back",
+                person.held + " (the television was in a menu)"]);
+  }
+
+  box.innerHTML = "";
+  const list = document.createElement("dl");
+  list.className = "chat-person-facts";
+  facts.forEach(([term, said]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = term;
+    const dd = document.createElement("dd");
+    dd.textContent = said;
+    list.appendChild(dt);
+    list.appendChild(dd);
+  });
+  box.appendChild(list);
+  box.hidden = false;
+}
+
 /* ---- chat ----------------------------------------------------------------
  *
  * Guests can watch each other play and cannot say a word to each other, which
@@ -2898,6 +3074,12 @@ function openChat() {
   // pushed, so a guest who joins an hour in gets the conversation and a guest
   // who never opens chat is never sent it.
   send({ t: "chatlog", since: chatSeen });
+  // Who is here, and then again while they are looking. The host pushes this
+  // when somebody joins, leaves or changes seat, but a ping that got worse
+  // changes nothing the host can see -- so the panel that is showing it asks.
+  askPeople();
+  clearInterval(peopleTimer);
+  peopleTimer = setInterval(askPeople, PEOPLE_EVERY_MS);
   const box = el("chat-text");
   // Not focused on a phone: focus opens the keyboard over the game, and
   // somebody opening chat to *read* it did not ask for that.
@@ -2910,6 +3092,9 @@ function openChat() {
 function closeChat() {
   el("chat").hidden = true;
   el("chat-text").blur();
+  // Nothing is drawing them any more, so stop asking.
+  clearInterval(peopleTimer);
+  peopleTimer = 0;
 }
 
 el("chatbtn").addEventListener("click", () => {

@@ -148,6 +148,16 @@ WARN_AT = (300, 120, 30)
 class GuestConnection:
     """One browser: a slot, a pad, a WebRTC peer and a socket."""
 
+    # Class-level defaults for the plain values, so that a guest built without
+    # running __init__ -- which is how several tests make a minimal one --
+    # still answers for them. `health` is None rather than {} on purpose: a
+    # mutable default here would be one dict shared by every guest that never
+    # set its own.
+    health = None
+    peer = None
+    frames = 0
+    held_frames = 0
+
     def __init__(self, session, slot, socket, name=""):
         self.session = session
         self.slot = slot
@@ -191,6 +201,11 @@ class GuestConnection:
         self.last_input = 0.0
         self.frames = 0
         self.bad_frames = 0
+        # How this guest's connection is actually running, measured at their
+        # end and sent here. It has to come from there: round trip time and
+        # lost packets are properties of the path to *them*, and the host can
+        # only see its own side of it.
+        self.health = {}
         # Frames that arrived while the television was in a menu, and so went
         # nowhere. Counted rather than dropped silently: "my controller did
         # nothing" is a question somebody will ask, and this is the answer.
@@ -251,6 +266,11 @@ class GuestConnection:
 
 class LiveSession:
     """Everything that exists only while the session is open."""
+
+    # Who, if anybody, may use the screen directly. A class-level default for
+    # the same reason the guest has them: a session built without __init__ --
+    # which is how some tests make one -- is still asked who is driving.
+    driver = None
 
     def __init__(self, cfg, loop, now=time.monotonic):
         self.cfg = cfg
@@ -502,6 +522,7 @@ class LiveSession:
         self.publish_pad_names()
         self.notify({"t": "arrived", "label": guest.label,
                      "guests": len(self.guests), "slots": self.slots})
+        self.publish_people()
         return guest, guest_token
 
     async def agree_codec(self, guest, guest_codecs):
@@ -797,6 +818,7 @@ class LiveSession:
             self.invite.release(slot, now=self._now())
             self.save()
         self.publish_pad_names()
+        self.publish_people()
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -860,6 +882,7 @@ class LiveSession:
             log.info("%s moved from pad %d to pad %d", guest.label, was, index)
         self.publish_pad_names()
         self.notify({"t": "pads", **self.pad_state()})
+        self.publish_people()
         return index
 
     def request_repick(self, guest):
@@ -914,6 +937,74 @@ class LiveSession:
             "ports": {str(i): ports[name]
                       for i, name in enumerate(names) if name in ports},
         }
+
+    def people(self):
+        """Who is in the room, for the guests' own list of each other.
+
+        Deliberately narrower than roster(). That one is for the person who
+        owns the television and may say anything; this goes to everybody, so
+        it carries names, seats and how well each connection is running, and
+        nothing that says which machine or which network anybody is on.
+
+        The pad name is worth having rather than just the number: "Fourth
+        Player 2" is what the guest sees written on the seat picker, and a
+        list that called it something else would be a list nobody could match
+        up with the thing in front of them.
+        """
+        ports = {}
+        try:
+            ports = launcher.player_ports()
+        except Exception:
+            pass
+        names = list(self.pads.names) if self.pads is not None else []
+        rows = []
+        for g in sorted(self.guests.values(), key=lambda g: g.slot):
+            pad_name = (names[g.pad_index]
+                        if 0 <= g.pad_index < len(names) else "")
+            health = g.health or {}
+            rows.append({
+                "slot": g.slot,
+                "name": g.label,
+                "pad": g.pad_index,
+                "pad_name": pad_name,
+                # Which player the running game thinks they are, which is not
+                # their seat number and is absent when no game has bound it.
+                "player": ports.get(pad_name),
+                "here": g.has_media(),
+                "seconds": round(time.monotonic() - g.joined_at),
+                "driving": g.slot == self.driver,
+                "rtt": health.get("rtt"),
+                "loss": health.get("loss"),
+                "fps": health.get("fps"),
+                "frames": g.frames,
+                # Frames that arrived while the television was in a menu and
+                # so went nowhere. "My controller did nothing" is a question
+                # somebody asks, and this is the answer to it.
+                "held": g.held_frames,
+            })
+        return rows
+
+    def set_health(self, guest, message):
+        """Take a guest's word for how their own connection is doing.
+
+        Clamped rather than trusted: these numbers are drawn on other people's
+        screens, and a guest is free to send anything at all.
+        """
+        def number(key, low, high):
+            try:
+                value = float(message.get(key))
+            except (TypeError, ValueError):
+                return None
+            if value != value:                       # NaN
+                return None
+            return round(max(low, min(high, value)), 1)
+
+        guest.health = {"rtt": number("rtt", 0, 9999),
+                        "loss": number("loss", 0, 100),
+                        "fps": number("fps", 0, 240)}
+
+    def publish_people(self):
+        self.notify({"t": "people", "people": self.people()})
 
     def roster(self):
         rows = []

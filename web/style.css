@@ -1623,6 +1623,89 @@ html.held .touch::after {
   flex-direction: column;
   gap: .45rem;
 }
+/* Who is here. A single row that scrolls sideways: on a phone in landscape
+   the panel is a few hundred pixels tall, and a strip that wrapped to three
+   rows would take the conversation off the screen to show a guest list
+   nobody asked to see. `flex: 0 0 auto` keeps it out of the log's scrolling. */
+.chat-people {
+  flex: 0 0 auto;
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;                 /* the chips are the affordance */
+  padding: .45rem clamp(.6rem, 3vw, 1.4rem);
+  border-bottom: 2px solid var(--bg2);
+}
+.chat-people::-webkit-scrollbar { display: none; }
+/* A chip, like every other chip on the page -- square, dim, in the display
+   face -- but tall enough to be a target: this one is meant to be tapped,
+   which the status chips are not. */
+.chat-person-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  min-height: 2rem;
+  padding: .4rem .5rem;
+  border: 2px solid var(--dim);
+  background: rgba(16, 14, 40, .9);
+  color: var(--dim);
+  font-family: var(--pixel);
+  font-size: .48rem;
+  line-height: 1.5;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.chat-person-chip.is-me { border-color: var(--accent); color: var(--accent); }
+.chat-person-chip.is-open {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+/* Away is dimmed rather than dropped: somebody whose picture has stopped is
+   still in the session and still holding a seat, and a list that quietly lost
+   them would be a list that disagrees with the seat picker. */
+.chat-person-chip.is-away { opacity: .55; }
+.chat-person-ping {
+  width: .5rem;
+  height: .5rem;
+  flex: 0 0 auto;
+  background: var(--dim);                /* not measured yet */
+}
+/* The open chip is filled with the accent colour, which is also the colour a
+   middling ping is drawn in -- so on that one chip the dot needs an edge, or
+   it vanishes into its own background exactly when somebody is looking at it. */
+.chat-person-chip.is-open .chat-person-ping { box-shadow: 0 0 0 1px var(--bg); }
+.chat-person-ping.is-good { background: var(--ok); }
+.chat-person-ping.is-fair { background: var(--accent); }
+.chat-person-ping.is-poor { background: var(--bad); }
+/* The numbers, in a readable face. This is the one part of the panel somebody
+   reads rather than glances at. */
+.chat-person {
+  flex: 0 0 auto;
+  padding: .55rem clamp(.6rem, 3vw, 1.4rem);
+  border-bottom: 2px solid var(--bg2);
+  font-family: var(--sans);
+  font-size: .82rem;
+}
+.chat-person-facts {
+  margin: 0;
+  display: grid;
+  /* The term column sizes to its content, so the values line up down the
+     panel instead of stepping in and out with the length of each label. */
+  grid-template-columns: auto 1fr;
+  gap: .2rem .7rem;
+}
+.chat-person-facts dt { color: var(--dim); }
+.chat-person-facts dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+
 .chat-line {
   margin: 0;
   font-size: .9rem;

@@ -406,6 +406,14 @@
       <button id="chat-close" type="button" class="ghost"
               title="Back to the game">&times;</button>
     </div>
+    <!-- Who else is here, along the top: a strip of names that scrolls
+         sideways on a phone rather than wrapping into three rows and pushing
+         the conversation off the screen. Tapping one opens the detail below
+         it, which is the only place the numbers live -- a ping on every chip
+         is a strip nobody can read at a glance. -->
+    <div id="chat-people" class="chat-people" role="tablist"
+         aria-label="Who is connected"></div>
+    <div id="chat-person" class="chat-person" hidden></div>
     <div id="chat-log" class="chat-log" aria-live="polite"></div>
     <form id="chat-form" class="chat-form" autocomplete="off">
       <!-- 240 characters, the same limit the host enforces. Said here as

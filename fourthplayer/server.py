@@ -208,6 +208,17 @@ class Server:
                     # game was running.
                     await outbox.put({"t": "pads", "yours": guest.pad_index,
                                       **self.session.pad_state()})
+                elif kind == "people":
+                    # Asked for while the chat panel is open, because the
+                    # numbers in it age: a guest whose connection went bad
+                    # after the list was drawn still looked fine on it.
+                    await outbox.put({"t": "people",
+                                      "people": self.session.people()})
+                elif kind == "health":
+                    # How their own connection is running, measured at their
+                    # end -- round trip time and lost packets belong to the
+                    # path to them, and this end can only see its own half.
+                    self.session.set_health(guest, message)
                 elif kind == "chat":
                     said = self.session.say(guest.label, message.get("message"),
                                             slot=guest.slot)
