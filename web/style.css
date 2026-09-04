@@ -239,7 +239,19 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
      however much browser furniture is on screen. */
   --sh: calc(var(--vv-height, 100dvh) / 100);
   background: #000;
-  touch-action: manipulation;
+  /* No pinch on the picture.
+   *
+   * `manipulation` only turns off double-tap zoom; a two-finger touch still
+   * zooms the page. This is a game held in two hands with thumbs on glass,
+   * so a stray pinch is not a rare accident -- and Safari remembers the zoom
+   * for next time, which is why the page sometimes *opens* zoomed, with the
+   * chips too big and the pad hanging off the right.
+   *
+   * Nothing is lost by refusing it: this element never scrolls, and the pad
+   * inside it already said `none` for the same reason. The panels that do
+   * scroll ask for the one gesture they need, because touch-action is
+   * intersected down the ancestor chain. */
+  touch-action: none;
   overflow: hidden;             /* nothing here is ever reached by scrolling */
 }
 
@@ -494,6 +506,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    underneath it -- which meant the explanation of why there was no video was
    the one thing you could not read. */
 .notice {
+  /* Scrolls, and the stage above it now refuses every gesture to keep
+     pinch off the picture, so it asks for the one it needs. */
+  touch-action: pan-y;
   position: absolute;
   top: calc(var(--top-safe) + 3.2rem);
   left: .6rem;
@@ -1140,6 +1155,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 }
 
 .shelf {
+  /* Scrolls, and the stage above it now refuses every gesture to keep
+     pinch off the picture, so it asks for the one it needs. */
+  touch-action: pan-y;
   flex: 1 1 auto;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1459,6 +1477,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 /* ---- what your controller is doing ---- */
 
 .pads {
+  /* Scrolls, and the stage above it now refuses every gesture to keep
+     pinch off the picture, so it asks for the one it needs. */
+  touch-action: pan-y;
   position: absolute;
   inset: 0;
   z-index: 45;
@@ -1704,6 +1725,9 @@ html.held .touch::after {
    a page that scrolls as a whole. */
 .chat { display: flex; flex-direction: column; }
 .chat-log {
+  /* Scrolls, and the stage above it now refuses every gesture to keep
+     pinch off the picture, so it asks for the one it needs. */
+  touch-action: pan-y;
   flex: 1 1 auto;
   /* The keyboard's own animation is what the eye follows; the panel resizing
      underneath it should not be a second thing moving. Kept short: anything
@@ -1728,6 +1752,8 @@ html.held .touch::after {
   gap: .35rem;
   align-items: center;
   overflow-x: auto;
+  /* Sideways, for the same reason the others say pan-y. */
+  touch-action: pan-x;
   overscroll-behavior-x: contain;
   scrollbar-width: none;                 /* the chips are the affordance */
   padding: .45rem clamp(.6rem, 3vw, 1.4rem);

@@ -2504,7 +2504,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04l";
+const CLIENT_BUILD = "2026-09-04m";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3723,9 +3723,31 @@ function enterVideoFullscreen() {
    so anything anchored to the bottom -- select and start -- gets laid out
    behind them. visualViewport reports what is really on screen, including
    while the bars slide in and out and while the page is pinch-zoomed. */
+/* Whether the page is pinch-zoomed, said out loud once.
+ *
+ * A zoomed page looks like a broken layout and is not one: everything sized
+ * in rem -- the chips, the buttons -- is drawn larger, and the picture becomes
+ * a window onto a page wider than the screen, so the pad appears to hang off
+ * the right. The two are indistinguishable from a description, and this is
+ * the number that tells them apart. Reported when it changes rather than
+ * continuously, because it changes while a pinch is happening. */
+let zoomTold = 0;
+
+function noteZoom(vv) {
+  const scale = Math.round((vv.scale || 1) * 100) / 100;
+  if (scale === zoomTold) return;
+  zoomTold = scale;
+  if (scale === 1) return;               // back to normal is not worth a line
+  report("the page is zoomed to " + Math.round(scale * 100) + "%: "
+         + Math.round(vv.width) + "x" + Math.round(vv.height)
+         + " of the layout is showing. Everything will look too big and the "
+         + "pad will sit off the right until it is pinched back to 100%.");
+}
+
 function fitStage() {
   const vv = window.visualViewport;
   if (!vv) return;                       // the dvh fallback in the CSS applies
+  noteZoom(vv);
   const style = document.documentElement.style;
   style.setProperty("--vv-height", vv.height + "px");
   style.setProperty("--vv-width", vv.width + "px");
