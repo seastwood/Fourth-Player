@@ -122,8 +122,20 @@
     <!-- Guests can see each other's controllers moving and cannot say a word
          to each other, which is a strange way to play together. The count is
          what has been said since this page last looked at it. -->
-    <button id="chatbtn" type="button" class="ghost">Chat<span id="chatnew"
-            class="chat-new" hidden>0</span></button>
+    <button id="chatbtn" type="button" class="ghost icon chat-btn"
+            aria-label="Chat" title="Chat">
+      <!-- A speech bubble, drawn rather than written: the row it sits in is
+           the one that runs out of width first on a phone, and the word was
+           the widest thing on it. Square-cornered, because everything else
+           here is. -->
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M1 1 h14 v10 H6 L2.5 14.5 V11 H1 Z"/>
+        <rect class="chat-dot" x="4.5" y="5" width="1.6" height="1.6"/>
+        <rect class="chat-dot" x="7.2" y="5" width="1.6" height="1.6"/>
+        <rect class="chat-dot" x="9.9" y="5" width="1.6" height="1.6"/>
+      </svg>
+      <span id="chatnew" class="chat-new" hidden>0</span>
+    </button>
     <!-- The speaker shows the level at a glance -- no waves, one wave, two --
          and opens the slider when tapped. Its own level, not the
          television's: turning it down here should not silence the room. -->

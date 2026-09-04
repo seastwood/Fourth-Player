@@ -85,6 +85,25 @@ told = source.split("def _tell_about_the_hold")[1].split("\n    def ")[0]
 check('"t": "hold"' in told and "notify_one" in told,
       "one page at a time, because 'may you drive' is a different answer for "
       "each of them")
+
+# And that the thing it calls exists. This suite used to check only that the
+# name appeared at the call site, which it did -- while the method itself had
+# never been written, because the edit that was meant to add it aborted before
+# saving. What that produced was an AttributeError inside the sweeper, which
+# is also the dead-man switch and the launch deadline, so the first symptom
+# was pads not being released.
+import ast  # noqa: E402
+klass = next(node for node in ast.parse(source).body
+             if isinstance(node, ast.ClassDef) and node.name == "LiveSession")
+methods = {node.name for node in klass.body
+           if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+for name in ("notify_one", "notify", "say", "name_a_driver", "_hold_input"):
+    check(name in methods, "LiveSession really has %s(), not just calls to it"
+          % name)
+sweeper = source.split("async def _sweep_forever")[1].split("\n    async def ")[0]
+check("except Exception" in sweeper,
+      "and a fault in the newest thing on the sweeper cannot end the sweeper: "
+      "the dead-man switch rides on it")
 check('"driving": guest.slot == self.driver' in told,
       "and the answer is worked out here rather than by a page comparing slot "
       "numbers it cannot be sure of")

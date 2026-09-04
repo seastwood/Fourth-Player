@@ -56,16 +56,6 @@ def set_link(required):
     return ask({"cmd": "link", "set": bool(required)})
 
 
-def chat(since=0):
-    """Everything said since `since`."""
-    return ask({"cmd": "chat", "since": since})
-
-
-def say(text, name="Television"):
-    """Say something to the guests, as the room rather than as a player."""
-    return ask({"cmd": "say", "text": text, "as": name})
-
-
 def set_driver(slot):
     """Name the guest who may drive what is in front, or None for nobody."""
     return ask({"cmd": "drive", "slot": slot})

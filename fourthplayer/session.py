@@ -1331,6 +1331,21 @@ class LiveSession:
             log.info("guest controllers live again")
         self._tell_about_the_hold()
 
+    def notify_one(self, guest, message):
+        """One guest, for the things whose answer differs per page.
+
+        "May you drive" is the first of those. Falls back to telling everybody
+        if the server has not given us a way to reach one guest -- a message
+        that reaches too many people is a poor answer, and a message that
+        reaches nobody because an attribute was missing is a worse one.
+        """
+        if self.on_notice_one is None:
+            return self.notify(message)
+        try:
+            self.on_notice_one(guest, message)
+        except Exception:
+            log.exception("could not deliver a notice to %s", guest.label)
+
     def notify(self, message):
         if self.on_notice is not None:
             try:
@@ -1352,9 +1367,18 @@ class LiveSession:
                 # bringing a second timer of its own.
                 every = max(1, int(self.cfg.shell_poll_ms / (SWEEP_INTERVAL * 1000)))
                 if self._ticks % every == 0:
-                    held, why = await self.loop.run_in_executor(
-                        None, self._watch_the_screen)
-                    self._hold_input(held, why)
+                    # Guarded, because this loop is also the dead-man switch,
+                    # the launch-request deadline and the pad sweep. A fault
+                    # in the newest thing on it took all of those with it: a
+                    # missing method here ended the task, and what somebody
+                    # actually noticed was that a controller stopped being
+                    # released when its guest went quiet.
+                    try:
+                        held, why = await self.loop.run_in_executor(
+                            None, self._watch_the_screen)
+                        self._hold_input(held, why)
+                    except Exception:
+                        log.exception("could not read what is on the screen")
                 # Roughly every ten seconds, make sure the thread that owns the
                 # pipeline is still answering. A wedge is otherwise invisible
                 # until somebody tries to join and is refused.

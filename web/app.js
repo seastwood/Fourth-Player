@@ -2265,7 +2265,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-03z";
+const CLIENT_BUILD = "2026-09-04a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -2781,11 +2781,15 @@ function heardChat(message) {
   // escaping belongs where the medium is known. Here the medium is a DOM.
   said.textContent = message.text;
   line.append(who, said);
+  // Whether they were reading the newest line before this arrived. Somebody
+  // scrolled back to re-read something should not be yanked to the bottom by
+  // a message they have not seen yet.
+  const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.appendChild(line);
   // Only the last hundred stay in the page. A conversation nobody scrolled
   // back through is not worth the memory on a phone.
   while (log.children.length > 100) log.removeChild(log.firstChild);
-  log.scrollTop = log.scrollHeight;
+  if (atEnd) log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
 
   if (chatOpen()) return;
   chatUnread += 1;
@@ -2846,6 +2850,10 @@ el("chat-form").addEventListener("submit", (event) => {
   if (!text) return;
   send({ t: "chat", message: text });
   box.value = "";
+  // Focus is kept deliberately: letting the field blur closes the keyboard,
+  // and a keyboard that shuts after every line makes a conversation feel like
+  // a form. It closes when the panel does, or when somebody taps away.
+  box.focus({ preventScroll: true });
   // Not echoed locally: it comes back from the host with everybody else's,
   // in the order the host put them in, which is the order everyone else sees.
   // A page that draws its own first shows a different conversation from the
@@ -3005,6 +3013,24 @@ if (window.visualViewport) {
   };
   window.visualViewport.addEventListener("resize", schedule);
   window.visualViewport.addEventListener("scroll", schedule);
+  /* The keyboard coming up is a viewport resize like any other, and it is the
+     one that shows. Two things make it rough rather than smooth: the last
+     message slides up behind the keyboard because the log keeps its scroll
+     offset while the box around it shrinks, and iOS scrolls the *window* to
+     reveal a focused field even though everything here is fixed, which drags
+     the whole stage by a few pixels and then drags it back.
+
+     So the log is pinned to the end while the panel is open, and the stray
+     window scroll is put back to zero. Both on the same frame as the resize,
+     which is the frame the keyboard is drawn on. */
+  window.visualViewport.addEventListener("resize", () => {
+    if (el("chat").hidden) return;
+    requestAnimationFrame(() => {
+      if (window.scrollY || window.scrollX) window.scrollTo(0, 0);
+      const log = el("chat-log");
+      log.scrollTop = log.scrollHeight;
+    });
+  });
   window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
   fitStage();
 }

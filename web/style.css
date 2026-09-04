@@ -1610,6 +1610,11 @@ html.held .touch::after {
 .chat { display: flex; flex-direction: column; }
 .chat-log {
   flex: 1 1 auto;
+  /* The keyboard's own animation is what the eye follows; the panel resizing
+     underneath it should not be a second thing moving. Kept short: anything
+     longer lags behind the keyboard rather than moving with it. */
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
   min-height: 0;                 /* or the log refuses to scroll inside flex */
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1655,15 +1660,42 @@ html.held .touch::after {
    own line under a full-width field. */
 .chat-form .paste { flex: 1 1 auto; width: auto; min-width: 0; }
 .chat-form .choice { flex: 0 0 auto; align-self: stretch; }
+/* The chat button: a bubble, and the count of what has been said since this
+   page last looked at it. The icon is stroked rather than filled so it reads
+   at chip size on a phone, where it is competing with the clock. */
+.chat-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linejoin: miter;
+}
+.chat-btn .chat-dot { fill: currentColor; stroke: none; }
+
 /* How many have been said since this page last looked. */
 .chat-new {
-  display: inline-block;
-  margin-left: .35rem;
-  padding: 0 .3rem;
+  /* On the corner of the bubble rather than beside it: in the chip row there
+     is no width to spare, and a badge that widens the button pushes whatever
+     is next to it off the screen. */
+  position: absolute;
+  top: -.35rem;
+  right: -.35rem;
+  padding: 0 .25rem;
   background: var(--edge);
   color: var(--bg);
   font-family: var(--pixel);
   font-size: .45rem;
+  /* Its own, because `.ghost.icon` sets line-height to 0 so the svg sits flush
+     -- inherited, that made the badge sixteen pixels wide and none tall. */
+  line-height: 1.6;
 }
 .chat-toast strong { color: var(--accent); }
 

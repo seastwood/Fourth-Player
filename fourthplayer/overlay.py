@@ -366,9 +366,13 @@ class Overlay(Gtk.Window):
                 self.open_composer()
             if (self.typing is not None
                     and time.monotonic() - self.typed_at > COMPOSE_IDLE):
-                # It holds the keyboard while it is open. Nothing that holds a
-                # keyboard may hold it for ever.
-                self.close_composer()
+                # Only Escape closes it -- somebody reading a conversation is
+                # not somebody who has finished with it. But the keyboard is
+                # not theirs to hold for ever while they read, so after a long
+                # silence the grab is handed back and the window stays, saying
+                # so. Typing is over at that point, which is the honest state:
+                # the keys are going to the game again.
+                self.release_keyboard()
         except Exception:
             print("overlay: reading the keyboard failed", file=sys.stderr)
             traceback.print_exc()
@@ -422,16 +426,26 @@ class Overlay(Gtk.Window):
         for code, value in self.chatkey.typed():
             if not value:                       # a release
                 continue
+            if not self.grabbed:
+                # It was handed back while nobody was typing. Somebody is now.
+                self.grab_keyboard()
             self.typed_at = time.monotonic()
             name = self.chatkey.evdev.ecodes.KEY.get(code, "")
             if name == "KEY_ESC":
                 return self.close_composer()
             if name in ("KEY_ENTER", "KEY_KPENTER"):
+                # Sends and stays. A conversation is not one message: closing
+                # on send meant pressing the shortcut again for every line,
+                # and the answer usually arrives while somebody is still
+                # looking at what they sent.
                 said = self.typing.strip()
-                self.close_composer()
+                self.typing = ""
                 if said:
                     ask({"cmd": "say", "text": said})
-                return
+                    # Straight back from the host, so the line appears above
+                    # the box in the same order everybody else sees it.
+                    self.poll()
+                continue
             if name == "KEY_BACKSPACE":
                 self.typing = self.typing[:-1]
                 continue
@@ -605,8 +619,15 @@ class Overlay(Gtk.Window):
         showing = self.typing[-52:]
         text(ctx, CARD_PAD + 10, box + 8, (showing or "Say something") + "_",
              13, (0.89, 0.91, 0.95) if self.typing else (0.45, 0.49, 0.56))
-        text(ctx, CARD_PAD, height - 14, "Enter sends  ·  Escape closes", 10,
-             (0.62, 0.66, 0.72))
+        if self.grabbed:
+            note, colour = "Enter sends  ·  Escape closes", (0.62, 0.66, 0.72)
+        else:
+            # Either the grab never took, or it was given back after a long
+            # silence. Both mean the same thing to somebody about to type, so
+            # both say it: the game can hear this.
+            note = "the game has the keyboard  ·  Escape closes  ·  press a key to take it back"
+            colour = (0.90, 0.45, 0.35)
+        text(ctx, CARD_PAD, height - 14, note, 10, colour)
 
     def draw_chat(self, ctx, width, height):
         who, said, _until = self.chat

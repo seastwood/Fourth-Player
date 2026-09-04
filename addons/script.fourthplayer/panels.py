@@ -92,31 +92,17 @@ def backdrop_png():
     return path
 
 
-# Select, and the space bar, which is what a hand already on a keyboard
-# reaches for. Both mean "I want to say something" in the chat window and
-# nothing anywhere else.
-REPLY_ACTIONS = (7, 100)          # ACTION_SELECT_ITEM, ACTION_MOUSE_LEFT_CLICK
-
-
 class Panel(xbmcgui.WindowDialog):
     """A window that stays up and refreshes until somebody backs out of it."""
 
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.closed = False
-        # Set by the chat window's loop when somebody asks to type. Held as a
-        # flag rather than opening the keyboard here, because this runs on
-        # Kodi's UI thread and a modal opened from inside an action handler
-        # is a dialog inside a dialog.
-        self.replying = False
 
     def onAction(self, action):
         if action.getId() in CLOSE_ACTIONS:
             self.closed = True
             self.close()
-        elif action.getId() in REPLY_ACTIONS or action.getButtonCode() in (
-                61472, 32):                  # space, on a keyboard
-            self.replying = True
 
     def onControl(self, control):
         self.closed = True
@@ -231,80 +217,6 @@ def show_invite(get_status, reshare=None):
                 clock.setLabel("%d of %d playing  ·  %s"
                                % (guests, status.get("slots", 0),
                                   time_left(status)))
-            if monitor.waitForAbort(1):
-                break
-    finally:
-        window.close()
-        del window
-
-
-def show_chat(get_chat, say):
-    """What everybody is saying, and a way to answer from the sofa.
-
-    The room is in the conversation rather than being talked about, which is
-    the whole reason this exists: guests can see each other's controllers
-    moving and say things to each other, and the person actually holding the
-    television should not be the one who cannot hear it.
-
-    Reading needs no keyboard -- it updates while you watch. Answering opens
-    Kodi's own keyboard dialog, which is a real keyboard where there is one
-    and the on-screen one where there is not.
-    """
-    window = Panel()
-    width, height = window.getWidth(), window.getHeight()
-
-    window.addControl(xbmcgui.ControlImage(0, 0, width, height, backdrop_png()))
-    card_w, card_h = int(width * 0.72), int(height * 0.78)
-    card_x, card_y = (width - card_w) // 2, (height - card_h) // 2
-    window.addControl(xbmcgui.ControlImage(
-        card_x, card_y, card_w, card_h, panel_png(card_w, card_h, "chat.png")))
-
-    pad = int(card_h * 0.07)
-    line = int(card_h * 0.075)
-    heading, hint = _labels(window, [
-        (card_x + pad, card_y + pad, card_w - pad * 2, line,
-         "[B]Chat[/B]", "0xFFE69B40"),
-        (card_x + pad, card_y + card_h - pad - line, card_w - pad * 2, line,
-         "[COLOR FF949CAC]Press OK or space to say something · back to "
-         "close · Ctrl+Shift+C opens this any time[/COLOR]", "0xFF949CAC"),
-    ])
-
-    rows = []
-    for index in range(8):
-        rows.extend(_labels(window, [
-            (card_x + pad, card_y + pad + int(line * (1.4 + index)),
-             card_w - pad * 2, line, "", "0xFFE3E7EE"),
-        ]))
-
-    window.show()
-    monitor = xbmc.Monitor()
-    seen = 0
-    said = []
-    try:
-        while not window.closed and not monitor.abortRequested():
-            reply = get_chat(seen)
-            for message in (reply.get("messages") or []):
-                seen = max(seen, message.get("id", 0))
-                said.append("[COLOR FFE69B40]%s[/COLOR]  %s"
-                            % (message.get("from", "?"), message.get("text", "")))
-            del said[:-len(rows)]
-            for index, row in enumerate(rows):
-                row.setLabel(said[index] if index < len(said) else "")
-            heading.setLabel("[B]Chat[/B]" if said
-                             else "[B]Chat[/B]   [COLOR FF5C6472]nothing said "
-                                  "yet[/COLOR]")
-            # A short wait, because this is a conversation: a two second lag
-            # on somebody's answer is the difference between talking and
-            # leaving messages.
-            if window.replying:
-                window.replying = False
-                keyboard = xbmc.Keyboard("", "Say something")
-                keyboard.doModal()
-                if keyboard.isConfirmed():
-                    text = keyboard.getText().strip()
-                    if text:
-                        say(text)
-                continue
             if monitor.waitForAbort(1):
                 break
     finally:

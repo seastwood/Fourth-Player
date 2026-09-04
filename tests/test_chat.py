@@ -184,42 +184,37 @@ overlay = open(os.path.join(ROOT, "fourthplayer", "overlay.py")).read()
 check("def draw_chat" in overlay,
       "the television shows what was said, rather than the guests talking "
       "about somebody who cannot hear them")
-key = re.search(r'REPLY_KEY = "([^"]+)"', overlay).group(1)
-check("to reply" in overlay, "and says which key answers it")
-keymap = open(os.path.join(ROOT, "system", "fourth-player-keymap.xml")).read()
-# The key itself, and the fact that it is a combination. F8 was the first
-# choice, and F8 is Kodi's screenshot key: pressing it photographed the
-# television instead of opening the chat. Kodi's keymap claims nearly every
-# bare letter and eight function keys, so anything unmodified is a collision
-# waiting to be found by somebody else.
-parts = [p.strip().lower() for p in key.split("+")]
-check(len(parts) > 1, "the shortcut is a combination, not a bare key: %s" % key)
-check("<%s mod=" % parts[-1] in keymap.lower(),
-      "the keymap binds that key with modifiers")
-for modifier in parts[:-1]:
-    check(modifier in keymap.lower().split("mod=\"")[1].split("\"")[0],
-          "with %s among them, so the card and the keymap say the same thing"
-          % modifier)
-check("screenshot" in keymap.lower() or "F8" in keymap,
-      "and why it is not the obvious single key is written down beside it")
-check("RunScript(script.fourthplayer,chat)" in keymap,
-      "and it opens the chat window directly rather than the menu")
-check("<global>" in keymap,
-      "globally, so it works while a game is on screen and not only in a menu")
+check("REPLY_KEY" in overlay, "and says which keys open it")
+
+print("and the Kodi half is gone, because two of them fought")
 addon = open(os.path.join(ROOT, "addons", "script.fourthplayer", "main.py")).read()
-# The whole of that branch, rather than up to its first `return` -- which is
-# the one that fires when no session is open.
-chat_entry = addon.split('sys.argv[1] == "chat"')[1].split("\n    if ")[0]
-check("open_chat()" in chat_entry,
-      "and opening it does not wait for somebody to have spoken: the room may "
-      "want to say the first thing")
-check("C.chat(" not in chat_entry and "messages" not in chat_entry,
-      "nothing about what has been said gates it -- the only question asked "
-      "is whether there is a session to chat with")
+panels = open(os.path.join(ROOT, "addons", "script.fourthplayer",
+                           "panels.py")).read()
+client = open(os.path.join(ROOT, "addons", "script.fourthplayer",
+                           "fpclient.py")).read()
+check("chat" not in addon and "show_chat" not in panels and "chat" not in client,
+      "no chat window in the add-on: the overlay grabs those keys at the "
+      "kernel, so a Kodi keymap on the same combination opened both at once")
+check(not os.path.exists(os.path.join(ROOT, "system",
+                                      "fourth-player-keymap.xml")),
+      "and no keymap ships any more")
 install = open(os.path.join(ROOT, "install", "install.sh")).read()
-check("keymaps/fourth-player.xml" in install,
-      "installed rather than suggested: a card telling somebody to press a "
-      "key that does nothing is worse than a card that says nothing")
+check("keymaps" not in install,
+      "nor is one installed -- there is nothing left for it to open")
+
+print("the composer stays until somebody closes it")
+compose_keys = overlay.split("def take_typing")[1].split("\n    def ")[0]
+check("self.typing = \"\"" in compose_keys and "close_composer" not in
+      compose_keys.split("KEY_ENTER")[1].split("continue")[0],
+      "Enter sends and stays: a conversation is not one message, and closing "
+      "on send means pressing the shortcut again for every line")
+watch = overlay.split("def watch_keys")[1].split("\n    def ")[0]
+# Just the idle branch: the exception handler below it closes the composer on
+# purpose, and reading to the end of the function swept that up too.
+idle = watch.split("COMPOSE_IDLE")[1].split("except Exception")[0]
+check("release_keyboard()" in idle and "close_composer()" not in idle,
+      "and a long silence hands the keyboard back without closing the window: "
+      "somebody reading is not somebody who has finished")
 
 print()
 if fails:
