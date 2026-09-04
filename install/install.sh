@@ -80,6 +80,16 @@ say "the Kodi add-on"
 if [ -d "$HOME/.kodi/addons" ]; then
   ln -sfn "$REPO/addons/script.fourthplayer" "$HOME/.kodi/addons/script.fourthplayer"
   echo "linked into ~/.kodi/addons"
+  # The menu tile, put where every other tile on that menu lives. Cut from the
+  # same drawing as the home screen icon, so the row on the television and the
+  # icon on a phone are recognisably the same thing. Copied rather than
+  # linked: the menu is read by Kodi, which does not need this repository to
+  # still be where it was.
+  if [ -f "$REPO/media/menu-tile.png" ]; then
+    mkdir -p "$HOME/.kodi/media/consoles"
+    cp "$REPO/media/menu-tile.png" "$HOME/.kodi/media/consoles/_fourthplayer.png"
+    echo "menu tile in place"
+  fi
   # Kodi reads its add-on list once, at startup. Until it rescans, the add-on
   # is on disk and unknown -- and a menu entry pointing at it answers with
   # "you need to install this add-on", which sounds like a packaging fault

@@ -84,8 +84,44 @@ check('rel="manifest"' in html and 'rel="apple-touch-icon"' in html,
 manifest = json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
 check(manifest.get("start_url") == "/",
       "an installed copy starts on the plain address, not on a dead invite")
-check(os.path.isfile(os.path.join(ROOT, "web", "icons", "pad-180.png")),
-      "the icon it points at exists")
+# Every icon the manifest and the page name, actually on disk and actually
+# the size they are declared as. A manifest naming a file that is not there
+# is an install prompt with a blank square in it, and nothing says so at
+# build time -- the phone simply shows the blank.
+from PIL import Image                                            # noqa: E402
+
+page = open(os.path.join(ROOT, "web", "index.html")).read()
+named = set(re.findall(r'/static/(icons/[\w.-]+\.png)', page))
+for entry in manifest.get("icons", []):
+    named.add(entry["src"].replace("/static/", ""))
+check(len(named) >= 4, "the page and the manifest name %d icons" % len(named))
+for rel in sorted(named):
+    path = os.path.join(ROOT, "web", rel)
+    there = os.path.isfile(path)
+    check(there, "%s is there" % rel)
+    if not there:
+        continue
+    want = re.search(r"-(\d+)\.png$", rel)
+    if want:
+        got = Image.open(path).size
+        check(got == (int(want.group(1)),) * 2,
+              "%s really is %s pixels, got %s" % (rel, want.group(1), got))
+
+# A maskable icon is cropped by the launcher to whatever shape it likes, and
+# only the middle 80% is promised. This drawing is a circle that fills its
+# square, so the maskable one is padded -- and if that padding is ever lost,
+# the ring loses its edge on somebody's home screen and nothing here would
+# have said so.
+maskable = [e["src"] for e in manifest.get("icons", [])
+            if "maskable" in (e.get("purpose") or "")]
+check(len(maskable) == 1, "there is one maskable icon")
+if maskable:
+    art = Image.open(os.path.join(
+        ROOT, "web", maskable[0].replace("/static/", ""))).convert("RGB")
+    edge = art.crop((0, 0, art.size[0], 8)).getcolors(4096)
+    check(len(edge) <= 3,
+          "and its edge is flat background rather than artwork, which is what "
+          "being cropped safely means; got %d colours" % len(edge))
 
 json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest")))
 print("  ok   the manifest parses")

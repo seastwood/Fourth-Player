@@ -113,6 +113,21 @@ html, body {
   z-index: 1;
 }
 
+/* The icon, above the heading. Sized in rem so it shrinks with everything
+   else on a short screen -- a phone in landscape has very little height, and
+   the PIN box is what has to stay visible. */
+.gate-mark {
+  display: block;
+  width: clamp(4rem, 18vw, 7rem);
+  height: auto;
+  margin: 0 auto -.4rem;
+  image-rendering: pixelated;      /* it is pixel art; do not smooth it */
+}
+@media (max-height: 32rem) {
+  /* Landscape on a phone. The heading and the PIN are the job here. */
+  .gate-mark { display: none; }
+}
+
 .gate h1 {
   font-family: var(--pixel);
   font-size: clamp(1rem, 4.6vw, 1.5rem);

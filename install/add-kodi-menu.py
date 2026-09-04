@@ -50,7 +50,11 @@ ENTRY = """	<shortcut>
 	</shortcut>
 """
 
+# Its own tile first. The one below it is MULTIPLAYER's, which is a different
+# thing -- who is on the sofa, rather than somebody who is not in the
+# building -- and using it made two rows of the menu the same picture.
 ICONS = [
+    os.path.expanduser("~/.kodi/media/consoles/_fourthplayer.png"),
     os.path.expanduser("~/.kodi/media/consoles/_multiplayer.png"),
     "special://skin/extras/icons/DefaultAddonProgram.png",
 ]

@@ -14,8 +14,13 @@
 <!-- Draws under the clock and battery rather than beside them; the layout
      already keeps its distance with env(safe-area-inset-*). -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="apple-touch-icon" href="/static/icons/pad-180.png">
-<link rel="icon" href="/static/icons/pad-180.png" sizes="180x180">
+<!-- All cut from one drawing by tools/make_icons.py. iOS asks for exactly
+     180 for a home screen icon; the small one is what a browser tab gets, and
+     there is no point sending a phone-sized picture to draw at sixteen
+     pixels. -->
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="icon" href="/static/icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- No start_url on purpose: it then defaults to whatever page installed it,
      so the home-screen icon keeps the invite token it was added with. -->
 <link rel="manifest" href="/static/manifest.webmanifest">
@@ -25,6 +30,12 @@
 
 <main id="gate" class="gate">
  <div class="gate-inner">
+  <!-- The same drawing the home screen icon and the Kodi menu tile are cut
+       from, so the page somebody lands on looks like the icon they tapped.
+       Decorative: the heading underneath already says what this is, and a
+       screen reader repeating "Fourth Player" twice helps nobody. -->
+  <img class="gate-mark" src="/static/icons/icon-round-192.png" alt="" width="112"
+       height="112" decoding="async">
   <h1>Fourth&nbsp;Player</h1>
   <p class="lede">Someone has opened a game for you to join.</p>
 

@@ -1,5 +1,7 @@
 # fourth-player
 
+<img src="media/icon.png" alt="Fourth Player" width="160" align="right">
+
 **Friends outside your network join the game on your machine, from a browser
 link, with their own controllers.** They see the screen, they take a player
 slot, you all play together. Nothing to install on their side and no account
