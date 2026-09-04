@@ -1272,22 +1272,9 @@ function paintBuzz() {
   const box = el("pads-buzz");
   if (!box) return;
   box.checked = hapticsOn;
-  const note = el("pads-buzz-note");
-  if (note) {
-    /* Said plainly rather than left to be discovered by pressing things. A
-       page cannot find out whether a tap actually happened -- there is no
-       answer to read and nothing throws -- so a phone that feels nothing is
-       indistinguishable here from a phone that is buzzing away happily, and
-       the only decent thing to do about that is say which phones cannot. */
-    const caveat = canVibrate ? ""
-      : " On an iPhone the tap comes from iOS's own switch, so it lands as you"
-        + " let go of a button rather than as you press it, and a direction"
-        + " slid into rather than tapped does not tap back. Safari has no way"
-        + " to vibrate a phone on demand, and that is the whole of what is"
-        + " left.";
-    note.textContent = (hapticsOn ? "The pad answers a press."
-                                  : "The pad is quiet.") + caveat;
-  }
+  // No sentence under it. "Haptic feedback", on or off, is the whole of what
+  // there is to know, and a paragraph explaining a switch somebody has just
+  // read the label of is a paragraph in the way.
 }
 
 function paintFaceSwap() {
@@ -1295,20 +1282,10 @@ function paintFaceSwap() {
   if (!box) return;
   const on = faceSwapped();
   box.checked = on;
-  const note = el("pads-faceswap-note");
-  if (!note) return;
-  // Named by what a game will be told, because that is the thing somebody is
-  // trying to line up. The letters on the glass are in front of them; what
-  // arrives at the other end is what they cannot see.
-  const layout = LAYOUTS[chosenLayout()];
-  const bottom = touchOn && layout && layout.face
-    ? (layout.face.find((b) => b.y > 50) || {}).id : "";
-  note.textContent = on
-    ? "A and B traded over, and X and Y with them -- on the on-screen pad and "
-      + "on a controller."
-    : (bottom ? "The button marked " + bottom + " is sent as A, which is what "
-                + "its position means on the pad the host presents."
-              : "Each button is sent as the one in its position.");
+  // "Swap A/B and X/Y" is the whole of it. What it used to say underneath --
+  // which button ends up being sent as which -- is the thing somebody finds
+  // out by flipping it and pressing one, in less time than the sentence took
+  // to read.
 }
 
 function setFaceSwap(on) {
@@ -1333,18 +1310,8 @@ function paintStrength() {
   // and one whose only haptic is a switch gets more taps, because the length
   // of those is iOS's to decide and not ours.
   row.hidden = !canBuzz || !hapticsOn;
-  const note = el("pads-buzz-strength-note");
-  if (note) {
-    note.textContent = canVibrate
-      ? (hapticStrength === "light"
-         ? "Short. On some phones the motor barely has time to move."
-         : (hapticStrength === "strong" ? "Longest, and the firmest to a thumb."
-                                        : ""))
-      : (SWITCH_TAPS[hapticStrength] > 1
-         ? SWITCH_TAPS[hapticStrength] + " taps, which is as firm as this "
-           + "phone lets a web page be."
-         : "One tap.");
-  }
+  // Light, Medium and Strong say it. Choosing one buzzes at that strength,
+  // which is a better explanation than a sentence about motors.
 }
 
 function setStrength(which) {
@@ -2581,7 +2548,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04p";
+const CLIENT_BUILD = "2026-09-04q";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

@@ -261,8 +261,7 @@ print("a page that was told no stays told")
 out = run(stored={"fp:haptics": "0"}, taps=3)
 check(out["on"] is False, "the stored off is read back as off")
 check(out["buzzes"] == [], "and nothing buzzes")
-check(out["checked"] is False and "quiet" in out["note"],
-      "the switch is drawn off, and says so in words underneath")
+check(out["checked"] is False, "the switch is drawn off")
 
 print("the switch is remembered")
 out = run(set=False, taps=2)
@@ -310,10 +309,13 @@ check(arms.count('switch class="tbtn-tap"') == 4,
 check(arms.count("<label") == 4,
       "as a label, which is what a finger activates")
 
-print("a phone that taps a different way is told how")
-out = run(canVibrate=False)
-check("as you let go" in out["note"] and "slid into" in out["note"],
-      "the note says the tap lands on release, and what does not tap at all")
+# There was a paragraph here explaining that an iPhone's tap comes from its
+# own switch control and so lands on release. It is gone, along with the two
+# other notes under these switches: "Haptic feedback", on or off, is the whole
+# of what there is to know, and a sentence explaining a switch somebody has
+# just read the label of is a sentence in the way. What the switch does is
+# still tested; what it said about itself is not, because it no longer says
+# anything.
 out = run()
 check("as you let go" not in out["note"],
       "and says nothing of the sort where vibrate() exists")
