@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 
-from . import (catalogue as cataloguelib, gpu, invites, launcher,
+from . import (accounts, catalogue as cataloguelib, gpu, invites, launcher,
                pads as padlib, protocol, retroarch, screen)
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
 
@@ -163,6 +163,29 @@ class GuestConnection:
     # -- their own seat, their own pad, their own name, their own row in the
     # list -- because that is what the rest of this already understands.
     input_only = False
+    # Which account this connection has logged in to, and what that account
+    # may do. Both live here and nowhere else, so they die with the socket:
+    # a resume is a new connection and has to log in again.
+    #
+    # The capabilities are copied at login rather than read from the file on
+    # demand, because `can` is asked on the input path -- once per frame, per
+    # guest -- and that is no place for a disk read. Anything that changes an
+    # account's capabilities calls refresh_capabilities() to push the new
+    # list out to whoever is connected on it.
+    account = None
+    capabilities = ()
+    # When they last presented an authenticator code. A remembered device
+    # restores who somebody is; it is deliberately not enough on its own for
+    # the capabilities that affect other people, and this is what those ask.
+    logged_in_at = 0.0
+
+    def can(self, capability):
+        """Whether this connection may do something. The only place to ask.
+
+        Not the page. A guest who edits their own JavaScript changes what
+        their phone draws and nothing about what the host will do for them.
+        """
+        return accounts.allows({"can": list(self.capabilities)}, capability)
 
     def __init__(self, session, slot, socket, name=""):
         self.session = session
@@ -293,6 +316,13 @@ class LiveSession:
         # on what has the foreground.
         self.input_held = False
         self.hold_reason = ""
+        # Wrong logins, counted. Its own limiter rather than the invite's:
+        # they are different doors, and mistyping your own authenticator code
+        # should not use up the tolerance for mistyping the PIN. It lives on
+        # the session rather than the invite because a reshare hands out a new
+        # link and PIN, and somebody grinding at a password should not get a
+        # clean slate out of that.
+        self.login_limiter = invites.RateLimiter()
         # One guest the host has named who may drive whatever is in front,
         # while everybody else's frames stop at the television. A slot number,
         # or None, which is what it is until somebody says otherwise.
@@ -507,6 +537,93 @@ class LiveSession:
                  seconds / 60, self.remaining() / 60)
         self.notify({"t": "extended", "remaining": round(self.remaining())})
         return seconds
+
+    # -- logging in ---------------------------------------------------------
+    #
+    # This is a second door, not a second front door. Nobody reaches it
+    # without a working link and PIN, so it inherits everything the invite
+    # already enforces and adds named accounts inside it.
+    #
+    # Split into three because the middle part is deliberately slow. scrypt
+    # costs about 150 ms, and 150 ms on the event loop is 150 ms of stalled
+    # video signalling for everybody else in the session -- so the hashing
+    # runs in a thread and the two halves that touch shared state stay here,
+    # on the loop, where there is only ever one of them at a time.
+
+    def login_check(self, address, name, now=None):
+        """Is this caller allowed to try? Raises invites.LockedOut.
+
+        Keyed on the address and on the account name, both. Keying on the
+        address alone lets somebody with a second network start again; keying
+        on the name alone lets them work through the names one connection at
+        a time. Neither is much of an attack from behind a PIN, and both cost
+        one dictionary lookup to close.
+        """
+        now = self._now() if now is None else now
+        for who in self._login_keys(address, name):
+            self.login_limiter.check(who, now)
+
+    @staticmethod
+    def _login_keys(address, name):
+        # Prefixed, so an account called after somebody's IP address cannot
+        # share a bucket with it.
+        return ("addr:" + (address or ""),
+                "name:" + accounts._key(name))
+
+    def login_failed(self, address, name, now=None):
+        """Record a wrong answer. Returns the lockout in seconds, or 0."""
+        now = self._now() if now is None else now
+        longest = 0.0
+        for who in self._login_keys(address, name):
+            longest = max(longest, self.login_limiter.record_failure(who, now))
+        if longest:
+            log.warning("login for %r from %s locked out for %.0fs",
+                        name, address or "unknown", longest)
+        return longest
+
+    def login_ok(self, guest, account, address, now=None, fresh=True):
+        """Attach an account to a connection. The last step of a login.
+
+        `fresh` says whether an authenticator code was presented just now. A
+        remembered device restores who somebody is without one, which is
+        enough to see what they may do and not enough to do the things that
+        land on other people.
+        """
+        now = self._now() if now is None else now
+        for who in self._login_keys(address, account["name"]):
+            self.login_limiter.record_success(who)
+        guest.account = account["name"]
+        guest.capabilities = tuple(account.get("can") or ())
+        guest.logged_in_at = now if fresh else 0.0
+        log.info("%s logged in as %s (may: %s)", guest.label, guest.account,
+                 " ".join(guest.capabilities) or "nothing")
+        return guest.capabilities
+
+    def logout(self, guest):
+        guest.account = None
+        guest.capabilities = ()
+        guest.logged_in_at = 0.0
+
+    def refresh_capabilities(self, name):
+        """Push a changed capability list out to whoever is connected on it.
+
+        Called after anything that edits an account. Without it a grant taken
+        away would keep working until that guest's socket closed, which for a
+        phone left open on a sofa is the rest of the evening.
+        """
+        try:
+            account = accounts.find(name)
+        except accounts.AccountError:
+            return []
+        changed = []
+        for guest in list(self.guests.values()):
+            if guest.account and accounts._key(guest.account) == accounts._key(name):
+                if account is None:
+                    self.logout(guest)
+                else:
+                    guest.capabilities = tuple(account.get("can") or ())
+                changed.append(guest)
+        return changed
 
     # -- guests -------------------------------------------------------------
 

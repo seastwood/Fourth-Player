@@ -68,7 +68,13 @@ REFUSED = "That link or PIN is not valid."
 # "locked" mean the credential was fine and waiting is the answer. The page
 # used to treat all of them alike and could not tell "your link is stale"
 # from "come back in a minute".
-ERROR_REASONS = ("credential", "closed", "full", "locked", "request")
+ERROR_REASONS = ("credential", "closed", "full", "locked", "request", "login")
+
+# One line for a name that does not exist, a wrong password and a wrong code
+# alike. Saying which half was wrong tells somebody guessing which half to
+# keep working on, and the person who mistyped their own code does not need
+# telling -- they know.
+LOGIN_REFUSED = "That did not work."
 
 
 class Server:
@@ -223,6 +229,11 @@ class Server:
                     # game was running.
                     await outbox.put({"t": "pads", "yours": guest.pad_index,
                                       **self.session.pad_state()})
+                elif kind == "login":
+                    await self._login(guest, socket_, message, outbox)
+                elif kind == "logout":
+                    self.session.logout(guest)
+                    await outbox.put({"t": "loggedout"})
                 elif kind == "people":
                     # Asked for while the chat panel is open, because the
                     # numbers in it age: a guest whose connection went bad
@@ -331,6 +342,89 @@ class Server:
                     guest.outbox = None
                     guest.socket = None
                 log.info("%s: signalling closed, media left alone", guest.label)
+
+    async def _login(self, guest, socket_, message, outbox):
+        """A named account, from a phone that is already in the session.
+
+        Every refusal below says the same thing, and the lockout is the one
+        exception -- that message is for the person who mistyped their own
+        code twice, and telling them to wait is the only useful answer.
+        """
+        from . import accounts
+
+        address = self._address(socket_)
+        name = str(message.get("name") or "")[:64]
+
+        # A remembered device, rather than a password. It restores who
+        # somebody is and nothing more: logged_in_at stays at zero, which is
+        # what the capabilities that affect other people ask about.
+        device = str(message.get("device") or "")
+        if device and not message.get("password"):
+            account = await self.loop.run_in_executor(
+                None, lambda: self._safely(accounts.device_account, device))
+            if account is None:
+                # Almost always a token that simply aged out, so this is not
+                # counted against them: locking somebody out for holding a
+                # fortnight-old cookie would be a self-inflicted wound.
+                await outbox.put({"t": "error", "reason": "login",
+                                  "message": "This device is not remembered any more."})
+                return
+            can = self.session.login_ok(guest, account, address, fresh=False)
+            await outbox.put({"t": "loggedin", "name": account["name"],
+                              "can": list(can), "fresh": False})
+            return
+
+        try:
+            self.session.login_check(address, name)
+        except invites.LockedOut as exc:
+            await outbox.put({"t": "error", "reason": "locked",
+                              "retry_after": round(exc.seconds),
+                              "message": f"Too many tries. Wait {round(exc.seconds)}s."})
+            return
+
+        password = str(message.get("password") or "")
+        code = str(message.get("code") or "")
+        # scrypt costs about 150 ms by design. On the event loop that is 150 ms
+        # in which no other guest's ICE candidate, chat line or input channel
+        # is served -- so it goes in a thread, and everything that touches
+        # shared state stays on the loop either side of it.
+        account = await self.loop.run_in_executor(
+            None, lambda: self._safely(accounts.verify, name, password, code))
+        if account is None:
+            waited = self.session.login_failed(address, name)
+            if waited:
+                await outbox.put({"t": "error", "reason": "locked",
+                                  "retry_after": round(waited),
+                                  "message": f"Too many tries. Wait {round(waited)}s."})
+            else:
+                await outbox.put({"t": "error", "reason": "login",
+                                  "message": LOGIN_REFUSED})
+            return
+
+        can = self.session.login_ok(guest, account, address)
+        reply = {"t": "loggedin", "name": account["name"], "can": list(can),
+                 "fresh": True}
+        if message.get("remember"):
+            token = await self.loop.run_in_executor(
+                None, lambda: self._safely(accounts.remember_device,
+                                           account["name"], guest.label))
+            if token:
+                reply["device"] = token
+        await outbox.put(reply)
+
+    @staticmethod
+    def _safely(call, *args):
+        """Run an accounts call in a thread without letting it kill the socket.
+
+        A damaged accounts file is a refusal, not a traceback: everything here
+        returns None on trouble and the caller treats that as "no".
+        """
+        from . import accounts
+        try:
+            return call(*args)
+        except accounts.AccountError as exc:
+            log.error("accounts: %s", exc)
+            return None
 
     async def _admit(self, socket_, message, outbox):
         """Let somebody in, and remember whether they brought a screen.

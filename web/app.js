@@ -526,7 +526,11 @@ function onError(message) {
   // that cannot open with no game running -- is not evidence that the link is
   // stale, and counting it meant two failed seat changes threw somebody back
   // to the PIN screen.
-  if (message.reason === "request") {
+  if (message.reason === "request" || message.reason === "login") {
+    // A login that did not work is about the login, not about the invite.
+    // Counting it would throw somebody back to the PIN screen for mistyping
+    // their own authenticator code, which is the same mistake "request" was
+    // added to stop.
     setLink("bad", message.message);
     return;
   }
@@ -2555,7 +2559,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04w";
+const CLIENT_BUILD = "2026-09-04x";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
