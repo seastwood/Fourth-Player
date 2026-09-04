@@ -437,6 +437,12 @@ class Server:
             # than showing a button that always refuses.
             "launch": self.session.launch_state(),
             "pads": {"yours": guest.pad_index, **self.session.pad_state()},
+            # Where they stand on the hold, now, rather than whatever they
+            # last heard before they went away. It is broadcast when it
+            # changes -- which is right -- so a page that was in the
+            # background while a game started came back still showing
+            # "Controls paused" over a picture that was plainly playing.
+            "hold": self.session.hold_state(guest),
         })
         return guest
 

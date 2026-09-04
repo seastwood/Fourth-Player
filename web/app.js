@@ -564,6 +564,13 @@ function joined(message) {
   try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
   seatsFrom(message.pads);
+  // Before the early return below, which is the case this was reported in: a
+  // page whose stream never stopped comes back through that branch, and it
+  // was keeping whatever notice it had when it went away. The hold is
+  // broadcast when it changes, so a game that started while this page was in
+  // the background changed it to nobody listening -- and "Controls paused"
+  // stayed up over a picture that was plainly playing.
+  if (message.hold) holdInput(message.hold);
   forgetTokenInAddress();
   if (message.resumed_media) {
     setLink("ok");
@@ -2548,7 +2555,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04r";
+const CLIENT_BUILD = "2026-09-04s";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

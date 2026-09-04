@@ -82,6 +82,10 @@ check("_tell_about_the_hold()" in held,
       "the guests are told, rather than left guessing")
 
 told = source.split("def _tell_about_the_hold")[1].split("\n    def ")[0]
+# Where the fields are actually worked out. They moved out of the broadcast
+# and into hold_state() when a guest who rejoins started being told the same
+# thing on the way in -- one place deciding it, two places sending it.
+state = source.split("def hold_state")[1].split("\n    def ")[0]
 check('"t": "hold"' in told and "notify_one" in told,
       "one page at a time, because 'may you drive' is a different answer for "
       "each of them")
@@ -100,11 +104,14 @@ methods = {node.name for node in klass.body
 for name in ("notify_one", "notify", "say", "name_a_driver", "_hold_input"):
     check(name in methods, "LiveSession really has %s(), not just calls to it"
           % name)
+check("self.hold_state(guest)" in told,
+      "and the broadcast sends what that works out rather than a second copy "
+      "of it, which is how two answers to one question start disagreeing")
 sweeper = source.split("async def _sweep_forever")[1].split("\n    async def ")[0]
 check("except Exception" in sweeper,
       "and a fault in the newest thing on the sweeper cannot end the sweeper: "
       "the dead-man switch rides on it")
-check('"driving": guest.slot == self.driver' in told,
+check('"driving": guest.slot == self.driver' in state,
       "and the answer is worked out here rather than by a page comparing slot "
       "numbers it cannot be sure of")
 

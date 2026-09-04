@@ -1377,6 +1377,22 @@ class LiveSession:
             self.driver = None
             self.driver_shell = ""
 
+    def hold_state(self, guest):
+        """Where one guest stands on the hold, right now.
+
+        The same answer _tell_about_the_hold sends, for a guest who was not
+        here when it last changed. It changes when it changes and not
+        otherwise, which is right for a broadcast and leaves anybody who
+        rejoins afterwards holding whatever they last heard -- a page that
+        came back to a game in progress could still be showing "Controls
+        paused" from before it went away.
+        """
+        driving = next((g.label for g in self.guests.values()
+                        if g.slot == self.driver), "")
+        return {"held": self.input_held, "why": self.hold_reason,
+                "driving": guest.slot == self.driver,
+                "driver_label": "" if guest.slot == self.driver else driving}
+
     def _tell_about_the_hold(self):
         """Tell every page where it stands, one page at a time.
 
@@ -1386,13 +1402,8 @@ class LiveSession:
         program's business, it changes, and a page that guessed wrong would
         either pause the driver or let everybody through.
         """
-        driving = next((g.label for g in self.guests.values()
-                        if g.slot == self.driver), "")
         for guest in list(self.guests.values()):
-            self.notify_one(guest, {
-                "t": "hold", "held": self.input_held, "why": self.hold_reason,
-                "driving": guest.slot == self.driver,
-                "driver_label": "" if guest.slot == self.driver else driving})
+            self.notify_one(guest, {"t": "hold", **self.hold_state(guest)})
 
     def _hold_input(self, held, why=""):
         """Start or stop withholding guest frames, and say so once."""
