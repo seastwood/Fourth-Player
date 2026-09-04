@@ -79,8 +79,21 @@ html, body {
 
 .gate {
   display: flex;
-  min-height: 100vh;
-  min-height: 100dvh;
+  /* Exactly what is on screen, and never a pixel more.
+   *
+   * It used to be min-height, so the gate grew when its contents did -- and
+   * automatically rejoining is when they are tallest, with the link row, its
+   * note and an error all showing at once. On a 660-tall phone that made the
+   * document 804 tall, and a document taller than the window is what a mobile
+   * address bar reacts to: it hides, the viewport grows, the layout crosses
+   * the threshold back, it shows again. That oscillation is the "aggressive
+   * jitter" on the PIN page, and it only ever appeared while logging in
+   * automatically because that is the state with the most in it.
+   *
+   * --vv-height is the visible height, kept current by fitStage(); the dvh is
+   * for the moment before that runs and for anything without visualViewport.
+   * Nothing overflows the document now: what is too tall scrolls inside. */
+  height: var(--vv-height, 100dvh);
   padding: 1.5rem 1.2rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(120% 90% at 50% 0%, var(--bg2) 0%, var(--bg) 70%);
@@ -109,6 +122,14 @@ html, body {
   width: 100%;
   max-width: 27rem;
   margin: auto;
+  /* Taller than the screen scrolls here rather than growing the page. The
+     margin above still centres it while it is short, which is the ordinary
+     case; overflow-y rather than clipping because the top of this is the
+     heading and the PIN box, and clipping would put them out of reach. */
+  max-height: 100%;
+  overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   position: relative;
   z-index: 1;
 }
