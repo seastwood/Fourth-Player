@@ -1883,6 +1883,13 @@ class LiveSession:
             return False, "Every player slot is taken."
         return True, ""
 
+    # Steam's own windows, as the screen watcher names them. A Steam game is
+    # supposed to be its own window with its own class -- which is what lets
+    # guests keep playing while the shell stays out of reach -- and in practice
+    # Steam's loader, its overlay and Big Picture come to the front during a
+    # game often enough to matter.
+    STEAM_SHELLS = ("steam", "steamwebhelper")
+
     def holding(self, guest):
         """Whether this guest's frames stop at the television, and why.
 
@@ -1898,6 +1905,18 @@ class LiveSession:
             return True, ("%s is a Steam game, and you have not been given it."
                           % (self.steam_label or "What is playing"))
         if self.input_held and self.driver != guest.slot:
+            # Getting here means either no Steam game is playing, or one is and
+            # this guest was given it. In the second case, Steam's own window
+            # being in front of its own game is not a menu they should be kept
+            # out of: it is the loader, the overlay, or Big Picture between two
+            # games, and holding them there is what stopped an account that had
+            # been granted the game from playing it at all.
+            #
+            # Every other shell still holds everybody. Kodi's menu, a desktop
+            # and Moonlight are not something a Steam grant says anything
+            # about.
+            if self.steam_now and self.hold_reason in self.STEAM_SHELLS:
+                return False, ""
             return True, ""
         return False, ""
 

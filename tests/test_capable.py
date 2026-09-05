@@ -154,6 +154,37 @@ check("not been given" in session.holding(watching)[1], "and why")
 check(session.hold_state(watching)["held"] is True, "their page is told so")
 check(session.hold_state(playing)["held"] is False, "and the other is not")
 
+print("\nSteam's own window over its own game does not hold the person given it")
+# The shell rule holds guest pads out of menus. Steam's loader, its overlay and
+# Big Picture all come to the front during a game, and the watcher calls every
+# one of them "steam" -- so an account that had been granted the game was held
+# out of it, on and off, for as long as it played.
+session, loop = make_session()
+session.steam_here(BROFORCE, "Broforce")
+given = FakeGuest(2, "given", can=["steam"])
+nothing = FakeGuest(3, "nothing")
+session.input_held = True
+session.hold_reason = "steam"
+check(not session.holding(given)[0],
+      "the account given the game plays through Steam's own window")
+check(session.holding(nothing)[0], "and everybody else is still held")
+session.hold_reason = "steamwebhelper"
+check(not session.holding(given)[0], "Big Picture counts as Steam's own too")
+
+# Every other shell still holds everybody.
+for shell in ("kodi", "moonlight", "xfdesktop", "thunar"):
+    session.hold_reason = shell
+    check(session.holding(given)[0],
+          "%s still holds even an account with Steam: a grant for a game says "
+          "nothing about a desktop" % shell)
+
+# And with no Steam game playing, Steam's own window is an ordinary shell.
+session.steam_here("")
+session.hold_reason = "steam"
+check(session.holding(given)[0],
+      "with no Steam game running, Steam's window holds everybody as before")
+session.input_held = False
+
 print("\nbeing handed the screen is not being handed Steam")
 session.driver = watching.slot
 check(session.holding(watching)[0],
