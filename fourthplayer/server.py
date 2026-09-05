@@ -1086,6 +1086,12 @@ class Server:
             _time.monotonic(), getattr(self.cfg, "fixed_pin", ""))
         if invite is None:
             return
+        # Read before the session starts, because starting it writes the
+        # snapshot again -- with the defaults of a session that has not been
+        # told anything yet. Reading afterwards read back what had just been
+        # overwritten, which looked exactly like the lock not being saved at
+        # all.
+        keep = LiveSession.saved_limits()
         try:
             session = LiveSession(self.cfg, self.loop)
             session.on_notice = self._broadcast
@@ -1098,13 +1104,14 @@ class Server:
         # Who may be here comes back with it. This host restarts on its own
         # several times a day when the video encoder falls over, and every one
         # of those quietly opened a locked session back up.
-        keep = LiveSession.saved_limits()
         if keep.get("locked"):
             session.locked = keep["locked"]
             session.allowed = tuple(keep.get("allowed") or ())
         if keep.get("max_guests"):
             session.max_guests = keep["max_guests"]
         self.session = session
+        if keep.get("locked") or keep.get("max_guests"):
+            session.save()          # put it back on disk, now it is true again
         log.info("restored the session that was open before; %s%s",
                  "no time limit" if session.unlimited
                  else "%.0f minutes left" % (session.remaining() / 60),

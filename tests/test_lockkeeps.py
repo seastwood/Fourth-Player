@@ -75,6 +75,12 @@ server = open(os.path.join(ROOT, "fourthplayer", "server.py"),
 restore = server.split("restored the session that was open before")[0]
 check("saved_limits()" in restore,
       "the restore asks for the saved lock before saying it restored anything")
+# Starting a session writes the snapshot again, with the defaults of one that
+# has not been told anything yet. Reading afterwards read back what had just
+# been overwritten, which looked exactly like the lock never being saved.
+before_start = server.split("session.start(0, invite=invite)")[0]
+check("saved_limits()" in before_start,
+      "and asks before starting the session, which rewrites the snapshot")
 check("session.locked = keep" in restore, "and puts it back on the session")
 
 import shutil
