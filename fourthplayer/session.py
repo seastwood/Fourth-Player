@@ -636,7 +636,9 @@ class LiveSession:
         log.info("%s logged in as %s (may: %s)", guest.label, guest.account,
                  " ".join(guest.capabilities) or "nothing")
         # Logging in can be the difference between a held controller and a
-        # live one, so say so rather than waiting for something else to change.
+        # live one, so say so rather than waiting for something else to change
+        # -- and give them the controller the new answer entitles them to.
+        self.settle_steam_pads()
         self.tell_hold(guest)
         return guest.capabilities
 
@@ -644,6 +646,7 @@ class LiveSession:
         guest.account = None
         guest.capabilities = ()
         guest.logged_in_at = 0.0
+        self.settle_steam_pads()
         self.tell_hold(guest)
 
     def tell_hold(self, guest):
@@ -680,6 +683,7 @@ class LiveSession:
                     guest.capabilities = tuple(account.get("can") or ())
                     # A capability given or taken away while a Steam game is
                     # in front changes this guest's answer and nobody else's.
+                    self.settle_steam_pads()
                     self.tell_hold(guest)
                 changed.append(guest)
         return changed
@@ -701,6 +705,11 @@ class LiveSession:
         # in the game as the only ones unable to get back in.
         self.save()
         log.info("%s joined from %s", guest.label, address or "unknown")
+        # Whether they get a controller is the one rule: while a Steam game is
+        # running, the clients allowed to play it have one and nobody else
+        # does. plug_in above already declines to make theirs; this keeps the
+        # rest true for everybody, including them if they may play after all.
+        self.settle_steam_pads()
         # Everybody already in the session hears about it. The one arriving is
         # sent this too, but has no label of their own yet and ignores it.
         self.publish_pad_names()
@@ -1050,6 +1059,7 @@ class LiveSession:
             self.save()
         self.publish_pad_names()
         self.publish_people()
+        self.settle_steam_pads()
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -1633,7 +1643,7 @@ class LiveSession:
                             starting=True)
             # After steam_here, which is what decides who is held, and before
             # the launch, which is when the game decides who is player one.
-            self.settle_pads_for_steam(row)
+            self.settle_steam_pads()
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
@@ -2046,69 +2056,54 @@ class LiveSession:
                        "If the picture stays black, ask the owner to set "
                        "h264_profile to constrained-baseline."})
 
-    def settle_pads_for_steam(self, row):
-        """Make sure exactly the controllers that will be driven are plugged in.
+    def settle_steam_pads(self):
+        """While a Steam game is running, exactly the clients allowed to play
+        it have a controller, and nobody else has one.
 
-        Who counts as a player here is "may they play *this game*", not "are
-        they held right now". The hold is about what is on the screen at this
-        instant, and this runs at the one moment that is guaranteed to be
-        mid-change: the game has been asked for and has not arrived, so Kodi's
-        menu is still in front and the menu rule says everybody is held.
-        Asking it produced "0 plugged in, 3 unplugged" -- every controller
-        removed, none made, and a game that started with no controls at all.
-
-        Both halves matter, and the first version of this only did the second.
-
-        A Steam game binds device to player when it starts and does not
-        revisit it. So what decides who is player one is which devices exist
-        at that moment -- not who is holding them, which the game cannot see.
-
-        A pad belonging to a guest held out of the game, or to a seat nobody
-        is sitting in, is a device the game may well pick as player one and
-        that nobody can drive. What that looks like is a controller that does
-        nothing at all, for the person who actually started the game, with no
-        way back except restarting it -- which is what was reported.
-
-        Called just before a Steam game is launched. RetroArch does not need
-        this: it has a picker, and its ports are settled by the profiles this
+        That is the whole rule. Steam has no player ports to allot -- there is
+        no picker, no per-device profile, nothing to bind a seat number to --
+        so the only thing that decides who plays is which controllers exist
+        while the game is running. RetroArch is the opposite and is left
+        alone: it has a picker and its ports come from the profiles this
         program writes.
+
+        Kept true continuously rather than only at launch. Every earlier
+        version of this ran once, at one moment, and the moment was always
+        wrong for something: a client joining afterwards, an account logging
+        in, a permission granted, somebody leaving. This is called from all of
+        them, and it is cheap -- a set of small integers and, at most, one
+        device made or unplugged.
+
+        Deciding by capability rather than by the hold, because the hold is
+        about what is on the screen this instant and this runs while that is
+        changing. Asking it at launch, with the menu still in front, produced
+        "0 plugged in, 3 unplugged" and a game with no controls at all.
         """
-        if self.pads is None:
+        if self.pads is None or not self.steam_now:
             return []
-        players = [g for g in self.guests.values() if self.may_start(g, row)]
-        driving = {g.pad_index for g in players}
+        want = "steam:" + self.steam_now
+        allowed = {g.pad_index for g in self.guests.values() if g.can(want)}
 
-        # Plug in the ones that will be driven. Leaving this out is how a game
-        # started with no controllers at all: a guest who joined while an
-        # earlier Steam game was playing was given no device, quite rightly,
-        # and nothing gave them one back when they started a game of their own.
-        # The pad is otherwise made by their first frame, which arrives after
-        # the game has already decided who player one is -- too late.
         made = []
-        for guest in players:
-            if self.pads.existing(guest.pad_index) is None:
-                self.plug_in(guest)
+        for guest in self.guests.values():
+            if guest.pad_index in allowed and \
+                    self.pads.existing(guest.pad_index) is None:
+                guest.pad                       # plug their controller in
                 made.append(guest.pad_index)
-
-        # And unplug the rest. A pad belonging to a guest held out of the game,
-        # or to a seat nobody is sitting in, is a device the game may pick as
-        # player one and that nobody can drive.
         freed = []
         for index, _pad in list(self.pads.live()):
-            if index in driving:
-                continue
-            if self.pads.release(index):
+            if index not in allowed and self.pads.release(index):
                 freed.append(index)
 
         if made or freed:
-            log.info("controllers for this game: %d plugged in (%s), "
-                     "%d unplugged (%s)",
+            log.info("%s: %d controller(s) plugged in (%s), %d unplugged (%s)",
+                     self.steam_label or "a Steam game",
                      len(made), ", ".join(str(i + 1) for i in made) or "-",
                      len(freed), ", ".join(str(i + 1) for i in freed) or "-")
             self.publish_pad_names()
-        if not driving:
-            log.warning("nobody here may play this Steam game, so it starts "
-                        "with no controllers at all")
+        if not allowed:
+            log.warning("nobody here may play %s, so it has no controllers",
+                        self.steam_label or "this Steam game")
         return freed
 
     def plug_in(self, guest):
@@ -2185,6 +2180,7 @@ class LiveSession:
                      "; " + label if label else "")
         elif was:
             log.info("the Steam game has gone")
+        self.settle_steam_pads()
         self._tell_about_the_hold()
 
     def hold_state(self, guest):
