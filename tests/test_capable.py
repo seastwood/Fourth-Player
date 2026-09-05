@@ -266,8 +266,20 @@ sent = []
 
 
 class Pad:
+    """Only what the code under test asks of a device."""
+    forgotten = []
+
     def apply(self, state, sender=None):
         sent.append(sender)
+
+    def forget(self, sender):
+        Pad.forgotten.append(sender)
+
+    def adopt_new_sender(self, sender=None):
+        pass
+
+    def release_all(self):
+        pass
 
 
 watching.pad_index = 0
@@ -696,6 +708,9 @@ session.detach_peer(playing)
 check(seats.existing(1) is not None,
       "and letting their peer go leaves the device alone, only forgetting "
       "their frames -- a shared pad must not lose the other person's controls")
+check(1 in Pad.forgotten, "their frames were forgotten: %r" % Pad.forgotten)
+check(2 not in Pad.forgotten,
+      "and the one who never had a device forgot nothing on one")
 
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
