@@ -274,6 +274,10 @@ watching.pad_index = 0
 # The real frame, through the real decoder, into the real feed(): the whole
 # point is that nothing on the page is what stops it.
 from fourthplayer import protocol
+# Saved and put back at the end of this block. Left in place it silently
+# re-points every later check that touches a pad -- which is how the checks
+# below it passed while proving nothing.
+REAL_PAD = GuestConnection.pad
 GuestConnection.pad = property(lambda self: Pad())
 frame = protocol.encode(protocol.PadState(seq=1, buttons=0b101))
 watching.feed(frame)
@@ -285,6 +289,7 @@ allowed.feed(frame)
 check(sent == [2], "and one with it does")
 check(watching.frames == 1,
       "the held guest still counts as present -- being held is not silence")
+GuestConnection.pad = REAL_PAD
 
 print("\nstop only ever adds")
 # Nothing here may touch a real process. This suite runs on the console
@@ -661,18 +666,26 @@ class Seats:
         self.devices.pop(index, None)
 
 
+class Seat(FakeGuest):
+    """A guest whose pad comes from the session, as the real one's does."""
+    @property
+    def pad(self):
+        return self.session.pads[self.pad_index]
+
+
 seats = Seats()
 session.pads = seats
-gone = FakeGuest(2, "held out")
+gone = Seat(2, "held out")
 gone.pad_index = 2
 gone.peer = None
+gone.session = session
 session.detach_peer(gone)
 check(seats.asked == [],
       "letting go of a guest with no device makes none: %r" % seats.asked)
 check(seats.existing(2) is None, "and there is still no device on their seat")
 
 # One who does have a device is still tidied up properly.
-playing = FakeGuest(1, "playing", can=["steam"])
+playing = Seat(1, "playing", can=["steam"])
 playing.pad_index = 1
 playing.peer = None
 playing.session = session          # plug_in reaches through the guest
