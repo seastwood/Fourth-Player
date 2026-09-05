@@ -220,11 +220,21 @@ class FakePad:
 
 
 class FakePads:
+    """Enough of a PadSet for the hold to let go of buttons on it."""
     def __init__(self, count):
         self.pads = [FakePad(i) for i in range(count)]
 
     def live(self):
-        return list(enumerate(self.pads))
+        return [(i, p) for i, p in enumerate(self.pads) if p is not None]
+
+    def existing(self, index):
+        return self.pads[index] if 0 <= index < len(self.pads) else None
+
+    def release(self, index):
+        if 0 <= index < len(self.pads) and self.pads[index] is not None:
+            self.pads[index] = None
+            return True
+        return False
 
 
 session, loop = make_session()
