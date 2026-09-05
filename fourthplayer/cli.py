@@ -369,11 +369,16 @@ def _print_status(reply):
     else:
         print("  link and PIN were forgotten on restart -- re-share to get new ones")
     limit, slots = reply.get("limit"), reply.get("slots")
-    if reply.get("locked") == "accounts":
-        print("  LOCKED to accounts -- only somebody logged in may join")
-    elif reply.get("locked") == "named":
-        print("  LOCKED to: %s (and the first account made, always)"
-              % (", ".join(reply.get("allowed") or []) or "nobody but the owner"))
+    # Always said, never only when it is on. "I'm not sure what it's set at
+    # now" is what a setting that only announces itself half the time gets.
+    mode = reply.get("locked") or ""
+    if mode == "accounts":
+        print("  who may join: only somebody logged in to an account")
+    elif mode == "named":
+        print("  who may join: only %s (and the first account made, always)"
+              % (", ".join(reply.get("allowed") or []) or "the owner"))
+    else:
+        print("  who may join: anybody with the link and PIN")
     if limit and slots and limit < slots:
         print(f"  at most {limit} connected at once (of {slots} slots)")
     launch = reply.get("launch") or {}
