@@ -224,6 +224,9 @@ class FakePads:
     def __init__(self, count):
         self.pads = [FakePad(i) for i in range(count)]
 
+    def __len__(self):
+        return len(self.pads)
+
     def live(self):
         return [(i, p) for i, p in enumerate(self.pads) if p is not None]
 
@@ -247,6 +250,7 @@ session, loop = make_session()
 session.notify = lambda message: None
 session.notify_one = lambda guest, message: None
 session.pads = FakePads(4)
+session.publish_pad_names = lambda: None
 session.steam_here(BROFORCE, "Broforce")
 given = FakeGuest(0, "given", can=["steam"])
 given.pad_index = 0
