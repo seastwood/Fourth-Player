@@ -87,7 +87,14 @@ mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/fourth-player"
 sed "s|%h/fourth-player|$REPO|" "$REPO/system/fourth-player.service" \
   > "$HOME/.config/systemd/user/fourth-player.service"
 systemctl --user daemon-reload
-echo "enable it with: systemctl --user enable --now fourth-player"
+# Enabled here rather than left as an instruction. "enable it with" is a line
+# somebody reads once, and the first reboot after that is where it is found
+# out -- which is exactly how this console spent a day not starting on its own.
+if systemctl --user enable fourth-player >/dev/null 2>&1; then
+  echo "enabled: it will start with your session from now on"
+else
+  echo "could not enable it; run: systemctl --user enable --now fourth-player"
+fi
 
 say "the Kodi add-on"
 if [ -d "$HOME/.kodi/addons" ]; then

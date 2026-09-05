@@ -48,4 +48,16 @@ DeviceAllow=/dev/dri rw
 DeviceAllow=char-input r
 
 [Install]
-WantedBy=graphical-session.target
+# Both, and deliberately.
+#
+# graphical-session.target is the right answer on a desktop, where the session
+# manager activates it. This console has no desktop: Kodi is started from a
+# script, nothing ever activates that target, and a service wanted only by it
+# is never pulled in. It survived reboots by never being rebooted -- the first
+# one showed it had not been starting on its own at all.
+#
+# default.target is what the user manager reaches on login, autologin
+# included, so it covers this machine. Restart=on-failure covers the other
+# half: if it starts before X is up the pipeline refuses and it tries again
+# three seconds later, until the display is there.
+WantedBy=default.target graphical-session.target
