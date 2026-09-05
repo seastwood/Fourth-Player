@@ -95,6 +95,9 @@ function check(cond, msg) {
 
   // Logged in, with the powers of an owner.
   const admin = await page.evaluate(() => {
+    // With the panel closed, which is the case a remembered device lands in:
+    // logged in on the load path, nobody having opened the tab yet.
+    showTab("controls");
     loggedIn({ t: "loggedin", name: "seth", fresh: true,
                can: ["kick", "lock", "slots", "reshare", "grant", "steam"] });
     limitsFrom({ t: "limits", limit: 4, slots: 4, locked: false, here: 2 });
@@ -103,6 +106,8 @@ function check(cond, msg) {
              can: document.getElementById("login-can").textContent };
   });
   check(admin.tab, "the Account tab stays put once logged in");
+  check(/noken|seth/.test(admin.says),
+        "and the sheet is filled in before the tab is opened, not on opening it");
   check(/seth/.test(admin.says), "and says who: " + admin.says);
   check(/remove people/i.test(admin.can),
         "and what it may do, in words: " + admin.can);

@@ -212,10 +212,6 @@ el("pin-form").addEventListener("submit", (event) => {
                     code: (el("gate-code").value || "").trim() };
     el("gate-pass").value = "";
     el("gate-code").value = "";
-  } else if (savedDevice()) {
-    // Quietly, and only worth anything if the host still remembers it. It
-    // restores who somebody is and nothing that lands on other people.
-    knock.device = savedDevice();
   }
   connect(knock);
 });
@@ -347,15 +343,25 @@ function reconnectSoon() {
   retryTimer = setTimeout(() => {
     retryTimer = null;
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new",
-              // A login dies with the socket, so coming back on a new one
-              // means logging in again. This is the only thing that does it
-              // without asking: a device the host was told to remember.
-              device: savedDevice() });
+              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new" });
   }, delay);
 }
 
 function connect(hello) {
+  // A remembered device rides on every knock, whichever one it is.
+  //
+  // It was added to the two reconnect paths and not to the one on the load
+  // path -- which is the only one that runs when somebody closes the app and
+  // opens it again, so the case it was built for was the case it missed. It
+  // goes on here, once, where there is nothing left to forget: a login dies
+  // with its socket, and this is the only thing that brings it back without
+  // asking. An empty string is simply no device, and the host reads it as
+  // nobody.
+  if (hello && !hello.login && !hello.device) {
+    const device = savedDevice();
+    if (device) hello.device = device;
+  }
+
   // Every resume gets a deadline, not just the one on the load path.
   //
   // Reconnect sent a resume and armed nothing, so a resume that was never
@@ -2029,7 +2035,7 @@ function reviveNow(why) {
     // only lost signalling, and the whole reason for being here is that this
     // one is not working, whatever it says about itself.
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: "new", device: savedDevice() });
+              codecs: videoCodecs(), media: "new" });
   } catch (_) {
     // Nothing to connect to yet -- no network at all, usually. The backoff
     // was made for this, and it has just been reset to its first step.
@@ -2600,7 +2606,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05d";
+const CLIENT_BUILD = "2026-09-05f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3269,6 +3275,13 @@ function reshared(message) {
 function paintAccount() {
   // The tab itself is always there -- it is where logging in lives. What
   // changes with the account is how much is inside it.
+  //
+  // The login sheet is painted whether the panel is open or not. paintSession
+  // stops early on a closed panel, which is right for the parts that read the
+  // people list, and meant a page logged back in by a remembered device had
+  // the right account and a panel that still said nothing -- correct as soon
+  // as it was opened, and wrong in the moment before.
+  paintLogin();
   paintSession();
 }
 
