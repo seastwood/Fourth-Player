@@ -336,6 +336,18 @@ class PadSet:
             self.pads[index] = pad
         return pad
 
+    def existing(self, index):
+        """The device for a seat if there is one, and None if there is not.
+
+        The counterpart to __getitem__, which makes one. Anything that is
+        tidying up rather than driving wants this: asking for a device in
+        order to let go of it is how a controller gets plugged in on the way
+        out, which Steam notices and a running game does not survive.
+        """
+        if not 0 <= index < len(self.pads):
+            return None
+        return self.pads[index]
+
     def live(self):
         """The seats that currently have a device, as (index, pad)."""
         return [(i, pad) for i, pad in enumerate(self.pads) if pad is not None]

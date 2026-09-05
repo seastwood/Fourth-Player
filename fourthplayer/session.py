@@ -993,7 +993,18 @@ class LiveSession:
         peer, guest.peer = guest.peer, None
         # Only this guest's contribution. On a shared pad, one
         # of them dropping out must not take the controls away from the other.
-        guest.pad.forget(guest.slot)
+        #
+        # And only if there is a device to forget it on. `guest.pad` *makes*
+        # one, so asking for a pad in order to let go of it plugged a
+        # controller in on the way out -- for a guest who had deliberately
+        # been given none, because they were held out of the Steam game that
+        # was playing. Steam re-enumerates the moment a controller appears and
+        # hands the game to whichever it likes, so the person actually playing
+        # lost their controls and could only get them back by restarting the
+        # game.
+        pad = self.pads.existing(guest.pad_index) if self.pads is not None else None
+        if pad is not None:
+            pad.forget(guest.slot)
         if peer is None:
             return
         # Its death is expected from here on, and must not be read as the

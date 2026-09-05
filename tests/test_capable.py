@@ -625,6 +625,64 @@ check(session.plug_in(held_out) is not None,
       "with no Steam game running, everybody gets one as before")
 check(made == [2], "which is the ordinary case: %r" % made)
 
+print("\nletting a peer go does not plug a controller in on the way out")
+# `guest.pad` makes a device. detach_peer asked for one in order to let go of
+# it, so a guest who had deliberately been given none -- because they were held
+# out of the Steam game that was playing -- got one plugged in the moment their
+# peer was torn down. Steam re-enumerates when a controller appears and hands
+# the game to whichever it likes, so the person actually playing lost their
+# controls until the game was restarted.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.steam_here(BROFORCE, "Broforce")
+
+
+class Seats:
+    """A PadSet that records any attempt to make a device."""
+    def __init__(self):
+        self.devices = {}
+        self.asked = []
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, index):
+        self.asked.append(index)
+        return self.devices.setdefault(index, Pad())
+
+    def existing(self, index):
+        return self.devices.get(index)
+
+    def live(self):
+        return list(self.devices.items())
+
+    def release(self, index):
+        self.devices.pop(index, None)
+
+
+seats = Seats()
+session.pads = seats
+gone = FakeGuest(2, "held out")
+gone.pad_index = 2
+gone.peer = None
+session.detach_peer(gone)
+check(seats.asked == [],
+      "letting go of a guest with no device makes none: %r" % seats.asked)
+check(seats.existing(2) is None, "and there is still no device on their seat")
+
+# One who does have a device is still tidied up properly.
+playing = FakeGuest(1, "playing", can=["steam"])
+playing.pad_index = 1
+playing.peer = None
+session.plug_in(playing)
+check(seats.existing(1) is not None, "the account playing has one")
+seats.asked.clear()
+session.detach_peer(playing)
+check(seats.existing(1) is not None,
+      "and letting their peer go leaves the device alone, only forgetting "
+      "their frames -- a shared pad must not lose the other person's controls")
+
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
 print()
