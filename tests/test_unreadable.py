@@ -58,7 +58,7 @@ check(watcher("broforce", True) == (False, ""), "a game is not a shell")
 check(watcher("kodi.bin kodi", True)[0], "Kodi's menu holds, game or no game")
 check(watcher("kodi.bin kodi", False)[0], "and holds with nothing running")
 
-print("\\na window we cannot read")
+print("\na window we cannot read")
 check(watcher("", True) == (False, ""),
       "with a game running, an unreadable window does not hold: %r"
       % (watcher("", True),))
@@ -67,7 +67,7 @@ check(watcher("", False)[0],
 check(watcher("", False)[1] == "the desktop",
       "and says so: %r" % (watcher("", False)[1],))
 
-print("\\nand a launcher that will not answer")
+print("\nand a launcher that will not answer")
 
 
 def angry():
