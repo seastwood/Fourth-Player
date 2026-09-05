@@ -19,7 +19,6 @@ verified on the target machine before any of it was written.
 
 import logging
 import time
-import traceback
 
 from evdev import UInput, AbsInfo, ecodes as e
 
@@ -338,12 +337,11 @@ class PadSet:
             pad = VirtualPad(self.names[index], now=self._now,
                              guide=self._guide)
             self.pads[index] = pad
-            # Said, and with a stack, because a controller appearing is not
-            # free: Steam re-enumerates when one does and may hand a running
-            # game to it. A device with nobody holding it is a bug, and this
-            # is how to find out who made it.
+            # Said, because a controller appearing is not free: Steam
+            # re-enumerates when one does and may hand a running game to it.
+            # A pad appearing repeatedly while nobody is playing means
+            # somebody is reconnecting in a loop, which is worth seeing.
             log.info("plugged in %s (seat %d)", self.names[index], index)
-            log.info("made by:\n%s", "".join(traceback.format_stack(limit=7)))
         return pad
 
     def existing(self, index):
