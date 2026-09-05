@@ -700,6 +700,7 @@ class Server:
         # sent.
         try:
             await self.session.agree_codec(guest, message.get("codecs") or [])
+            self.session.check_profile(guest, message.get("h264_profiles") or [])
         except Exception as exc:
             log.warning("could not settle on a codec (%s); carrying on", exc)
 

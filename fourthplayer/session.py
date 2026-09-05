@@ -21,6 +21,7 @@ import time
 
 from . import (accounts, catalogue as cataloguelib, gpu, invites, launcher,
                pads as padlib, protocol, retroarch, screen)
+from . import video
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
 
 # Better first, so "is this a step down" is a comparison rather than a guess.
@@ -1981,6 +1982,49 @@ class LiveSession:
     # is that with room to spare: for this long, "it has not appeared yet" is
     # read as "it is still starting" rather than "it is not there".
     STEAM_STARTING = 45.0
+
+    def check_profile(self, guest, profiles):
+        """Say so when a guest cannot decode the H.264 profile being offered.
+
+        The codec is negotiated -- agree_codec picks the best of H.264, H.265
+        and AV1 that every guest can manage. The profile inside H.264 is not:
+        it is pinned on the encoder, which encodes once for everybody, so it
+        cannot be chosen per guest.
+
+        That is a reasonable limitation and a terrible silent failure. A host
+        set to Main offers Main; a browser that only takes Constrained Baseline
+        answers with the video refused; the guest gets a black screen; and
+        nothing anywhere says why. It read as a network fault for hours.
+
+        So it is read out loud. Nothing is changed automatically, because the
+        change is a recapture that would interrupt everybody already watching
+        -- and because the answer is one line in the config, which this says.
+        """
+        # Only H.264 has profiles worth checking here, and only when that is
+        # what is going out: "auto" that settled on H.265 or AV1 is a different
+        # question and not this one.
+        playing = getattr(self.stage, "codec", None) or self.codec
+        if not profiles or str(playing).lower() not in ("h264", "auto", ""):
+            return
+        want = video.h264_profile_level_id(
+            getattr(self.cfg, "h264_profile", "constrained-baseline"),
+            getattr(self.cfg, "height", 1080))[:4].lower()
+        theirs = {str(p).lower()[:4] for p in profiles}
+        if want in theirs:
+            return
+        log.warning(
+            "%s's browser does not list the H.264 profile this host offers "
+            "(%s, %s). They will connect and see a black screen. Their "
+            "browser takes: %s. Set h264_profile to constrained-baseline in "
+            "%s and restart to fix it for everybody.",
+            guest.label, getattr(self.cfg, "h264_profile", "?"), want,
+            ", ".join(sorted(theirs)) or "nothing it would name",
+            getattr(self.cfg, "path", "the config"))
+        self.notify_one(guest, {
+            "t": "note",
+            "message": "Your browser may not accept this host's video format. "
+                       "If the picture stays black, ask the owner to set "
+                       "h264_profile to constrained-baseline."})
 
     def plug_in(self, guest):
         """Give this guest a device, unless nothing they send could reach it.

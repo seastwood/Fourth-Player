@@ -157,6 +157,33 @@ let joinTimer = null;
 /* What this browser can actually decode, so the host can encode the best thing
  * both ends manage rather than guessing. Safari takes H.265 and most others do
  * not, and the difference at 1.5 Mb/s is worth asking about. */
+/* Which H.264 profiles this browser says it can decode, as the four-character
+   profile-idc-and-constraints prefix of each profile-level-id it lists.
+
+   The codec is negotiated -- the host picks the best of H.264, H.265 and AV1
+   that every guest can manage -- and the profile inside H.264 never was. It is
+   pinned on the encoder, which encodes once for everybody, so a host set to
+   Main offers Main to a browser that only takes Constrained Baseline, the
+   browser answers with the video refused, and the guest gets a black screen
+   with nothing anywhere saying why. That cost an evening.
+
+   Reported so the host can say so in its log. It cannot re-encode per guest. */
+function videoProfiles() {
+  try {
+    const caps = RTCRtpReceiver.getCapabilities("video");
+    if (!caps) return [];
+    const seen = new Set();
+    for (const codec of caps.codecs) {
+      if (!/H264/i.test(codec.mimeType || "")) continue;
+      const found = /profile-level-id=([0-9a-fA-F]{6})/.exec(codec.sdpFmtpLine || "");
+      if (found) seen.add(found[1].slice(0, 4).toLowerCase());
+    }
+    return [...seen];
+  } catch (_) {
+    return [];
+  }
+}
+
 function videoCodecs() {
   try {
     const caps = RTCRtpReceiver.getCapabilities("video");
@@ -201,7 +228,8 @@ el("pin-form").addEventListener("submit", (event) => {
   // Asking somebody to read the PIN off the television a second time to seat
   // the person next to them would be a poor answer to "make it simple".
   sessionPin = pin;
-  const knock = { t: "join", token, pin, name: who, codecs: videoCodecs() };
+  const knock = { t: "join", token, pin, name: who, codecs: videoCodecs(),
+                  h264_profiles: videoProfiles() };
   // Said at the door rather than once inside. A session locked to accounts
   // admits nobody who has not named themselves, so a login you could only
   // reach from within would be a door the owner had shut behind them.
@@ -343,7 +371,8 @@ function reconnectSoon() {
   retryTimer = setTimeout(() => {
     retryTimer = null;
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new" });
+              codecs: videoCodecs(), h264_profiles: videoProfiles(),
+              media: mediaIsLive() ? "live" : "new" });
   }, delay);
 }
 
@@ -2068,7 +2097,8 @@ function reviveNow(why) {
     // only lost signalling, and the whole reason for being here is that this
     // one is not working, whatever it says about itself.
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: "new" });
+              codecs: videoCodecs(), h264_profiles: videoProfiles(),
+              media: "new" });
   } catch (_) {
     // Nothing to connect to yet -- no network at all, usually. The backoff
     // was made for this, and it has just been reset to its first step.
@@ -2646,7 +2676,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05g";
+const CLIENT_BUILD = "2026-09-05h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -5678,5 +5708,6 @@ if (saved) {
   el("pin").placeholder = "rejoining…";
   el("join").disabled = true;
   connect({ t: "resume", guest: saved, name: myName(),
-            codecs: videoCodecs(), media: "new" });
+            codecs: videoCodecs(), h264_profiles: videoProfiles(),
+              media: "new" });
 }
