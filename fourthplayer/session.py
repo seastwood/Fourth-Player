@@ -1928,14 +1928,20 @@ class LiveSession:
     # read as "it is still starting" rather than "it is not there".
     STEAM_STARTING = 45.0
 
-    def steam_here(self, appid, label="", starting=False):
+    def steam_here(self, appid, label="", starting=False, polled=False):
         """What Steam is running now. Tells anybody whose answer changed.
 
         `starting` marks an appid this end has just launched, which the
         process table cannot confirm for another quarter of a minute.
+
+        `polled` marks an answer read off the process table, which is the only
+        caller whose "nothing is running" is uncertain -- during Steam's
+        start-up it is simply too early to tell. An explicit call is not
+        uncertain about anything and is always believed, which is what lets a
+        launch that failed clear what it had claimed.
         """
         appid = str(appid or "")
-        if not appid and self._steam_asked_at and \
+        if polled and not appid and self._steam_asked_at and \
                 (self._now() - self._steam_asked_at) < self.STEAM_STARTING:
             # Asked for and not visible yet. Believing the poll here would
             # unhold everybody for the whole of Steam's start-up.
@@ -2076,7 +2082,7 @@ class LiveSession:
                     try:
                         appid = await self.loop.run_in_executor(
                             None, self._steam_in_front)
-                        self.steam_here(*appid)
+                        self.steam_here(*appid, polled=True)
                     except Exception:
                         log.exception("could not tell whether Steam is playing")
                     try:

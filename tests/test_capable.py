@@ -328,13 +328,20 @@ check(session.steam_now == BROFORCE,
 check(session.holding(watching)[0], "so a guest without it is held at once")
 
 # The poll, finding nothing yet, must not undo that.
-session.steam_here("")
+session.steam_here("", polled=True)
 check(session.steam_now == BROFORCE,
       "a poll that cannot see it yet does not unhold everybody")
 clock[0] += session.STEAM_STARTING + 1
-session.steam_here("")
+session.steam_here("", polled=True)
 check(session.steam_now == "",
       "but once it has had long enough, the process table is the truth")
+
+# The grace is the poll's, because the poll is the only caller whose
+# "nothing is running" is uncertain. An explicit clear is not.
+session.steam_here(BROFORCE, "Broforce", starting=True)
+session.steam_here("")
+check(session.steam_now == "",
+      "an explicit clear is believed straight away, whatever the poll would say")
 
 # A launch that failed holds nobody.
 session, loop = make_session()
