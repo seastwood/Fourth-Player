@@ -1633,7 +1633,7 @@ class LiveSession:
                             starting=True)
             # After steam_here, which is what decides who is held, and before
             # the launch, which is when the game decides who is player one.
-            self.settle_pads_for_steam()
+            self.settle_pads_for_steam(row)
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
@@ -2046,8 +2046,16 @@ class LiveSession:
                        "If the picture stays black, ask the owner to set "
                        "h264_profile to constrained-baseline."})
 
-    def settle_pads_for_steam(self):
+    def settle_pads_for_steam(self, row):
         """Make sure exactly the controllers that will be driven are plugged in.
+
+        Who counts as a player here is "may they play *this game*", not "are
+        they held right now". The hold is about what is on the screen at this
+        instant, and this runs at the one moment that is guaranteed to be
+        mid-change: the game has been asked for and has not arrived, so Kodi's
+        menu is still in front and the menu rule says everybody is held.
+        Asking it produced "0 plugged in, 3 unplugged" -- every controller
+        removed, none made, and a game that started with no controls at all.
 
         Both halves matter, and the first version of this only did the second.
 
@@ -2067,7 +2075,7 @@ class LiveSession:
         """
         if self.pads is None:
             return []
-        players = [g for g in self.guests.values() if not self.holding(g)[0]]
+        players = [g for g in self.guests.values() if self.may_start(g, row)]
         driving = {g.pad_index for g in players}
 
         # Plug in the ones that will be driven. Leaving this out is how a game

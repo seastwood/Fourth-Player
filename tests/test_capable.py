@@ -761,6 +761,27 @@ check(seats3.existing(1) is not None,
       "and one is plugged in before the game starts, not by their first frame "
       "after it has already chosen a player one")
 check(len(seats3.live()) == 1, "and it is the only one: %r" % seats3.live())
+
+# The question is "may they play this game", not "are they held right now".
+# This runs at the one moment guaranteed to be mid-change: the game has been
+# asked for and has not arrived, so the menu is still in front and the menu
+# rule says everybody is held. Asking that gave "0 plugged in, 3 unplugged".
+seats4 = Seats()
+session4, loop4 = make_session()
+session4.notify = lambda message: None
+session4.notify_one = lambda guest, message: None
+session4.publish_pad_names = lambda: None
+session4.pads = seats4
+session4.input_held = True
+session4.hold_reason = "kodi"          # the menu, as it is at launch
+player = Seat(1, "the one playing", can=["steam"])
+player.pad_index = 1
+player.session = session4
+session4.guests = {1: player}
+loop4.run_until_complete(session4._start_game(dict(FakeCatalogue.ROWS[1])))
+check(seats4.existing(1) is not None,
+      "the player gets a controller even though the menu is still in front")
+check(len(seats4.live()) == 1, "and it is the only one: %r" % seats4.live())
 check(seats.existing(2) is None,
       "the pad of the guest who may not is unplugged")
 check(seats.existing(0) is None and seats.existing(3) is None,
