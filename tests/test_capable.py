@@ -244,8 +244,10 @@ session.pads = FakePads(4)
 session.steam_here(BROFORCE, "Broforce")
 given = FakeGuest(0, "given", can=["steam"])
 given.pad_index = 0
+given.session = session            # the rule reaches a pad through the guest
 nothing = FakeGuest(1, "nothing")
 nothing.pad_index = 1
+nothing.session = session
 session.guests = {0: given, 1: nothing}
 # The rule has already run: while this Steam game is on, only the client
 # allowed to play it has a controller at all. So there is nothing left on the
