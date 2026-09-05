@@ -236,6 +236,12 @@ class FakePads:
             return True
         return False
 
+    def __getitem__(self, index):
+        """Made on first use, as the real one does."""
+        if self.pads[index] is None:
+            self.pads[index] = FakePad(index)
+        return self.pads[index]
+
 
 session, loop = make_session()
 session.notify = lambda message: None
