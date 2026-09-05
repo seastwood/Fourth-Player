@@ -172,109 +172,40 @@ check(session.holding(watching)[0], "and the menu hold still works")
 session.driver = watching.slot
 check(not session.holding(watching)[0], "including the driver exemption")
 
-print("\nSteam's own window over its own game does not hold the person given it")
-# The shell rule holds guest pads out of menus. Steam's loader, its overlay and
-# Big Picture all come to the front during a game, and the watcher calls every
-# one of them "steam" -- so an account that had been granted the game was held
-# out of it, on and off, for as long as it played.
-session, loop = make_session()
-session.steam_here(BROFORCE, "Broforce")
-given = FakeGuest(2, "given", can=["steam"])
-nothing = FakeGuest(3, "nothing")
-session.input_held = True
-session.hold_reason = "steam"
-check(not session.holding(given)[0],
-      "the account given the game plays through Steam's own window")
-check(session.holding(nothing)[0], "and everybody else is still held")
-session.hold_reason = "steamwebhelper"
-check(not session.holding(given)[0], "Big Picture counts as Steam's own too")
-
-# Every other shell still holds everybody.
-for shell in ("kodi", "moonlight", "xfdesktop", "thunar"):
-    session.hold_reason = shell
-    check(session.holding(given)[0],
-          "%s still holds even an account with Steam: a grant for a game says "
-          "nothing about a desktop" % shell)
-
-# And with no Steam game playing, Steam's own window is an ordinary shell.
-session.steam_here("")
-session.hold_reason = "steam"
-check(session.holding(given)[0],
-      "with no Steam game running, Steam's window holds everybody as before")
-session.input_held = False
-
-print("\nthe hold only lets go of the buttons of the people it holds")
-# Steam's own window flickers to the front repeatedly while a game runs --
-# twice in ten seconds, measured on the console. Each time, the hold turned on
-# and every pad was released. An account that had been given the game was not
-# held, so its frames flowed, and its buttons were wiped every few seconds:
-# indistinguishable from a controller that does not work at all.
-
-
-class FakePad:
-    def __init__(self, index):
-        self.index = index
-        self.released = 0
-
-    def release_all(self):
-        self.released += 1
-
-
-class FakePads:
-    def __init__(self, count):
-        self.pads = [FakePad(i) for i in range(count)]
-
-    def live(self):
-        return list(enumerate(self.pads))
-
-
+print("\nthe hold lets go of the buttons of everybody it holds")
+# A menu in front is one answer for everybody, which is what it always was.
 session, loop = make_session()
 session.notify = lambda message: None
 session.notify_one = lambda guest, message: None
+session.publish_pad_names = lambda: None
 session.pads = FakePads(4)
-session.steam_here(BROFORCE, "Broforce")
-given = FakeGuest(0, "given", can=["steam"])
-given.pad_index = 0
-nothing = FakeGuest(1, "nothing")
-nothing.pad_index = 1
-session.guests = {0: given, 1: nothing}
-session._hold_input(True, "steam")
-check(session.pads.pads[0].released == 0,
-      "the account playing the game keeps its buttons")
-check(session.pads.pads[1].released == 1,
-      "and the guest who is held loses theirs")
-check(session.pads.pads[2].released == 1,
-      "a pad with nobody on it is released too, which costs nothing")
-
-# An ordinary menu is still one answer for everybody.
-session, loop = make_session()
-session.notify = lambda message: None
-session.notify_one = lambda guest, message: None
-session.pads = FakePads(2)
-given = FakeGuest(0, "given", can=["steam"])
-given.pad_index = 0
-session.guests = {0: given}
+one = FakeGuest(0, "one")
+one.pad_index = 0
+one.session = session
+session.guests = {0: one}
 session._hold_input(True, "kodi")
 check(session.pads.pads[0].released == 1,
-      "Kodi's menu still lets go of everybody's, Steam grant or not")
+      "the menu takes the buttons of the guest it holds")
+check(session.pads.pads[1].released == 1,
+      "and of the seats nobody is in, which costs nothing")
 
 print("\nthe frames really do stop")
+# The one thing feed() decides, through the one call that decides it.
 session, loop = make_session()
-session.steam_here(BROFORCE, "Broforce")
-watching = FakeGuest(3, "watching")
-watching.session = session
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.input_held = True
+session.hold_reason = "kodi"
 sent = []
 
 
 class Pad:
     """Only what the code under test asks of a device."""
-    forgotten = []
-
     def apply(self, state, sender=None):
         sent.append(sender)
 
     def forget(self, sender):
-        Pad.forgotten.append(sender)
+        pass
 
     def adopt_new_sender(self, sender=None):
         pass
@@ -283,25 +214,27 @@ class Pad:
         pass
 
 
-watching.pad_index = 0
-# The real frame, through the real decoder, into the real feed(): the whole
-# point is that nothing on the page is what stops it.
-from fourthplayer import protocol
-# Saved and put back at the end of this block. Left in place it silently
-# re-points every later check that touches a pad -- which is how the checks
-# below it passed while proving nothing.
+held_out = FakeGuest(3, "held")
+held_out.session = session
+held_out.pad_index = 0
+session.guests = {3: held_out}
+
+# Saved and put back below: left replaced it silently re-points every later
+# check that touches a pad.
 REAL_PAD = GuestConnection.pad
 GuestConnection.pad = property(lambda self: Pad())
+from fourthplayer import protocol
 frame = protocol.encode(protocol.PadState(seq=1, buttons=0b101))
-watching.feed(frame)
-check(sent == [] and watching.held_frames == 1,
-      "a guest without the capability gets nothing through to the pad")
-allowed = FakeGuest(2, "allowed", can=["steam"])
-allowed.session = session
-allowed.feed(frame)
-check(sent == [2], "and one with it does")
-check(watching.frames == 1,
-      "the held guest still counts as present -- being held is not silence")
+held_out.feed(frame)
+check(sent == [] and held_out.held_frames == 1,
+      "a guest held by the menu gets nothing through to the pad")
+check(held_out.frames == 1,
+      "and still counts as present -- being held is not silence")
+
+session.driver = held_out.slot
+held_out.feed(protocol.encode(protocol.PadState(seq=2, buttons=0b101)))
+check(sent == [3], "the one named to drive gets through")
+session.driver = None
 GuestConnection.pad = REAL_PAD
 
 print("\nstop only ever adds")
