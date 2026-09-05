@@ -324,6 +324,12 @@ class LiveSession:
     # When a Steam game was asked for, so the poll's silence during Steam's
     # start-up is not mistaken for the game not being there.
     _steam_asked_at = 0.0
+    # Consecutive polls that could not see the game. One is not evidence: the
+    # process table read misses often enough to have been logged as "the Steam
+    # game has gone" and back again four seconds later, in the middle of a game
+    # nobody had touched.
+    _steam_misses = 0
+    STEAM_MISSES = 3
     # How many guests may be connected at once, and whether anybody without an
     # account may be one of them. Both are the owner narrowing a session that
     # is already open, rather than settings for the next one -- "there are too
@@ -2112,12 +2118,32 @@ class LiveSession:
         launch that failed clear what it had claimed.
         """
         appid = str(appid or "")
+        if polled and not appid and self.steam_now:
+            # A poll that cannot see a game we believe is running.
+            #
+            # One of those is not evidence. The read misses -- it was logged as
+            # "the Steam game has gone" and back again four seconds later, with
+            # nobody having touched anything -- and every miss unholds every
+            # guest for as long as it lasts. A guest joining in that window is
+            # not held, so they are given a controller, and a Steam game binds
+            # device to player when it starts: a new one appearing takes the
+            # game away from whoever was playing, until it is restarted.
+            #
+            # So it takes a few in a row to be believed. A game that really has
+            # ended is noticed a second or two later than it used to be, which
+            # costs nothing.
+            self._steam_misses += 1
+            if self._steam_misses < self.STEAM_MISSES:
+                return
+        elif polled:
+            self._steam_misses = 0
         if polled and not appid and self._steam_asked_at and \
                 (self._now() - self._steam_asked_at) < self.STEAM_STARTING:
             # Asked for and not visible yet. Believing the poll here would
             # unhold everybody for the whole of Steam's start-up.
             return
         self._steam_asked_at = self._now() if (appid and starting) else 0.0
+        self._steam_misses = 0
         if appid == self.steam_now:
             return
         was = self.steam_now

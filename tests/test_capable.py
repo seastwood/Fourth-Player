@@ -758,6 +758,29 @@ loop2.run_until_complete(session2._start_game(dict(FakeCatalogue.ROWS[0])))
 check(len(seats2.live()) == 4,
       "starting a ROM unplugs nothing: %r" % len(seats2.live()))
 
+print("\none missed poll does not mean the game has gone")
+# It was logged as "the Steam game has gone" and back again four seconds later
+# with nobody touching anything. Every miss unholds every guest for as long as
+# it lasts, and a guest joining in that window is given a controller -- which a
+# Steam game, having bound device to player when it started, hands the game to.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.steam_here(BROFORCE, "Broforce")
+check(session.steam_now == BROFORCE, "the game is in front")
+for n in range(session.STEAM_MISSES - 1):
+    session.steam_here("", polled=True)
+    check(session.steam_now == BROFORCE,
+          "miss %d does not clear it" % (n + 1))
+session.steam_here(BROFORCE, "Broforce", polled=True)
+check(session.steam_now == BROFORCE, "seeing it again resets the count")
+for n in range(session.STEAM_MISSES - 1):
+    session.steam_here("", polled=True)
+check(session.steam_now == BROFORCE, "so the count really did reset")
+session.steam_here("", polled=True)
+check(session.steam_now == "",
+      "but enough misses in a row is a game that really has ended")
+
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
 print()
