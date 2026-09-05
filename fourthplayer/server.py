@@ -201,20 +201,31 @@ class Server:
                     # sits in front of a black screen.
                     if (not guest.input_only
                             and re.search(r"^m=video 0[ ]", sdp, re.M)):
-                        # A prediction, not a verdict. Safari on iOS answers a
-                        # renegotiation with port 0 while the picture it
-                        # already has carries on playing, and acting on that
-                        # freed the slot of somebody mid-game -- which
-                        # unplugged their pad and took the controller out of a
-                        # Steam game that had already bound it.
+                        # Said, and nothing else done about it.
                         #
-                        # So wait, then look. If they have media by then they
-                        # took the video after all and nothing happened.
-                        log.info("%s: answered with no video; giving it a "
-                                 "moment before freeing the slot", guest.label)
-                        slot = guest.slot
-                        self.loop.call_later(
-                            5.0, lambda s=slot: self._free_if_no_video(s))
+                        # This used to free the slot five seconds later, on the
+                        # reasoning that somebody who will never see a picture
+                        # should not hold one. Both halves of that were wrong.
+                        #
+                        # An answer of port 0 is not reliably a refusal: Safari
+                        # sends one on a renegotiation while the picture it
+                        # already has carries on. And five seconds is not long
+                        # enough to tell anyway -- ICE on a phone routinely
+                        # takes longer, so "no media yet" was being read as
+                        # "this browser cannot do H.264". Freeing the slot
+                        # destroys the peer, which stops the candidates that
+                        # were about to arrive, so the guest ends up with a
+                        # black screen and a page reporting that the host
+                        # offered no address at all. It made its own evidence.
+                        #
+                        # There is already one mechanism for a guest who never
+                        # gets a picture, and it is the better-judged one:
+                        # _reap_ghosts frees a slot after GHOST_SECONDS of no
+                        # media, whatever the reason. Two mechanisms for one
+                        # job, and the hasty one winning, is how this went
+                        # wrong. Now there is one.
+                        log.info("%s: answered with no video (their page will "
+                                 "say so if no picture arrives)", guest.label)
                     guest.peer.set_remote_answer(sdp)
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
@@ -545,27 +556,6 @@ class Server:
             if token:
                 reply["device"] = token
         await outbox.put(reply)
-
-    def _free_if_no_video(self, slot):
-        """Let a slot go only if the guest really never got a picture.
-
-        They will never see one, so holding the slot only locks the next
-        person out -- including this one after they reload. But a guest whose
-        media is running took the video whatever their answer said, and
-        dropping them there is how somebody lost a game they were playing.
-        """
-        if self.session is None:
-            return
-        guest = self.session.guests.get(slot)
-        if guest is None:
-            return
-        if guest.has_media():
-            log.info("%s took the video after all; keeping their slot",
-                     guest.label)
-            return
-        log.warning("%s: their browser would not take the video -- freeing "
-                    "the slot", guest.label)
-        self.session.drop(slot, reason="could not take the video")
 
     @staticmethod
     def _safely(call, *args):

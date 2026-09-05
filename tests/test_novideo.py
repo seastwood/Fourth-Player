@@ -65,17 +65,21 @@ def strip_comments(text):
 code = strip_comments(app)
 host = re.sub(r"(?m)^\s*#.*$", "", server)
 
-print("the host waits, then looks")
-check("_free_if_no_video" in host, "the drop goes through one named check")
-free = host.split("def _free_if_no_video")[1].split("\n    @staticmethod")[0]
-check("has_media()" in free,
-      "which asks whether the guest has media before letting the slot go")
-check("return" in free.split("has_media()")[1].split("log.warning")[0],
-      "and returns without dropping them when they have")
+print("an answer with no video costs the guest nothing")
 answer = host.split('re.search(r"^m=video 0[ ]", sdp, re.M)')[1].split("elif kind")[0]
 check("self.session.drop(" not in answer,
-      "the answer handler does not drop anybody itself")
-check("call_later" in answer, "it waits first")
+      "the answer handler does not drop anybody")
+check("call_later" not in answer,
+      "and does not arm anything to drop them later either")
+check("log." in answer, "it says what it saw and stops there")
+check("_free_if_no_video" not in host,
+      "the five-second guillotine is gone entirely")
+
+print("\nand the one mechanism that does free a slot is the patient one")
+check("def _reap_ghosts" in open(
+    os.path.join(ROOT, "fourthplayer", "session.py"), encoding="utf-8").read(),
+      "the ghost reaper still exists, and frees a slot after a real absence "
+      "of media rather than five seconds after one SDP answer")
 
 print("\nthe page waits, then looks")
 refused = code.split("function videoRefused()")[1].split("\nfunction ")[0]
