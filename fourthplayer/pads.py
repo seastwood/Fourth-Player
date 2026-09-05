@@ -17,10 +17,13 @@ installs grants the logged-in user write access to /dev/uinput, and this was
 verified on the target machine before any of it was written.
 """
 
+import logging
 import time
 import traceback
 
 from evdev import UInput, AbsInfo, ecodes as e
+
+log = logging.getLogger("fourthplayer.pads")
 
 from . import protocol as P
 
