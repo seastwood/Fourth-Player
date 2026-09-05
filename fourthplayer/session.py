@@ -1874,6 +1874,30 @@ class LiveSession:
             return False, ""
         shells = tuple(self.cfg.shell_windows) or screen.SHELLS
         front = screen.foreground()
+
+        # We could not read what is in front.
+        #
+        # is_shell() calls that a shell, and for an empty desktop it is right:
+        # a guest whose game has crashed is looking at nothing and their pad
+        # should stop at the television. But a fullscreen game can be
+        # unreadable too -- an override-redirect window has no entry for
+        # xdotool to find -- and then every guest is held, permanently, in the
+        # middle of a game, with no reason given anywhere.
+        #
+        # That is what "no one can control Broforce" was: foreground() empty
+        # for minutes on end while the game ran perfectly well.
+        #
+        # So when we cannot tell, ask whether a game is running. If one is,
+        # the guest is far likelier looking at it than at a menu, and the hold
+        # exists for menus.
+        if not front:
+            try:
+                if launcher.running():
+                    return False, ""
+            except Exception:
+                pass
+            return True, "the desktop"
+
         if not screen.is_shell(front, shells):
             return False, ""
         # Named in the message, because "controls paused" without a reason is
