@@ -343,7 +343,7 @@ class PadSet:
             # game to it. A device with nobody holding it is a bug, and this
             # is how to find out who made it.
             log.info("plugged in %s (seat %d)", self.names[index], index)
-            log.debug("made by:\n%s", "".join(traceback.format_stack(limit=6)))
+            log.info("made by:\n%s", "".join(traceback.format_stack(limit=7)))
         return pad
 
     def existing(self, index):
