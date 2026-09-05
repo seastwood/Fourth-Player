@@ -625,12 +625,30 @@ class LiveSession:
         guest.logged_in_at = now if fresh else 0.0
         log.info("%s logged in as %s (may: %s)", guest.label, guest.account,
                  " ".join(guest.capabilities) or "nothing")
+        # Logging in can be the difference between a held controller and a
+        # live one, so say so rather than waiting for something else to change.
+        self.tell_hold(guest)
         return guest.capabilities
 
     def logout(self, guest):
         guest.account = None
         guest.capabilities = ()
         guest.logged_in_at = 0.0
+        self.tell_hold(guest)
+
+    def tell_hold(self, guest):
+        """Tell one guest where they stand on the hold, now.
+
+        Called wherever an account changes, because that is one of the two
+        things the answer depends on and the only one that is about this guest
+        alone. The hold is otherwise broadcast when what is in front changes,
+        which is right for a Steam game starting and useless for somebody
+        logging in while one is already playing: the host let their frames
+        through and their page went on saying "Controls paused" over a dimmed
+        controller, which is a good way to be told you cannot play something
+        you can.
+        """
+        self.notify_one(guest, {"t": "hold", **self.hold_state(guest)})
 
     def refresh_capabilities(self, name):
         """Push a changed capability list out to whoever is connected on it.
@@ -650,6 +668,9 @@ class LiveSession:
                     self.logout(guest)
                 else:
                     guest.capabilities = tuple(account.get("can") or ())
+                    # A capability given or taken away while a Steam game is
+                    # in front changes this guest's answer and nobody else's.
+                    self.tell_hold(guest)
                 changed.append(guest)
         return changed
 

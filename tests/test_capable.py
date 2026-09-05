@@ -308,6 +308,44 @@ check(session.may_join({"name": "seth"})[0], "somebody who logs in does")
 session.set_locked(False, by=admin)
 check(not session.locked and session.may_join(None)[0], "and it unlocks")
 
+print("\nlogging in says so, when it changes whether you are held")
+# The hold is broadcast when what is in front changes, which is right for a
+# Steam game starting and useless for somebody logging in while one is already
+# playing: the host starts letting their frames through and their page goes on
+# saying "Controls paused" over a dimmed controller.
+session, loop = make_session()
+session.steam_here(BROFORCE, "Broforce")
+told = []
+session.notify_one = lambda guest, message: told.append((guest.label, message))
+session.notify = lambda message: None
+guest = FakeGuest(1, "seth")
+session.guests = {1: guest}
+check(session.holding(guest)[0], "held before logging in")
+session.login_ok(guest, {"name": "seth", "can": ["steam"]}, "10.0.0.1")
+holds = [m for _who, m in told if m.get("t") == "hold"]
+check(holds, "logging in tells the page about the hold: %r" % (told,))
+check(holds and holds[-1]["held"] is False,
+      "and says it is over: %r" % (holds[-1] if holds else None))
+
+told.clear()
+session.logout(guest)
+holds = [m for _who, m in told if m.get("t") == "hold"]
+check(holds and holds[-1]["held"] is True,
+      "logging out says it is back on: %r" % (holds[-1] if holds else None))
+check(holds and "Broforce" in (holds[-1].get("because") or ""),
+      "with the reason filled in")
+
+told.clear()
+session.login_ok(guest, {"name": "seth", "can": ["steam"]}, "10.0.0.1")
+told.clear()
+accounts.add("seth", "a-good-password", ["steam"])
+accounts.set_capabilities("seth", ["kick"])
+session.refresh_capabilities("seth")
+holds = [m for _who, m in told if m.get("t") == "hold"]
+check(holds and holds[-1]["held"] is True,
+      "a capability taken away while a Steam game is playing says so too: %r"
+      % (holds[-1] if holds else None))
+
 print("\nthe host, not the page, decides")
 srv = serverlib.Server.__new__(serverlib.Server)
 srv.session, srv.loop = session, loop
