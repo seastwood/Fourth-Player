@@ -308,6 +308,20 @@ check(session.may_join({"name": "seth"})[0], "somebody who logs in does")
 session.set_locked(False, by=admin)
 check(not session.locked and session.may_join(None)[0], "and it unlocks")
 
+print("\nthe stricter answer is settled first")
+# Both are read on one tick. In the other order there is a moment where the
+# shell hold has been released because a game is up and the appid has not been
+# recorded yet -- a moment in which a guest who has not been given that game
+# may drive it.
+import inspect
+tick = inspect.getsource(LiveSession._sweep) if hasattr(LiveSession, "_sweep") else ""
+if not tick:
+    tick = "".join(inspect.getsource(LiveSession).split("SWEEP_INTERVAL")[1:2])
+check("_steam_in_front" in tick and "_watch_the_screen" in tick,
+      "the tick reads both")
+check(tick.index("_steam_in_front") < tick.index("_watch_the_screen"),
+      "and records the Steam game before releasing the shell hold")
+
 print("\nlogging in says so, when it changes whether you are held")
 # The hold is broadcast when what is in front changes, which is right for a
 # Steam game starting and useless for somebody logging in while one is already

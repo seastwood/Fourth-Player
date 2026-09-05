@@ -2026,21 +2026,27 @@ class LiveSession:
                     # missing method here ended the task, and what somebody
                     # actually noticed was that a controller stopped being
                     # released when its guest went quiet.
-                    try:
-                        held, why = await self.loop.run_in_executor(
-                            None, self._watch_the_screen)
-                        self._hold_input(held, why)
-                    except Exception:
-                        log.exception("could not read what is on the screen")
-                    # And which Steam game, if any, is in front. Its own try:
-                    # a fault asking Steam must not take the screen watcher,
-                    # the dead-man switch and the launch deadline with it.
+                    # Which Steam game is in front, before the shell hold
+                    # rather than after it. Both are read on this tick, and in
+                    # the other order there is a moment where the hold has
+                    # been released because a game is up and the appid has not
+                    # been recorded yet -- which is a moment in which a guest
+                    # who has not been given that game may drive it. Its own
+                    # try: a fault asking Steam must not take the screen
+                    # watcher, the dead-man switch and the launch deadline
+                    # with it.
                     try:
                         appid = await self.loop.run_in_executor(
                             None, self._steam_in_front)
                         self.steam_here(*appid)
                     except Exception:
                         log.exception("could not tell whether Steam is playing")
+                    try:
+                        held, why = await self.loop.run_in_executor(
+                            None, self._watch_the_screen)
+                        self._hold_input(held, why)
+                    except Exception:
+                        log.exception("could not read what is on the screen")
                 # Roughly every ten seconds, make sure the thread that owns the
                 # pipeline is still answering. A wedge is otherwise invisible
                 # until somebody tries to join and is refused.
