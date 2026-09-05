@@ -561,6 +561,40 @@ check(not session.holding(same)[0],
 check(same.logged_in_at == 0.0,
       "though the authenticator code is not still fresh")
 
+print("\na guest who cannot play gets a seat and no controller")
+# A virtual pad appearing is not free: Steam re-enumerates controllers the
+# moment one arrives and hands the game to whichever it likes, so a guest
+# joining took the controller out of the hands of somebody already playing.
+# Somebody held out of the game has nothing to send anyway.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.steam_here(BROFORCE, "Broforce")
+made = []
+
+
+class Seat(FakeGuest):
+    @property
+    def pad(self):
+        made.append(self.slot)
+        return Pad()
+
+
+held_out = Seat(2, "held out")
+check(session.plug_in(held_out) is None,
+      "no device for somebody held out of the Steam game")
+check(made == [], "and none was made: %r" % made)
+allowed = Seat(3, "allowed", can=["steam"])
+check(session.plug_in(allowed) is not None,
+      "the account that was given it does get one")
+check(made == [3], "and only theirs was made: %r" % made)
+
+made.clear()
+session.steam_here("")
+check(session.plug_in(held_out) is not None,
+      "with no Steam game running, everybody gets one as before")
+check(made == [2], "which is the ordinary case: %r" % made)
+
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
 print()

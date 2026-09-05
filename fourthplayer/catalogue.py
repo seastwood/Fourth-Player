@@ -143,6 +143,38 @@ def art_path(system, label):
     return None
 
 
+# Where Steam keeps the art it has already downloaded, under each appid. The
+# portrait is the one the library shows and the right shape for a row of
+# covers; the header is a wide fallback for a game that has no portrait.
+STEAM_ART_NAMES = ("library_600x900.jpg", "header.jpg", "logo.png")
+
+
+def steam_art_path(appid):
+    """Steam's own cover for one appid, or None.
+
+    A Steam game's art is not in the emulator thumbnail tree and never will be:
+    that tree is libretro's, keyed by system and title. Steam downloaded its
+    own when the game was installed, which is both nearer and always right.
+    """
+    from . import steamgames
+    for root in steamgames._roots():
+        folder = os.path.join(root, "appcache", "librarycache", str(appid))
+        for name in STEAM_ART_NAMES:
+            path = os.path.join(folder, name)
+            if os.path.exists(path):
+                return path
+    return None
+
+
+def art_for(row):
+    """The cover for one row, wherever it lives."""
+    if row.get("kind") == "steam" and row.get("appid"):
+        found = steam_art_path(row["appid"])
+        if found:
+            return found
+    return art_path(row["system"], row["label"])
+
+
 class Catalogue:
     """Everything launchable, rebuilt when the playlists change underneath."""
 
@@ -256,7 +288,7 @@ class Catalogue:
                 "short": row["short"],
                 "players": row["players"],
                 "bucket": bucket(row["players"]),
-                "art": bool(art_path(row["system"], row["label"])),
+                "art": bool(art_for(row)),
                 # Whether there is anything to continue from, so the page can
                 # offer that only when it is a real choice.
                 "saved": bool(state),
@@ -267,4 +299,4 @@ class Catalogue:
 
     def art(self, key):
         row = self.find(key)
-        return art_path(row["system"], row["label"]) if row else None
+        return art_for(row) if row else None

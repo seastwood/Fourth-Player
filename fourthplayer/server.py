@@ -144,9 +144,16 @@ class Server:
                 body = handle.read()
         except OSError:
             return HTTPStatus.NOT_FOUND, [], b"not found\n"
+        # By what the file is, not by what most of them are. The emulator
+        # thumbnails are PNG; Steam's own covers are JPEG, and served as PNG
+        # they arrived as broken images -- which is what "the steam games
+        # don't have cover art" looked like once the art was found at all.
+        kind = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png"}.get(os.path.splitext(path)[1].lower(),
+                                         "image/png")
         # Box art does not change under a given id, and a phone scrolling two
         # hundred games should not fetch each one twice.
-        return HTTPStatus.OK, [("content-type", "image/png"),
+        return HTTPStatus.OK, [("content-type", kind),
                                ("cache-control", "private, max-age=3600")], body
 
     def _address(self, socket_):

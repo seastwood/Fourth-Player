@@ -463,6 +463,12 @@ def preflight(row):
     return None
 
 
+# The flag that starts the interface a controller can drive. Named here rather
+# than written into the launch line, because it is the one thing in it somebody
+# might have to change: Valve renamed it once already.
+BIG_PICTURE = "-gamepadui"
+
+
 def build_argv(row, resume=False):
     """What to run. Fresh unless the guest asked to continue.
 
@@ -477,8 +483,16 @@ def build_argv(row, resume=False):
         # Steam starts itself if it is not already up, and then the game.
         # There is no picker and no shader: this is somebody else's program,
         # and what it does with a controller is between them and it.
+        #
+        # In Big Picture, because this is a television with a controller in
+        # front of it. Without the flag Steam comes up in its desktop window,
+        # which wants a mouse for everything the game does not cover -- a
+        # first-run prompt, a Proton dialogue, the moment between one game
+        # ending and the next -- and a guest on a phone has no mouse to give
+        # it. `-gamepadui` is the modern spelling; `-bigpicture` is the old
+        # one and is what kodi-steam settled on for the same reason.
         exe = shutil.which("steam") or "/usr/games/steam"
-        return [exe, "-applaunch", str(appid)]
+        return [exe, BIG_PICTURE, "-applaunch", str(appid)]
 
     argv = [PICKER]
     if not resume:

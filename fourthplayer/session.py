@@ -687,7 +687,7 @@ class LiveSession:
             require_token=getattr(self.cfg, "require_link", True))
         guest = GuestConnection(self, slot, socket, name)
         self.guests[slot] = guest
-        guest.pad                        # plug their controller in
+        self.plug_in(guest)              # plug their controller in
         # Write it down now. The snapshot was only taken when a session opened
         # or somebody left, so a guest who joined and was still playing when
         # the process died was absent from it -- leaving the people actually
@@ -835,7 +835,7 @@ class LiveSession:
             name = ""                       # a slot number is not a name
         guest = GuestConnection(self, record.slot, socket, name)
         self.guests[record.slot] = guest
-        guest.pad                        # plug their controller back in
+        self.plug_in(guest)              # plug their controller back in
         self.save()
         self.publish_pad_names()
         return guest
@@ -854,7 +854,14 @@ class LiveSession:
         guest.on_signal = on_signal
         # A new peer means a new sender, whose sequence numbers start again at
         # zero. Without this the pad rejects everything they send as stale.
-        guest.pad.adopt_new_sender(guest.slot)
+        #
+        # Only if they have a device at all. Making one here would be a
+        # controller appearing in the middle of somebody else's game, for a
+        # guest who cannot send anything through it; when they can, their first
+        # frame makes it and it starts fresh anyway.
+        pad = self.plug_in(guest)
+        if pad is not None:
+            pad.adopt_new_sender(guest.slot)
 
         def configure(peer):
             peer.on_input = guest.feed
@@ -1960,6 +1967,31 @@ class LiveSession:
     # is that with room to spare: for this long, "it has not appeared yet" is
     # read as "it is still starting" rather than "it is not there".
     STEAM_STARTING = 45.0
+
+    def plug_in(self, guest):
+        """Give this guest a device, unless nothing they send could reach it.
+
+        A virtual pad appearing is not free. Steam re-enumerates controllers
+        the moment one arrives and hands the game to whichever it likes, so a
+        guest joining took the controller out of the hands of somebody already
+        playing -- which is what "it works until another client joins" was.
+
+        A guest held out of the Steam game that is playing has nothing to send
+        anyway: feed() drops their frames before they reach a pad. So they get
+        a seat, a name and a place in the list, and no device until there is
+        something for it to do -- which the input path makes for them on the
+        first frame that gets through, the moment they are allowed one.
+
+        Seats have always been cheap for a related reason, written down in
+        PadSet: a device that exists takes a player port whether or not
+        anybody is holding it.
+        """
+        if self.steam_now and not guest.can("steam:" + self.steam_now):
+            log.info("%s gets a seat and no controller for now: %s is a Steam "
+                     "game they have not been given", guest.label,
+                     self.steam_label or "what is playing")
+            return None
+        return guest.pad
 
     def steam_here(self, appid, label="", starting=False, polled=False):
         """What Steam is running now. Tells anybody whose answer changed.
