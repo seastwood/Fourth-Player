@@ -536,7 +536,6 @@ loop.run_until_complete(session._start_game(dict(FakeCatalogue.ROWS[1])))
 check(session.steam_now == BROFORCE,
       "the appid is written down at launch, not when the poll finds it: %r"
       % session.steam_now)
-check(session.holding(watching)[0], "so a guest without it is held at once")
 
 # The poll, finding nothing yet, must not undo that.
 session.steam_here("", polled=True)
@@ -581,46 +580,25 @@ check("_steam_in_front" in tick and "_watch_the_screen" in tick,
 check(tick.index("_steam_in_front") < tick.index("_watch_the_screen"),
       "and records the Steam game before releasing the shell hold")
 
-print("\nlogging in says so, when it changes whether you are held")
-# The hold is broadcast when what is in front changes, which is right for a
-# Steam game starting and useless for somebody logging in while one is already
-# playing: the host starts letting their frames through and their page goes on
-# saying "Controls paused" over a dimmed controller.
+print("\nlogging in still tells the page where it stands")
+# It used to be that logging in could turn a held controller live, because a
+# Steam game held everybody who had not been given it. That rule is gone, and
+# the telling is kept: an account arriving or leaving is still the moment to
+# say where somebody stands, and it costs one message.
 session, loop = make_session()
-session.steam_here(BROFORCE, "Broforce")
 told = []
 session.notify_one = lambda guest, message: told.append((guest.label, message))
 session.notify = lambda message: None
 guest = FakeGuest(1, "seth")
 session.guests = {1: guest}
-check(session.holding(guest)[0], "held before logging in")
 session.login_ok(guest, {"name": "seth", "can": ["steam"]}, "10.0.0.1")
 holds = [m for _who, m in told if m.get("t") == "hold"]
 check(holds, "logging in tells the page about the hold: %r" % (told,))
-check(holds and holds[-1]["held"] is False,
-      "and says it is over: %r" % (holds[-1] if holds else None))
 
 told.clear()
 session.logout(guest)
 holds = [m for _who, m in told if m.get("t") == "hold"]
-check(holds and holds[-1]["held"] is True,
-      "logging out says it is back on: %r" % (holds[-1] if holds else None))
-check(holds and "Broforce" in (holds[-1].get("because") or ""),
-      "with the reason filled in")
-
-told.clear()
-session.login_ok(guest, {"name": "seth", "can": ["steam"]}, "10.0.0.1")
-told.clear()
-if accounts.find("seth") is None:
-    accounts.add("seth", "a-good-password", ["steam"])
-else:
-    accounts.set_capabilities("seth", ["steam"])
-accounts.set_capabilities("seth", ["kick"])
-session.refresh_capabilities("seth")
-holds = [m for _who, m in told if m.get("t") == "hold"]
-check(holds and holds[-1]["held"] is True,
-      "a capability taken away while a Steam game is playing says so too: %r"
-      % (holds[-1] if holds else None))
+check(holds, "and so does logging out")
 
 print("\nthe host, not the page, decides")
 srv = serverlib.Server.__new__(serverlib.Server)
