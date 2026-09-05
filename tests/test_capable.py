@@ -313,10 +313,12 @@ print("\nthe stricter answer is settled first")
 # shell hold has been released because a game is up and the appid has not been
 # recorded yet -- a moment in which a guest who has not been given that game
 # may drive it.
-import inspect
-tick = inspect.getsource(LiveSession._sweep) if hasattr(LiveSession, "_sweep") else ""
-if not tick:
-    tick = "".join(inspect.getsource(LiveSession).split("SWEEP_INTERVAL")[1:2])
+# Read from the file rather than through inspect: the loop is not a method
+# with a name worth guessing at, and every other structural check in this
+# suite reads the source the same way.
+source = open(os.path.join(ROOT, "fourthplayer", "session.py"),
+              encoding="utf-8").read()
+tick = source.split("await asyncio.sleep(SWEEP_INTERVAL)")[1].split("\n    async def ")[0]
 check("_steam_in_front" in tick and "_watch_the_screen" in tick,
       "the tick reads both")
 check(tick.index("_steam_in_front") < tick.index("_watch_the_screen"),
