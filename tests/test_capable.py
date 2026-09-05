@@ -675,6 +675,7 @@ check(seats.existing(2) is None, "and there is still no device on their seat")
 playing = FakeGuest(1, "playing", can=["steam"])
 playing.pad_index = 1
 playing.peer = None
+playing.session = session          # plug_in reaches through the guest
 session.plug_in(playing)
 check(seats.existing(1) is not None, "the account playing has one")
 seats.asked.clear()

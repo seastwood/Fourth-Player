@@ -80,6 +80,16 @@ class FakePads(list):
     def release(self, index):
         return True
 
+    def existing(self, index):
+        """The device if there is one, without making one -- as PadSet does.
+
+        The real one grew this so that tidying up a guest cannot plug a
+        controller in on the way out; a fake without it is a fake that would
+        have hidden exactly that.
+        """
+        return self[index] if 0 <= index < len(self) else None
+
+
 
 def a_session(count=2):
     loop = asyncio.new_event_loop()
