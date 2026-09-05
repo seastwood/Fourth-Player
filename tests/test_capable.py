@@ -373,10 +373,10 @@ session.set_limit(2)
 check(not session.may_join(None)[0], "a new guest is refused at the limit")
 check(session.may_join(None, resuming=True)[0],
       "and somebody reconnecting to their own slot is not")
-session.set_locked(True, by=FakeGuest(0, "a", can=["lock"]))
+session.set_locked("accounts", by=FakeGuest(0, "a", can=["lock"]))
 check(not session.may_join(None, resuming=True)[0],
       "but a lock still applies to them -- that one is not about how many")
-session.locked = False
+session.locked = ""
 
 print("\nthe limit cannot shut an account out")
 session, loop = make_session()
@@ -475,8 +475,8 @@ session.guests = {0: admin, 1: mate, 2: stranger}
 dropped = []
 session.drop = lambda slot, reason="": dropped.append(slot)
 session.notify = lambda message: None
-session.set_locked(True, by=admin)
-check(session.locked, "it locks")
+session.set_locked("accounts", by=admin)
+check(session.locked == "accounts", "it locks")
 check(dropped == [2], "the guest with no account is removed, got %r" % dropped)
 check(0 not in dropped and 1 not in dropped,
       "and the two logged in are not -- including the one who asked")
@@ -485,7 +485,7 @@ check("accounts only" in session.may_join(None)[1].lower()
       or "named accounts" in session.may_join(None)[1],
       "and is told why: %r" % session.may_join(None)[1])
 check(session.may_join({"name": "seth"})[0], "somebody who logs in does")
-session.set_locked(False, by=admin)
+session.set_locked("", by=admin)
 check(not session.locked and session.may_join(None)[0], "and it unlocks")
 
 print("\na Steam game is held from the moment it is asked for")
@@ -592,23 +592,23 @@ print("\nthe host, not the page, decides")
 srv = serverlib.Server.__new__(serverlib.Server)
 srv.session, srv.loop = session, loop
 outbox = asyncio.Queue()
-loop.run_until_complete(srv._act(stranger, "lock", {"on": True}, outbox))
+loop.run_until_complete(srv._act(stranger, "lock", {"mode": "accounts"}, outbox))
 reply = outbox.get_nowait()
 check(reply.get("t") == "error" and reply.get("reason") == "denied",
       "a guest with no account cannot lock the session: %r" % reply)
 check(not session.locked, "and did not")
-loop.run_until_complete(srv._act(FakeGuest(can=["kick"]), "lock", {"on": True}, outbox))
+loop.run_until_complete(srv._act(FakeGuest(can=["kick"]), "lock", {"mode": "accounts"}, outbox))
 check(outbox.get_nowait().get("reason") == "denied",
       "nor can an account that was given something else")
-loop.run_until_complete(srv._act(admin, "lock", {"on": True}, outbox))
+loop.run_until_complete(srv._act(admin, "lock", {"mode": "accounts"}, outbox))
 check(session.locked, "the account that was given it can")
-session.set_locked(False, by=admin)
+session.set_locked("", by=admin)
 drain(outbox)
 
 print("\nthe things that land on other people ask for a code")
 stale = FakeGuest(5, "a remembered phone", can=["kick", "lock", "grant"],
                   fresh=False)
-for action, message in (("lock", {"on": True}), ("kick", {"slot": 1}),
+for action, message in (("lock", {"mode": "accounts"}), ("kick", {"slot": 1}),
                         ("grant", {"name": "mate", "can": []})):
     loop.run_until_complete(srv._act(stale, action, message, outbox))
     reply = outbox.get_nowait()

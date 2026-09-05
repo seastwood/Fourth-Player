@@ -1646,11 +1646,12 @@ class LiveSession:
         # So it is written down first, and the poll's job becomes noticing when
         # the game *goes* rather than when it arrives.
         if row.get("kind") == "steam" and row.get("appid"):
+            # Written down before the launch: Steam takes about eighteen
+            # seconds to spawn the marker the poll looks for, and until then
+            # nothing else knows which game is coming up.
             self.steam_here(str(row["appid"]), row.get("label") or "",
                             starting=True)
-            # After steam_here, which is what decides who is held, and before
-            # the launch, which is when the game decides who is player one.
-            problem = await self.loop.run_in_executor(
+        problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
         # go and read what the television wrote down.
