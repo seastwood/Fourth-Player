@@ -27,3 +27,21 @@ touching the join, resume or login paths.
 
 The password is hard-coded as `throwaway-probe-pw`; make the probe account with
 that, and delete it afterwards.
+
+# Two clients, one Steam game
+
+`tests/browser/twoclients.mjs` runs two real browsers against a running host:
+an account that has been given a Steam game starts it, then somebody with no
+account joins, then leaves. It checks the admin's controller stays live
+throughout and the newcomer's is held.
+
+Two real browsers rather than two sockets, and that matters. A socket-only
+client has no media, so its slot is swept, a later join takes that slot, and
+the wreckage looks exactly like the bug being chased. Chasing that cost an
+hour.
+
+    LINK="https://<box>:8443/j/<token>" PIN=<pin> SECRET=<totp-secret> \
+      node twoclients.mjs
+
+The probe account is `probe` / `throwaway-probe-pw` with `steam`; remake it
+before each run, because the replay guard refuses a code a previous run used.
