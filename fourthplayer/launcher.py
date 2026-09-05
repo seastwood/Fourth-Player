@@ -484,9 +484,7 @@ def build_argv(row, resume=False):
     overwriting it on exit -- is not a thing to do without being asked.
     """
     if row.get("kind") == "steam" and row.get("shell"):
-        # Steam's own interface, and nothing else on the line: `-gamepadui`
-        # with an `-applaunch` beside it launches neither, which is how games
-        # stopped starting when Big Picture was first added here.
+        # Steam's own interface, and nothing else on the line.
         exe = shutil.which("steam") or "/usr/games/steam"
         return [exe, BIG_PICTURE]
 
@@ -498,16 +496,11 @@ def build_argv(row, resume=False):
         #
         # `-applaunch` on its own, and deliberately.
         #
-        # Big Picture was added here as `steam -gamepadui -applaunch <id>` and
-        # it stopped games starting altogether. Steam comes up in Big Picture
-        # and drops the launch: on a cold start the client swallows the
-        # applaunch, and forwarded to a running client the pair is read as a
-        # UI-mode change with nothing to run. Steam is up, the game is not,
-        # and the guest is left looking at a library they cannot drive.
-        #
-        # Big Picture is still worth having on a television and wants its own
-        # step -- put Steam into it first, then ask for the game -- rather
-        # than being smuggled into the line that has one job.
+        # `steam -gamepadui -applaunch <id>` launches neither: on a cold start
+        # the client swallows the applaunch while it brings up Big Picture, and
+        # forwarded to a running client the pair is read as a UI-mode change
+        # with nothing to run. Big Picture is worth having on a television and
+        # it gets its own step -- see steam_steps.
         exe = shutil.which("steam") or "/usr/games/steam"
         return [exe, "-applaunch", str(appid)]
 
@@ -523,6 +516,45 @@ def build_argv(row, resume=False):
     if not shader or os.path.exists(shader):
         argv += ["--shader", shader or "none"]
     return argv + ["-f", "-L", row["core_path"], row["path"]]
+
+
+# How long to give Steam to come up before asking it for a game. Measured on
+# the console this was written for: a cold start reaches the point of taking an
+# -applaunch in about ten seconds, and a client already running takes one at
+# once.
+STEAM_WARMUP = 12.0
+
+
+def steam_running():
+    """Whether a Steam client is up and able to take a command line."""
+    try:
+        done = subprocess.run(["pgrep", "-f", "ubuntu12_32/steam[ ]"],
+                              capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def steam_steps(row):
+    """The commands that start this Steam row, in order.
+
+    Two of them when a game is asked for and Steam is not already up: put the
+    client into Big Picture, then ask for the game. One when it is already
+    running, or when Big Picture itself is what was asked for.
+
+    Big Picture because this is a television with a controller in front of it.
+    Steam's desktop window wants a mouse for everything the game does not cover
+    -- a first-run prompt, a Proton dialogue, the gap between one game and the
+    next -- and a guest on a phone has none to give it. It cannot go on the
+    same line as the game, which is the thing that launches neither.
+    """
+    exe = shutil.which("steam") or "/usr/games/steam"
+    argv = build_argv(row)
+    if row.get("shell"):
+        return [argv]                      # Big Picture is the whole request
+    if steam_running():
+        return [[exe, "steam://open/bigpicture"], argv]
+    return [[exe, BIG_PICTURE], argv]
 
 
 UNIT_PREFIX = "fourth-player-game"
@@ -560,6 +592,27 @@ def launch(row, display=":0", resume=False):
         _steam_appid = str(appid)
     env = {"DISPLAY": display,
            "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
+
+    # Steam wants Big Picture first and the game second, on separate lines.
+    # Only the last of these is the one held by a unit and waited on; the
+    # earlier ones are asked for and given a moment to take effect.
+    steps = [argv]
+    if row.get("kind") == "steam":
+        cold = not steam_running()
+        steps = steam_steps(row)
+        for earlier in steps[:-1]:
+            log.info("putting Steam into Big Picture first: %s",
+                     " ".join(earlier[1:]) or "(client)")
+            try:
+                subprocess.run(earlier, capture_output=True, timeout=20,
+                               env=dict(os.environ, **env))
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning("could not ask Steam for Big Picture: %s", exc)
+            # A client that was not running needs time to reach the point of
+            # taking an -applaunch; one already up takes it at once.
+            time.sleep(STEAM_WARMUP if cold else 1.0)
+        argv = steps[-1]
+
     runner = shutil.which("systemd-run")
     if runner:
         command = [runner, "--user", "--collect", "--quiet",

@@ -44,7 +44,19 @@ log = logging.getLogger("fourthplayer.screen")
 # Between those two, the second is not a thing to do by accident. What it
 # wants instead is the host naming a guest who may: see the note in
 # session.py, and until then this is the safe half of the choice.
-SHELLS = ("steamwebhelper", "steam", "moonlight", "kodi", "xfdesktop",
+# Steam is deliberately not here any more.
+#
+# It was, on the reasoning that Steam's own window is a shop and a settings
+# screen and no guest's business. What that cost was the owner's own controller:
+# Steam's loader, its overlay and Big Picture come to the front constantly
+# while a game runs, and every time they did, every controller stopped. Big
+# Picture could not be driven from a phone at all, which is the one interface
+# on this machine designed to be driven by a controller.
+#
+# So Steam is a thing you play, like the emulator. What still holds a
+# controller is Kodi's menu and the desktop behind it: places where a guest
+# pad would be pressing buttons in somebody's file manager.
+SHELLS = ("moonlight", "kodi", "xfdesktop",
           "xfce4-panel", "xfce4-appfinder", "thunar", "xfce4-session")
 
 

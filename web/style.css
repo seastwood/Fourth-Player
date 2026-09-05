@@ -2257,20 +2257,36 @@ input.name {
 .acct-block .footnote { margin: 0; }
 .acct-block .footnote + .choice { margin-top: .7rem; }
 
+/* The page's `input` rule is sized for the PIN box on the join screen: 1.6rem
+   of pixel font with the padding to match, which is right for six digits
+   typed off a television and absurd for a settings panel. Three of those
+   stacked made the login four hundred and seventy pixels tall, most of it
+   empty box. These are ordinary fields. */
 #login-sheet label {
   display: block;
-  margin: .55rem 0 .2rem;
-  font-family: var(--pixel);
-  font-size: .55rem;
-  letter-spacing: .08em;
+  margin: .5rem 0 .15rem;
+  font-family: var(--sans);
+  font-size: .78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.3;
   color: var(--dim);
 }
 #login-sheet input[type="text"],
 #login-sheet input[type="password"] {
   width: 100%;
-  min-height: 2.6rem;          /* a thumb, not a mouse */
+  box-sizing: border-box;
+  font: 1rem/1.2 var(--sans);
+  min-height: 2.5rem;          /* a thumb, not a mouse */
+  padding: .45rem .6rem;
+  border-width: 2px;
 }
-#login-form .acct-row { margin-top: .9rem; }
+#login-sheet input::placeholder { font-family: var(--sans); opacity: .5; }
+/* The code is six digits and reads better spaced out, without being a
+   billboard about it. */
+#login-code { letter-spacing: .25em; text-align: center; }
+#login-form .acct-row { margin-top: .7rem; }
+#login-form { gap: 0; margin: 0; }
 #login-form .acct-row .choice { flex: 1 1 auto; }
 
 /* The tick and its words on one line, both of them tappable. */

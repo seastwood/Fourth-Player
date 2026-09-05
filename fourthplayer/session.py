@@ -2015,177 +2015,29 @@ class LiveSession:
             return False, "Every player slot is taken."
         return True, ""
 
-    # Steam's own windows, as the screen watcher names them. A Steam game is
-    # supposed to be its own window with its own class -- which is what lets
-    # guests keep playing while the shell stays out of reach -- and in practice
-    # Steam's loader, its overlay and Big Picture come to the front during a
-    # game often enough to matter.
-    STEAM_SHELLS = ("steam", "steamwebhelper")
-
     def holding(self, guest):
         """Whether this guest's frames stop at the television, and why.
 
         The only answer to that question. feed() asks it to decide, and
         hold_state asks it to explain, so the controller and the notice on the
         phone can never disagree.
+
+        There used to be a great deal more here. A Steam game held every guest
+        who had not been given that game, Steam's own window held everybody but
+        the owner, and around those grew rules about which controllers were
+        allowed to exist while a game ran. It was four mechanisms deep, none of
+        them provable from outside, and between them they left a Steam game
+        with no working controls at all.
+
+        The rule now is the one that was always enough: `steam` is permission
+        to *start* the games on the owner's list. Once something is running,
+        everybody in the session plays it, exactly as they do a ROM. What
+        holds a controller is what has always held one -- a menu in front of
+        the game -- and nothing else.
         """
-        if self.steam_now == steamgames.BIG_PICTURE_ID:
-            # Steam's own interface. Whoever may open it may drive it, and
-            # nobody else may: the shell rule would otherwise hold even them,
-            # because "steam" is exactly what the screen watcher calls this.
-            mine = bool(guest.primary)
-            return (not mine), ("" if mine else
-                                "Steam's own screen is open, and only the "
-                                "owner drives that.")
-        if self.steam_now and not guest.can("steam:" + self.steam_now):
-            # Deliberately before the driver exemption rather than after it.
-            # Being handed the screen is permission to drive what is in front;
-            # it is not permission to be in somebody's Steam account, and the
-            # console owner who wants that grants the game.
-            return True, ("%s is a Steam game, and you have not been given it."
-                          % (self.steam_label or "What is playing"))
         if self.input_held and self.driver != guest.slot:
-            # Getting here means either no Steam game is playing, or one is and
-            # this guest was given it. In the second case, Steam's own window
-            # being in front of its own game is not a menu they should be kept
-            # out of: it is the loader, the overlay, or Big Picture between two
-            # games, and holding them there is what stopped an account that had
-            # been granted the game from playing it at all.
-            #
-            # Every other shell still holds everybody. Kodi's menu, a desktop
-            # and Moonlight are not something a Steam grant says anything
-            # about.
-            if self.steam_now and self.hold_reason in self.STEAM_SHELLS:
-                return False, ""
-            # Steam's own window, opened deliberately by the owner. The poll
-            # cannot see Big Picture in the process table the way it sees a
-            # game, so this does not lean on steam_now: whoever may open it
-            # may drive it for as long as it is there.
-            if self.hold_reason in self.STEAM_SHELLS and guest.primary:
-                return False, ""
             return True, ""
         return False, ""
-
-    def _steam_in_front(self):
-        """(appid, label) for the Steam game running, or ("", "").
-
-        Runs in a thread: it asks the process table, and the caller is the
-        loop that also serves everybody's video.
-        """
-        try:
-            appid = launcher.steam_game_now() or ""
-        except Exception:
-            return ("", "")
-        if not appid:
-            return ("", "")
-        for row in self.catalogue.rows():
-            if str(row.get("appid") or "") == str(appid):
-                return (str(appid), row.get("label") or "")
-        # Playing and not on the list guests are offered -- somebody started
-        # it at the television. Still a Steam game, and still nobody's to
-        # drive without being given it.
-        return (str(appid), "")
-
-    # How long a Steam game just asked for is believed to be coming up, before
-    # the process table is taken as the truth. Steam took about eighteen
-    # seconds to spawn its marker on the console this was written for, so this
-    # is that with room to spare: for this long, "it has not appeared yet" is
-    # read as "it is still starting" rather than "it is not there".
-    STEAM_STARTING = 45.0
-
-    def check_profile(self, guest, profiles):
-        """Say so when a guest cannot decode the H.264 profile being offered.
-
-        The codec is negotiated -- agree_codec picks the best of H.264, H.265
-        and AV1 that every guest can manage. The profile inside H.264 is not:
-        it is pinned on the encoder, which encodes once for everybody, so it
-        cannot be chosen per guest.
-
-        That is a reasonable limitation and a terrible silent failure. A host
-        set to Main offers Main; a browser that only takes Constrained Baseline
-        answers with the video refused; the guest gets a black screen; and
-        nothing anywhere says why. It read as a network fault for hours.
-
-        So it is read out loud. Nothing is changed automatically, because the
-        change is a recapture that would interrupt everybody already watching
-        -- and because the answer is one line in the config, which this says.
-        """
-        # Only H.264 has profiles worth checking here, and only when that is
-        # what is going out: "auto" that settled on H.265 or AV1 is a different
-        # question and not this one.
-        playing = getattr(self.stage, "codec", None) or self.codec
-        if not profiles or str(playing).lower() not in ("h264", "auto", ""):
-            return
-        want = video.h264_profile_level_id(
-            getattr(self.cfg, "h264_profile", "constrained-baseline"),
-            getattr(self.cfg, "height", 1080))[:4].lower()
-        theirs = {str(p).lower()[:4] for p in profiles}
-        if want in theirs:
-            return
-        log.warning(
-            "%s's browser does not list the H.264 profile this host offers "
-            "(%s, %s). They will connect and see a black screen. Their "
-            "browser takes: %s. Set h264_profile to constrained-baseline in "
-            "%s and restart to fix it for everybody.",
-            guest.label, getattr(self.cfg, "h264_profile", "?"), want,
-            ", ".join(sorted(theirs)) or "nothing it would name",
-            getattr(self.cfg, "path", "the config"))
-        self.notify_one(guest, {
-            "t": "note",
-            "message": "Your browser may not accept this host's video format. "
-                       "If the picture stays black, ask the owner to set "
-                       "h264_profile to constrained-baseline."})
-
-    def warn_about_joining(self, guest):
-        """Say, when somebody joins mid-Steam-game, what that may cost.
-
-        A virtual controller appearing is a real disturbance: Steam
-        re-enumerates and may hand the game to whichever device it likes, and
-        a game that has already bound its player does not give it back without
-        being restarted.
-
-        This was fought with code for a while -- withholding devices, then
-        unplugging and replugging them as permissions changed -- and it was
-        four mechanisms deep, none of them provable from the outside, and
-        between them they left a game with no controls at all. Saying it
-        plainly and giving the owner a lock is a smaller, truer answer than
-        juggling devices under a running game.
-        """
-        if not self.steam_now:
-            return
-        log.warning("%s joined while %s is playing. A new controller appearing "
-                    "can make Steam hand the game to it, and a game that has "
-                    "bound its player will not give it back without being "
-                    "restarted. Lock the session if you do not want this.",
-                    guest.label, self.steam_label or "a Steam game")
-        for other in list(self.guests.values()):
-            if other is guest or not other.can("lock"):
-                continue
-            self.notify_one(other, {
-                "t": "note",
-                "message": "%s joined while %s is playing. Steam may hand the "
-                           "game to their controller. You can lock the session "
-                           "from the Account tab." % (
-                               guest.label, self.steam_label or "a Steam game")})
-
-    def plug_in(self, guest):
-        """Give this guest their controller.
-
-        This was conditional for a while: a guest held out of the Steam game
-        that was playing got a seat and no device, so that Steam would not see
-        a controller appear and hand the game to it. Around that grew a second
-        rule that unplugged and replugged devices whenever the answer changed.
-
-        All of it is gone. It was four mechanisms deep, none of them provable
-        from the outside, and between them they left Broforce with no controls
-        at all -- which is worse than the problem they were for. A device
-        appearing mid-game is a real disturbance to Steam and the honest answer is
-        to say so and let the owner shut the door, not to juggle devices under
-        a running game and hope.
-
-        See warn_about_joining and the session lock.
-        """
-        return guest.pad
 
     def steam_here(self, appid, label="", starting=False, polled=False):
         """What Steam is running now. Tells anybody whose answer changed.
