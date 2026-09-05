@@ -575,6 +575,22 @@ function backToGate() {
 const HOPELESS = ["credential", "closed"];
 
 function onError(message) {
+  if (message.reason === "code") {
+    // Not a refusal to be argued with: it is a request for the six digits.
+    waitingOnCode = lastAction;
+    loginOpen = true;
+    showTab("session");
+    paintLogin();
+    const note = el("login-code-note");
+    if (note) {
+      note.textContent = message.message
+        || "Enter your authenticator code to do that.";
+      note.hidden = false;
+    }
+    const box = el("login-code");
+    if (box) { box.value = ""; box.focus(); }
+    return;
+  }
   if (message.reason === "shut") {
     // The one refusal with something to do about it: say who you are.
     const box = el("gate-account");
@@ -595,6 +611,11 @@ function onError(message) {
   // that cannot open with no game running -- is not evidence that the link is
   // stale, and counting it meant two failed seat changes threw somebody back
   // to the PIN screen.
+  if (message.reason === "denied") {
+    setLink("bad", message.message);
+    showToast(message.message || "You have not been given that.");
+    return;
+  }
   if (message.reason === "request" || message.reason === "login") {
     // A login that did not work is about the login, not about the invite.
     // Counting it would throw somebody back to the PIN screen for mistyping
@@ -618,6 +639,15 @@ function onError(message) {
                              .test(message.message || ""));
   if (hopeless || resumeRefused >= 2) askForPin(message.message);
 }
+
+/* The last thing that was refused for want of an authenticator code.
+ *
+ * kick, reshare, lock and grant ask for one at the moment they are used, even
+ * from a remembered device -- those are the ones that land on other people. A
+ * resume restores who you are and not the code, so the first of these after
+ * coming back is always refused, and what that looked like from the outside
+ * was "I'm trying to set it to Only Me, but it's not letting me". */
+let waitingOnCode = null;
 
 function send(message) {
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -2676,7 +2706,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05j";
+const CLIENT_BUILD = "2026-09-05k";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3303,6 +3333,14 @@ function loggedIn(message) {
   if (message.device) rememberDevice(message.device);
   loginOpen = false;
   paintAccount();
+  if (waitingOnCode && account.fresh) {
+    const finish = waitingOnCode;
+    waitingOnCode = null;
+    const note = el("login-code-note");
+    if (note) note.hidden = true;
+    showToast("Code accepted \u2014 finishing that now");
+    send(finish);
+  }
   if (first) {
     showToast("Logged in as " + message.name);
     // The catalogue is different for an account -- a Steam game they have
@@ -3365,10 +3403,18 @@ function paintAccount() {
 function paintLogin() {
   const sheet = el("login-sheet");
   if (!sheet) return;
+  // Logged in already, and asked for a fresh code by something that needs
+  // one. The form comes back with the name filled in, so all that is left to
+  // type is the six digits.
+  const reauth = !!waitingOnCode && !!account;
   sheet.hidden = false;
-  el("login-in").hidden = !account;
+  el("login-in").hidden = !account || reauth;
   el("login-outside").hidden = !!account || loginOpen;
-  el("login-form").hidden = !!account || !loginOpen;
+  el("login-form").hidden = reauth ? false : (!!account || !loginOpen);
+  if (reauth) {
+    const who = el("login-user");
+    if (who && !who.value) who.value = account.name;
+  }
   if (account) {
     el("login-as").textContent = account.name;
     paintChips(el("login-can"), account.can || []);
@@ -3475,7 +3521,7 @@ function wireSession() {
     button.addEventListener("click", () => {
       // Asked, because it happens to other people and removes them.
       if (mode && !window.confirm(ask)) return;
-      send({ t: "lock", mode, allowed: [] });
+      act({ t: "lock", mode, allowed: [] });
     });
   });
   const share = el("reshare-now");
@@ -3483,7 +3529,7 @@ function wireSession() {
     share.addEventListener("click", () => {
       if (!window.confirm("Give out a new link and PIN? The ones you sent "
                           + "stop working. Everybody here keeps their place.")) return;
-      send({ t: "reshare" });
+      act({ t: "reshare" });
     });
   }
 }
@@ -3492,6 +3538,16 @@ function wireSession() {
 
    It used to be one button that toggled, which left "I'm not sure what it's
    set at now" as a perfectly fair thing to say about it. */
+/* Anything the host may ask for a fresh code before doing. Remembered so it
+   can be finished once the code is given, rather than made to be found and
+   pressed again. */
+let lastAction = null;
+
+function act(message) {
+  lastAction = message;
+  send(message);
+}
+
 function paintLock() {
   const now = el("lock-now");
   if (!now || !sessionLimits) return;
@@ -3540,7 +3596,7 @@ function paintKickList() {
       // link they were sent stops working with them.
       if (!window.confirm("Remove " + person.name + "? Their link stops "
                           + "working, so they cannot simply rejoin.")) return;
-      send({ t: "kick", slot: person.slot });
+      act({ t: "kick", slot: person.slot });
     });
     row.appendChild(go);
     list.appendChild(row);
@@ -3598,7 +3654,7 @@ function paintGrantList() {
       tick.addEventListener("change", () => {
         const now = new Set(person.can || []);
         if (tick.checked) now.add(capability); else now.delete(capability);
-        send({ t: "grant", name: person.account, can: Array.from(now) });
+        act({ t: "grant", name: person.account, can: Array.from(now) });
       });
       label.appendChild(tick);
       label.appendChild(document.createTextNode(" " + words));

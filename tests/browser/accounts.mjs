@@ -119,13 +119,18 @@ function check(cond, msg) {
              kick: on("session-kick"), grant: on("session-grant"),
              reshare: on("session-reshare"),
              count: document.getElementById("limit-count").value,
-             lockWord: document.getElementById("lock-toggle").textContent.trim(),
+             lockWord: document.getElementById("lock-now").textContent.trim(),
+             lockLit: [...document.querySelectorAll(".acct-choices .choice")]
+                        .filter((b) => b.classList.contains("is-on")).length,
              kicks: document.getElementById("kick-list").children.length };
   });
   check(panel.limit && panel.lock && panel.kick && panel.grant && panel.reshare,
         "every part of the panel it was given is drawn");
   check(panel.count === "4", "the limit box shows what the host said: " + panel.count);
-  check(/Lock to accounts/.test(panel.lockWord), "and the lock offers to lock");
+  check(/link and PIN/i.test(panel.lockWord),
+        "the panel says who may join, in words: " + panel.lockWord);
+  check(panel.lockLit === 1,
+        "and exactly one of the three settings is shown as the current one");
   check(panel.kicks === 1, "one other person to remove, not including me");
 
   // A lesser account sees only what it was given.
@@ -153,6 +158,52 @@ function check(cond, msg) {
   });
   check(partial.kick && !partial.lock && !partial.grant,
         "an account given only kick sees only the removing");
+
+  // An action that needs a fresh code asks for one, and finishes afterwards.
+  const asked = await page.evaluate(() => {
+    loggedIn({ t: "loggedin", name: "seth", fresh: false,
+               can: ["kick", "lock", "slots", "reshare", "grant", "steam"] });
+    limitsFrom({ t: "limits", limit: 4, slots: 4, locked: "", here: 2 });
+    const out = [];
+    window.send = (m) => out.push(m);
+    gate.hidden = true;                 // in the session, as you would be
+    showTab("session");
+    window.confirm = () => true;
+    document.getElementById("lock-named").click();
+    onError({ t: "error", reason: "code",
+              message: "Enter your authenticator code first." });
+    return { sent: out, form: !document.getElementById("login-form").hidden,
+             note: document.getElementById("login-code-note").textContent,
+             noteShown: !document.getElementById("login-code-note").hidden,
+             tab: !document.getElementById("tab-session").hidden };
+  });
+  check(asked.sent.length === 1 && asked.sent[0].t === "lock",
+        "the lock was asked for: " + JSON.stringify(asked.sent));
+  check(asked.form && asked.noteShown,
+        "being told a code is needed opens the login and says so");
+  check(/authenticator/i.test(asked.note), "in the host's words: " + asked.note);
+
+  const finished = await page.evaluate(() => {
+    const out = [];
+    window.send = (m) => out.push(m);
+    loggedIn({ t: "loggedin", name: "seth", fresh: true,
+               can: ["kick", "lock", "slots", "reshare", "grant", "steam"] });
+    return { sent: out,
+             note: !document.getElementById("login-code-note").hidden };
+  });
+  check(finished.sent.some((m) => m.t === "lock"),
+        "and giving the code finishes what was asked for: "
+        + JSON.stringify(finished.sent));
+  check(!finished.note, "the request for a code is taken down");
+
+  const notTwice = await page.evaluate(() => {
+    const out = [];
+    window.send = (m) => out.push(m);
+    loggedIn({ t: "loggedin", name: "seth", fresh: true, can: ["lock"] });
+    return out;
+  });
+  check(!notTwice.some((m) => m.t === "lock"),
+        "and it is not done again on the next login: " + JSON.stringify(notTwice));
 
   // Locked, and the join screen offering a way back in.
   const shut = await page.evaluate(() => {

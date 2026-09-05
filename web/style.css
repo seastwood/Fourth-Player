@@ -2373,3 +2373,11 @@ input.name {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* Why the login has come up by itself: an action that needs a fresh
+   authenticator code asked for one. Said in the accent colour, because it is
+   a request rather than a failure. */
+.acct-asking {
+  color: var(--accent) !important;
+  margin-top: .6rem !important;
+}
