@@ -47,6 +47,23 @@ argv = launcher.build_argv(rom)
 check(launcher.BIG_PICTURE not in argv,
       "no Steam flag anywhere near it: %r" % (argv,))
 
+print("\nnothing Steam is asked for is waited on in the foreground")
+# `steam <anything>` with no client running *is* the client: it does not return
+# until Steam exits. Waiting on it with a timeout killed Steam after twenty
+# seconds, every time, and no game ever arrived.
+source = open(os.path.join(ROOT, "fourthplayer", "launcher.py"),
+              encoding="utf-8").read()
+start = source.split("def _start_steam")[1].split("\ndef ")[0]
+check("steam_client_up()" in start,
+      "it asks whether a client is already up before deciding how to run it")
+check("_run_unit(" in start.split("if not steam_client_up():")[1].split("return None")[0],
+      "with no client, the line is handed to a unit and not waited on")
+check("timeout=" in start.split("try:")[1],
+      "with a client, it is forwarded and returns at once")
+check(start.count("subprocess.run") == 1,
+      "and there is exactly one place that runs anything: %d"
+      % start.count("subprocess.run"))
+
 print("\nSteam's own art is where a Steam game's cover comes from")
 check(hasattr(catalogue, "steam_art_path"), "there is a lookup for it")
 check("library_600x900.jpg" in catalogue.STEAM_ART_NAMES,

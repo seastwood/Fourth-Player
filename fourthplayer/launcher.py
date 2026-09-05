@@ -541,28 +541,6 @@ def steam_client_up():
     return done.returncode == 0
 
 
-def steam_steps(row):
-    """The commands that start this Steam row, in order.
-
-    Two of them when a game is asked for and Steam is not already up: put the
-    client into Big Picture, then ask for the game. One when it is already
-    running, or when Big Picture itself is what was asked for.
-
-    Big Picture because this is a television with a controller in front of it.
-    Steam's desktop window wants a mouse for everything the game does not cover
-    -- a first-run prompt, a Proton dialogue, the gap between one game and the
-    next -- and a guest on a phone has none to give it. It cannot go on the
-    same line as the game, which is the thing that launches neither.
-    """
-    exe = shutil.which("steam") or "/usr/games/steam"
-    argv = build_argv(row)
-    if row.get("shell"):
-        return [argv]                      # Big Picture is the whole request
-    if steam_client_up():
-        return [[exe, "steam://open/bigpicture"], argv]
-    return [[exe, BIG_PICTURE], argv]
-
-
 def _run_unit(argv, env):
     """Hand a long-running program to systemd and come straight back."""
     runner = shutil.which("systemd-run")
@@ -594,37 +572,31 @@ def _start_steam(row, env):
     """
     exe = shutil.which("steam") or "/usr/games/steam"
     appid = steam_game(row)
+    argv = build_argv(row)
 
+    # Nothing is ever run in the foreground and waited on here.
+    #
+    # `steam <anything>` with no client running *is* the client: it does not
+    # return until Steam exits. Waiting on it with a timeout killed Steam
+    # after twenty seconds, every time, and no game ever arrived. With a
+    # client already up the same line forwards the request and returns at
+    # once. So: no client, hand it to a unit; a client, forward it.
     if not steam_client_up():
-        problem = _run_unit([exe, BIG_PICTURE], env)
+        problem = _run_unit(argv, env)
         if problem:
             log.error("Steam would not start: %s", problem)
             return "Steam would not start."
-        waited = 0.0
-        while waited < STEAM_WARMUP and not steam_client_up():
-            time.sleep(1.0)
-            waited += 1.0
-        log.info("Steam came up in Big Picture after %.0fs", waited)
-    elif appid:
-        # Already running, and possibly in its desktop window. Ask it to come
-        # to the front in the interface a controller can drive. Forwarded to a
-        # live client, so it returns at once.
-        try:
-            subprocess.run([exe, "steam://open/bigpicture"], capture_output=True,
-                           timeout=15, env=dict(os.environ, **env))
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.warning("could not put Steam into Big Picture: %s", exc)
-
-    if not appid:
-        return None                       # Big Picture itself was the request
+        log.info("started Steam with %s", " ".join(argv[1:]))
+        return None
 
     try:
-        subprocess.run([exe, "-applaunch", str(appid)], capture_output=True,
-                       timeout=30, env=dict(os.environ, **env))
+        subprocess.run(argv, capture_output=True, timeout=30,
+                       env=dict(os.environ, **env))
     except (OSError, subprocess.SubprocessError) as exc:
         log.exception("could not ask Steam for %s", row["label"])
         return "The game could not be started: %s" % exc
-    log.info("asked Steam for %s (appid %s)", row["label"], appid)
+    log.info("asked Steam for %s%s", row["label"],
+             " (appid %s)" % appid if appid else "")
     return None
 
 
