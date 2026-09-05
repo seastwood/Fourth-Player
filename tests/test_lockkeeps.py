@@ -40,6 +40,15 @@ save = source.split("    def save(self):")[1].split("\n    @staticmethod")[0]
 for key in ("locked", "allowed", "max_guests"):
     check('snapshot["%s"]' % key in save, "save() writes %s down" % key)
 
+print("\nand written the moment it is set")
+# The snapshot is otherwise only rewritten when somebody joins or leaves, so a
+# lock set on a quiet session was still only in memory when the encoder next
+# fell over and took it with it.
+locking = source.split("    def set_locked(self")[1].split("\n    def ")[0]
+check("self.save()" in locking, "set_locked writes the snapshot")
+limiting = source.split("    def set_limit(self")[1].split("\n    def ")[0]
+check("self.save()" in limiting, "and so does set_limit")
+
 print("\nand read back")
 json.dump({"locked": "named", "allowed": ["seth"], "max_guests": 2,
            "expires_in": 3600, "saved_at": 0},

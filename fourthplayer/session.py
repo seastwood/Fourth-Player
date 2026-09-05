@@ -1961,6 +1961,7 @@ class LiveSession:
         self.max_guests = want
         log.info("%s set the connection limit to %d (%d here)",
                  getattr(by, "label", "the owner"), want, len(self.guests))
+        self.save()
         self.notify({"t": "limits", **self.limits()})
         return want
 
@@ -1995,6 +1996,10 @@ class LiveSession:
         else:
             log.info("%s opened the session to anybody with the invite",
                      getattr(by, "label", "the owner"))
+        # Written down at once. The snapshot is otherwise only rewritten when
+        # somebody joins or leaves, so a lock set on a quiet session was still
+        # only in memory when the encoder next fell over and took it with it.
+        self.save()
         self.notify({"t": "limits", **self.limits()})
         return self.locked
 
