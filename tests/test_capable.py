@@ -366,6 +366,42 @@ session.guests[3] = FakeGuest(3, "d", can=["kick"])
 check(session.set_limit(1) == 2,
       "the floor rises to the number of accounts here, so none is cut off")
 
+print("\nSteam's own interface is the owner's alone to open")
+# `steam` means the games on the owner's list. Big Picture is the shop, the
+# library, the settings and the account behind them.
+session, loop = make_session()
+if accounts.find("seth") is None:
+    accounts.add("seth", "a-good-password", ["grant", "steam"])
+else:
+    accounts.set_capabilities("seth", ["grant", "steam"])
+
+shell_row = {"id": "s", "label": "Steam Big Picture", "system": "Steam",
+             "short": "STEAM", "kind": "steam", "appid": "bigpicture",
+             "shell": True}
+game_row = {"id": "b", "label": "Broforce", "system": "Steam",
+            "short": "STEAM", "kind": "steam", "appid": BROFORCE}
+boss = FakeGuest(0, "owner", can=["grant", "steam"])
+boss.account = "seth"
+boss.primary = True                 # set at login in the real thing
+player = FakeGuest(1, "player", can=["steam"])
+player.account = "mate"
+nobody = FakeGuest(2, "nobody")
+
+check(session.may_start(boss, shell_row), "the owner may open it")
+check(not session.may_start(player, shell_row),
+      "an account with steam may not -- that grant was for games")
+check(not session.may_start(nobody, shell_row), "and nobody else may")
+check(session.may_start(player, game_row),
+      "while the game on the list is still theirs to start")
+
+print("\nbut once it is open, it holds nobody")
+# Steam is not a shell any more: it is the one interface on this machine meant
+# to be driven with a controller, and holding it meant nobody could use it.
+session.steam_here("bigpicture", "Steam Big Picture")
+check(not session.holding(boss)[0], "the owner drives it")
+check(not session.holding(player)[0], "and so does everybody else in the room")
+session.steam_here("")
+
 print("\nsaying who may be in the session")
 session, loop = make_session()
 admin = FakeGuest(0, "admin", can=["lock", "grant"])

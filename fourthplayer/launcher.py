@@ -387,9 +387,20 @@ def ports_from_config(path):
     return ports
 
 
+# The flag that opens the interface a controller can drive. Named here rather
+# than written into a launch line, because Valve renamed it once already.
+BIG_PICTURE = "-gamepadui"
+
+
 def steam_game(row):
-    """The appid, if this row is a Steam game rather than a ROM."""
-    return row.get("appid") if row.get("kind") == "steam" else None
+    """The appid, if this row is a Steam game rather than a ROM.
+
+    Steam's own interface is not a game and has no appid to launch, however
+    much its row looks like one -- `-applaunch bigpicture` would be nonsense.
+    """
+    if row.get("kind") != "steam" or row.get("shell"):
+        return None
+    return row.get("appid")
 
 
 def steam_game_now():
@@ -445,8 +456,7 @@ def preflight(row):
     Every one of these otherwise presents as the screen going black and coming
     straight back, with nothing said anywhere.
     """
-    appid = steam_game(row)
-    if appid:
+    if row.get("kind") == "steam":
         if not (shutil.which("steam") or os.path.exists("/usr/games/steam")):
             return "Steam is not installed on this machine."
         return None
@@ -472,6 +482,14 @@ def build_argv(row, resume=False):
     and dropping them into the middle of somebody else's saved game -- then
     overwriting it on exit -- is not a thing to do without being asked.
     """
+    if row.get("kind") == "steam" and row.get("shell"):
+        # Steam's own interface, and nothing else on the line. `-gamepadui`
+        # beside an `-applaunch` launches neither -- that pair is what stopped
+        # games starting when Big Picture was first tried here -- so this row
+        # exists precisely so that asking for Big Picture is its own request.
+        exe = shutil.which("steam") or "/usr/games/steam"
+        return [exe, BIG_PICTURE]
+
     appid = steam_game(row)
     if appid:
         # Steam starts itself if it is not already up, and then the game.

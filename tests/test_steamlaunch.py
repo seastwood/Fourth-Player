@@ -40,6 +40,21 @@ check(len(argv) == 3, "and says nothing else: %r" % (argv,))
 check(not any("gamepadui" in str(a) or "bigpicture" in str(a) for a in argv),
       "no Big Picture anywhere near it")
 
+print("\nSteam's own interface is its own request")
+# `-gamepadui` beside an `-applaunch` launches neither -- that pair is what
+# stopped games starting when Big Picture was first tried here. This row exists
+# so that asking for Big Picture is a request of its own.
+shell = {"kind": "steam", "shell": True, "appid": "bigpicture",
+         "label": "Steam Big Picture", "system": "Steam"}
+argv = launcher.build_argv(shell)
+check(launcher.BIG_PICTURE in argv, "it asks for Big Picture: %r" % (argv,))
+check("-applaunch" not in argv, "and never beside an applaunch")
+check(len(argv) == 2, "two words, no more: %r" % (argv,))
+check(launcher.steam_game(shell) is None,
+      "and it is not a game with an appid to launch")
+check(launcher.steam_game({"kind": "steam", "appid": "274190"}) == "274190",
+      "while a real Steam game still is")
+
 print("\na ROM is not affected")
 rom = {"kind": "rom", "system": "nes", "label": "Micro Mages",
        "path": "/roms/mm.nes", "core_path": "/cores/nes.so", "players": "1-4"}

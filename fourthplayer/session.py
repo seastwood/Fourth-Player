@@ -1440,6 +1440,13 @@ class LiveSession:
             return True
         if guest is None:
             return False
+        if row.get("shell"):
+            # Steam's own interface is the one row no capability covers.
+            # `steam` means the games on the owner's list; this is the shop,
+            # the library, the settings and the account behind them, and
+            # handing that to everybody who may play Broforce is not what
+            # granting Broforce meant.
+            return bool(guest.primary)
         return guest.can("steam:" + str(row.get("appid") or ""))
 
     def listing_for(self, guest):
