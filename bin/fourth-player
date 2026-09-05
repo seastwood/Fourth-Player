@@ -1,0 +1,25 @@
+#!/bin/sh
+# The command every message in this program tells you to run.
+#
+# Without it `fourth-player admin add seth` is a lie: the code lives in a
+# checkout and is run as `python3 -m fourthplayer`, which is not what any of
+# the help text, error messages or the README say. Somebody being told to make
+# the first account should be able to paste the line they were given.
+#
+# A shell wrapper rather than a packaged entry point, because there is no
+# package here: the box runs the checkout directly, and this has to keep
+# working after a `git pull` without anybody reinstalling anything.
+#
+# Resolved through symlinks on purpose -- this is linked into ~/.local/bin,
+# and the repository it points back to is wherever it was cloned.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+     *) self=$(dirname "$self")/$link ;;
+  esac
+done
+REPO=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd)
+cd "$REPO" || exit 1
+exec python3 -m fourthplayer "$@"

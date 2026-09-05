@@ -29,40 +29,46 @@ function check(cond, msg) {
   // Nothing about accounts is visible to somebody who has not logged in.
   const start = await page.evaluate(() => ({
     sessionTab: document.getElementById("tab-session-pick").hidden,
-    sheet: document.getElementById("login-sheet").hidden,
     gateAccount: document.getElementById("gate-account").hidden,
   }));
-  check(start.sessionTab, "no Session tab before anybody logs in");
-  check(start.sheet, "and the login sheet is out of sight");
+  check(!start.sessionTab,
+        "the Account tab is there before anybody logs in -- a login nobody "
+        + "can find is a login nobody has");
   check(start.gateAccount, "and the join screen says nothing about accounts");
 
-  // The host says who is here, and the page opens my own row.
-  const own = await page.evaluate(() => {
+  // Findable in the obvious place: open the options panel, and it is a tab.
+  const found = await page.evaluate(() => {
+    showTab("session");
+    const sheet = document.getElementById("login-sheet");
+    return { panel: !document.getElementById("tab-session").hidden,
+             sheet: !sheet.hidden,
+             inPanel: document.getElementById("tab-session").contains(sheet),
+             offer: !document.getElementById("login-open").hidden,
+             form: !document.getElementById("login-form").hidden,
+             owner: document.getElementById("session-who").textContent };
+  });
+  check(found.panel && found.sheet && found.inPanel,
+        "opening the Account tab shows the login");
+  check(found.offer && !found.form, "as a Log in button rather than a form");
+  check(found.owner === "",
+        "and says nothing about the session to somebody not logged in");
+
+  // The people list is about connections and nothing else now.
+  const roster = await page.evaluate(() => {
     mySlot = 0;
     people = [{ slot: 0, name: "Seth", pad: 0, seconds: 5 },
               { slot: 1, name: "Mate", pad: 1, seconds: 5 }];
     personOpen = 0;
     paintPeople();
-    const sheet = document.getElementById("login-sheet");
-    return { hidden: sheet.hidden,
-             inMyRow: document.getElementById("chat-person").contains(sheet),
-             offer: !document.getElementById("login-open").hidden,
-             form: !document.getElementById("login-form").hidden };
+    return { own: document.getElementById("chat-person").innerHTML,
+             sheetMoved: document.getElementById("chat-person")
+                           .contains(document.getElementById("login-sheet")) };
   });
-  check(!own.hidden && own.inMyRow, "tapping my own name shows the login sheet there");
-  check(own.offer && !own.form, "with a Log in button rather than a form");
-
-  const other = await page.evaluate(() => {
-    personOpen = 1;
-    paintPeople();
-    return { hidden: document.getElementById("login-sheet").hidden,
-             inRow: document.getElementById("chat-person")
-                      .contains(document.getElementById("login-sheet")) };
-  });
-  check(other.hidden && !other.inRow, "somebody else's row has no login in it");
+  check(!roster.sheetMoved, "the people list carries no login of its own");
+  check(/Controller/.test(roster.own), "and still says what it always said");
 
   const opened = await page.evaluate(() => {
-    personOpen = 0; paintPeople();
+    showTab("session");
     document.getElementById("login-open").click();
     return { form: !document.getElementById("login-form").hidden,
              offer: !document.getElementById("login-open").hidden };
@@ -96,8 +102,8 @@ function check(cond, msg) {
              says: document.getElementById("login-as").textContent,
              can: document.getElementById("login-can").textContent };
   });
-  check(admin.tab, "an account with owner powers gets the Session tab");
-  check(/seth/.test(admin.says), "and its own row says who: " + admin.says);
+  check(admin.tab, "the Account tab stays put once logged in");
+  check(/seth/.test(admin.says), "and says who: " + admin.says);
   check(/remove people/i.test(admin.can),
         "and what it may do, in words: " + admin.can);
 
@@ -120,12 +126,18 @@ function check(cond, msg) {
   // A lesser account sees only what it was given.
   const lesser = await page.evaluate(() => {
     loggedIn({ t: "loggedin", name: "mate", fresh: true, can: ["steam:274190"] });
+    showTab("session");
     const on = (id) => !document.getElementById(id).hidden;
-    return { tab: !document.getElementById("tab-session-pick").hidden,
-             panel: !document.getElementById("tab-session").hidden };
+    return { limit: on("session-limit"), lock: on("session-lock"),
+             kick: on("session-kick"), grant: on("session-grant"),
+             reshare: on("session-reshare"),
+             says: document.getElementById("login-can").textContent };
   });
-  check(!lesser.tab, "an account given only a game gets no Session tab");
-  check(!lesser.panel, "and is put back to the controls if it was looking at one");
+  check(!lesser.limit && !lesser.lock && !lesser.kick && !lesser.grant
+        && !lesser.reshare,
+        "an account given only a game gets none of the owner's controls");
+  check(/Steam/.test(lesser.says),
+        "and is told what it does have: " + lesser.says);
 
   const partial = await page.evaluate(() => {
     loggedIn({ t: "loggedin", name: "mate", fresh: true, can: ["kick"] });

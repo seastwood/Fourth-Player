@@ -351,9 +351,15 @@
       <button id="tab-controls-pick" type="button" class="tab is-on"
               role="tab" aria-selected="true"
               aria-controls="tab-controls">Controls</button>
+      <!-- Always shown, because logging in lives behind it and a login
+           nobody can find is a login nobody has. It was tucked behind your
+           own name in the people list at first, on the reasoning that a
+           stranger should see no sign accounts exist -- which cost the person
+           who owns the television any way of finding it, and bought nothing:
+           the password and the authenticator are what keep anybody out, not
+           whether the door is signposted. -->
       <button id="tab-session-pick" type="button" class="tab" role="tab"
-              aria-controls="tab-session" aria-selected="false"
-              hidden>Session</button>
+              aria-controls="tab-session" aria-selected="false">Account</button>
       <button id="tab-game-pick" type="button" class="tab" role="tab"
               aria-selected="false" aria-controls="tab-game">Game</button>
     </div>
@@ -536,6 +542,45 @@
          narrows or takes back powers this box already has, which is the line
          that keeps a password on a public page from being a shell. -->
     <div id="tab-session" class="tab-panel" role="tabpanel" hidden>
+        <!-- Logging in, and what you may do once you have. In the markup
+             rather than built in JavaScript, which is how the rest of this page
+             works and how a typo in an id stays findable.
+
+             It says nothing about who has an account or whether an admin
+             exists: it is a name and a password box, the same one everybody
+             sees, and it is the powers behind it that differ. -->
+      <div id="login-sheet" class="chat-person-login" hidden>
+        <div id="login-in" hidden>
+          <p class="browse-note" id="login-as"></p>
+          <p class="footnote" id="login-can"></p>
+          <p class="footnote" id="login-remembered" hidden>This device is
+             remembered. Anything that affects other people will ask for your
+             authenticator code.</p>
+          <button id="login-out" type="button" class="ghost">Log out</button>
+        </div>
+
+        <button id="login-open" type="button" class="ghost">Log in</button>
+
+        <form id="login-form" autocomplete="off" hidden>
+          <label for="login-user">Account name</label>
+          <input id="login-user" name="login-user" type="text" maxlength="32"
+                 autocomplete="username" autocapitalize="off" autocorrect="off"
+                 spellcheck="false">
+          <label for="login-pass">Password</label>
+          <input id="login-pass" name="login-pass" type="password" maxlength="128"
+                 autocomplete="current-password">
+          <label for="login-code">Code from your authenticator</label>
+          <input id="login-code" name="login-code" type="text" inputmode="numeric"
+                 pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
+                 placeholder="000000">
+          <label class="optional" for="login-remember">
+            <input id="login-remember" name="login-remember" type="checkbox">
+            Remember this device</label>
+          <button type="submit" class="choice">Log in</button>
+          <button id="login-cancel" type="button" class="ghost">Cancel</button>
+        </form>
+      </div>
+
       <p class="browse-note" id="session-who"></p>
 
       <div id="session-limit" hidden>
@@ -599,45 +644,6 @@
          aria-label="Who is connected"></div>
     <div id="chat-person" class="chat-person" hidden></div>
 
-    <!-- Logging in, and what you may do once you have. It lives here, in the
-         markup, and is moved into your own row in the list above when that row
-         is open -- rather than being built in JavaScript, which is how the
-         rest of this page works and how a typo in an id stays findable.
-
-         Behind your own name on purpose: it is the one row somebody would
-         think to tap about themselves, and a guest with no account never sees
-         a login at all. No list of names, no hint that an admin exists. -->
-    <div id="login-sheet" class="chat-person-login" hidden>
-      <div id="login-in" hidden>
-        <p class="browse-note" id="login-as"></p>
-        <p class="footnote" id="login-can"></p>
-        <p class="footnote" id="login-remembered" hidden>This device is
-           remembered. Anything that affects other people will ask for your
-           authenticator code.</p>
-        <button id="login-out" type="button" class="ghost">Log out</button>
-      </div>
-
-      <button id="login-open" type="button" class="ghost">Log in</button>
-
-      <form id="login-form" autocomplete="off" hidden>
-        <label for="login-user">Account name</label>
-        <input id="login-user" name="login-user" type="text" maxlength="32"
-               autocomplete="username" autocapitalize="off" autocorrect="off"
-               spellcheck="false">
-        <label for="login-pass">Password</label>
-        <input id="login-pass" name="login-pass" type="password" maxlength="128"
-               autocomplete="current-password">
-        <label for="login-code">Code from your authenticator</label>
-        <input id="login-code" name="login-code" type="text" inputmode="numeric"
-               pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
-               placeholder="000000">
-        <label class="optional" for="login-remember">
-          <input id="login-remember" name="login-remember" type="checkbox">
-          Remember this device</label>
-        <button type="submit" class="choice">Log in</button>
-        <button id="login-cancel" type="button" class="ghost">Cancel</button>
-      </form>
-    </div>
     <div id="chat-log" class="chat-log" aria-live="polite"></div>
     <form id="chat-form" class="chat-form" autocomplete="off">
       <!-- 240 characters, the same limit the host enforces. Said here as

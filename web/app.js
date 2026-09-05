@@ -2596,7 +2596,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05a";
+const CLIENT_BUILD = "2026-09-05b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3222,7 +3222,6 @@ function loggedIn(message) {
               fresh: message.fresh !== false };
   if (message.device) rememberDevice(message.device);
   loginOpen = false;
-  paintPeople();
   paintAccount();
   if (first) {
     showToast("Logged in as " + message.name);
@@ -3236,7 +3235,6 @@ function loggedIn(message) {
 function loggedOut() {
   account = null;
   loginOpen = false;
-  paintPeople();
   paintAccount();
 }
 
@@ -3265,21 +3263,21 @@ function reshared(message) {
 
 /* What the page draws once it knows who somebody is. */
 function paintAccount() {
-  const pick = el("tab-session-pick");
-  if (pick) pick.hidden = !mayAnything();
-  if (!mayAnything() && !el("tab-session").hidden) showTab("controls");
+  // The tab itself is always there -- it is where logging in lives. What
+  // changes with the account is how much is inside it.
   paintSession();
 }
 
-/* The login sheet, moved into your own row in the people list.
+/* The login sheet. It sits in the Account tab and stays there -- three
+   states in one block of markup, and this only picks which one is showing.
 
-   The markup is in index.html; this only decides which of its three states is
-   showing and where it sits. Moving one element rather than building one is
-   what keeps the ids in the file that has the ids in it. */
-function ownRow(box) {
+   It used to be moved into your own row in the people list, on the reasoning
+   that a stranger should see no sign that accounts exist. That cost the owner
+   any way of finding it and bought nothing: what keeps people out is the
+   password and the authenticator, not whether the door is signposted. */
+function paintLogin() {
   const sheet = el("login-sheet");
   if (!sheet) return;
-  box.appendChild(sheet);
   sheet.hidden = false;
   el("login-in").hidden = !account;
   el("login-open").hidden = !!account || loginOpen;
@@ -3305,9 +3303,9 @@ function saidCapability(capability) {
 
 function wireLogin() {
   const open = el("login-open");
-  if (open) open.addEventListener("click", () => { loginOpen = true; paintPeople(); });
+  if (open) open.addEventListener("click", () => { loginOpen = true; paintLogin(); });
   const cancel = el("login-cancel");
-  if (cancel) cancel.addEventListener("click", () => { loginOpen = false; paintPeople(); });
+  if (cancel) cancel.addEventListener("click", () => { loginOpen = false; paintLogin(); });
   const out = el("login-out");
   if (out) {
     out.addEventListener("click", () => {
@@ -3339,11 +3337,12 @@ function wireLogin() {
 function paintSession() {
   const panel = el("tab-session");
   if (!panel || panel.hidden) return;
+  paintLogin();
   const who = el("session-who");
   if (who) {
-    who.textContent = account
-      ? "Logged in as " + account.name + ". " + peopleHere()
-      : "";
+    // Said only to somebody who can act on it. To everybody else this tab is
+    // a login and nothing else, which is the whole of what it should be.
+    who.textContent = account && mayAnything() ? peopleHere() : "";
   }
   show("session-limit", may("slots"));
   show("session-lock", may("lock"));
@@ -3553,12 +3552,6 @@ function paintPerson() {
   const box = el("chat-person");
   if (!box) return;
   const person = people.find((p) => p.slot === personOpen);
-  // The login sheet lives in the markup and is moved into a row, so it has to
-  // be put back out of sight when that row closes -- innerHTML = "" below
-  // would otherwise take it out of the document altogether and the next open
-  // would find nothing to move.
-  const sheet = el("login-sheet");
-  if (sheet) { sheet.hidden = true; document.body.appendChild(sheet); }
   if (!person) { box.hidden = true; box.innerHTML = ""; return; }
 
   const facts = [];
@@ -3597,11 +3590,6 @@ function paintPerson() {
     list.appendChild(dd);
   });
   box.appendChild(list);
-  // Your own row, and only yours: this is where logging in lives, because it
-  // is the one row somebody would think to tap about themselves. A guest with
-  // no account sees a "Log in" button and nothing else -- no list of names,
-  // no hint that an admin exists.
-  if (person.slot === mySlot) ownRow(box);
   box.hidden = false;
 }
 
@@ -5170,7 +5158,7 @@ function showTab(which) {
     }
   }
   if (which === "game") paintEndGame();
-  if (which === "session") paintSession();
+  if (which === "session") { paintLogin(); paintSession(); }
 }
 
 function paintEndGame() {

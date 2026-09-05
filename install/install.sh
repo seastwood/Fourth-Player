@@ -69,6 +69,19 @@ else
   echo "already writable"
 fi
 
+say "the command"
+# So that `fourth-player admin add <name>` -- which is what every message in
+# this program tells you to run -- is a command that exists. The service does
+# not need it; a person at the console does.
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$REPO/bin/fourth-player" "$HOME/.local/bin/fourth-player"
+if command -v fourth-player >/dev/null 2>&1; then
+  echo "fourth-player is on your PATH"
+else
+  echo "linked into ~/.local/bin, which is not on your PATH yet."
+  echo "add it with: echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.profile"
+fi
+
 say "the service"
 mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/fourth-player"
 sed "s|%h/fourth-player|$REPO|" "$REPO/system/fourth-player.service" \
