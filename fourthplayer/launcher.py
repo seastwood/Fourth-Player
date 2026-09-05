@@ -525,8 +525,14 @@ def build_argv(row, resume=False):
 STEAM_WARMUP = 12.0
 
 
-def steam_running():
-    """Whether a Steam client is up and able to take a command line."""
+def steam_client_up():
+    """Whether a Steam client is up and able to take a command line.
+
+    Named apart from steam_running(), which is older and answers a related
+    question about the same program. Two functions of one name in one file is
+    how the later one silently replaces the earlier, and this file has a test
+    that says so.
+    """
     try:
         done = subprocess.run(["pgrep", "-f", "ubuntu12_32/steam[ ]"],
                               capture_output=True, timeout=5)
@@ -552,7 +558,7 @@ def steam_steps(row):
     argv = build_argv(row)
     if row.get("shell"):
         return [argv]                      # Big Picture is the whole request
-    if steam_running():
+    if steam_client_up():
         return [[exe, "steam://open/bigpicture"], argv]
     return [[exe, BIG_PICTURE], argv]
 
@@ -598,7 +604,7 @@ def launch(row, display=":0", resume=False):
     # earlier ones are asked for and given a moment to take effect.
     steps = [argv]
     if row.get("kind") == "steam":
-        cold = not steam_running()
+        cold = not steam_client_up()
         steps = steam_steps(row)
         for earlier in steps[:-1]:
             log.info("putting Steam into Big Picture first: %s",

@@ -2039,6 +2039,98 @@ class LiveSession:
             return True, ""
         return False, ""
 
+    def check_profile(self, guest, profiles):
+        """Say so when a guest cannot decode the H.264 profile being offered.
+
+        The codec is negotiated -- agree_codec picks the best of H.264, H.265
+        and AV1 that every guest can manage. The profile inside H.264 is not:
+        it is pinned on the encoder, which encodes once for everybody, so it
+        cannot be chosen per guest.
+
+        That is a reasonable limitation and a terrible silent failure. A host
+        set to Main offers Main; a browser that only takes Constrained Baseline
+        answers with the video refused; the guest gets a black screen; and
+        nothing anywhere says why. It read as a network fault for hours.
+
+        So it is read out loud. Nothing is changed automatically, because the
+        change is a recapture that would interrupt everybody already watching
+        -- and because the answer is one line in the config, which this says.
+        """
+        # Only H.264 has profiles worth checking here, and only when that is
+        # what is going out: "auto" that settled on H.265 or AV1 is a different
+        # question and not this one.
+        playing = getattr(self.stage, "codec", None) or self.codec
+        if not profiles or str(playing).lower() not in ("h264", "auto", ""):
+            return
+        want = video.h264_profile_level_id(
+            getattr(self.cfg, "h264_profile", "constrained-baseline"),
+            getattr(self.cfg, "height", 1080))[:4].lower()
+        theirs = {str(p).lower()[:4] for p in profiles}
+        if want in theirs:
+            return
+        log.warning(
+            "%s's browser does not list the H.264 profile this host offers "
+            "(%s, %s). They will connect and see a black screen. Their "
+            "browser takes: %s. Set h264_profile to constrained-baseline in "
+            "%s and restart to fix it for everybody.",
+            guest.label, getattr(self.cfg, "h264_profile", "?"), want,
+            ", ".join(sorted(theirs)) or "nothing it would name",
+            getattr(self.cfg, "path", "the config"))
+        self.notify_one(guest, {
+            "t": "note",
+            "message": "Your browser may not accept this host's video format. "
+                       "If the picture stays black, ask the owner to set "
+                       "h264_profile to constrained-baseline."})
+
+    def warn_about_joining(self, guest):
+        """Say, when somebody joins mid-Steam-game, what that may cost.
+
+        A virtual controller appearing is a real disturbance: Steam
+        re-enumerates and may hand the game to whichever device it likes, and a
+        game that has already bound its player does not give it back without
+        being restarted.
+
+        This was fought with code for a while, four mechanisms deep, and
+        between them they left a game with no controls at all. Saying it
+        plainly and giving the owner a lock is a smaller, truer answer than
+        juggling devices under a running game.
+        """
+        if not self.steam_now:
+            return
+        log.warning("%s joined while %s is playing. A new controller appearing "
+                    "can make Steam hand the game to it, and a game that has "
+                    "bound its player will not give it back without being "
+                    "restarted. Lock the session if you do not want this.",
+                    guest.label, self.steam_label or "a Steam game")
+        for other in list(self.guests.values()):
+            if other is guest or not other.can("lock"):
+                continue
+            self.notify_one(other, {
+                "t": "note",
+                "message": "%s joined while %s is playing. Steam may hand the "
+                           "game to their controller. You can lock the session "
+                           "from the Account tab." % (
+                               guest.label, self.steam_label or "a Steam game")})
+
+    def plug_in(self, guest):
+        """Give this guest their controller.
+
+        This was conditional for a while: a guest held out of the Steam game
+        that was playing got a seat and no device, so that Steam would not see
+        a controller appear and hand the game to it. Around it grew a second
+        rule that unplugged and replugged devices whenever a permission
+        changed.
+
+        All of that is gone. It was four mechanisms deep, none of them provable
+        from outside, and between them they left a Steam game with no working
+        controls at all -- worse than the problem they were for. A controller
+        appearing mid-game is a real disturbance to Steam, and the honest
+        answer is to say so and let the owner shut the door: see
+        warn_about_joining and the session lock.
+        """
+        return guest.pad
+
+
     def steam_here(self, appid, label="", starting=False, polled=False):
         """What Steam is running now. Tells anybody whose answer changed.
 
