@@ -43,7 +43,38 @@ def check(cond, msg):
         fails.append(msg)
 
 
-print("what counts as a shell")
+print("reading what is in front")
+# getwindowclassname is not in every xdotool -- it is missing from the one on
+# the console this runs on, which left the class half silently empty and every
+# decision being made on the window's title alone. A fullscreen game with no
+# title then read as nothing in front, and nothing in front holds every
+# controller in the session.
+asked = []
+
+
+def fake_sh(*argv):
+    asked.append(argv)
+    if argv[:2] == ("xdotool", "getactivewindow"):
+        return "12345"
+    if argv[:2] == ("xdotool", "getwindowclassname"):
+        return ""                      # this machine has no such command
+    if argv[0] == "xprop":
+        return 'WM_CLASS(STRING) = "broforce.x86_64", "Broforce.x86_64"'
+    if argv[:2] == ("xdotool", "getwindowname"):
+        return ""                      # a fullscreen window with no title
+    return ""
+
+
+real_sh = screen.sh
+screen.sh = fake_sh
+front = screen.foreground()
+screen.sh = real_sh
+check("broforce" in front,
+      "the class is found through xprop when xdotool cannot give it: %r" % front)
+check(any(a[0] == "xprop" for a in asked), "xprop was asked")
+check(not screen.is_shell(front), "and a game read that way is not a shell")
+
+print("\nwhat counts as a shell")
 # Steam deliberately does not count as a shell any more. It was one, on the
 # reasoning that its own window is a store and a settings screen and no guest's
 # business -- and what that cost was every controller in the session, because

@@ -24,6 +24,7 @@ own interface, Kodi, and the desktop.
 
 import logging
 import os
+import re
 import subprocess
 
 log = logging.getLogger("fourthplayer.screen")
@@ -86,7 +87,19 @@ def foreground():
     window = sh("xdotool", "getactivewindow")
     if not window:
         return ""
+    # The class, by whichever route this machine has.
+    #
+    # `getwindowclassname` is not in every xdotool -- it is missing from the
+    # one on this console, which is why the class half of this was silently
+    # empty and every decision was being made on the window's title alone. A
+    # fullscreen game with no title then read as nothing in front, and nothing
+    # in front holds every controller in the session.
+    #
+    # xprop is older than xdotool and always has WM_CLASS.
     kind = sh("xdotool", "getwindowclassname", window)
+    if not kind:
+        kind = " ".join(re.findall(r'"([^"]*)"',
+                                   sh("xprop", "-id", window, "WM_CLASS")))
     name = sh("xdotool", "getwindowname", window)
     return (" ".join(part for part in (kind, name) if part)).lower()
 
