@@ -1033,7 +1033,11 @@ class Server:
             if command == "kick":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
-                self.session.kick(int(request.get("slot")))
+                if str(request.get("slot")).lower() == "all":
+                    for slot in list(self.session.guests):
+                        self.session.kick(slot)
+                else:
+                    self.session.kick(int(request.get("slot")))
                 return self._status()
         except Exception as exc:                      # never kill the socket
             log.exception("control command failed: %r", request)

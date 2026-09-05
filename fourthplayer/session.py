@@ -1411,12 +1411,6 @@ class LiveSession:
         session -- that is the entire point of the thing, and a ROM in
         RetroArch cannot wander into anybody's Steam account.
 
-        Steam's own interface is the strictest row in the catalogue and the
-        only one no capability covers. `steam` means "the games on the owner's
-        list"; Big Picture is the shop, the library, the settings and the
-        account behind them, and handing that to everybody who may play
-        Broforce is not what granting Broforce meant. It goes to the primary
-        admin and nobody else.
         """
         if row is None:
             return True
@@ -1424,8 +1418,6 @@ class LiveSession:
             return True
         if guest is None:
             return False
-        if row.get("shell"):
-            return bool(guest.primary)
         return guest.can("steam:" + str(row.get("appid") or ""))
 
     def listing_for(self, guest):

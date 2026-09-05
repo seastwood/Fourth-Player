@@ -172,8 +172,8 @@ def main(argv=None):
     deny = sub.add_parser("deny", help="say no to the waiting launch request")
     deny.add_argument("--reason", default="the owner said no")
 
-    kick = sub.add_parser("kick", help="remove one guest")
-    kick.add_argument("slot", type=int)
+    kick = sub.add_parser("kick", help="remove one guest, or all of them")
+    kick.add_argument("slot", help="a slot number, or `all`")
 
     # Which Steam games guests may start. Its own list, because a Steam
     # library is mostly things the owner would not hand to a stranger on a
@@ -280,7 +280,11 @@ def main(argv=None):
         request["minutes"] = 0
     elif args.command in ("start", "extend") and args.minutes is not None:
         request["minutes"] = args.minutes
-    if args.command == "kick":
+    if args.command == "kick" and str(args.slot).lower() == "all":
+        # One command for "clear the room". Doing it a slot at a time is four
+        # commands and a race with anybody reconnecting between them.
+        request["slot"] = "all"
+    elif args.command == "kick":
         request["slot"] = args.slot
     if args.command == "policy" and args.set:
         request["set"] = args.set
