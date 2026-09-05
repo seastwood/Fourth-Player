@@ -20,6 +20,7 @@ import sys
 import time
 
 from . import (accounts, catalogue as cataloguelib, gpu, invites, launcher,
+               steamgames,
                pads as padlib, protocol, retroarch, screen)
 from . import video
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
@@ -1386,12 +1387,23 @@ class LiveSession:
         Only Steam rows ask. An emulator game stays open to whoever is in the
         session -- that is the entire point of the thing, and a ROM in
         RetroArch cannot wander into anybody's Steam account.
+
+        Steam's own interface is the strictest row in the catalogue and the
+        only one no capability covers. `steam` means "the games on the owner's
+        list"; Big Picture is the shop, the library, the settings and the
+        account behind them, and handing that to everybody who may play
+        Broforce is not what granting Broforce meant. It goes to the primary
+        admin and nobody else.
         """
         if row is None:
             return True
         if row.get("kind") != "steam":
             return True
-        return guest is not None and guest.can("steam:" + str(row.get("appid") or ""))
+        if guest is None:
+            return False
+        if row.get("shell"):
+            return bool(guest.account and accounts.is_primary(guest.account))
+        return guest.can("steam:" + str(row.get("appid") or ""))
 
     def listing_for(self, guest):
         """The catalogue as one guest may see it.
@@ -1998,6 +2010,14 @@ class LiveSession:
         hold_state asks it to explain, so the controller and the notice on the
         phone can never disagree.
         """
+        if self.steam_now == steamgames.BIG_PICTURE_ID:
+            # Steam's own interface. Whoever may open it may drive it, and
+            # nobody else may: the shell rule would otherwise hold even them,
+            # because "steam" is exactly what the screen watcher calls this.
+            mine = bool(guest.account and accounts.is_primary(guest.account))
+            return (not mine), ("" if mine else
+                                "Steam's own screen is open, and only the "
+                                "owner drives that.")
         if self.steam_now and not guest.can("steam:" + self.steam_now):
             # Deliberately before the driver exemption rather than after it.
             # Being handed the screen is permission to drive what is in front;
@@ -2017,6 +2037,13 @@ class LiveSession:
             # and Moonlight are not something a Steam grant says anything
             # about.
             if self.steam_now and self.hold_reason in self.STEAM_SHELLS:
+                return False, ""
+            # Steam's own window, opened deliberately by the owner. The poll
+            # cannot see Big Picture in the process table the way it sees a
+            # game, so this does not lean on steam_now: whoever may open it
+            # may drive it for as long as it is there.
+            if self.hold_reason in self.STEAM_SHELLS and guest.account \
+                    and accounts.is_primary(guest.account):
                 return False, ""
             return True, ""
         return False, ""

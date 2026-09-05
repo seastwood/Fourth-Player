@@ -389,6 +389,60 @@ session.guests[3] = FakeGuest(3, "d", can=["kick"])
 check(session.set_limit(1) == 2,
       "the floor rises to the number of accounts here, so none is cut off")
 
+print("\nSteam's own interface is the owner's alone")
+# `steam` means "the games on the owner's list". Big Picture is the shop, the
+# library, the settings and the account behind them, and handing that to
+# everybody who may play Broforce is not what granting Broforce meant.
+session, loop = make_session()
+if accounts.find("seth") is None:
+    accounts.add("seth", "a-good-password", ["grant", "steam"])
+else:
+    accounts.set_capabilities("seth", ["grant", "steam"])
+if accounts.find("mate") is None:
+    accounts.add("mate", "another-password", ["steam"])
+else:
+    accounts.set_capabilities("mate", ["steam"])
+
+shell_row = {"id": "s", "label": "Steam Big Picture", "system": "Steam",
+             "short": "STEAM", "kind": "steam", "appid": "bigpicture",
+             "shell": True}
+game_row = {"id": "b", "label": "Broforce", "system": "Steam",
+            "short": "STEAM", "kind": "steam", "appid": BROFORCE}
+
+owner = FakeGuest(0, "owner", can=["grant", "steam"])
+owner.account = "seth"
+player = FakeGuest(1, "player", can=["steam"])
+player.account = "mate"
+nobody = FakeGuest(2, "nobody")
+
+check(accounts.is_primary("seth"), "seth is the primary admin")
+check(session.may_start(owner, shell_row), "the owner may open Big Picture")
+check(not session.may_start(player, shell_row),
+      "an account with steam may not -- that grant was for games")
+check(not session.may_start(nobody, shell_row), "and nobody else may")
+check(session.may_start(player, game_row),
+      "while the game on the list is still theirs to start")
+
+print("\nand the owner may drive it once it is open")
+session.steam_here("bigpicture", "Steam Big Picture")
+check(not session.holding(owner)[0], "the owner drives Steam's own screen")
+check(session.holding(player)[0],
+      "an account with steam does not: %r" % (session.holding(player),))
+check(session.holding(nobody)[0], "and neither does anybody else")
+
+# The poll cannot see Big Picture in the process table, so this must not lean
+# on steam_now staying set.
+session.steam_here("")
+session.input_held = True
+session.hold_reason = "steamwebhelper"
+check(not session.holding(owner)[0],
+      "still the owner's once the poll has forgotten, while Steam is in front")
+check(session.holding(player)[0], "and still nobody else's")
+session.hold_reason = "kodi"
+check(session.holding(owner)[0],
+      "but Kodi's menu holds the owner like everybody else")
+session.input_held = False
+
 print("\nsaying who may be in the session")
 session, loop = make_session()
 admin = FakeGuest(0, "admin", can=["lock", "grant"])

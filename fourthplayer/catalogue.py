@@ -168,6 +168,9 @@ def steam_art_path(appid):
 
 def art_for(row):
     """The cover for one row, wherever it lives."""
+    if row.get("shell"):
+        from . import steamgames
+        return steamgames.big_picture_icon()
     if row.get("kind") == "steam" and row.get("appid"):
         found = steam_art_path(row["appid"])
         if found:
@@ -231,6 +234,27 @@ class Catalogue:
         # on this television by every measure a guest cares about even though
         # nothing else about them is like a ROM: no core, no file, no player
         # count anybody has written down.
+        # Steam's own interface, first in its own section: it is how somebody
+        # at the far end installs, updates or picks a Steam game, and there is
+        # no other way to reach it from a phone. Offered only to the primary
+        # admin -- see LiveSession.may_start -- because it hands over the
+        # machine's Steam account, shop and settings screen.
+        shell = steamgames.big_picture_row()
+        if shell:
+            key = game_id("Steam", shell["appid"])
+            rows[key] = {
+                "id": key,
+                "label": shell["label"],
+                "system": "Steam",
+                "short": "STEAM",
+                "players": 0,
+                "kind": "steam",
+                "appid": shell["appid"],
+                "shell": True,
+                "path": "",
+                "core_path": "",
+            }
+
         for game in steamgames.offered():
             key = game_id("Steam", game["appid"])
             rows[key] = {
@@ -287,6 +311,9 @@ class Catalogue:
                 "system": row["system"],
                 "short": row["short"],
                 "players": row["players"],
+                # Steam's own interface rather than a game, so the page can
+                # say "Open" instead of "Play" and not offer to resume it.
+                "shell": bool(row.get("shell")),
                 "bucket": bucket(row["players"]),
                 "art": bool(art_for(row)),
                 # Whether there is anything to continue from, so the page can
@@ -294,7 +321,10 @@ class Catalogue:
                 "saved": bool(state),
                 "saved_at": os.path.getmtime(state) if state else None,
             })
-        rows.sort(key=lambda r: (r["short"].lower(), r["label"].lower()))
+        # Within a system, Steam's own interface comes first: it is the way in
+        # to the rest of that section rather than one more thing in it.
+        rows.sort(key=lambda r: (r["short"].lower(), not r.get("shell"),
+                                 r["label"].lower()))
         return rows
 
     def art(self, key):

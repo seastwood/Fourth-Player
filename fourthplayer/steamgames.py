@@ -30,6 +30,45 @@ STEAM_ROOTS = (
     "~/.var/app/com.valvesoftware.Steam/data/Steam",   # the Flathub build
 )
 
+# Steam's own interface, offered as though it were a game.
+#
+# Not a game and worth having in the list anyway: it is how somebody at the
+# other end of the country installs, updates or picks a Steam game, and there
+# is no other way to reach it from a phone. It is also the one row in this
+# whole catalogue that hands over the machine's Steam account -- a shop, a
+# library, a settings screen -- which is why only the primary admin is ever
+# offered it. See may_start.
+BIG_PICTURE_ID = "bigpicture"
+BIG_PICTURE_LABEL = "Steam Big Picture"
+
+# Where the desktop keeps Steam's icon, best first.
+BIG_PICTURE_ICONS = (
+    "/usr/share/icons/hicolor/256x256/apps/steam.png",
+    "/usr/share/icons/hicolor/128x128/apps/steam.png",
+    "/usr/share/icons/hicolor/64x64/apps/steam.png",
+    "/usr/share/pixmaps/steam.png",
+)
+
+
+def big_picture_icon():
+    """Steam's own icon, or None. A tiny file is a placeholder, not an icon."""
+    for path in BIG_PICTURE_ICONS:
+        try:
+            if os.path.getsize(path) > 1024:
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def big_picture_row():
+    """The catalogue row for Steam's interface, or None if Steam is not here."""
+    if not any(True for _ in _roots()):
+        return None
+    return {"label": BIG_PICTURE_LABEL, "appid": BIG_PICTURE_ID,
+            "kind": "steam", "shell": True}
+
+
 # The owner's list. A file rather than a setting in the config, because it is
 # edited far more often than anything else here and one game per line reads
 # better than a JSON array inside a TOML value.
