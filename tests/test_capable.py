@@ -509,6 +509,40 @@ check(session.locked, "the account that was given it can")
 session.set_locked(False, by=admin)
 drain(outbox)
 
+print("\ncoming back mid-game does not take the game away")
+# Sockets drop here constantly: a stalled encoder, a browser that refuses the
+# video, a phone changing network. Each one used to become "you are logged out
+# and your controller has stopped", in the middle of a game, with nothing said.
+session, loop = make_session()
+session.steam_here(BROFORCE, "Broforce")
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+back_in = FakeGuest(1, "seth", can=["steam"])
+session.guests = {1: back_in}
+check(not session.holding(back_in)[0], "playing a Steam game they were given")
+
+
+class Record2:
+    slot = 1
+
+
+class Invite2:
+    guests = {1: Record2()}
+
+    def guest_for(self, token, now=None):
+        return Record2()
+
+
+session.invite = Invite2()
+session.detach_peer = lambda g: None
+session.publish_pad_names = lambda: None
+same = session.resume("their-token", object(), "")
+check(same is back_in, "a resume puts them back in the same seat")
+check(not session.holding(same)[0],
+      "and the game is still theirs to play: %r" % (session.holding(same),))
+check(same.logged_in_at == 0.0,
+      "though the authenticator code is not still fresh")
+
 print("\nthe things that land on other people ask for a code")
 stale = FakeGuest(5, "a remembered phone", can=["kick", "lock", "grant"],
                   fresh=False)

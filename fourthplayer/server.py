@@ -702,6 +702,12 @@ class Server:
                                         fresh=bool(login))
             signed_in = {"name": account["name"], "can": list(can),
                          "fresh": bool(login)}
+        elif getattr(guest, "account", None):
+            # A resume back into a seat that was already logged in. Said in the
+            # welcome, because the page starts every load knowing nothing and
+            # the whole fault this replaced was the two of them disagreeing.
+            signed_in = {"name": guest.account, "can": list(guest.capabilities),
+                         "fresh": bool(guest.logged_in_at)}
 
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,

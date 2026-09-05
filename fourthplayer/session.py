@@ -798,20 +798,34 @@ class LiveSession:
         if existing is not None:
             self.detach_peer(existing)
             existing.socket = socket
-            # A login dies with the socket that made it, and this is the one
-            # place a connection outlives its socket -- the object is reused
-            # so the slot, the pad and the player port survive a network
-            # switch, and the account was quietly surviving with them.
+            # Who they are survives; being here right now does not.
             #
-            # What that looked like: reopen the page mid-game, be shown as
-            # logged out, and still be able to play a Steam game nobody had
-            # given you. The page had forgotten and the host had not. A
-            # remembered device is how somebody gets it back, and that asks
-            # for the token again rather than trusting what is already here.
+            # This was a full logout for a while, on the rule that a login
+            # dies with the socket that made it. The rule was aimed at the
+            # real fault, which was not survival but *disagreement*: the page
+            # had forgotten and the host had not, so somebody was shown as
+            # logged out while still able to play a Steam game nobody had
+            # given them.
+            #
+            # Logging them out fixed the disagreement in the wrong direction.
+            # Sockets drop constantly here -- a stalled encoder, a browser
+            # that refuses the video, a phone changing network -- and each one
+            # became "you are logged out and your controller has stopped",
+            # mid-game, with nothing said. The guest token that got them back
+            # into this seat is 256 bits of this program's own randomness and
+            # is what already proves they are the same person; it is not
+            # weaker than the device token that would have restored the same
+            # account.
+            #
+            # So the account comes back with the seat, and the moment of the
+            # authenticator code does not: logged_in_at goes to zero, so kick,
+            # lock, reshare and grant ask for a fresh code exactly as they do
+            # on a remembered device. And the welcome says who they are, which
+            # is what stops the page and the host disagreeing again.
             if existing.account:
-                log.info("%s was logged in as %s; a new socket means logging "
-                         "in again", existing.label, existing.account)
-                self.logout(existing)
+                existing.logged_in_at = 0.0
+                log.info("%s came back on their token, still %s (a code will "
+                         "be asked for again)", existing.label, existing.account)
             return existing
         # The name they gave when they first joined is on the invite's record,
         # so coming back does not turn them into "Player 3" again. A name sent

@@ -231,7 +231,7 @@ session.logout(guest)
 check(guest.account is None and guest.capabilities == (),
       "logging out clears it")
 
-print("\na login dies with the socket that made it")
+print("\ncoming back on the guest token keeps who you are, not the code")
 # The one place a connection outlives its socket: resume hands back the same
 # object so the slot, the pad and the player port survive a network switch.
 # The account was surviving with them, which is how somebody reopened their
@@ -263,9 +263,11 @@ session.detach_peer = lambda g: None
 session.publish_pad_names = lambda: None
 back = session.resume("a-token", object(), "")
 check(back is guest, "resume gives the same connection back")
-check(back.account is None and back.capabilities == (),
-      "and it is nobody again: %r %r" % (back.account, back.capabilities))
-check(back.logged_in_at == 0.0, "with no code to its name either")
+check(back.account == "seth" and back.capabilities,
+      "and who they are comes back with the seat: %r %r"
+      % (back.account, back.capabilities))
+check(back.logged_in_at == 0.0,
+      "but the moment of the code does not, so kick and lock ask again")
 
 print("\nand a remembered device is how it comes back")
 srv, session, loop = make_server()
