@@ -347,6 +347,10 @@ class LiveSession:
     # nobody had touched.
     _steam_misses = 0
     STEAM_MISSES = 3
+    # How long a Steam game just asked for is believed to be coming up before
+    # the process table is taken as the truth. Steam took about eighteen
+    # seconds to spawn its marker on this console, so this is that with room.
+    STEAM_STARTING = 45.0
     # How many guests may be connected at once, and whether anybody without an
     # account may be one of them. Both are the owner narrowing a session that
     # is already open, rather than settings for the next one -- "there are too

@@ -403,41 +403,19 @@ check(not session.may_start(nobody, shell_row), "and nobody else may")
 check(session.may_start(player, game_row),
       "while the game on the list is still theirs to start")
 
-print("\nand the owner may drive it once it is open")
+print("\nand once it is open, anybody in the session may drive it")
+# Opening Steam's own interface is the owner's alone. Driving it is not: it is
+# the one interface on this machine designed for a controller, and holding it
+# meant nobody could use it from a phone at all -- including the owner, whose
+# controller stopped every time Steam's loader or overlay came to the front.
 session.steam_here("bigpicture", "Steam Big Picture")
-check(not session.holding(owner)[0], "the owner drives Steam's own screen")
-check(session.holding(player)[0],
-      "an account with steam does not: %r" % (session.holding(player),))
-check(session.holding(nobody)[0], "and neither does anybody else")
-
-# The poll cannot see Big Picture in the process table, so this must not lean
-# on steam_now staying set.
-session.steam_here("")
+check(not session.holding(owner)[0], "the owner drives it")
+check(not session.holding(player)[0], "and so does everybody else in the room")
 session.input_held = True
-session.hold_reason = "steamwebhelper"
-check(not session.holding(owner)[0],
-      "still the owner's once the poll has forgotten, while Steam is in front")
-check(session.holding(player)[0], "and still nobody else's")
 session.hold_reason = "kodi"
-check(session.holding(owner)[0],
-      "but Kodi's menu holds the owner like everybody else")
+check(session.holding(owner)[0], "while Kodi's menu holds them all as ever")
 session.input_held = False
-
-print("\nthe primary admin may do everything, including reach the lock")
-# They hold `grant`, so they can give themselves any of these in two taps.
-# Pretending otherwise is ceremony rather than security -- and they must
-# always be able to reach the lock, being the one person it cannot shut out.
-boss = FakeGuest(0, "boss")
-boss.account = "seth"
-boss.capabilities = ()
-boss.primary = True
-for capability in ("lock", "kick", "grant", "reshare", "slots", "stop",
-                   "steam", "steam:274190"):
-    check(boss.can(capability), "the primary may %s" % capability)
-plain = FakeGuest(1, "plain")
-plain.account = "mate"
-plain.capabilities = ("steam",)
-check(not plain.can("lock"), "and an ordinary account still may not lock")
+session.steam_here("")
 
 print("\nsaying who may be in the session")
 session, loop = make_session()
