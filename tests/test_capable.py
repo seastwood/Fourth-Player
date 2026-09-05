@@ -712,6 +712,52 @@ check(1 in Pad.forgotten, "their frames were forgotten: %r" % Pad.forgotten)
 check(2 not in Pad.forgotten,
       "and the one who never had a device forgot nothing on one")
 
+print("\nstarting a Steam game unplugs the pads nobody will drive")
+# A Steam game binds device to player when it starts and does not revisit it,
+# so what decides who is player one is which devices exist at that moment --
+# not who is holding them, which the game cannot see. A pad belonging to a
+# guest held out of the game is one the game may pick and nobody can drive:
+# a controller that does nothing, for the person who started the game, with no
+# way back but restarting it.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.publish_pad_names = lambda: None
+launcher.launch = lambda row, resume=False: None
+launcher.clear_the_screen = lambda: []
+
+seats = Seats()
+seats.devices = {0: Pad(), 1: Pad(), 2: Pad(), 3: Pad()}   # all four plugged in
+session.pads = seats
+mine = Seat(1, "the one playing", can=["steam"])
+mine.pad_index = 1
+mine.session = session
+theirs = Seat(2, "no account")
+theirs.pad_index = 2
+theirs.session = session
+session.guests = {1: mine, 2: theirs}
+
+loop.run_until_complete(session._start_game(dict(FakeCatalogue.ROWS[1])))
+check(seats.existing(1) is not None,
+      "the pad of the account that may play it survives")
+check(seats.existing(2) is None,
+      "the pad of the guest who may not is unplugged")
+check(seats.existing(0) is None and seats.existing(3) is None,
+      "and so are the seats nobody is sitting in")
+
+# A ROM is left alone: RetroArch has a picker and its own port profiles.
+seats2 = Seats()
+seats2.devices = {0: Pad(), 1: Pad(), 2: Pad(), 3: Pad()}
+session2, loop2 = make_session()
+session2.notify = lambda message: None
+session2.notify_one = lambda guest, message: None
+session2.publish_pad_names = lambda: None
+session2.pads = seats2
+session2.guests = {}
+loop2.run_until_complete(session2._start_game(dict(FakeCatalogue.ROWS[0])))
+check(len(seats2.live()) == 4,
+      "starting a ROM unplugs nothing: %r" % len(seats2.live()))
+
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
 print()

@@ -1625,6 +1625,9 @@ class LiveSession:
         if row.get("kind") == "steam" and row.get("appid"):
             self.steam_here(str(row["appid"]), row.get("label") or "",
                             starting=True)
+            # After steam_here, which is what decides who is held, and before
+            # the launch, which is when the game decides who is player one.
+            self.clear_idle_pads()
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
@@ -2036,6 +2039,40 @@ class LiveSession:
             "message": "Your browser may not accept this host's video format. "
                        "If the picture stays black, ask the owner to set "
                        "h264_profile to constrained-baseline."})
+
+    def clear_idle_pads(self):
+        """Unplug the controllers nobody is going to be driving.
+
+        A Steam game binds device to player when it starts and does not
+        revisit it. So what decides who is player one is which devices exist
+        at that moment -- not who is holding them, which the game cannot see.
+
+        A pad belonging to a guest held out of the game, or to a seat nobody
+        is sitting in, is a device the game may well pick as player one and
+        that nobody can drive. What that looks like is a controller that does
+        nothing at all, for the person who actually started the game, with no
+        way back except restarting it -- which is what was reported.
+
+        Called just before a Steam game is launched. RetroArch does not need
+        this: it has a picker, and its ports are settled by the profiles this
+        program writes.
+        """
+        if self.pads is None:
+            return []
+        driving = {g.pad_index for g in self.guests.values()
+                   if not self.holding(g)[0]}
+        freed = []
+        for index, _pad in list(self.pads.live()):
+            if index in driving:
+                continue
+            if self.pads.release(index):
+                freed.append(index)
+        if freed:
+            log.info("unplugged %d controller(s) nobody will be driving "
+                     "(seats %s), so the game binds to the ones that will be",
+                     len(freed), ", ".join(str(i + 1) for i in freed))
+            self.publish_pad_names()
+        return freed
 
     def plug_in(self, guest):
         """Give this guest a device, unless nothing they send could reach it.
