@@ -202,6 +202,61 @@ check(session.holding(given)[0],
       "with no Steam game running, Steam's window holds everybody as before")
 session.input_held = False
 
+print("\nthe hold only lets go of the buttons of the people it holds")
+# Steam's own window flickers to the front repeatedly while a game runs --
+# twice in ten seconds, measured on the console. Each time, the hold turned on
+# and every pad was released. An account that had been given the game was not
+# held, so its frames flowed, and its buttons were wiped every few seconds:
+# indistinguishable from a controller that does not work at all.
+
+
+class FakePad:
+    def __init__(self, index):
+        self.index = index
+        self.released = 0
+
+    def release_all(self):
+        self.released += 1
+
+
+class FakePads:
+    def __init__(self, count):
+        self.pads = [FakePad(i) for i in range(count)]
+
+    def live(self):
+        return list(enumerate(self.pads))
+
+
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.pads = FakePads(4)
+session.steam_here(BROFORCE, "Broforce")
+given = FakeGuest(0, "given", can=["steam"])
+given.pad_index = 0
+nothing = FakeGuest(1, "nothing")
+nothing.pad_index = 1
+session.guests = {0: given, 1: nothing}
+session._hold_input(True, "steam")
+check(session.pads.pads[0].released == 0,
+      "the account playing the game keeps its buttons")
+check(session.pads.pads[1].released == 1,
+      "and the guest who is held loses theirs")
+check(session.pads.pads[2].released == 1,
+      "a pad with nobody on it is released too, which costs nothing")
+
+# An ordinary menu is still one answer for everybody.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+session.pads = FakePads(2)
+given = FakeGuest(0, "given", can=["steam"])
+given.pad_index = 0
+session.guests = {0: given}
+session._hold_input(True, "kodi")
+check(session.pads.pads[0].released == 1,
+      "Kodi's menu still lets go of everybody's, Steam grant or not")
+
 print("\nthe frames really do stop")
 session, loop = make_session()
 session.steam_here(BROFORCE, "Broforce")

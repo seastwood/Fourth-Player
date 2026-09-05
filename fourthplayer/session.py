@@ -2039,8 +2039,24 @@ class LiveSession:
             # would take its port binding with it -- RetroArch settles which
             # device is which player when a game starts and does not revisit
             # it -- so a guest would come back from the menu as nobody.
+            #
+            # And only the pads of the people actually being held. Releasing
+            # every one of them was right while the hold was a single answer
+            # for everybody; it is not any more. An account that has been
+            # given the Steam game that is playing drives straight through
+            # Steam's own window, and that window flickers to the front
+            # repeatedly while a game runs -- twice in ten seconds, measured.
+            # Wiping their buttons on each flicker is indistinguishable from a
+            # controller that does not work at all.
+            #
+            # A pad shared by several guests is spared if any one of them is
+            # still playing: their presses are not somebody else's to cancel.
+            still_playing = {g.pad_index for g in self.guests.values()
+                             if not self.holding(g)[0]}
             if self.pads is not None:
-                for _index, pad in self.pads.live():
+                for index, pad in self.pads.live():
+                    if index in still_playing:
+                        continue
                     pad.release_all()
             log.info("guest controllers held: %s is in front", why or "a menu")
         else:
