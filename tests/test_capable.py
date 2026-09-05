@@ -247,13 +247,19 @@ given.pad_index = 0
 nothing = FakeGuest(1, "nothing")
 nothing.pad_index = 1
 session.guests = {0: given, 1: nothing}
+# The rule has already run: while this Steam game is on, only the client
+# allowed to play it has a controller at all. So there is nothing left on the
+# other seats for the hold to let go of, which is the stronger version of what
+# this block used to check.
+session.settle_steam_pads()
+check(session.pads.existing(0) is not None,
+      "the account playing the game has a controller")
+check(session.pads.existing(1) is None,
+      "the guest who may not play has none to lose")
+check(session.pads.existing(2) is None, "and neither does an empty seat")
 session._hold_input(True, "steam")
 check(session.pads.pads[0].released == 0,
-      "the account playing the game keeps its buttons")
-check(session.pads.pads[1].released == 1,
-      "and the guest who is held loses theirs")
-check(session.pads.pads[2].released == 1,
-      "a pad with nobody on it is released too, which costs nothing")
+      "and the hold does not take the buttons of the one who is playing")
 
 # An ordinary menu is still one answer for everybody.
 session, loop = make_session()
