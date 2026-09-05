@@ -404,7 +404,18 @@ class Server:
                               "asked": message.get("count"), "became": became})
             return
         if kind == "lock":
-            self.session.set_locked(bool(message.get("on")), by=guest)
+            # "" | "accounts" | "named". `on: true` is still understood, so an
+            # older page keeps working.
+            mode = message.get("mode")
+            if mode is None:
+                mode = "accounts" if message.get("on") else ""
+            try:
+                self.session.set_locked(mode, by=guest,
+                                        allowed=message.get("allowed") or ())
+            except ValueError as exc:
+                await outbox.put({"t": "error", "reason": "request",
+                                  "message": str(exc)})
+                return
             await outbox.put({"t": "limits", **self.session.limits()})
             return
         if kind == "kick":
@@ -1015,7 +1026,8 @@ class Server:
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
                 if "set" in request:
-                    self.session.set_locked(bool(request["set"]))
+                    self.session.set_locked(request["set"],
+                                            allowed=request.get("who") or ())
                 return self._status()
             if command == "kick":
                 if not (self.session and self.session.open):
@@ -1117,6 +1129,7 @@ class Server:
             # named accounts. Both are about this session, not the next one.
             "limit": self.session.limit(),
             "locked": self.session.locked,
+            "allowed": list(self.session.allowed),
             "public_url": self.cfg.public_url,
             "example_url": self.join_url("EXAMPLE"),
             "require_link": self.cfg.require_link,

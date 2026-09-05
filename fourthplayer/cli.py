@@ -159,9 +159,14 @@ def main(argv=None):
     limit.add_argument("set", nargs="?", type=int,
                        help="omit to read it; never goes below the accounts here")
     lock = sub.add_parser(
-        "lock", help="shut the open session to named accounts, or open it again")
-    lock.add_argument("set", nargs="?", choices=("on", "off"),
-                      help="omit to read it")
+        "lock", help="say who may be in the open session")
+    lock.add_argument("set", nargs="?", choices=("off", "accounts", "named"),
+                      help="off: anybody with the invite. accounts: only "
+                           "somebody logged in. named: only the accounts you "
+                           "list. Omit to read it.")
+    lock.add_argument("who", nargs="*",
+                      help="account names, for `named`. The first account made "
+                           "is always let in, whatever you say here.")
 
     sub.add_parser("approve", help="say yes to the waiting launch request")
     deny = sub.add_parser("deny", help="say no to the waiting launch request")
@@ -290,7 +295,8 @@ def main(argv=None):
     if args.command == "limit" and args.set is not None:
         request["set"] = args.set
     if args.command == "lock" and args.set is not None:
-        request["set"] = (args.set == "on")
+        request["set"] = "" if args.set == "off" else args.set
+        request["who"] = list(getattr(args, "who", []) or [])
     if args.command == "slots" and args.set is not None:
         request["set"] = args.set
     if args.command == "start" and args.slots:
@@ -363,9 +369,11 @@ def _print_status(reply):
     else:
         print("  link and PIN were forgotten on restart -- re-share to get new ones")
     limit, slots = reply.get("limit"), reply.get("slots")
-    if reply.get("locked"):
-        print("  LOCKED to named accounts -- nobody else can join, and anybody "
-              "who was not logged in was removed")
+    if reply.get("locked") == "accounts":
+        print("  LOCKED to accounts -- only somebody logged in may join")
+    elif reply.get("locked") == "named":
+        print("  LOCKED to: %s (and the first account made, always)"
+              % (", ".join(reply.get("allowed") or []) or "nobody but the owner"))
     if limit and slots and limit < slots:
         print(f"  at most {limit} connected at once (of {slots} slots)")
     launch = reply.get("launch") or {}

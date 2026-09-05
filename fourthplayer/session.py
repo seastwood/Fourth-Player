@@ -339,7 +339,18 @@ class LiveSession:
     # None means "as many as there are slots", which is what it has always
     # been.
     max_guests = None
-    locked = False
+    # Who may join. Not a flag any more, because "everybody but strangers" was
+    # not the only thing worth being able to say:
+    #
+    #   ""          anybody with the link and PIN, as it has always been
+    #   "accounts"  only somebody logged in to an account
+    #   "named"     only the accounts in `allowed`, plus the primary admin
+    #
+    # The primary admin is admitted whatever this says. A lock is a door and
+    # somebody has to keep a key: an owner who can shut themselves out of
+    # their own television, from a phone, has been handed a footgun.
+    locked = ""
+    allowed = ()
 
     def __init__(self, cfg, loop, now=time.monotonic):
         self.cfg = cfg
@@ -638,7 +649,6 @@ class LiveSession:
         # Logging in can be the difference between a held controller and a
         # live one, so say so rather than waiting for something else to change
         # -- and give them the controller the new answer entitles them to.
-        self.settle_steam_pads()
         self.tell_hold(guest)
         return guest.capabilities
 
@@ -646,7 +656,6 @@ class LiveSession:
         guest.account = None
         guest.capabilities = ()
         guest.logged_in_at = 0.0
-        self.settle_steam_pads()
         self.tell_hold(guest)
 
     def tell_hold(self, guest):
@@ -683,7 +692,6 @@ class LiveSession:
                     guest.capabilities = tuple(account.get("can") or ())
                     # A capability given or taken away while a Steam game is
                     # in front changes this guest's answer and nobody else's.
-                    self.settle_steam_pads()
                     self.tell_hold(guest)
                 changed.append(guest)
         return changed
@@ -705,11 +713,11 @@ class LiveSession:
         # in the game as the only ones unable to get back in.
         self.save()
         log.info("%s joined from %s", guest.label, address or "unknown")
+        self.warn_about_joining(guest)
         # Whether they get a controller is the one rule: while a Steam game is
         # running, the clients allowed to play it have one and nobody else
         # does. plug_in above already declines to make theirs; this keeps the
         # rest true for everybody, including them if they may play after all.
-        self.settle_steam_pads()
         # Everybody already in the session hears about it. The one arriving is
         # sent this too, but has no label of their own yet and ignores it.
         self.publish_pad_names()
@@ -1059,7 +1067,6 @@ class LiveSession:
             self.save()
         self.publish_pad_names()
         self.publish_people()
-        self.settle_steam_pads()
         log.info("%s %s", guest.label, reason)
         return True
 
@@ -1643,8 +1650,7 @@ class LiveSession:
                             starting=True)
             # After steam_here, which is what decides who is held, and before
             # the launch, which is when the game decides who is player one.
-            self.settle_steam_pads()
-        problem = await self.loop.run_in_executor(
+            problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
         # go and read what the television wrote down.
@@ -1896,34 +1902,59 @@ class LiveSession:
         self.notify({"t": "limits", **self.limits()})
         return want
 
-    def set_locked(self, on, by=None):
-        """Shut the session to everybody but named accounts, or open it again.
+    def set_locked(self, mode, by=None, allowed=None):
+        """Say who may be in this session, and remove anybody who may not.
 
-        Turning it on removes the guests who are not logged in -- that is what
-        "everybody else out" means -- and refuses new ones unless they log in
-        as they join. It never removes a guest who is logged in, which
-        includes whoever asked for it.
+        `mode` is "" (anybody with the invite), "accounts" (only somebody
+        logged in), or "named" (only the accounts in `allowed`).
+
+        Two things are never done, whatever is asked for. The primary admin is
+        never removed and never refused, and neither is whoever is asking --
+        an owner who can shut themselves out of their own television, from a
+        phone, has been handed a footgun rather than a control.
         """
-        on = bool(on)
-        if on == self.locked:
-            return self.locked
-        self.locked = on
-        if on:
+        mode = "" if not mode else str(mode)
+        if mode not in ("", "accounts", "named"):
+            raise ValueError("no such lock: %r" % mode)
+        keep = {accounts._key(n) for n in (allowed or ())}
+        if by is not None and getattr(by, "account", None):
+            keep.add(accounts._key(by.account))       # never yourself
+        self.locked = mode
+        self.allowed = tuple(sorted(keep))
+
+        if mode:
             for guest in list(self.guests.values()):
-                if guest.account or guest is by:
+                if guest is by or self.may_stay(guest):
                     continue
                 self.drop(guest.slot,
-                          reason="the owner locked this session to accounts")
-            log.info("%s locked the session to named accounts",
-                     getattr(by, "label", "the owner"))
+                          reason="the owner limited who may be in this session")
+            log.info("%s set the session to %s%s", getattr(by, "label", "the owner"),
+                     mode, (": " + ", ".join(self.allowed)) if self.allowed else "")
         else:
-            log.info("%s unlocked the session", getattr(by, "label", "the owner"))
+            log.info("%s opened the session to anybody with the invite",
+                     getattr(by, "label", "the owner"))
         self.notify({"t": "limits", **self.limits()})
         return self.locked
 
+    def may_stay(self, guest):
+        """Whether this guest passes the current lock. The primary always does."""
+        return self._passes_lock(getattr(guest, "account", None))
+
+    def _passes_lock(self, account_name):
+        if not self.locked:
+            return True
+        if not account_name:
+            return False
+        if accounts.is_primary(account_name):
+            return True                       # never shut the owner out
+        if self.locked == "accounts":
+            return True
+        return accounts._key(account_name) in self.allowed
+
     def limits(self):
         return {"limit": self.limit(), "slots": self.slots,
-                "locked": self.locked, "here": len(self.guests)}
+                "locked": self.locked, "allowed": list(self.allowed),
+                "here": len(self.guests)}
 
     def may_join(self, account, resuming=False):
         """Whether somebody with a valid invite may take a slot.
@@ -1940,9 +1971,12 @@ class LiveSession:
         and then reloads their phone can still get back in, because they can
         still say who they are.
         """
-        if account is not None:
+        if account is not None and self._passes_lock(account.get("name")):
             return True, ""
         if self.locked:
+            if self.locked == "named":
+                return False, ("The owner has limited this session to certain "
+                               "accounts. Log in as one of them to join it.")
             return False, ("This session is open to named accounts only. "
                            "Log in to join it.")
         if not resuming and len(self.guests) >= self.limit():
@@ -2056,79 +2090,55 @@ class LiveSession:
                        "If the picture stays black, ask the owner to set "
                        "h264_profile to constrained-baseline."})
 
-    def settle_steam_pads(self):
-        """While a Steam game is running, exactly the clients allowed to play
-        it have a controller, and nobody else has one.
+    def warn_about_joining(self, guest):
+        """Say, when somebody joins mid-Steam-game, what that may cost.
 
-        That is the whole rule. Steam has no player ports to allot -- there is
-        no picker, no per-device profile, nothing to bind a seat number to --
-        so the only thing that decides who plays is which controllers exist
-        while the game is running. RetroArch is the opposite and is left
-        alone: it has a picker and its ports come from the profiles this
-        program writes.
+        A virtual controller appearing is a real disturbance: Steam
+        re-enumerates and may hand the game to whichever device it likes, and
+        a game that has already bound its player does not give it back without
+        being restarted.
 
-        Kept true continuously rather than only at launch. Every earlier
-        version of this ran once, at one moment, and the moment was always
-        wrong for something: a client joining afterwards, an account logging
-        in, a permission granted, somebody leaving. This is called from all of
-        them, and it is cheap -- a set of small integers and, at most, one
-        device made or unplugged.
-
-        Deciding by capability rather than by the hold, because the hold is
-        about what is on the screen this instant and this runs while that is
-        changing. Asking it at launch, with the menu still in front, produced
-        "0 plugged in, 3 unplugged" and a game with no controls at all.
+        This was fought with code for a while -- withholding devices, then
+        unplugging and replugging them as permissions changed -- and it was
+        four mechanisms deep, none of them provable from the outside, and
+        between them they left a game with no controls at all. Saying it
+        plainly and giving the owner a lock is a smaller, truer answer than
+        juggling devices under a running game.
         """
-        if self.pads is None or not self.steam_now:
-            return []
-        want = "steam:" + self.steam_now
-        allowed = {g.pad_index for g in self.guests.values() if g.can(want)}
-
-        made = []
-        for guest in self.guests.values():
-            if guest.pad_index in allowed and \
-                    self.pads.existing(guest.pad_index) is None:
-                guest.pad                       # plug their controller in
-                made.append(guest.pad_index)
-        freed = []
-        for index, _pad in list(self.pads.live()):
-            if index not in allowed and self.pads.release(index):
-                freed.append(index)
-
-        if made or freed:
-            log.info("%s: %d controller(s) plugged in (%s), %d unplugged (%s)",
-                     self.steam_label or "a Steam game",
-                     len(made), ", ".join(str(i + 1) for i in made) or "-",
-                     len(freed), ", ".join(str(i + 1) for i in freed) or "-")
-            self.publish_pad_names()
-        if not allowed:
-            log.warning("nobody here may play %s, so it has no controllers",
-                        self.steam_label or "this Steam game")
-        return freed
+        if not self.steam_now:
+            return
+        log.warning("%s joined while %s is playing. A new controller appearing "
+                    "can make Steam hand the game to it, and a game that has "
+                    "bound its player will not give it back without being "
+                    "restarted. Lock the session if you do not want this.",
+                    guest.label, self.steam_label or "a Steam game")
+        for other in list(self.guests.values()):
+            if other is guest or not other.can("lock"):
+                continue
+            self.notify_one(other, {
+                "t": "note",
+                "message": "%s joined while %s is playing. Steam may hand the "
+                           "game to their controller. You can lock the session "
+                           "from the Account tab." % (
+                               guest.label, self.steam_label or "a Steam game")})
 
     def plug_in(self, guest):
-        """Give this guest a device, unless nothing they send could reach it.
+        """Give this guest their controller.
 
-        A virtual pad appearing is not free. Steam re-enumerates controllers
-        the moment one arrives and hands the game to whichever it likes, so a
-        guest joining took the controller out of the hands of somebody already
-        playing -- which is what "it works until another client joins" was.
+        This was conditional for a while: a guest held out of the Steam game
+        that was playing got a seat and no device, so that Steam would not see
+        a controller appear and hand the game to it. Around that grew a second
+        rule that unplugged and replugged devices whenever the answer changed.
 
-        A guest held out of the Steam game that is playing has nothing to send
-        anyway: feed() drops their frames before they reach a pad. So they get
-        a seat, a name and a place in the list, and no device until there is
-        something for it to do -- which the input path makes for them on the
-        first frame that gets through, the moment they are allowed one.
+        All of it is gone. It was four mechanisms deep, none of them provable
+        from the outside, and between them they left Broforce with no controls
+        at all -- which is worse than the problem they were for. A device
+        appearing mid-game is a real disturbance to Steam and the honest answer is
+        to say so and let the owner shut the door, not to juggle devices under
+        a running game and hope.
 
-        Seats have always been cheap for a related reason, written down in
-        PadSet: a device that exists takes a player port whether or not
-        anybody is holding it.
+        See warn_about_joining and the session lock.
         """
-        if self.steam_now and not guest.can("steam:" + self.steam_now):
-            log.info("%s gets a seat and no controller for now: %s is a Steam "
-                     "game they have not been given", guest.label,
-                     self.steam_label or "what is playing")
-            return None
         return guest.pad
 
     def steam_here(self, appid, label="", starting=False, polled=False):
@@ -2180,7 +2190,6 @@ class LiveSession:
                      "; " + label if label else "")
         elif was:
             log.info("the Steam game has gone")
-        self.settle_steam_pads()
         self._tell_about_the_hold()
 
     def hold_state(self, guest):

@@ -220,6 +220,30 @@ def all_accounts():
     return _read()["accounts"]
 
 
+def primary():
+    """The account that can never be shut out of a session.
+
+    The oldest one holding `grant`, which in practice is the first account
+    made -- `admin add` gives the first one grant, and later ones start with
+    nothing. Derived rather than stored, so there is nothing to migrate and
+    nothing that can disagree with the file.
+
+    It exists because a lock is a door and somebody has to keep a key. An
+    owner who can shut themselves out of their own television, from a phone,
+    at the moment they most want back in, has been handed a footgun rather
+    than a control.
+    """
+    holders = [a for a in all_accounts() if "grant" in (a.get("can") or [])]
+    if not holders:
+        return None
+    return sorted(holders, key=lambda a: (a.get("added") or 0, a.get("name") or ""))[0]
+
+
+def is_primary(name):
+    first = primary()
+    return bool(first and _key(first.get("name")) == _key(name))
+
+
 def find(name):
     wanted = _key(name)
     if not wanted:
