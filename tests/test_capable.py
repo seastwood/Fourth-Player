@@ -411,6 +411,9 @@ game_row = {"id": "b", "label": "Broforce", "system": "Steam",
 
 owner = FakeGuest(0, "owner", can=["grant", "steam"])
 owner.account = "seth"
+# Set at login in the real thing, and read on the input path, which is why it
+# is a remembered flag rather than a look in the accounts file.
+owner.primary = True
 player = FakeGuest(1, "player", can=["steam"])
 player.account = "mate"
 nobody = FakeGuest(2, "nobody")
