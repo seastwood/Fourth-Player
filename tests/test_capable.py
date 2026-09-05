@@ -173,6 +173,49 @@ session.driver = watching.slot
 check(not session.holding(watching)[0], "including the driver exemption")
 
 print("\nthe hold lets go of the buttons of everybody it holds")
+
+
+class FakePad:
+    def __init__(self, index):
+        self.index = index
+        self.released = 0
+
+    def release_all(self):
+        self.released += 1
+
+    def forget(self, sender):
+        pass
+
+    def adopt_new_sender(self, sender=None):
+        pass
+
+
+class FakePads:
+    """Enough of a PadSet for the hold to let go of buttons on it."""
+    def __init__(self, count):
+        self.pads = [FakePad(i) for i in range(count)]
+
+    def __len__(self):
+        return len(self.pads)
+
+    def __getitem__(self, index):
+        if self.pads[index] is None:
+            self.pads[index] = FakePad(index)
+        return self.pads[index]
+
+    def existing(self, index):
+        return self.pads[index] if 0 <= index < len(self.pads) else None
+
+    def live(self):
+        return [(i, p) for i, p in enumerate(self.pads) if p is not None]
+
+    def release(self, index):
+        if 0 <= index < len(self.pads) and self.pads[index] is not None:
+            self.pads[index] = None
+            return True
+        return False
+
+
 # A menu in front is one answer for everybody, which is what it always was.
 session, loop = make_session()
 session.notify = lambda message: None
