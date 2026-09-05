@@ -284,8 +284,11 @@ class GuestConnection:
         # the dead-man switch releases pads for *silence* -- reaping somebody
         # for being held is the wrong answer to the right observation.
         self.last_input = time.monotonic()
-        if (self.session is not None and self.session.input_held
-                and self.session.driver != self.slot):
+        # One place decides whether this guest's frames reach the television,
+        # and the same call is what tells their page why. Two answers computed
+        # separately is exactly how a page ends up saying "controls paused"
+        # while the controller works, or the reverse.
+        if self.session is not None and self.session.holding(self)[0]:
             self.held_frames += 1
             return
         # Named, so a shared pad can tell its senders' frames apart
@@ -302,6 +305,31 @@ class LiveSession:
     driver = None
     # The row this session last put on the television, for "start it again".
     last_started = None
+    # Where messages to guests go, set by the server. Class-level defaults for
+    # the same reason the guest connection has them: a session built without
+    # __init__ -- which is how several tests make a minimal one -- is still
+    # asked to tell somebody something, and notify_one falls back to the
+    # broadcast when there is no per-guest route.
+    on_notice = None
+    on_notice_one = None
+    # The Steam game in front, by appid, or "" for none. Steam is not an
+    # emulator: it is a desktop application signed into somebody's account,
+    # with a shop, a library and a settings screen a button press away, which
+    # is why a guest needs to have been given a Steam game before their
+    # controller reaches one. Kept as a plain value because the input path
+    # asks it once per frame per guest, which is no place for a subprocess.
+    steam_now = ""
+    steam_label = ""
+    # How many guests may be connected at once, and whether anybody without an
+    # account may be one of them. Both are the owner narrowing a session that
+    # is already open, rather than settings for the next one -- "there are too
+    # many people in this" and "everybody out but me" are things you want to
+    # say now, from the phone in your hand.
+    #
+    # None means "as many as there are slots", which is what it has always
+    # been.
+    max_guests = None
+    locked = False
 
     def __init__(self, cfg, loop, now=time.monotonic):
         self.cfg = cfg
@@ -1079,8 +1107,13 @@ class LiveSession:
                      if row and not playing else None),
         }
 
-    def people(self):
+    def people(self, asker=None):
         """Who is in the room, for the guests' own list of each other.
+
+        `asker` is the guest it is being drawn for. Account names are in it
+        only for somebody holding `grant`, who is the one person with a reason
+        to see them -- to everybody else there is no list of accounts, no hint
+        that an admin exists, and nothing to tap but their own row.
 
         Deliberately narrower than roster(). That one is for the person who
         owns the television and may say anything; this goes to everybody, so
@@ -1124,6 +1157,9 @@ class LiveSession:
                 # somebody asks, and this is the answer to it.
                 "held": g.held_frames,
             })
+            if asker is not None and asker.can("grant") and g.account:
+                rows[-1]["account"] = g.account
+                rows[-1]["can"] = list(g.capabilities)
         return rows
 
     def set_health(self, guest, message):
@@ -1146,7 +1182,15 @@ class LiveSession:
                         "fps": number("fps", 0, 240)}
 
     def publish_people(self):
-        self.notify({"t": "people", "people": self.people()})
+        """The list, to each guest, drawn for them.
+
+        Per guest rather than broadcast, because it is not the same list for
+        everybody any more: an account holding `grant` sees who else is logged
+        in, and nobody else sees that such a thing exists.
+        """
+        for guest in list(self.guests.values()):
+            self.notify_one(guest, {"t": "people",
+                                    "people": self.people(asker=guest)})
 
     def roster(self):
         rows = []
@@ -1228,12 +1272,53 @@ class LiveSession:
         self.notify({"t": "launchpolicy", **self.launch_state()})
         return policy
 
+    def may_start(self, guest, row):
+        """Whether this guest may start this row.
+
+        Only Steam rows ask. An emulator game stays open to whoever is in the
+        session -- that is the entire point of the thing, and a ROM in
+        RetroArch cannot wander into anybody's Steam account.
+        """
+        if row is None:
+            return True
+        if row.get("kind") != "steam":
+            return True
+        return guest is not None and guest.can("steam:" + str(row.get("appid") or ""))
+
+    def listing_for(self, guest):
+        """The catalogue as one guest may see it.
+
+        A Steam game they have not been given is left out rather than shown
+        and refused. This program already takes that line elsewhere -- there
+        is no point offering a button that can only ever say no -- and a list
+        that mentions a game before refusing it is worse than one that never
+        did.
+        """
+        # Asked of the full row, not of the listed one. listing() is what the
+        # page gets and deliberately carries no paths, cores, kinds or appids
+        # -- so asking it whether a game is a Steam game got None every time,
+        # and a filter that never filtered. The id is the one thing both
+        # halves share, so the question goes to the row `find` would return:
+        # the listing and the launch check then cannot disagree about what a
+        # game is, which is the only way this stays right.
+        full = {row["id"]: row for row in self.catalogue.rows()}
+        return [row for row in self.catalogue.listing()
+                if self.may_start(guest, full.get(row["id"], row))]
+
     async def request_launch(self, guest, game_id, resume=False):
         """A guest has asked for a game. Returns what to tell them."""
         if self.launch_policy == "off":
             return {"ok": False, "error": "The owner has not turned on starting "
                                           "games from here."}
         row = self.catalogue.find(game_id)
+        if row is not None and not self.may_start(guest, row):
+            # Hidden from their list, so the honest answer to naming its id
+            # anyway is the answer for an id that does not exist. Checked here
+            # and not only in the listing: leaving a game out of what the page
+            # draws is a courtesy, and this is the part that enforces it.
+            log.info("%s asked for %s, which they have not been given",
+                     getattr(guest, "label", "a guest"), row["label"])
+            row = None
         if row is None:
             # Either a stale page or somebody inventing ids. Same answer.
             return {"ok": False, "error": "That game is not on this box."}
@@ -1322,7 +1407,7 @@ class LiveSession:
         Gated as starting one is, and it is a start: what it replaces is the
         game somebody is in the middle of.
         """
-        if self.launch_policy == "off":
+        if self.launch_policy == "off" and not (guest and guest.can("stop")):
             return {"ok": False, "error": "The owner has not turned on "
                                           "starting and stopping games from "
                                           "here."}
@@ -1352,7 +1437,13 @@ class LiveSession:
         save step to get wrong, and a game that ignores TERM long enough is
         killed by the same path that has always killed it.
         """
-        if self.launch_policy == "off":
+        # `stop` only ever adds. An account given it may end a game the
+        # launch policy would have refused or put to the owner; an account
+        # without it is exactly where it was before accounts existed. That is
+        # the rule for every capability here: the web hands out powers, and
+        # never takes one away from somebody who already had it.
+        stopper = bool(guest and guest.can("stop"))
+        if self.launch_policy == "off" and not stopper:
             return {"ok": False, "error": "The owner has not turned on "
                                           "starting and stopping games from "
                                           "here."}
@@ -1360,7 +1451,7 @@ class LiveSession:
         if not playing:
             return {"ok": False, "error": "Nothing is playing."}
 
-        if self.launch_policy == "approve":
+        if self.launch_policy == "approve" and not stopper:
             if self.pending:
                 return {"ok": False,
                         "error": "Someone else has just asked. Wait for that "
@@ -1649,6 +1740,142 @@ class LiveSession:
             self.driver = None
             self.driver_shell = ""
 
+    # -- how many, and who ---------------------------------------------------
+    #
+    # The rule that shapes all of this: the owner must not be able to shut
+    # themselves out from their own phone. Every limit below is written so
+    # that somebody logged in to an account can always get back in, and the
+    # console can always undo it besides.
+
+    def limit(self):
+        """How many guests may be connected. Never more than there are slots."""
+        if self.max_guests is None:
+            return self.slots
+        return max(1, min(int(self.max_guests), self.slots))
+
+    def accounts_here(self):
+        return [g for g in self.guests.values() if g.account]
+
+    def set_limit(self, count, by=None):
+        """Set how many may be connected at once. Returns what it became.
+
+        Never below one, never below the number of logged-in guests already
+        here, and never above the slots the session actually has. Lowering it
+        does not throw anybody out: somebody mid-game is not a queue to be
+        trimmed, and the number takes effect as people leave.
+        """
+        floor = max(1, len(self.accounts_here()))
+        want = max(floor, min(int(count), self.slots))
+        if want == self.limit():
+            return want
+        self.max_guests = want
+        log.info("%s set the connection limit to %d (%d here)",
+                 getattr(by, "label", "the owner"), want, len(self.guests))
+        self.notify({"t": "limits", **self.limits()})
+        return want
+
+    def set_locked(self, on, by=None):
+        """Shut the session to everybody but named accounts, or open it again.
+
+        Turning it on removes the guests who are not logged in -- that is what
+        "everybody else out" means -- and refuses new ones unless they log in
+        as they join. It never removes a guest who is logged in, which
+        includes whoever asked for it.
+        """
+        on = bool(on)
+        if on == self.locked:
+            return self.locked
+        self.locked = on
+        if on:
+            for guest in list(self.guests.values()):
+                if guest.account or guest is by:
+                    continue
+                self.drop(guest.slot,
+                          reason="the owner locked this session to accounts")
+            log.info("%s locked the session to named accounts",
+                     getattr(by, "label", "the owner"))
+        else:
+            log.info("%s unlocked the session", getattr(by, "label", "the owner"))
+        self.notify({"t": "limits", **self.limits()})
+        return self.locked
+
+    def limits(self):
+        return {"limit": self.limit(), "slots": self.slots,
+                "locked": self.locked, "here": len(self.guests)}
+
+    def may_join(self, account):
+        """Whether somebody with a valid invite may take a slot.
+
+        `account` is whoever they proved they are as they joined, or None.
+
+        A logged-in account is held back only by the slots that physically
+        exist, never by the limit or the lock. That is the whole of the
+        never-shut-yourself-out guarantee: an owner who sets the limit to one
+        and then reloads their phone can still get back in, because they can
+        still say who they are.
+        """
+        if account is not None:
+            return True, ""
+        if self.locked:
+            return False, ("This session is open to named accounts only. "
+                           "Log in to join it.")
+        if len(self.guests) >= self.limit():
+            return False, "Every player slot is taken."
+        return True, ""
+
+    def holding(self, guest):
+        """Whether this guest's frames stop at the television, and why.
+
+        The only answer to that question. feed() asks it to decide, and
+        hold_state asks it to explain, so the controller and the notice on the
+        phone can never disagree.
+        """
+        if self.steam_now and not guest.can("steam:" + self.steam_now):
+            # Deliberately before the driver exemption rather than after it.
+            # Being handed the screen is permission to drive what is in front;
+            # it is not permission to be in somebody's Steam account, and the
+            # console owner who wants that grants the game.
+            return True, ("%s is a Steam game, and you have not been given it."
+                          % (self.steam_label or "What is playing"))
+        if self.input_held and self.driver != guest.slot:
+            return True, ""
+        return False, ""
+
+    def _steam_in_front(self):
+        """(appid, label) for the Steam game running, or ("", "").
+
+        Runs in a thread: it asks the process table, and the caller is the
+        loop that also serves everybody's video.
+        """
+        try:
+            appid = launcher.steam_game_now() or ""
+        except Exception:
+            return ("", "")
+        if not appid:
+            return ("", "")
+        for row in self.catalogue.rows():
+            if str(row.get("appid") or "") == str(appid):
+                return (str(appid), row.get("label") or "")
+        # Playing and not on the list guests are offered -- somebody started
+        # it at the television. Still a Steam game, and still nobody's to
+        # drive without being given it.
+        return (str(appid), "")
+
+    def steam_here(self, appid, label=""):
+        """What Steam is running now. Tells anybody whose answer changed."""
+        appid = str(appid or "")
+        if appid == self.steam_now:
+            return
+        was = self.steam_now
+        self.steam_now = appid
+        self.steam_label = label
+        if appid:
+            log.info("a Steam game is in front (appid %s%s)", appid,
+                     "; " + label if label else "")
+        elif was:
+            log.info("the Steam game has gone")
+        self._tell_about_the_hold()
+
     def hold_state(self, guest):
         """Where one guest stands on the hold, right now.
 
@@ -1661,8 +1888,13 @@ class LiveSession:
         """
         driving = next((g.label for g in self.guests.values()
                         if g.slot == self.driver), "")
-        return {"held": self.input_held, "why": self.hold_reason,
-                "driving": guest.slot == self.driver,
+        held, because = self.holding(guest)
+        return {"held": held, "why": self.hold_reason,
+                # The host's own words for why, when it has better ones than
+                # the page's "the television is in a menu" -- which is right
+                # for a menu and wrong for a Steam game nobody gave them.
+                "because": because,
+                "driving": guest.slot == self.driver and not because,
                 "driver_label": "" if guest.slot == self.driver else driving}
 
     def _tell_about_the_hold(self):
@@ -1761,6 +1993,15 @@ class LiveSession:
                         self._hold_input(held, why)
                     except Exception:
                         log.exception("could not read what is on the screen")
+                    # And which Steam game, if any, is in front. Its own try:
+                    # a fault asking Steam must not take the screen watcher,
+                    # the dead-man switch and the launch deadline with it.
+                    try:
+                        appid = await self.loop.run_in_executor(
+                            None, self._steam_in_front)
+                        self.steam_here(*appid)
+                    except Exception:
+                        log.exception("could not tell whether Steam is playing")
                 # Roughly every ten seconds, make sure the thread that owns the
                 # pipeline is still answering. A wedge is otherwise invisible
                 # until somebody tries to join and is refused.

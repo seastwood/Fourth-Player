@@ -1,0 +1,5 @@
+# Installed with `npm install puppeteer-core` when somebody wants to run the
+# browser suite. Nothing here ships to the console.
+node_modules/
+package-lock.json
+package.json

@@ -201,7 +201,23 @@ el("pin-form").addEventListener("submit", (event) => {
   // Asking somebody to read the PIN off the television a second time to seat
   // the person next to them would be a poor answer to "make it simple".
   sessionPin = pin;
-  connect({ t: "join", token, pin, name: who, codecs: videoCodecs() });
+  const knock = { t: "join", token, pin, name: who, codecs: videoCodecs() };
+  // Said at the door rather than once inside. A session locked to accounts
+  // admits nobody who has not named themselves, so a login you could only
+  // reach from within would be a door the owner had shut behind them.
+  const user = (el("gate-user").value || "").trim();
+  const pass = el("gate-pass").value || "";
+  if (user && pass) {
+    knock.login = { name: user, password: pass,
+                    code: (el("gate-code").value || "").trim() };
+    el("gate-pass").value = "";
+    el("gate-code").value = "";
+  } else if (savedDevice()) {
+    // Quietly, and only worth anything if the host still remembers it. It
+    // restores who somebody is and nothing that lands on other people.
+    knock.device = savedDevice();
+  }
+  connect(knock);
 });
 
 function myName() {
@@ -409,6 +425,11 @@ function connect(hello) {
       case "arrived":       return somebodyArrived(message);
       case "pads":          return seatsFrom(message);
       case "hold":          return holdInput(message);
+      case "loggedin":      return loggedIn(message);
+      case "loggedout":     return loggedOut();
+      case "granted":       return granted(message);
+      case "limits":        return limitsFrom(message);
+      case "reshared":      return reshared(message);
       case "people":        return peopleFrom(message);
       case "chat":          return heardChat(message);
       case "chatlog":       return (message.messages || []).forEach(heardChat);
@@ -515,6 +536,15 @@ function backToGate() {
 const HOPELESS = ["credential", "closed"];
 
 function onError(message) {
+  if (message.reason === "shut") {
+    // The one refusal with something to do about it: say who you are.
+    const box = el("gate-account");
+    if (box) box.hidden = false;
+    const why = el("gate-account-why");
+    if (why && message.message) why.textContent = message.message;
+    askForPin(message.message);
+    return;
+  }
   if (!gate.hidden) {
     askForPin(message.message);
     return;
@@ -568,6 +598,13 @@ function joined(message) {
   try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
   seatsFrom(message.pads);
+  // Who they proved they were at the door, if they did. Before the hold is
+  // painted below: whether their controller reaches a Steam game depends on
+  // this, and a page told it was held and only then told it was an account
+  // would flash the wrong answer.
+  if (message.account) loggedIn(message.account);
+  else loggedOut();
+  if (message.limits) limitsFrom(message.limits);
   // Before the early return below, which is the case this was reported in: a
   // page whose stream never stopped comes back through that branch, and it
   // was keeping whatever notice it had when it went away. The hold is
@@ -2559,7 +2596,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-04x";
+const CLIENT_BUILD = "2026-09-05a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3064,10 +3101,18 @@ function holdInput(message) {
     const who = message.driver_label
       ? escapeText(message.driver_label) + " is driving it."
       : "";
+    // The host's own words when it has better ones. "The television is in a
+    // menu" is right for a menu and wrong for a Steam game nobody gave them,
+    // and being told the real reason is the difference between a controller
+    // that seems broken and one that is waiting on a permission.
+    const because = message.because
+      ? escapeText(message.because) + " Ask whoever set this up to give it to "
+        + "you, and your controller works here as it always did."
+      : "The television is in a menu rather than in a game, and controllers "
+        + "here only reach the game. " + who
+        + " They come back the moment something is playing.";
     showNotice("<p><strong>Controls paused</strong></p>"
-      + '<p class="footnote">The television is in a menu rather than in a '
-      + "game, and controllers here only reach the game. " + who
-      + " They come back the moment something is playing.</p>", false);
+      + '<p class="footnote">' + because + "</p>", false);
   } else if (!el("notice").hidden
              && (lastNotice.includes("Controls paused")
                  || lastNotice.includes("You are driving"))) {
@@ -3127,6 +3172,318 @@ let people = [];
 let personOpen = null;               // slot, or null for nobody
 let peopleTimer = 0;
 const PEOPLE_EVERY_MS = 5000;
+
+/* ---- accounts, on the page ----------------------------------------------
+ *
+ * Everything here decides what to *draw*. Not one of these checks stops
+ * anything: the host asks the same questions again about every action, and a
+ * guest who edits this file gets a page with more buttons on it and exactly
+ * the same answers from the other end.
+ *
+ * The login lives behind your own name in the people list. That is where
+ * names already are, it is the one row somebody would think to tap about
+ * themselves, and it means a guest who has no account never sees a login at
+ * all -- no list of names, no hint that an admin exists.
+ */
+const DEVICE_KEY = "fp-device";
+
+let account = null;            // {name, can: [...], fresh} or null
+let sessionLimits = null;      // {limit, slots, locked, here}
+let loginOpen = false;
+
+function may(capability) {
+  if (!account) return false;
+  const can = account.can || [];
+  if (can.includes(capability)) return true;
+  // Plain "steam" covers every game on the list, the same rule the host uses.
+  return capability.indexOf("steam:") === 0 && can.includes("steam");
+}
+
+/* Anything in the Session tab. The tab itself is not drawn without one of
+   these, so an account given only a Steam game never sees an owner's panel. */
+function mayAnything() {
+  return ["slots", "lock", "kick", "reshare", "grant"].some(may);
+}
+
+function savedDevice() {
+  try { return localStorage.getItem(DEVICE_KEY) || ""; } catch (_) { return ""; }
+}
+
+function rememberDevice(token) {
+  try {
+    if (token) localStorage.setItem(DEVICE_KEY, token);
+    else localStorage.removeItem(DEVICE_KEY);
+  } catch (_) {}
+}
+
+function loggedIn(message) {
+  const first = !account;
+  account = { name: message.name, can: message.can || [],
+              fresh: message.fresh !== false };
+  if (message.device) rememberDevice(message.device);
+  loginOpen = false;
+  paintPeople();
+  paintAccount();
+  if (first) {
+    showToast("Logged in as " + message.name);
+    // The catalogue is different for an account -- a Steam game they have
+    // been given was not in the list they were sent before they said who
+    // they were.
+    send({ t: "games" });
+  }
+}
+
+function loggedOut() {
+  account = null;
+  loginOpen = false;
+  paintPeople();
+  paintAccount();
+}
+
+function granted(message) {
+  showToast("Saved what " + message.name + " may do");
+  send({ t: "people" });
+}
+
+function limitsFrom(message) {
+  sessionLimits = message;
+  paintSession();
+}
+
+function reshared(message) {
+  if (message.url) {
+    // Shown rather than toasted: it is the thing they came here to get, and
+    // a toast that disappears is no way to hand somebody a PIN.
+    const box = el("reshare-new");
+    if (box) {
+      box.textContent = "New link: " + message.url + "  ·  PIN: " + message.pin;
+      box.hidden = false;
+    }
+  }
+  showToast("New link and PIN");
+}
+
+/* What the page draws once it knows who somebody is. */
+function paintAccount() {
+  const pick = el("tab-session-pick");
+  if (pick) pick.hidden = !mayAnything();
+  if (!mayAnything() && !el("tab-session").hidden) showTab("controls");
+  paintSession();
+}
+
+/* The login sheet, moved into your own row in the people list.
+
+   The markup is in index.html; this only decides which of its three states is
+   showing and where it sits. Moving one element rather than building one is
+   what keeps the ids in the file that has the ids in it. */
+function ownRow(box) {
+  const sheet = el("login-sheet");
+  if (!sheet) return;
+  box.appendChild(sheet);
+  sheet.hidden = false;
+  el("login-in").hidden = !account;
+  el("login-open").hidden = !!account || loginOpen;
+  el("login-form").hidden = !!account || !loginOpen;
+  if (account) {
+    el("login-as").textContent = "Logged in as " + account.name;
+    el("login-can").textContent = (account.can || []).length
+      ? "You may: " + account.can.map(saidCapability).join(", ")
+      : "This account has not been given anything yet.";
+    el("login-remembered").hidden = account.fresh !== false;
+  }
+}
+
+/* Said in what it does. "reshare" is a word from this program's insides. */
+function saidCapability(capability) {
+  const said = GRANTABLE.find((row) => row[0] === capability);
+  // Only the first letter, not the whole phrase: lowercasing all of it turned
+  // "a new link and PIN" into "a new link and pin".
+  if (said) return said[1].charAt(0).toLowerCase() + said[1].slice(1);
+  if (capability.indexOf("steam:") === 0) return "play one Steam game";
+  return capability;
+}
+
+function wireLogin() {
+  const open = el("login-open");
+  if (open) open.addEventListener("click", () => { loginOpen = true; paintPeople(); });
+  const cancel = el("login-cancel");
+  if (cancel) cancel.addEventListener("click", () => { loginOpen = false; paintPeople(); });
+  const out = el("login-out");
+  if (out) {
+    out.addEventListener("click", () => {
+      // Forgotten here as well as at the host: a device this page stops
+      // trusting should not be quietly re-offered on the next join.
+      rememberDevice("");
+      send({ t: "logout" });
+    });
+  }
+  const form = el("login-form");
+  if (form) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      send({ t: "login",
+             name: (el("login-user").value || "").trim(),
+             password: el("login-pass").value || "",
+             code: (el("login-code").value || "").trim(),
+             remember: !!el("login-remember").checked });
+      // Cleared whatever the answer is. A password left sitting in a field on
+      // a phone that gets handed round is the thing this was all for.
+      el("login-pass").value = "";
+      el("login-code").value = "";
+    });
+  }
+}
+
+/* ---- the owner's panel --------------------------------------------------- */
+
+function paintSession() {
+  const panel = el("tab-session");
+  if (!panel || panel.hidden) return;
+  const who = el("session-who");
+  if (who) {
+    who.textContent = account
+      ? "Logged in as " + account.name + ". " + peopleHere()
+      : "";
+  }
+  show("session-limit", may("slots"));
+  show("session-lock", may("lock"));
+  show("session-reshare", may("reshare"));
+  show("session-kick", may("kick"));
+  show("session-grant", may("grant"));
+
+  const count = el("limit-count");
+  if (count && sessionLimits) {
+    count.max = sessionLimits.slots || 8;
+    if (document.activeElement !== count) count.value = sessionLimits.limit;
+  }
+  const lock = el("lock-toggle");
+  if (lock && sessionLimits) {
+    lock.textContent = sessionLimits.locked
+      ? "Open it to everyone again" : "Lock to accounts";
+  }
+  paintKickList();
+  paintGrantList();
+}
+
+function wireSession() {
+  const set = el("limit-set");
+  if (set) {
+    set.addEventListener("click", () => {
+      const count = parseInt(el("limit-count").value, 10);
+      if (count > 0) send({ t: "limit", count });
+    });
+  }
+  const lock = el("lock-toggle");
+  if (lock) {
+    lock.addEventListener("click", () => {
+      const on = !(sessionLimits && sessionLimits.locked);
+      if (on && !window.confirm("Lock this session to named accounts? "
+                                + "Everybody who is not logged in is removed. "
+                                + "You keep your place.")) return;
+      send({ t: "lock", on });
+    });
+  }
+  const share = el("reshare-now");
+  if (share) {
+    share.addEventListener("click", () => {
+      if (!window.confirm("Give out a new link and PIN? The ones you sent "
+                          + "stop working. Everybody here keeps their place.")) return;
+      send({ t: "reshare" });
+    });
+  }
+}
+
+function peopleHere() {
+  if (!sessionLimits) return "";
+  const here = sessionLimits.here || 0;
+  return here + (here === 1 ? " person" : " people") + " connected, "
+    + "up to " + sessionLimits.limit + ".";
+}
+
+function show(id, on) {
+  const box = el(id);
+  if (box) box.hidden = !on;
+}
+
+function paintKickList() {
+  const list = el("kick-list");
+  if (!list || !may("kick")) return;
+  list.innerHTML = "";
+  people.filter((person) => person.slot !== mySlot).forEach((person) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chat-person-chip";
+    chip.textContent = "Remove " + person.name;
+    chip.addEventListener("click", () => {
+      // Asked, because it happens to somebody else and cannot be undone: the
+      // link they were sent stops working with them.
+      if (!window.confirm("Remove " + person.name + "? Their link stops "
+                          + "working, so they cannot simply rejoin.")) return;
+      send({ t: "kick", slot: person.slot });
+    });
+    list.appendChild(chip);
+  });
+  if (!list.children.length) {
+    const empty = document.createElement("span");
+    empty.className = "browse-note";
+    empty.textContent = "Nobody else is here.";
+    list.appendChild(empty);
+  }
+}
+
+/* Who else has an account, and what they may do. The names come from the
+   people list, so this only offers to change accounts that are actually in
+   the session -- which is the only case where changing one is useful, and
+   keeps the page from ever being a directory of accounts. */
+function paintGrantList() {
+  const list = el("grant-list");
+  if (!list || !may("grant")) return;
+  list.innerHTML = "";
+  const named = people.filter((person) => person.account);
+  if (!named.length) {
+    const empty = document.createElement("p");
+    empty.className = "footnote";
+    empty.textContent = "Nobody else here is logged in to an account.";
+    list.appendChild(empty);
+    return;
+  }
+  named.forEach((person) => {
+    const row = document.createElement("div");
+    row.className = "grant-row";
+    const title = document.createElement("p");
+    title.className = "browse-note";
+    title.textContent = person.account;
+    row.appendChild(title);
+    GRANTABLE.forEach(([capability, words]) => {
+      const label = document.createElement("label");
+      label.className = "optional";
+      const tick = document.createElement("input");
+      tick.type = "checkbox";
+      tick.checked = (person.can || []).includes(capability);
+      tick.addEventListener("change", () => {
+        const now = new Set(person.can || []);
+        if (tick.checked) now.add(capability); else now.delete(capability);
+        send({ t: "grant", name: person.account, can: Array.from(now) });
+      });
+      label.appendChild(tick);
+      label.appendChild(document.createTextNode(" " + words));
+      row.appendChild(label);
+    });
+    list.appendChild(row);
+  });
+}
+
+/* Said in what they do, not in what they are called. "reshare" is a word from
+   this program's insides; "give out a new link and PIN" is the thing. */
+const GRANTABLE = [
+  ["steam", "Start and play Steam games"],
+  ["stop", "End and restart what is playing"],
+  ["kick", "Remove people"],
+  ["reshare", "Give out a new link and PIN"],
+  ["slots", "Set how many may connect"],
+  ["lock", "Lock the session to accounts"],
+  ["grant", "Change what others may do"],
+];
 
 function peopleFrom(message) {
   people = Array.isArray(message.people) ? message.people : [];
@@ -3196,6 +3553,12 @@ function paintPerson() {
   const box = el("chat-person");
   if (!box) return;
   const person = people.find((p) => p.slot === personOpen);
+  // The login sheet lives in the markup and is moved into a row, so it has to
+  // be put back out of sight when that row closes -- innerHTML = "" below
+  // would otherwise take it out of the document altogether and the next open
+  // would find nothing to move.
+  const sheet = el("login-sheet");
+  if (sheet) { sheet.hidden = true; document.body.appendChild(sheet); }
   if (!person) { box.hidden = true; box.innerHTML = ""; return; }
 
   const facts = [];
@@ -3234,6 +3597,11 @@ function paintPerson() {
     list.appendChild(dd);
   });
   box.appendChild(list);
+  // Your own row, and only yours: this is where logging in lives, because it
+  // is the one row somebody would think to tap about themselves. A guest with
+  // no account sees a "Log in" button and nothing else -- no list of names,
+  // no hint that an admin exists.
+  if (person.slot === mySlot) ownRow(box);
   box.hidden = false;
 }
 
@@ -4791,7 +5159,7 @@ function showToast(what, footnote) {
    same thing: how your own controller behaves, and what the television is
    doing. */
 function showTab(which) {
-  for (const name of ["controls", "game"]) {
+  for (const name of ["controls", "game", "session"]) {
     const panel = el("tab-" + name);
     const pick = el("tab-" + name + "-pick");
     const on = name === which;
@@ -4802,6 +5170,7 @@ function showTab(which) {
     }
   }
   if (which === "game") paintEndGame();
+  if (which === "session") paintSession();
 }
 
 function paintEndGame() {
@@ -5208,10 +5577,12 @@ if (el("continuegame")) {
   });
 }
 
-for (const name of ["controls", "game"]) {
+for (const name of ["controls", "game", "session"]) {
   const pick = el("tab-" + name + "-pick");
   if (pick) pick.addEventListener("click", () => showTab(name));
 }
+wireSession();
+wireLogin();
 
 el("browse-close").addEventListener("click", closeBrowser);
 for (const id of ("q fsystem fplayers").split(" ")) {

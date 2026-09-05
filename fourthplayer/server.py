@@ -68,7 +68,8 @@ REFUSED = "That link or PIN is not valid."
 # "locked" mean the credential was fine and waiting is the answer. The page
 # used to treat all of them alike and could not tell "your link is stale"
 # from "come back in a minute".
-ERROR_REASONS = ("credential", "closed", "full", "locked", "request", "login")
+ERROR_REASONS = ("credential", "closed", "full", "locked", "request",
+                 "login", "shut", "denied", "code")
 
 # One line for a name that does not exist, a wrong password and a wrong code
 # alike. Saying which half was wrong tells somebody guessing which half to
@@ -229,6 +230,8 @@ class Server:
                     # game was running.
                     await outbox.put({"t": "pads", "yours": guest.pad_index,
                                       **self.session.pad_state()})
+                elif kind in ("limit", "lock", "kick", "reshare", "grant"):
+                    await self._act(guest, kind, message, outbox)
                 elif kind == "login":
                     await self._login(guest, socket_, message, outbox)
                 elif kind == "logout":
@@ -239,7 +242,7 @@ class Server:
                     # numbers in it age: a guest whose connection went bad
                     # after the list was drawn still looked fine on it.
                     await outbox.put({"t": "people",
-                                      "people": self.session.people()})
+                                      "people": self.session.people(asker=guest)})
                 elif kind == "health":
                     # How their own connection is running, measured at their
                     # end -- round trip time and lost packets belong to the
@@ -283,7 +286,10 @@ class Server:
                     await outbox.put({
                         "t": "games",
                         "systems": self.session.catalogue.systems(),
-                        "games": self.session.catalogue.listing(),
+                        # What this guest may see, which is not the whole
+                        # catalogue: a Steam game they have not been given is
+                        # left out rather than shown and refused.
+                        "games": self.session.listing_for(guest),
                         **self.session.launch_state(),
                     })
                 elif kind == "launch":
@@ -342,6 +348,123 @@ class Server:
                     guest.outbox = None
                     guest.socket = None
                 log.info("%s: signalling closed, media left alone", guest.label)
+
+    # What a logged-in account may do from a phone. Every one of these is a
+    # share of a power the box already has: none of them creates an account,
+    # adds a program the machine will run, or reaches anything outside the
+    # session that is already open. That line is what keeps an admin password
+    # from being a shell.
+    ACTIONS = {"limit": "slots", "lock": "lock", "kick": "kick",
+               "reshare": "reshare", "grant": "grant"}
+
+    async def _act(self, guest, kind, message, outbox):
+        from . import accounts
+
+        capability = self.ACTIONS[kind]
+        if not guest.can(capability):
+            # Named plainly. There is no hiding it: they can see the button
+            # is not there, and somebody who edited their page to send this
+            # anyway already knows what they were reaching for.
+            await outbox.put({"t": "error", "reason": "denied",
+                              "message": "You have not been given that."})
+            return
+        if capability in accounts.NEEDS_CODE and not guest.logged_in_at:
+            # A remembered device says who somebody is. It does not stand in
+            # for being there, and these are the ones that land on other
+            # people.
+            await outbox.put({"t": "error", "reason": "code",
+                              "message": "Enter your authenticator code first."})
+            return
+
+        if kind == "limit":
+            became = self.session.set_limit(message.get("count") or 0, by=guest)
+            await outbox.put({"t": "limits", **self.session.limits(),
+                              "asked": message.get("count"), "became": became})
+            return
+        if kind == "lock":
+            self.session.set_locked(bool(message.get("on")), by=guest)
+            await outbox.put({"t": "limits", **self.session.limits()})
+            return
+        if kind == "kick":
+            slot = int(message.get("slot", -1))
+            if slot == guest.slot:
+                await outbox.put({"t": "error", "reason": "request",
+                                  "message": "That is you."})
+                return
+            if not self.session.kick(slot):
+                await outbox.put({"t": "error", "reason": "request",
+                                  "message": "Nobody is on that slot."})
+            return
+        if kind == "reshare":
+            # The link and PIN that were sent out stop working, and this guest
+            # keeps their seat: the invite is spent, the session is not. They
+            # are handed the new pair, because the reason to do this from a
+            # phone is to give somebody the new one -- or to stop somebody
+            # having the old one.
+            self.session.invite.reshare()
+            self.session.save()
+            log.warning("%s (as %s) re-shared: a new link and PIN",
+                        guest.label, guest.account)
+            token, pin = self.session.invite.clear_invite
+            await outbox.put({"t": "reshared", "url": self.join_url(token),
+                              "pin": pin})
+            return
+        if kind == "grant":
+            await self._grant(guest, message, outbox)
+
+    async def _grant(self, guest, message, outbox):
+        """Change what another account may do.
+
+        The one capability that can hand out the others, and bounded by the
+        same rule as everything else here: it can only ever share out powers
+        this box already has. It cannot make an account, cannot invent a
+        capability, and cannot add a Steam game -- all three are acts of
+        creation and all three live at the console.
+        """
+        from . import accounts
+
+        name = str(message.get("name") or "")
+        wanted = [str(c) for c in (message.get("can") or [])]
+        try:
+            for capability in wanted:
+                accounts.check_capability(capability)
+        except accounts.AccountError as exc:
+            await outbox.put({"t": "error", "reason": "request",
+                              "message": str(exc)})
+            return
+
+        target = self._safely(accounts.find, name)
+        if target is None:
+            await outbox.put({"t": "error", "reason": "request",
+                              "message": "There is no account called %r." % name})
+            return
+
+        # The same promise as the lock and the limit: no way to shut yourself
+        # out from your own phone. Taking `grant` off the only account that
+        # has it would leave a session nobody can administer without walking
+        # to the machine.
+        if ("grant" in (target.get("can") or []) and "grant" not in wanted
+                and len([a for a in self._safely(accounts.all_accounts) or []
+                         if "grant" in (a.get("can") or [])]) <= 1):
+            await outbox.put({"t": "error", "reason": "request",
+                              "message": "That is the only account that can "
+                                         "grant anything. Do it at the console."})
+            return
+
+        if self._safely(accounts.set_capabilities, name, wanted) is None:
+            await outbox.put({"t": "error", "reason": "request",
+                              "message": "That could not be saved."})
+            return
+        log.info("%s (as %s) set what %s may do: %s", guest.label, guest.account,
+                 target["name"], " ".join(sorted(set(wanted))) or "nothing")
+        # Straight to whoever is connected on that account, rather than at
+        # their next login: a permission taken away should stop working now.
+        for changed in self.session.refresh_capabilities(name):
+            self._send_one(changed, {"t": "loggedin", "name": changed.account,
+                                     "can": list(changed.capabilities),
+                                     "fresh": bool(changed.logged_in_at)})
+        await outbox.put({"t": "granted", "name": target["name"],
+                          "can": sorted(set(wanted))})
 
     async def _login(self, guest, socket_, message, outbox):
         """A named account, from a phone that is already in the session.
@@ -434,10 +557,50 @@ class Server:
         They get a seat and a pad like anybody else; what they do not get is a
         second copy of the encode down the same wire.
         """
+        from . import accounts
+
         address = self._address(socket_)
         if self.session is None or not self.session.open:
             await outbox.put({"t": "error", "reason": "closed",
                               "message": "There is no session open."})
+            return None
+
+        # Who they are, if they said as they knocked. A locked session admits
+        # nobody else, so this has to happen at the door rather than over the
+        # socket afterwards -- otherwise the only way to log in would be to be
+        # in already, and the owner would have shut themselves out.
+        account = None
+        login = message.get("login")
+        if isinstance(login, dict) and login.get("password"):
+            name = str(login.get("name") or "")[:64]
+            try:
+                self.session.login_check(address, name)
+            except invites.LockedOut as exc:
+                await outbox.put({"t": "error", "reason": "locked",
+                                  "retry_after": round(exc.seconds),
+                                  "message": f"Too many tries. Wait {round(exc.seconds)}s."})
+                return None
+            account = await self.loop.run_in_executor(
+                None, lambda: self._safely(
+                    accounts.verify, name, str(login.get("password") or ""),
+                    str(login.get("code") or "")))
+            if account is None:
+                self.session.login_failed(address, name)
+                await outbox.put({"t": "error", "reason": "login",
+                                  "message": LOGIN_REFUSED})
+                return None
+        elif message.get("device"):
+            account = await self.loop.run_in_executor(
+                None, lambda: self._safely(accounts.device_account,
+                                           str(message.get("device"))))
+
+        allowed, why = self.session.may_join(account)
+        if not allowed:
+            # "shut" rather than "full": the page has something to do about
+            # this one, which is to offer the account fields.
+            await outbox.put({"t": "error",
+                              "reason": "shut" if self.session.locked else "full",
+                              "message": why})
             return None
         try:
             if message.get("t") == "resume":
@@ -528,6 +691,17 @@ class Server:
         else:
             await self.session.attach_peer(guest, on_signal)
 
+        # They proved who they were at the door, so the connection carries it
+        # from its first moment. Done before the welcome goes out, so what the
+        # welcome says about the hold and the game list is already the answer
+        # for the account rather than for a stranger.
+        signed_in = None
+        if account is not None:
+            can = self.session.login_ok(guest, account, address,
+                                        fresh=bool(login))
+            signed_in = {"name": account["name"], "can": list(can),
+                         "fresh": bool(login)}
+
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,
             "guest": guest_token,
@@ -547,6 +721,12 @@ class Server:
             # background while a game started came back still showing
             # "Controls paused" over a picture that was plainly playing.
             "hold": self.session.hold_state(guest),
+            # How many may be here and whether it is shut to accounts, so a
+            # page can say so rather than leaving somebody guessing why their
+            # friend cannot get in.
+            "limits": self.session.limits(),
+            # Who they logged in as on the way through, if they did.
+            "account": signed_in,
         })
         return guest
 
@@ -795,6 +975,18 @@ class Server:
                     return {"ok": False, "error": "no session"}
                 return self.session.deny_launch(
                     str(request.get("reason") or "the owner said no"))
+            if command == "limit":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                if "set" in request:
+                    self.session.set_limit(int(request["set"]))
+                return self._status()
+            if command == "lock":
+                if not (self.session and self.session.open):
+                    return {"ok": False, "error": "no session"}
+                if "set" in request:
+                    self.session.set_locked(bool(request["set"]))
+                return self._status()
             if command == "kick":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
@@ -891,6 +1083,10 @@ class Server:
             "unlimited": self.session.unlimited,
             "slots": self.session.slots,
             "max_slots": self.cfg.max_slots,
+            # How many may be connected right now, and whether it is shut to
+            # named accounts. Both are about this session, not the next one.
+            "limit": self.session.limit(),
+            "locked": self.session.locked,
             "public_url": self.cfg.public_url,
             "example_url": self.join_url("EXAMPLE"),
             "require_link": self.cfg.require_link,

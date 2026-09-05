@@ -65,7 +65,13 @@ DEVICE_BYTES = 32                # 256 bits
 # Everything an account can be given. Checked on the way in, so a typo in a
 # console command is refused rather than stored and silently never matched.
 # A per-game grant is written "steam:274190" and is checked separately.
-CAPABILITIES = ("steam", "stop", "kick", "reshare", "grant")
+CAPABILITIES = ("steam", "stop", "kick", "reshare", "slots", "lock", "grant")
+
+# The ones that land on other people rather than on the screen. These ask for
+# an authenticator code at the moment they are used, even from a device that
+# is remembered -- a borrowed phone should not be able to empty somebody's
+# session, and six digits is a small price at the point of doing it.
+NEEDS_CODE = ("kick", "reshare", "lock", "grant")
 
 
 class AccountError(Exception):

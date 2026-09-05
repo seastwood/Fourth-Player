@@ -151,6 +151,18 @@ def main(argv=None):
     slots.add_argument("set", nargs="?", type=int,
                        help="omit to read the current setting")
 
+    # Both of these act on the session that is open now, rather than on the
+    # next one, because "there are too many people in this" and "everybody out
+    # but me" are things you want to say while it is happening.
+    limit = sub.add_parser(
+        "limit", help="how many may be connected to the open session")
+    limit.add_argument("set", nargs="?", type=int,
+                       help="omit to read it; never goes below the accounts here")
+    lock = sub.add_parser(
+        "lock", help="shut the open session to named accounts, or open it again")
+    lock.add_argument("set", nargs="?", choices=("on", "off"),
+                      help="omit to read it")
+
     sub.add_parser("approve", help="say yes to the waiting launch request")
     deny = sub.add_parser("deny", help="say no to the waiting launch request")
     deny.add_argument("--reason", default="the owner said no")
@@ -275,6 +287,10 @@ def main(argv=None):
         request["set"] = args.set
     if args.command == "link" and args.set is not None:
         request["set"] = (args.set == "required")
+    if args.command == "limit" and args.set is not None:
+        request["set"] = args.set
+    if args.command == "lock" and args.set is not None:
+        request["set"] = (args.set == "on")
     if args.command == "slots" and args.set is not None:
         request["set"] = args.set
     if args.command == "start" and args.slots:
@@ -346,6 +362,12 @@ def _print_status(reply):
         print(f"  PIN:  {reply['pin']}")
     else:
         print("  link and PIN were forgotten on restart -- re-share to get new ones")
+    limit, slots = reply.get("limit"), reply.get("slots")
+    if reply.get("locked"):
+        print("  LOCKED to named accounts -- nobody else can join, and anybody "
+              "who was not logged in was removed")
+    if limit and slots and limit < slots:
+        print(f"  at most {limit} connected at once (of {slots} slots)")
     launch = reply.get("launch") or {}
     if launch:
         wording = {

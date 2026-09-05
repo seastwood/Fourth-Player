@@ -121,9 +121,17 @@ check("self.driver = slot" in named and "raise ValueError" in named,
       "a seat with nobody in it cannot be named")
 check("self.driver_shell = self.hold_reason" in named,
       "and what it is granted against is remembered with it")
-feed2 = source.split("def feed(self, data)")[1].split("\n    def ")[0]
-check("self.session.driver != self.slot" in feed2,
+# The gate itself moved out of feed() when Steam games arrived: "may this
+# guest drive" stopped being one question with one answer and became two, and
+# two places working it out separately is how a page ends up saying "controls
+# paused" over a controller that works. So there is one method, and feed()
+# calls it.
+holding = source.split("def holding(self, guest)")[1].split("\n    def ")[0]
+check("self.driver != guest.slot" in holding,
       "which is the whole of the gate: everybody is held except the one named")
+feed2 = source.split("def feed(self, data)")[1].split("\n    def ")[0]
+check("self.session.holding(self)" in feed2,
+      "and feed asks that one method rather than working it out again")
 gone = source.split("def forget_driver_if")[1].split("\n    def ")[0]
 check("self.driver = None" in gone,
       "leaving takes it away, and nobody inherits it with the seat")
@@ -135,7 +143,7 @@ check("why != self.driver_shell" in lapse,
 
 feed = source.split("def feed(self, data)")[1].split("\n    def ")[0]
 check(feed.index("self.last_input = time.monotonic()")
-      < feed.index("and self.session.input_held"),
+      < feed.index("self.session.holding(self)"),
       "presence is counted before the hold, or a held guest is reaped for "
       "silence that is not theirs")
 check("self.held_frames += 1" in feed,
