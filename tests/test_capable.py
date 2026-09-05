@@ -435,9 +435,11 @@ session.steam_here("", polled=True)
 check(session.steam_now == BROFORCE,
       "a poll that cannot see it yet does not unhold everybody")
 clock[0] += session.STEAM_STARTING + 1
-session.steam_here("", polled=True)
+for _ in range(session.STEAM_MISSES):
+    session.steam_here("", polled=True)
 check(session.steam_now == "",
-      "but once it has had long enough, the process table is the truth")
+      "but once it has had long enough, and the poll has missed it enough "
+      "times in a row, the process table is the truth")
 
 # The grace is the poll's, because the poll is the only caller whose
 # "nothing is running" is uncertain. An explicit clear is not.
