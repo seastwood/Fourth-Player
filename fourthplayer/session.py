@@ -1633,7 +1633,7 @@ class LiveSession:
                             starting=True)
             # After steam_here, which is what decides who is held, and before
             # the launch, which is when the game decides who is player one.
-            self.clear_idle_pads()
+            self.settle_pads_for_steam()
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
@@ -2046,8 +2046,10 @@ class LiveSession:
                        "If the picture stays black, ask the owner to set "
                        "h264_profile to constrained-baseline."})
 
-    def clear_idle_pads(self):
-        """Unplug the controllers nobody is going to be driving.
+    def settle_pads_for_steam(self):
+        """Make sure exactly the controllers that will be driven are plugged in.
+
+        Both halves matter, and the first version of this only did the second.
 
         A Steam game binds device to player when it starts and does not
         revisit it. So what decides who is player one is which devices exist
@@ -2065,19 +2067,40 @@ class LiveSession:
         """
         if self.pads is None:
             return []
-        driving = {g.pad_index for g in self.guests.values()
-                   if not self.holding(g)[0]}
+        players = [g for g in self.guests.values() if not self.holding(g)[0]]
+        driving = {g.pad_index for g in players}
+
+        # Plug in the ones that will be driven. Leaving this out is how a game
+        # started with no controllers at all: a guest who joined while an
+        # earlier Steam game was playing was given no device, quite rightly,
+        # and nothing gave them one back when they started a game of their own.
+        # The pad is otherwise made by their first frame, which arrives after
+        # the game has already decided who player one is -- too late.
+        made = []
+        for guest in players:
+            if self.pads.existing(guest.pad_index) is None:
+                self.plug_in(guest)
+                made.append(guest.pad_index)
+
+        # And unplug the rest. A pad belonging to a guest held out of the game,
+        # or to a seat nobody is sitting in, is a device the game may pick as
+        # player one and that nobody can drive.
         freed = []
         for index, _pad in list(self.pads.live()):
             if index in driving:
                 continue
             if self.pads.release(index):
                 freed.append(index)
-        if freed:
-            log.info("unplugged %d controller(s) nobody will be driving "
-                     "(seats %s), so the game binds to the ones that will be",
-                     len(freed), ", ".join(str(i + 1) for i in freed))
+
+        if made or freed:
+            log.info("controllers for this game: %d plugged in (%s), "
+                     "%d unplugged (%s)",
+                     len(made), ", ".join(str(i + 1) for i in made) or "-",
+                     len(freed), ", ".join(str(i + 1) for i in freed) or "-")
             self.publish_pad_names()
+        if not driving:
+            log.warning("nobody here may play this Steam game, so it starts "
+                        "with no controllers at all")
         return freed
 
     def plug_in(self, guest):

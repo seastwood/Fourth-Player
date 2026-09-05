@@ -712,7 +712,7 @@ check(1 in Pad.forgotten, "their frames were forgotten: %r" % Pad.forgotten)
 check(2 not in Pad.forgotten,
       "and the one who never had a device forgot nothing on one")
 
-print("\nstarting a Steam game unplugs the pads nobody will drive")
+print("\nstarting a Steam game settles which controllers exist")
 # A Steam game binds device to player when it starts and does not revisit it,
 # so what decides who is player one is which devices exist at that moment --
 # not who is holding them, which the game cannot see. A pad belonging to a
@@ -740,6 +740,25 @@ session.guests = {1: mine, 2: theirs}
 loop.run_until_complete(session._start_game(dict(FakeCatalogue.ROWS[1])))
 check(seats.existing(1) is not None,
       "the pad of the account that may play it survives")
+
+# The half that was missing: a player with no device yet gets one, before the
+# game starts and decides who player one is.
+seats3 = Seats()
+session3, loop3 = make_session()
+session3.notify = lambda message: None
+session3.notify_one = lambda guest, message: None
+session3.publish_pad_names = lambda: None
+session3.pads = seats3
+only = Seat(1, "the one playing", can=["steam"])
+only.pad_index = 1
+only.session = session3
+session3.guests = {1: only}
+check(seats3.existing(1) is None, "they have no controller to begin with")
+loop3.run_until_complete(session3._start_game(dict(FakeCatalogue.ROWS[1])))
+check(seats3.existing(1) is not None,
+      "and one is plugged in before the game starts, not by their first frame "
+      "after it has already chosen a player one")
+check(len(seats3.live()) == 1, "and it is the only one: %r" % seats3.live())
 check(seats.existing(2) is None,
       "the pad of the guest who may not is unplugged")
 check(seats.existing(0) is None and seats.existing(3) is None,
