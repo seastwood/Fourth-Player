@@ -1095,10 +1095,21 @@ class Server:
             log.warning("could not restore the previous session: %s", exc)
             LiveSession.forget()
             return
+        # Who may be here comes back with it. This host restarts on its own
+        # several times a day when the video encoder falls over, and every one
+        # of those quietly opened a locked session back up.
+        keep = LiveSession.saved_limits()
+        if keep.get("locked"):
+            session.locked = keep["locked"]
+            session.allowed = tuple(keep.get("allowed") or ())
+        if keep.get("max_guests"):
+            session.max_guests = keep["max_guests"]
         self.session = session
-        log.info("restored the session that was open before; %s",
+        log.info("restored the session that was open before; %s%s",
                  "no time limit" if session.unlimited
-                 else "%.0f minutes left" % (session.remaining() / 60))
+                 else "%.0f minutes left" % (session.remaining() / 60),
+                 "" if not session.locked
+                 else "; still locked to %s" % (session.locked))
 
     def _status(self):
         if not (self.session and self.session.open):

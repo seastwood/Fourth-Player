@@ -1773,8 +1773,18 @@ class LiveSession:
         try:
             os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
             tmp = STATE_PATH + ".new"
+            snapshot = self.invite.snapshot(self._now())
+            # Who may be here goes with the session it belongs to. It is a
+            # decision the owner made about this session, and it lived only in
+            # memory: every restart quietly opened the door again -- and this
+            # host restarts on its own, several times a day, when the video
+            # encoder falls over. "I set it to only me, and somehow it went
+            # back to anybody with the link" was that.
+            snapshot["locked"] = self.locked
+            snapshot["allowed"] = list(self.allowed)
+            snapshot["max_guests"] = self.max_guests
             with open(tmp, "w") as handle:
-                json.dump(self.invite.snapshot(self._now()), handle)
+                json.dump(snapshot, handle)
             os.chmod(tmp, 0o600)
             os.replace(tmp, STATE_PATH)          # never a half-written file
         except OSError as exc:
@@ -1786,6 +1796,22 @@ class LiveSession:
             os.unlink(STATE_PATH)
         except OSError:
             pass
+
+    @staticmethod
+    def saved_limits():
+        """The lock and the connection limit from a previous run.
+
+        Read separately from the invite so a snapshot written before these
+        existed still restores a session; a missing key is simply the default.
+        """
+        try:
+            with open(STATE_PATH) as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return {}
+        return {"locked": data.get("locked") or "",
+                "allowed": tuple(data.get("allowed") or ()),
+                "max_guests": data.get("max_guests")}
 
     @staticmethod
     def saved_invite(now, fixed_pin=""):
