@@ -28,16 +28,17 @@ except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
     sys.exit(0)
 
-print("a Steam game opens in the interface a controller can drive")
+print("the launch line asks for the game and nothing else")
+# `steam -gamepadui -applaunch <id>` stopped games starting at all: Steam comes
+# up in Big Picture and drops the launch -- swallowed on a cold start, read as
+# a UI-mode change when forwarded to a running client. Steam up, game not.
 row = {"kind": "steam", "appid": "274190", "label": "Broforce", "system": "Steam"}
 argv = launcher.build_argv(row)
-check(launcher.BIG_PICTURE in argv,
-      "the launch line asks for Big Picture: %r" % (argv,))
-check(argv.index(launcher.BIG_PICTURE) < argv.index("-applaunch"),
-      "before the game, which is the order Steam reads them in")
-check("-applaunch" in argv and "274190" in argv, "and still names the game")
-check(launcher.BIG_PICTURE == "-gamepadui",
-      "by the modern spelling, which is what kodi-steam settled on")
+check("-applaunch" in argv and "274190" in argv,
+      "it names the game: %r" % (argv,))
+check(launcher.BIG_PICTURE not in argv,
+      "and asks for nothing else on the same line")
+check(len(argv) == 3, "which is three words: %r" % (argv,))
 
 print("\na ROM is not affected")
 rom = {"kind": "rom", "system": "nes", "label": "Micro Mages",

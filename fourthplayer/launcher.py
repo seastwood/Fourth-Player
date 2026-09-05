@@ -484,15 +484,20 @@ def build_argv(row, resume=False):
         # There is no picker and no shader: this is somebody else's program,
         # and what it does with a controller is between them and it.
         #
-        # In Big Picture, because this is a television with a controller in
-        # front of it. Without the flag Steam comes up in its desktop window,
-        # which wants a mouse for everything the game does not cover -- a
-        # first-run prompt, a Proton dialogue, the moment between one game
-        # ending and the next -- and a guest on a phone has no mouse to give
-        # it. `-gamepadui` is the modern spelling; `-bigpicture` is the old
-        # one and is what kodi-steam settled on for the same reason.
+        # `-applaunch` on its own, and deliberately.
+        #
+        # Big Picture was added here as `steam -gamepadui -applaunch <id>` and
+        # it stopped games starting altogether. Steam comes up in Big Picture
+        # and drops the launch: on a cold start the client swallows the
+        # applaunch, and forwarded to a running client the pair is read as a
+        # UI-mode change with nothing to run. Steam is up, the game is not,
+        # and the guest is left looking at a library they cannot drive.
+        #
+        # Big Picture is still worth having on a television and wants its own
+        # step -- put Steam into it first, then ask for the game -- rather
+        # than being smuggled into the line that has one job.
         exe = shutil.which("steam") or "/usr/games/steam"
-        return [exe, BIG_PICTURE, "-applaunch", str(appid)]
+        return [exe, "-applaunch", str(appid)]
 
     argv = [PICKER]
     if not resume:
