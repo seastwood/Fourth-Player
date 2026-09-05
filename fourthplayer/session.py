@@ -176,6 +176,13 @@ class GuestConnection:
     # list out to whoever is connected on it.
     account = None
     capabilities = ()
+    # Whether this connection is logged in as the primary admin -- the oldest
+    # account holding `grant`, which is the first one `admin add` made.
+    #
+    # Worked out once, at login, and remembered. is_primary() reads the
+    # accounts file, and this is asked on the input path: once per frame, per
+    # guest. A disk read there would be a disk read thirty times a second.
+    primary = False
     # When they last presented an authenticator code. A remembered device
     # restores who somebody is; it is deliberately not enough on its own for
     # the capabilities that affect other people, and this is what those ask.
@@ -186,7 +193,16 @@ class GuestConnection:
 
         Not the page. A guest who edits their own JavaScript changes what
         their phone draws and nothing about what the host will do for them.
+
+        The primary admin may do everything. Not a shortcut: they hold
+        `grant`, so they can give themselves any of these in two taps, and
+        pretending otherwise is ceremony rather than security. Saying it here
+        means one rule instead of a special case at every gate -- including
+        the lock, which they must always be able to reach, since they are the
+        one person it can never shut out.
         """
+        if self.primary:
+            return True
         return accounts.allows({"can": list(self.capabilities)}, capability)
 
     def __init__(self, session, slot, socket, name=""):
@@ -644,6 +660,7 @@ class LiveSession:
             self.login_limiter.record_success(who)
         guest.account = account["name"]
         guest.capabilities = tuple(account.get("can") or ())
+        guest.primary = accounts.is_primary(account["name"])
         guest.logged_in_at = now if fresh else 0.0
         log.info("%s logged in as %s (may: %s)", guest.label, guest.account,
                  " ".join(guest.capabilities) or "nothing")
@@ -656,6 +673,7 @@ class LiveSession:
     def logout(self, guest):
         guest.account = None
         guest.capabilities = ()
+        guest.primary = False
         guest.logged_in_at = 0.0
         self.tell_hold(guest)
 
@@ -691,6 +709,7 @@ class LiveSession:
                     self.logout(guest)
                 else:
                     guest.capabilities = tuple(account.get("can") or ())
+                    guest.primary = accounts.is_primary(account["name"])
                     # A capability given or taken away while a Steam game is
                     # in front changes this guest's answer and nobody else's.
                     self.tell_hold(guest)
@@ -1402,7 +1421,7 @@ class LiveSession:
         if guest is None:
             return False
         if row.get("shell"):
-            return bool(guest.account and accounts.is_primary(guest.account))
+            return bool(guest.primary)
         return guest.can("steam:" + str(row.get("appid") or ""))
 
     def listing_for(self, guest):
@@ -2014,7 +2033,7 @@ class LiveSession:
             # Steam's own interface. Whoever may open it may drive it, and
             # nobody else may: the shell rule would otherwise hold even them,
             # because "steam" is exactly what the screen watcher calls this.
-            mine = bool(guest.account and accounts.is_primary(guest.account))
+            mine = bool(guest.primary)
             return (not mine), ("" if mine else
                                 "Steam's own screen is open, and only the "
                                 "owner drives that.")
@@ -2042,8 +2061,7 @@ class LiveSession:
             # cannot see Big Picture in the process table the way it sees a
             # game, so this does not lean on steam_now: whoever may open it
             # may drive it for as long as it is there.
-            if self.hold_reason in self.STEAM_SHELLS and guest.account \
-                    and accounts.is_primary(guest.account):
+            if self.hold_reason in self.STEAM_SHELLS and guest.primary:
                 return False, ""
             return True, ""
         return False, ""

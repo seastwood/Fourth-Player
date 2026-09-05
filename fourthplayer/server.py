@@ -149,8 +149,9 @@ class Server:
         # they arrived as broken images -- which is what "the steam games
         # don't have cover art" looked like once the art was found at all.
         kind = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".png": "image/png"}.get(os.path.splitext(path)[1].lower(),
-                                         "image/png")
+                ".png": "image/png",
+                ".svg": "image/svg+xml"}.get(os.path.splitext(path)[1].lower(),
+                                             "image/png")
         # Box art does not change under a given id, and a phone scrolling two
         # hundred games should not fetch each one twice.
         return HTTPStatus.OK, [("content-type", kind),

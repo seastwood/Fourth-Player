@@ -2676,7 +2676,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05h";
+const CLIENT_BUILD = "2026-09-05j";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3451,11 +3451,7 @@ function paintSession() {
     count.max = sessionLimits.slots || 8;
     if (document.activeElement !== count) count.value = sessionLimits.limit;
   }
-  const lock = el("lock-toggle");
-  if (lock && sessionLimits) {
-    lock.textContent = sessionLimits.locked
-      ? "Open it to everyone again" : "Lock to accounts";
-  }
+  paintLock();
   paintKickList();
   paintGrantList();
 }
@@ -3468,16 +3464,20 @@ function wireSession() {
       if (count > 0) send({ t: "limit", count });
     });
   }
-  const lock = el("lock-toggle");
-  if (lock) {
-    lock.addEventListener("click", () => {
-      const on = !(sessionLimits && sessionLimits.locked);
-      if (on && !window.confirm("Lock this session to named accounts? "
-                                + "Everybody who is not logged in is removed. "
-                                + "You keep your place.")) return;
-      send({ t: "lock", on });
+  [["lock-open", "", "Open this session to anybody with the link and PIN?"],
+   ["lock-accounts", "accounts",
+    "Only people logged in to an account? Everybody else is removed."],
+   ["lock-named", "named",
+    "Only you? Everybody else is removed, including other accounts."]
+  ].forEach(([id, mode, ask]) => {
+    const button = el(id);
+    if (!button) return;
+    button.addEventListener("click", () => {
+      // Asked, because it happens to other people and removes them.
+      if (mode && !window.confirm(ask)) return;
+      send({ t: "lock", mode, allowed: [] });
     });
-  }
+  });
   const share = el("reshare-now");
   if (share) {
     share.addEventListener("click", () => {
@@ -3486,6 +3486,26 @@ function wireSession() {
       send({ t: "reshare" });
     });
   }
+}
+
+/* What the lock is set to, in words, and which button is the current one.
+
+   It used to be one button that toggled, which left "I'm not sure what it's
+   set at now" as a perfectly fair thing to say about it. */
+function paintLock() {
+  const now = el("lock-now");
+  if (!now || !sessionLimits) return;
+  const mode = sessionLimits.locked || "";
+  const named = (sessionLimits.allowed || []).join(", ");
+  now.textContent =
+    mode === "accounts" ? "Only people logged in to an account."
+    : mode === "named" ? ("Only " + (named || "you") + ". You are always let in.")
+    : "Anybody with the link and PIN.";
+  [["lock-open", ""], ["lock-accounts", "accounts"],
+   ["lock-named", "named"]].forEach(([id, which]) => {
+    const button = el(id);
+    if (button) button.classList.toggle("is-on", mode === which);
+  });
 }
 
 function peopleHere() {

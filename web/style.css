@@ -2358,3 +2358,18 @@ input.name {
   word-break: break-all;
   color: var(--accent);
 }
+
+/* The three lock settings, one per line, with the current one lit. A row of
+   choices where one is already true reads better than a button that toggles
+   something you cannot see. */
+.acct-choices {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-bottom: .5rem;
+}
+.acct-choices .choice { width: 100%; display: block; margin: 0; }
+.acct-choices .choice.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

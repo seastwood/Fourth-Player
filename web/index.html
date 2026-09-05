@@ -615,11 +615,18 @@
 
       <section class="acct-block" id="session-lock" hidden>
         <h3 class="acct-title">Who may be here</h3>
-        <button id="lock-toggle" type="button" class="choice">Lock to
-          accounts</button>
-        <p class="footnote" id="lock-note">Removes everybody who is not logged
-           in and lets nobody else in. You keep your place, and you can always
-           log back in from the join screen.</p>
+        <!-- Said before it is offered. "I'm not sure what it's set at now" is
+             a fair thing to say about a button that only toggles. -->
+        <p class="acct-state" id="lock-now">Anybody with the link and PIN.</p>
+        <div class="acct-choices">
+          <button id="lock-open" type="button" class="choice">Anybody with the
+            link and PIN</button>
+          <button id="lock-accounts" type="button" class="choice">Only people
+            logged in to an account</button>
+          <button id="lock-named" type="button" class="choice">Only me</button>
+        </div>
+        <p class="footnote" id="lock-note">Anybody who no longer qualifies is
+           removed. You are always let back in, whatever this says.</p>
       </section>
 
       <section class="acct-block" id="session-reshare" hidden>

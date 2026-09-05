@@ -443,6 +443,22 @@ check(session.holding(owner)[0],
       "but Kodi's menu holds the owner like everybody else")
 session.input_held = False
 
+print("\nthe primary admin may do everything, including reach the lock")
+# They hold `grant`, so they can give themselves any of these in two taps.
+# Pretending otherwise is ceremony rather than security -- and they must
+# always be able to reach the lock, being the one person it cannot shut out.
+boss = FakeGuest(0, "boss")
+boss.account = "seth"
+boss.capabilities = ()
+boss.primary = True
+for capability in ("lock", "kick", "grant", "reshare", "slots", "stop",
+                   "steam", "steam:274190"):
+    check(boss.can(capability), "the primary may %s" % capability)
+plain = FakeGuest(1, "plain")
+plain.account = "mate"
+plain.capabilities = ("steam",)
+check(not plain.can("lock"), "and an ordinary account still may not lock")
+
 print("\nsaying who may be in the session")
 session, loop = make_session()
 admin = FakeGuest(0, "admin", can=["lock", "grant"])

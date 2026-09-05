@@ -41,24 +41,22 @@ STEAM_ROOTS = (
 BIG_PICTURE_ID = "bigpicture"
 BIG_PICTURE_LABEL = "Steam Big Picture"
 
-# Where the desktop keeps Steam's icon, best first.
-BIG_PICTURE_ICONS = (
-    "/usr/share/icons/hicolor/256x256/apps/steam.png",
-    "/usr/share/icons/hicolor/128x128/apps/steam.png",
-    "/usr/share/icons/hicolor/64x64/apps/steam.png",
-    "/usr/share/pixmaps/steam.png",
-)
+# Our own tile, drawn in this repository.
+#
+# The desktop's icon is not usable: on this console
+# /usr/share/icons/hicolor/256x256/apps/steam.png is the steam-installer
+# placeholder, which is a photograph of cardboard boxes, and it looked exactly
+# as odd in a row of box art as that sounds. Steam's own asset folder is no
+# better -- the file named library_logo_transparent.png in it is the Google
+# Chrome wordmark.
+BIG_PICTURE_ICON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "media", "steam-bigpicture.svg")
 
 
 def big_picture_icon():
-    """Steam's own icon, or None. A tiny file is a placeholder, not an icon."""
-    for path in BIG_PICTURE_ICONS:
-        try:
-            if os.path.getsize(path) > 1024:
-                return path
-        except OSError:
-            continue
-    return None
+    """The tile for Steam's own interface, or None if it has gone missing."""
+    return BIG_PICTURE_ICON if os.path.exists(BIG_PICTURE_ICON) else None
 
 
 def big_picture_row():
