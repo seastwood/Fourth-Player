@@ -1088,7 +1088,8 @@ check(holds and "Broforce" in (holds[-1].get("because") or ""),
 told.clear()
 session.login_ok(guest, {"name": "seth", "can": ["steam"]}, "10.0.0.1")
 told.clear()
-accounts.add("seth", "a-good-password", ["steam"])
+if accounts.find("seth") is None:
+    accounts.add("seth", "a-good-password", ["steam"])
 accounts.set_capabilities("seth", ["kick"])
 session.refresh_capabilities("seth")
 holds = [m for _who, m in told if m.get("t") == "hold"]
