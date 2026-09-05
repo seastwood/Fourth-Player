@@ -231,6 +231,58 @@ session.logout(guest)
 check(guest.account is None and guest.capabilities == (),
       "logging out clears it")
 
+print("\na login dies with the socket that made it")
+# The one place a connection outlives its socket: resume hands back the same
+# object so the slot, the pad and the player port survive a network switch.
+# The account was surviving with them, which is how somebody reopened their
+# page, was shown as logged out, and could still play a Steam game nobody had
+# given them -- the page had forgotten and the host had not.
+# The block above deleted the account, so build it again.
+_, secret = accounts.add("seth", "a-good-password", ["kick", "steam"])
+srv, session, loop = make_server()
+guest = FakeGuest()
+guest.slot = 2
+session.guests = {2: guest}
+login(srv, loop, guest, name="seth", password="a-good-password", code=fresh_code())
+check(guest.account == "seth", "logged in on the first socket")
+
+
+class Record:
+    slot = 2
+
+
+class Invite:
+    guests = {2: Record()}
+
+    def guest_for(self, token, now=None):
+        return Record()
+
+
+session.invite = Invite()
+session.detach_peer = lambda g: None
+session.publish_pad_names = lambda: None
+back = session.resume("a-token", object(), "")
+check(back is guest, "resume gives the same connection back")
+check(back.account is None and back.capabilities == (),
+      "and it is nobody again: %r %r" % (back.account, back.capabilities))
+check(back.logged_in_at == 0.0, "with no code to its name either")
+
+print("\nand a remembered device is how it comes back")
+srv, session, loop = make_server()
+guest = FakeGuest()
+session.guests = {1: guest}
+reply = login(srv, loop, guest, name="seth", password="a-good-password",
+              code=fresh_code(), remember=True)
+token = reply.get("device")
+check(token, "the first login hands one out")
+session.logout(guest)
+back = FakeGuest()
+reply = login(srv, loop, back, device=token)
+check(back.account == "seth",
+      "and it logs the new connection in without a password")
+check(back.logged_in_at == 0.0,
+      "though not freshly enough for the things that land on other people")
+
 print("\na damaged accounts file is a refusal, not a crash")
 srv, session, loop = make_server()
 open(accounts.STORE, "w").write("{ not json")

@@ -541,87 +541,110 @@
          something to do in it. Nothing here creates a power: it hands out,
          narrows or takes back powers this box already has, which is the line
          that keeps a password on a public page from being a shell. -->
-    <div id="tab-session" class="tab-panel" role="tabpanel" hidden>
-        <!-- Logging in, and what you may do once you have. In the markup
-             rather than built in JavaScript, which is how the rest of this page
-             works and how a typo in an id stays findable.
+    <!-- Sections with a heading each, rather than one run of buttons and
+         footnotes. Everything in here is a different kind of thing -- who you
+         are, how many may connect, who is here, what other accounts may do --
+         and read as one list they all looked equally important, which is how
+         "Log out" ended up the same size and weight as "Lock to accounts". -->
+    <div id="tab-session" class="tab-panel acct" role="tabpanel" hidden>
 
-             It says nothing about who has an account or whether an admin
-             exists: it is a name and a password box, the same one everybody
-             sees, and it is the powers behind it that differ. -->
-      <div id="login-sheet" class="chat-person-login" hidden>
-        <div id="login-in" hidden>
-          <p class="browse-note" id="login-as"></p>
-          <p class="footnote" id="login-can"></p>
-          <p class="footnote" id="login-remembered" hidden>This device is
-             remembered. Anything that affects other people will ask for your
-             authenticator code.</p>
-          <button id="login-out" type="button" class="ghost">Log out</button>
+      <!-- Logging in, and what you may do once you have. In the markup rather
+           than built in JavaScript, which is how the rest of this page works
+           and how a typo in an id stays findable.
+
+           It says nothing about who has an account or whether an admin
+           exists: it is a name and a password box, the same one everybody
+           sees, and it is the powers behind it that differ. -->
+      <section class="acct-block">
+        <h3 class="acct-title">You</h3>
+        <div id="login-sheet">
+          <div id="login-in" hidden>
+            <p class="acct-name" id="login-as"></p>
+            <div id="login-can" class="acct-can"></div>
+            <p class="footnote" id="login-remembered" hidden>This device is
+               remembered, so anything that affects other people will ask for
+               your authenticator code.</p>
+            <button id="login-out" type="button" class="ghost">Log out</button>
+          </div>
+
+          <div id="login-outside">
+            <p class="footnote">Some things are kept for named accounts:
+               starting a Steam game, removing somebody, or changing the link.
+               If you have an account, this is where you use it.</p>
+            <button id="login-open" type="button" class="choice">Log in</button>
+          </div>
+
+          <form id="login-form" autocomplete="off" hidden>
+            <label for="login-user">Account name</label>
+            <input id="login-user" name="login-user" type="text" maxlength="32"
+                   autocomplete="username" autocapitalize="off"
+                   autocorrect="off" spellcheck="false">
+            <label for="login-pass">Password</label>
+            <input id="login-pass" name="login-pass" type="password"
+                   maxlength="128" autocomplete="current-password">
+            <label for="login-code">Code from your authenticator</label>
+            <input id="login-code" name="login-code" type="text"
+                   inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                   autocomplete="one-time-code" placeholder="000000">
+            <label class="acct-tick" for="login-remember">
+              <input id="login-remember" name="login-remember" type="checkbox">
+              <span>Remember this device for a fortnight</span></label>
+            <div class="acct-row">
+              <button type="submit" class="choice">Log in</button>
+              <button id="login-cancel" type="button" class="ghost">Cancel</button>
+            </div>
+          </form>
         </div>
+      </section>
 
-        <button id="login-open" type="button" class="ghost">Log in</button>
-
-        <form id="login-form" autocomplete="off" hidden>
-          <label for="login-user">Account name</label>
-          <input id="login-user" name="login-user" type="text" maxlength="32"
-                 autocomplete="username" autocapitalize="off" autocorrect="off"
-                 spellcheck="false">
-          <label for="login-pass">Password</label>
-          <input id="login-pass" name="login-pass" type="password" maxlength="128"
-                 autocomplete="current-password">
-          <label for="login-code">Code from your authenticator</label>
-          <input id="login-code" name="login-code" type="text" inputmode="numeric"
-                 pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
-                 placeholder="000000">
-          <label class="optional" for="login-remember">
-            <input id="login-remember" name="login-remember" type="checkbox">
-            Remember this device</label>
-          <button type="submit" class="choice">Log in</button>
-          <button id="login-cancel" type="button" class="ghost">Cancel</button>
-        </form>
-      </div>
-
-      <p class="browse-note" id="session-who"></p>
-
-      <div id="session-limit" hidden>
-        <label for="limit-count">People who may be connected</label>
-        <input id="limit-count" type="number" min="1" max="8" step="1"
-               inputmode="numeric" class="name">
-        <button id="limit-set" type="button" class="choice">Set the limit</button>
+      <!-- The owner's half, and only ever drawn for an account that was given
+           something to do in it. Nothing here creates a power: it hands out,
+           narrows or takes back powers this box already has, which is the
+           line that keeps a password on a public page from being a shell. -->
+      <section class="acct-block" id="session-limit" hidden>
+        <h3 class="acct-title">How many may connect</h3>
+        <p class="acct-state" id="session-who"></p>
+        <div class="acct-row">
+          <input id="limit-count" type="number" min="1" max="8" step="1"
+                 inputmode="numeric" aria-label="People who may be connected">
+          <button id="limit-set" type="button" class="choice">Set</button>
+        </div>
         <p class="footnote">Nobody is thrown out. It takes effect as people
-           leave, and it can never go below the accounts that are here.</p>
-      </div>
+           leave, and it never goes below the accounts that are here.</p>
+      </section>
 
-      <div id="session-lock" hidden>
+      <section class="acct-block" id="session-lock" hidden>
+        <h3 class="acct-title">Who may be here</h3>
         <button id="lock-toggle" type="button" class="choice">Lock to
           accounts</button>
         <p class="footnote" id="lock-note">Removes everybody who is not logged
            in and lets nobody else in. You keep your place, and you can always
            log back in from the join screen.</p>
-      </div>
+      </section>
 
-      <div id="session-reshare" hidden>
+      <section class="acct-block" id="session-reshare" hidden>
+        <h3 class="acct-title">The invite</h3>
         <button id="reshare-now" type="button" class="choice">New link and
           PIN</button>
         <p class="footnote">The link and PIN you sent out stop working.
            Everybody here keeps their place.</p>
-        <p class="footnote" id="reshare-new" hidden></p>
-      </div>
+        <p class="footnote acct-new-link" id="reshare-new" hidden></p>
+      </section>
 
-      <div id="session-kick" hidden>
-        <p class="browse-note">Remove somebody</p>
-        <div id="kick-list" class="chat-people"></div>
-        <p class="footnote">Their link stops working too, so a removed guest
-           cannot simply rejoin on it.</p>
-      </div>
+      <section class="acct-block" id="session-kick" hidden>
+        <h3 class="acct-title">People here</h3>
+        <div id="kick-list" class="acct-people"></div>
+        <p class="footnote">Removing somebody stops their link working too, so
+           they cannot simply rejoin on it.</p>
+      </section>
 
-      <div id="session-grant" hidden>
-        <p class="browse-note">What each account may do</p>
+      <section class="acct-block" id="session-grant" hidden>
+        <h3 class="acct-title">What each account may do</h3>
         <div id="grant-list"></div>
         <p class="footnote">These are shares of what this box can already do.
            Making an account, adding a Steam game and resetting somebody's
            authenticator all happen at the console.</p>
-      </div>
+      </section>
     </div>
   </div>
 

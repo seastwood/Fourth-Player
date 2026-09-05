@@ -594,7 +594,8 @@ class Server:
                 None, lambda: self._safely(accounts.device_account,
                                            str(message.get("device"))))
 
-        allowed, why = self.session.may_join(account)
+        allowed, why = self.session.may_join(
+            account, resuming=message.get("t") == "resume")
         if not allowed:
             # "shut" rather than "full": the page has something to do about
             # this one, which is to offer the account fields.

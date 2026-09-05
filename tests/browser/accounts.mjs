@@ -43,7 +43,7 @@ function check(cond, msg) {
     return { panel: !document.getElementById("tab-session").hidden,
              sheet: !sheet.hidden,
              inPanel: document.getElementById("tab-session").contains(sheet),
-             offer: !document.getElementById("login-open").hidden,
+             offer: !document.getElementById("login-outside").hidden,
              form: !document.getElementById("login-form").hidden,
              owner: document.getElementById("session-who").textContent };
   });
@@ -71,7 +71,7 @@ function check(cond, msg) {
     showTab("session");
     document.getElementById("login-open").click();
     return { form: !document.getElementById("login-form").hidden,
-             offer: !document.getElementById("login-open").hidden };
+             offer: !document.getElementById("login-outside").hidden };
   });
   check(opened.form && !opened.offer, "Log in opens the form");
 

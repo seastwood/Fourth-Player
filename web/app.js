@@ -347,7 +347,11 @@ function reconnectSoon() {
   retryTimer = setTimeout(() => {
     retryTimer = null;
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new" });
+              codecs: videoCodecs(), media: mediaIsLive() ? "live" : "new",
+              // A login dies with the socket, so coming back on a new one
+              // means logging in again. This is the only thing that does it
+              // without asking: a device the host was told to remember.
+              device: savedDevice() });
   }, delay);
 }
 
@@ -2025,7 +2029,7 @@ function reviveNow(why) {
     // only lost signalling, and the whole reason for being here is that this
     // one is not working, whatever it says about itself.
     connect({ t: "resume", guest: guestToken, name: myName(),
-              codecs: videoCodecs(), media: "new" });
+              codecs: videoCodecs(), media: "new", device: savedDevice() });
   } catch (_) {
     // Nothing to connect to yet -- no network at all, usually. The backoff
     // was made for this, and it has just been reset to its first step.
@@ -2596,7 +2600,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05b";
+const CLIENT_BUILD = "2026-09-05d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3280,15 +3284,28 @@ function paintLogin() {
   if (!sheet) return;
   sheet.hidden = false;
   el("login-in").hidden = !account;
-  el("login-open").hidden = !!account || loginOpen;
+  el("login-outside").hidden = !!account || loginOpen;
   el("login-form").hidden = !!account || !loginOpen;
   if (account) {
-    el("login-as").textContent = "Logged in as " + account.name;
-    el("login-can").textContent = (account.can || []).length
-      ? "You may: " + account.can.map(saidCapability).join(", ")
-      : "This account has not been given anything yet.";
+    el("login-as").textContent = account.name;
+    paintChips(el("login-can"), account.can || []);
     el("login-remembered").hidden = account.fresh !== false;
   }
+}
+
+/* One chip per thing an account may do. It was a comma-separated sentence
+   that ran to five lines on a phone; these are the same words in a shape that
+   can be counted at a glance. */
+function paintChips(box, can) {
+  box.innerHTML = "";
+  const words = can.length ? can.map(saidCapability)
+                           : ["nothing has been given to this account yet"];
+  box.classList.toggle("acct-none", !can.length);
+  words.forEach((said) => {
+    const chip = document.createElement("span");
+    chip.textContent = said;
+    box.appendChild(chip);
+  });
 }
 
 /* Said in what it does. "reshare" is a word from this program's insides. */
@@ -3339,11 +3356,7 @@ function paintSession() {
   if (!panel || panel.hidden) return;
   paintLogin();
   const who = el("session-who");
-  if (who) {
-    // Said only to somebody who can act on it. To everybody else this tab is
-    // a login and nothing else, which is the whole of what it should be.
-    who.textContent = account && mayAnything() ? peopleHere() : "";
-  }
+  if (who) who.textContent = peopleHere();
   show("session-limit", may("slots"));
   show("session-lock", may("lock"));
   show("session-reshare", may("reshare"));
@@ -3395,8 +3408,8 @@ function wireSession() {
 function peopleHere() {
   if (!sessionLimits) return "";
   const here = sessionLimits.here || 0;
-  return here + (here === 1 ? " person" : " people") + " connected, "
-    + "up to " + sessionLimits.limit + ".";
+  return here + (here === 1 ? " person is" : " people are") + " connected of "
+    + sessionLimits.limit + " allowed.";
 }
 
 function show(id, on) {
@@ -3409,23 +3422,30 @@ function paintKickList() {
   if (!list || !may("kick")) return;
   list.innerHTML = "";
   people.filter((person) => person.slot !== mySlot).forEach((person) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chat-person-chip";
-    chip.textContent = "Remove " + person.name;
-    chip.addEventListener("click", () => {
+    const row = document.createElement("div");
+    row.className = "acct-person";
+    const name = document.createElement("span");
+    name.textContent = person.name
+      + (person.account ? " \u00b7 " + person.account : "");
+    row.appendChild(name);
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "ghost";
+    go.textContent = "Remove";
+    go.addEventListener("click", () => {
       // Asked, because it happens to somebody else and cannot be undone: the
       // link they were sent stops working with them.
       if (!window.confirm("Remove " + person.name + "? Their link stops "
                           + "working, so they cannot simply rejoin.")) return;
       send({ t: "kick", slot: person.slot });
     });
-    list.appendChild(chip);
+    row.appendChild(go);
+    list.appendChild(row);
   });
   if (!list.children.length) {
-    const empty = document.createElement("span");
-    empty.className = "browse-note";
-    empty.textContent = "Nobody else is here.";
+    const empty = document.createElement("p");
+    empty.className = "footnote";
+    empty.textContent = "Nobody else is connected.";
     list.appendChild(empty);
   }
 }
@@ -3442,7 +3462,7 @@ function paintGrantList() {
   if (!named.length) {
     const empty = document.createElement("p");
     empty.className = "footnote";
-    empty.textContent = "Nobody else here is logged in to an account.";
+    empty.textContent = "Nobody here is logged in to an account.";
     list.appendChild(empty);
     return;
   }
@@ -3450,12 +3470,25 @@ function paintGrantList() {
     const row = document.createElement("div");
     row.className = "grant-row";
     const title = document.createElement("p");
-    title.className = "browse-note";
-    title.textContent = person.account;
+    title.className = "acct-name";
+    title.textContent = person.account
+      + (person.slot === mySlot ? " (you)" : "");
     row.appendChild(title);
+    // Anything the tick boxes below cannot express -- a grant for one Steam
+    // game rather than all of them. Said rather than hidden: it is kept when
+    // the boxes are saved, and an admin looking at an unticked "Steam games"
+    // would otherwise think this account had none.
+    const perGame = (person.can || []).filter((c) => c.indexOf("steam:") === 0);
+    if (perGame.length) {
+      const also = document.createElement("p");
+      also.className = "footnote";
+      also.textContent = "Also has " + perGame.length
+        + (perGame.length === 1 ? " Steam game" : " Steam games")
+        + " given at the console. Kept when you save this.";
+      row.appendChild(also);
+    }
     GRANTABLE.forEach(([capability, words]) => {
       const label = document.createElement("label");
-      label.className = "optional";
       const tick = document.createElement("input");
       tick.type = "checkbox";
       tick.checked = (person.can || []).includes(capability);

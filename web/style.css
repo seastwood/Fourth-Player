@@ -2165,62 +2165,195 @@ input.name {
 
 /* ---- accounts -----------------------------------------------------------
  *
- * The login sits inside your own row in the people list, so it inherits that
- * panel's width and scrolling and needs no box of its own -- only a rule
- * above it to say that what follows is about you rather than about the
- * connection facts it sits under. */
-.chat-person-login {
+ * A section per kind of thing, each with a heading, rather than one run of
+ * buttons and footnotes down the panel. Read as a single list they all looked
+ * equally important -- "Log out" carried the same weight as "Lock to
+ * accounts" -- and the footnotes, which are asides, took as much room as the
+ * actions they explain.
+ *
+ * The gutter is the panel's, set once here, so headings, body text, buttons
+ * and inputs all start on the same line down the left. That was the other
+ * half of what looked wrong: .browse-note carried its own padding and
+ * .footnote carried none, so alternate paragraphs sat flush against the edge.
+ */
+.acct {
+  padding: 0 clamp(.7rem, 3.5vw, 1.4rem) 1.2rem;
+}
+.acct-block {
+  padding: .9rem 0;
+  border-bottom: 2px solid color-mix(in srgb, var(--dim) 45%, transparent);
+}
+.acct-block:last-child { border-bottom: 0; }
+.acct-block[hidden] { display: none; }
+
+/* Small, spaced and dim: a signpost for the section under it, not a
+   competitor to the buttons in it. */
+.acct-title {
+  margin: 0 0 .55rem;
+  font-family: var(--pixel);
+  font-size: .6rem;
+  font-weight: normal;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.acct-name {
+  margin: 0 0 .5rem;
+  font-size: 1rem;
+  color: var(--fg);
+}
+.acct-state {
+  margin: 0 0 .55rem;
+  color: var(--dim);
+  font-size: .85rem;
+}
+
+/* What an account may do, as one chip each. It was a comma-separated sentence
+   that ran to five lines on a phone and could not be scanned at all; these
+   are the same words, countable at a glance. */
+.acct-can {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  margin: 0 0 .6rem;
+}
+.acct-can span {
+  padding: .25rem .45rem;
+  border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: .75rem;
+  line-height: 1.3;
+}
+.acct-can.acct-none span {
+  border-color: var(--dim);
+  color: var(--dim);
+}
+
+/* One height for the things that sit side by side, so a button beside a box
+   does not stand a few pixels proud of it. */
+.acct-row {
+  display: flex;
+  align-items: stretch;
+  gap: .5rem;
+  margin: 0 0 .5rem;
+}
+.acct-row .choice,
+.acct-row .ghost { flex: 0 0 auto; }
+#limit-count {
+  width: 4.5rem;
+  min-height: 2.6rem;
+  text-align: center;
+  font-size: 1rem;
+}
+
+/* Actions are decisions: full width, and the sentence that says what they do
+   directly under them rather than beside them. */
+.acct-block > .choice {
+  display: block;
+  width: 100%;
+  margin: 0 0 .4rem;
+}
+.acct-block .footnote { margin: 0; }
+.acct-block .footnote + .choice { margin-top: .7rem; }
+
+#login-sheet label {
+  display: block;
+  margin: .55rem 0 .2rem;
+  font-family: var(--pixel);
+  font-size: .55rem;
+  letter-spacing: .08em;
+  color: var(--dim);
+}
+#login-sheet input[type="text"],
+#login-sheet input[type="password"] {
+  width: 100%;
+  min-height: 2.6rem;          /* a thumb, not a mouse */
+}
+#login-form .acct-row { margin-top: .9rem; }
+#login-form .acct-row .choice { flex: 1 1 auto; }
+
+/* The tick and its words on one line, both of them tappable. */
+.acct-tick {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .8rem;
+  font-family: var(--sans);
+  font-size: .85rem;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
+}
+.acct-tick input { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; }
+
+/* Who is here, one per line: a name is easier to read across than a row of
+   chips, and "remove" is a thing you want to be sure about before you tap. */
+.acct-people {
   display: flex;
   flex-direction: column;
   gap: .4rem;
-  margin-top: .6rem;
-  padding-top: .6rem;
-  border-top: 2px solid var(--dim);
+  margin-bottom: .5rem;
 }
-.chat-person-login label {
-  font-family: var(--pixel);
-  font-size: .7rem;
-  color: var(--dim);
-}
-.chat-person-login label.optional {
+.acct-person {
   display: flex;
   align-items: center;
-  gap: .4rem;
-  color: var(--fg);
+  justify-content: space-between;
+  gap: .6rem;
+  padding: .45rem .6rem;
+  border: 2px solid var(--dim);
+  background: rgba(16, 14, 40, .9);
 }
-.chat-person-login input[type="text"],
-.chat-person-login input[type="password"] {
-  min-height: 2.4rem;           /* a thumb, not a mouse */
-}
+.acct-person span { font-size: .9rem; }
+.acct-person .ghost { flex: 0 0 auto; }
 
-/* One account per block, with its permissions under its name. A rule between
-   them rather than a card each: these are rows in a list, and giving every
-   one a border would say they are separate objects when the only thing that
-   matters is telling one name from the next. */
+/* One account per block, its permissions under its name. A rule between them
+   rather than a card each: these are rows in a list, and a border on every one
+   would say they are separate objects when the only thing that matters is
+   telling one name from the next. */
 .grant-row {
   display: flex;
   flex-direction: column;
-  gap: .3rem;
+  gap: .1rem;
   padding: .6rem 0;
-  border-top: 2px solid var(--dim);
+  border-top: 2px solid color-mix(in srgb, var(--dim) 45%, transparent);
 }
+.grant-row:first-child { border-top: 0; padding-top: 0; }
+.grant-row .acct-name { margin-bottom: .35rem; font-size: .9rem; }
+/* A permission is a sentence, not a heading. The page's global label rule is
+   pixel-font, uppercase and letter-spaced -- right for "ENTER THE PIN" over a
+   box, and wrong for seven of these in a column, where every one wrapped onto
+   two lines and a list of five became a wall. */
 .grant-row label {
   display: flex;
   align-items: center;
-  gap: .45rem;
-  min-height: 2.2rem;
+  gap: .5rem;
+  min-height: 2.3rem;
+  font-family: var(--sans);
   font-size: .85rem;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
 }
+/* One a guest already has through a wider grant: shown ticked and left alone,
+   because "steam" covers every game and unticking one game would not take it
+   away. */
+.grant-row label.acct-implied { color: var(--dim); }
 .grant-row input[type="checkbox"] {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 1.15rem;
+  height: 1.15rem;
   flex: 0 0 auto;
 }
 
 /* The new link and PIN after a re-share. Selectable, because the whole point
    is to send it to somebody, and wrapped because a link is longer than a
    phone is wide. */
-#reshare-new {
+.acct-new-link {
+  margin-top: .6rem !important;
+  padding: .5rem .6rem;
+  border: 2px solid var(--accent);
   user-select: all;
   word-break: break-all;
   color: var(--accent);

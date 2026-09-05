@@ -257,6 +257,24 @@ check(not allowed and "slot" in why, "at the limit, the next is refused")
 check(session.may_join({"name": "seth"})[0],
       "but somebody who said who they are is let in anyway")
 
+print("\nthe limit does not shut out somebody already in it")
+# A guest coming back to a slot they still hold is not a new connection. Read
+# as one, setting the limit to the number of people present meant the next
+# person whose network blipped could not get back into the game they were in
+# the middle of.
+session, loop = make_session()
+session.guests = {0: FakeGuest(0, "a"), 1: FakeGuest(1, "b")}
+session.drop = lambda slot, reason="": session.guests.pop(slot, None)
+session.notify = lambda message: None
+session.set_limit(2)
+check(not session.may_join(None)[0], "a new guest is refused at the limit")
+check(session.may_join(None, resuming=True)[0],
+      "and somebody reconnecting to their own slot is not")
+session.set_locked(True, by=FakeGuest(0, "a", can=["lock"]))
+check(not session.may_join(None, resuming=True)[0],
+      "but a lock still applies to them -- that one is not about how many")
+session.locked = False
+
 print("\nthe limit cannot shut an account out")
 session, loop = make_session()
 session.guests = {0: FakeGuest(0, "admin", can=["lock"]),

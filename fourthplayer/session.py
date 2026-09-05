@@ -774,6 +774,20 @@ class LiveSession:
         if existing is not None:
             self.detach_peer(existing)
             existing.socket = socket
+            # A login dies with the socket that made it, and this is the one
+            # place a connection outlives its socket -- the object is reused
+            # so the slot, the pad and the player port survive a network
+            # switch, and the account was quietly surviving with them.
+            #
+            # What that looked like: reopen the page mid-game, be shown as
+            # logged out, and still be able to play a Steam game nobody had
+            # given you. The page had forgotten and the host had not. A
+            # remembered device is how somebody gets it back, and that asks
+            # for the token again rather than trusting what is already here.
+            if existing.account:
+                log.info("%s was logged in as %s; a new socket means logging "
+                         "in again", existing.label, existing.account)
+                self.logout(existing)
             return existing
         # The name they gave when they first joined is on the invite's record,
         # so coming back does not turn them into "Player 3" again. A name sent
@@ -1803,10 +1817,14 @@ class LiveSession:
         return {"limit": self.limit(), "slots": self.slots,
                 "locked": self.locked, "here": len(self.guests)}
 
-    def may_join(self, account):
+    def may_join(self, account, resuming=False):
         """Whether somebody with a valid invite may take a slot.
 
         `account` is whoever they proved they are as they joined, or None.
+        `resuming` says they already hold the slot they are coming back to,
+        which the limit must not count a second time -- otherwise setting the
+        limit to the number of people present means the next one whose network
+        blips cannot get back into the game they are in the middle of.
 
         A logged-in account is held back only by the slots that physically
         exist, never by the limit or the lock. That is the whole of the
@@ -1819,7 +1837,7 @@ class LiveSession:
         if self.locked:
             return False, ("This session is open to named accounts only. "
                            "Log in to join it.")
-        if len(self.guests) >= self.limit():
+        if not resuming and len(self.guests) >= self.limit():
             return False, "Every player slot is taken."
         return True, ""
 
