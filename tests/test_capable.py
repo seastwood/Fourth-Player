@@ -593,8 +593,20 @@ check(made == [3], "and only theirs was made: %r" % made)
 # still pick where they will sit for when it ends, and Steam must not see a
 # controller arrive because somebody tapped a seat.
 made.clear()
-session.pads = [object()] * 4
+class FakeSeats:
+    """Only what set_pad asks of it: a length, and letting an empty seat go."""
+    released = []
+
+    def __len__(self):
+        return 4
+
+    def release(self, index):
+        FakeSeats.released.append(index)
+
+
+session.pads = FakeSeats()
 session.cfg = type("C", (), {"share_pads": False})()
+session.pad_state = lambda: {}
 session.guests = {2: held_out}
 held_out.pad_index = 2
 session.publish_people = lambda: None
