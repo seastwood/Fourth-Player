@@ -2166,6 +2166,33 @@ class LiveSession:
         return guest.pad
 
 
+    def _steam_in_front(self):
+        """(appid, label) for the Steam game running, or ("", "").
+
+        Runs in a thread: it asks the process table, and the caller is the
+        loop that also serves everybody's video.
+        """
+        try:
+            appid = launcher.steam_game_now() or ""
+        except Exception:
+            return ("", "")
+        if not appid:
+            return ("", "")
+        for row in self.catalogue.rows():
+            if str(row.get("appid") or "") == str(appid):
+                return (str(appid), row.get("label") or "")
+        # Playing and not on the list guests are offered -- somebody started
+        # it at the television. Still a Steam game, and still nobody's to
+        # drive without being given it.
+        return (str(appid), "")
+
+    # How long a Steam game just asked for is believed to be coming up, before
+    # the process table is taken as the truth. Steam took about eighteen
+    # seconds to spawn its marker on the console this was written for, so this
+    # is that with room to spare: for this long, "it has not appeared yet" is
+    # read as "it is still starting" rather than "it is not there".
+    STEAM_STARTING = 45.0
+
     def steam_here(self, appid, label="", starting=False, polled=False):
         """What Steam is running now. Tells anybody whose answer changed.
 
