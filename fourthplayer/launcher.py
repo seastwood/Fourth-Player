@@ -563,6 +563,71 @@ def steam_steps(row):
     return [[exe, BIG_PICTURE], argv]
 
 
+def _run_unit(argv, env):
+    """Hand a long-running program to systemd and come straight back."""
+    runner = shutil.which("systemd-run")
+    if not runner:
+        log.warning("systemd-run is not available; starting inside this "
+                    "service's sandbox, which may stop it writing saves")
+        subprocess.Popen(argv, env=dict(os.environ, **env))
+        return None
+    command = [runner, "--user", "--collect", "--quiet",
+               "--unit", new_unit_name(),
+               "-p", "TimeoutStopSec=%ds" % int(STOP_GRACE),
+               "-p", "KillMode=mixed"]
+    for key, value in env.items():
+        command += ["--setenv", "%s=%s" % (key, value)]
+    command += ["--"] + argv
+    done = subprocess.run(command, capture_output=True, timeout=20,
+                          env=dict(os.environ, **env))
+    if done.returncode != 0:
+        return (done.stderr or b"").decode("utf-8", "replace").strip()[:300]
+    return None
+
+
+def _start_steam(row, env):
+    """Bring Steam up in Big Picture, then ask it for the game.
+
+    Returns None, or why it could not. See the note in launch(): the client is
+    the thing that has to be held by a unit, and the game is a request made to
+    a client that is already answering.
+    """
+    exe = shutil.which("steam") or "/usr/games/steam"
+    appid = steam_game(row)
+
+    if not steam_client_up():
+        problem = _run_unit([exe, BIG_PICTURE], env)
+        if problem:
+            log.error("Steam would not start: %s", problem)
+            return "Steam would not start."
+        waited = 0.0
+        while waited < STEAM_WARMUP and not steam_client_up():
+            time.sleep(1.0)
+            waited += 1.0
+        log.info("Steam came up in Big Picture after %.0fs", waited)
+    elif appid:
+        # Already running, and possibly in its desktop window. Ask it to come
+        # to the front in the interface a controller can drive. Forwarded to a
+        # live client, so it returns at once.
+        try:
+            subprocess.run([exe, "steam://open/bigpicture"], capture_output=True,
+                           timeout=15, env=dict(os.environ, **env))
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("could not put Steam into Big Picture: %s", exc)
+
+    if not appid:
+        return None                       # Big Picture itself was the request
+
+    try:
+        subprocess.run([exe, "-applaunch", str(appid)], capture_output=True,
+                       timeout=30, env=dict(os.environ, **env))
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.exception("could not ask Steam for %s", row["label"])
+        return "The game could not be started: %s" % exc
+    log.info("asked Steam for %s (appid %s)", row["label"], appid)
+    return None
+
+
 UNIT_PREFIX = "fourth-player-game"
 
 
@@ -599,25 +664,17 @@ def launch(row, display=":0", resume=False):
     env = {"DISPLAY": display,
            "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
 
-    # Steam wants Big Picture first and the game second, on separate lines.
-    # Only the last of these is the one held by a unit and waited on; the
-    # earlier ones are asked for and given a moment to take effect.
-    steps = [argv]
+    # Steam is two things, and which of them the unit holds matters.
+    #
+    # `steam -gamepadui` on a machine with no client running *is* the client:
+    # it does not return until Steam exits. Running it and waiting killed
+    # Steam after twenty seconds, every time, and the game never arrived.
+    # `steam -applaunch <id>` with a client already up is the opposite -- it
+    # forwards the request and returns at once.
+    #
+    # So the unit holds the client, and the game is asked for afterwards.
     if row.get("kind") == "steam":
-        cold = not steam_client_up()
-        steps = steam_steps(row)
-        for earlier in steps[:-1]:
-            log.info("putting Steam into Big Picture first: %s",
-                     " ".join(earlier[1:]) or "(client)")
-            try:
-                subprocess.run(earlier, capture_output=True, timeout=20,
-                               env=dict(os.environ, **env))
-            except (OSError, subprocess.SubprocessError) as exc:
-                log.warning("could not ask Steam for Big Picture: %s", exc)
-            # A client that was not running needs time to reach the point of
-            # taking an -applaunch; one already up takes it at once.
-            time.sleep(STEAM_WARMUP if cold else 1.0)
-        argv = steps[-1]
+        return _start_steam(row, env)
 
     runner = shutil.which("systemd-run")
     if runner:
