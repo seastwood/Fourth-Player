@@ -154,6 +154,23 @@ check("not been given" in session.holding(watching)[1], "and why")
 check(session.hold_state(watching)["held"] is True, "their page is told so")
 check(session.hold_state(playing)["held"] is False, "and the other is not")
 
+print("\nbeing handed the screen is not being handed Steam")
+session.driver = watching.slot
+check(session.holding(watching)[0],
+      "the named driver is still held on a Steam game they were not given")
+check(session.hold_state(watching)["driving"] is False,
+      "and is not told they are driving it")
+
+print("\nan emulator game holds nobody")
+session.steam_here("")
+session.driver = None
+check(not session.holding(watching)[0],
+      "once Steam is gone the ordinary rules are back")
+session.input_held = True
+check(session.holding(watching)[0], "and the menu hold still works")
+session.driver = watching.slot
+check(not session.holding(watching)[0], "including the driver exemption")
+
 print("\nSteam's own window over its own game does not hold the person given it")
 # The shell rule holds guest pads out of menus. Steam's loader, its overlay and
 # Big Picture all come to the front during a game, and the watcher calls every
@@ -184,23 +201,6 @@ session.hold_reason = "steam"
 check(session.holding(given)[0],
       "with no Steam game running, Steam's window holds everybody as before")
 session.input_held = False
-
-print("\nbeing handed the screen is not being handed Steam")
-session.driver = watching.slot
-check(session.holding(watching)[0],
-      "the named driver is still held on a Steam game they were not given")
-check(session.hold_state(watching)["driving"] is False,
-      "and is not told they are driving it")
-
-print("\nan emulator game holds nobody")
-session.steam_here("")
-session.driver = None
-check(not session.holding(watching)[0],
-      "once Steam is gone the ordinary rules are back")
-session.input_held = True
-check(session.holding(watching)[0], "and the menu hold still works")
-session.driver = watching.slot
-check(not session.holding(watching)[0], "including the driver exemption")
 
 print("\nthe frames really do stop")
 session, loop = make_session()
