@@ -44,8 +44,15 @@ def check(cond, msg):
 
 
 print("what counts as a shell")
-check(screen.is_shell("steamwebhelper steam big picture mode"),
-      "Steam's own interface does: a store, a browser and a way to the desktop")
+# Steam deliberately does not count as a shell any more. It was one, on the
+# reasoning that its own window is a store and a settings screen and no guest's
+# business -- and what that cost was every controller in the session, because
+# Steam's loader, its overlay and Big Picture come to the front constantly
+# while a game runs, and Big Picture could not be driven from a phone at all.
+# It is a thing you play now, like the emulator.
+check(not screen.is_shell("steamwebhelper steam big picture mode"),
+      "Steam's own interface does not: it is driven with a controller, and "
+      "holding it held every guest in the middle of a game")
 check(screen.is_shell("kodi.bin kodi"),
       "and Kodi, which guests could already drive and should not have been able to")
 # Moonlight is the awkward one: its chooser and its stream are the same

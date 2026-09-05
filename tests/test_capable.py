@@ -141,25 +141,26 @@ for who in (stranger, one, allsteam):
     check(session.may_start(who, session.catalogue.find("a")),
           "%r may start the ROM" % (who.capabilities,))
 
-print("\nwhile a Steam game is in front, controllers ask the capability")
+print("\na Steam game holds nobody: `steam` is permission to start one")
+# There used to be a great deal here. A Steam game held every guest who had not
+# been given it, Steam's own window held everybody but the owner, and around
+# those grew rules about which controllers were allowed to exist while a game
+# ran. Four mechanisms deep, none provable from outside, and between them they
+# left a Steam game with no working controls at all.
 session, loop = make_session()
 session.steam_here(BROFORCE, "Broforce")
-playing = FakeGuest(2, "playing", can=["steam:" + BROFORCE])
-watching = FakeGuest(3, "watching")
-check(not session.holding(playing)[0], "the guest who was given it may drive")
-check(session.holding(watching)[0], "the guest who was not may not")
-check("Broforce" in session.holding(watching)[1],
-      "and is told which game: %r" % session.holding(watching)[1])
-check("not been given" in session.holding(watching)[1], "and why")
-check(session.hold_state(watching)["held"] is True, "their page is told so")
-check(session.hold_state(playing)["held"] is False, "and the other is not")
+playing = FakeGuest(2, "given it", can=["steam"])
+watching = FakeGuest(3, "not given it")
+check(not session.holding(playing)[0], "the account that may start it plays")
+check(not session.holding(watching)[0],
+      "and so does everybody else, exactly as they would a ROM")
+check(session.hold_state(watching)["held"] is False, "their page is told so")
 
-print("\nbeing handed the screen is not being handed Steam")
-session.driver = watching.slot
-check(session.holding(watching)[0],
-      "the named driver is still held on a Steam game they were not given")
-check(session.hold_state(watching)["driving"] is False,
-      "and is not told they are driving it")
+session.input_held = True
+session.hold_reason = "kodi"
+check(session.holding(watching)[0], "a menu in front still holds a controller")
+check(session.holding(playing)[0], "whoever it belongs to")
+session.input_held = False
 
 print("\nan emulator game holds nobody")
 session.steam_here("")
