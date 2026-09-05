@@ -366,57 +366,6 @@ session.guests[3] = FakeGuest(3, "d", can=["kick"])
 check(session.set_limit(1) == 2,
       "the floor rises to the number of accounts here, so none is cut off")
 
-print("\nSteam's own interface is the owner's alone")
-# `steam` means "the games on the owner's list". Big Picture is the shop, the
-# library, the settings and the account behind them, and handing that to
-# everybody who may play Broforce is not what granting Broforce meant.
-session, loop = make_session()
-if accounts.find("seth") is None:
-    accounts.add("seth", "a-good-password", ["grant", "steam"])
-else:
-    accounts.set_capabilities("seth", ["grant", "steam"])
-if accounts.find("mate") is None:
-    accounts.add("mate", "another-password", ["steam"])
-else:
-    accounts.set_capabilities("mate", ["steam"])
-
-shell_row = {"id": "s", "label": "Steam Big Picture", "system": "Steam",
-             "short": "STEAM", "kind": "steam", "appid": "bigpicture",
-             "shell": True}
-game_row = {"id": "b", "label": "Broforce", "system": "Steam",
-            "short": "STEAM", "kind": "steam", "appid": BROFORCE}
-
-owner = FakeGuest(0, "owner", can=["grant", "steam"])
-owner.account = "seth"
-# Set at login in the real thing, and read on the input path, which is why it
-# is a remembered flag rather than a look in the accounts file.
-owner.primary = True
-player = FakeGuest(1, "player", can=["steam"])
-player.account = "mate"
-nobody = FakeGuest(2, "nobody")
-
-check(accounts.is_primary("seth"), "seth is the primary admin")
-check(session.may_start(owner, shell_row), "the owner may open Big Picture")
-check(not session.may_start(player, shell_row),
-      "an account with steam may not -- that grant was for games")
-check(not session.may_start(nobody, shell_row), "and nobody else may")
-check(session.may_start(player, game_row),
-      "while the game on the list is still theirs to start")
-
-print("\nand once it is open, anybody in the session may drive it")
-# Opening Steam's own interface is the owner's alone. Driving it is not: it is
-# the one interface on this machine designed for a controller, and holding it
-# meant nobody could use it from a phone at all -- including the owner, whose
-# controller stopped every time Steam's loader or overlay came to the front.
-session.steam_here("bigpicture", "Steam Big Picture")
-check(not session.holding(owner)[0], "the owner drives it")
-check(not session.holding(player)[0], "and so does everybody else in the room")
-session.input_held = True
-session.hold_reason = "kodi"
-check(session.holding(owner)[0], "while Kodi's menu holds them all as ever")
-session.input_held = False
-session.steam_here("")
-
 print("\nsaying who may be in the session")
 session, loop = make_session()
 admin = FakeGuest(0, "admin", can=["lock", "grant"])

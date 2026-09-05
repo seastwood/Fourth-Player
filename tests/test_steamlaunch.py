@@ -28,41 +28,23 @@ except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
     sys.exit(0)
 
-print("the launch line asks for the game and nothing else")
-# `steam -gamepadui -applaunch <id>` stopped games starting at all: Steam comes
-# up in Big Picture and drops the launch -- swallowed on a cold start, read as
-# a UI-mode change when forwarded to a running client. Steam up, game not.
+print("the launch line asks Steam for the game and nothing else")
+# Big Picture was tried here three ways and every one of them ended with games
+# not launching: on this line beside -applaunch, as a step before it, and as a
+# foreground command whose timeout killed the client. This is what works.
 row = {"kind": "steam", "appid": "274190", "label": "Broforce", "system": "Steam"}
 argv = launcher.build_argv(row)
 check("-applaunch" in argv and "274190" in argv,
       "it names the game: %r" % (argv,))
-check(launcher.BIG_PICTURE not in argv,
-      "and asks for nothing else on the same line")
-check(len(argv) == 3, "which is three words: %r" % (argv,))
+check(len(argv) == 3, "and says nothing else: %r" % (argv,))
+check(not any("gamepadui" in str(a) or "bigpicture" in str(a) for a in argv),
+      "no Big Picture anywhere near it")
 
 print("\na ROM is not affected")
 rom = {"kind": "rom", "system": "nes", "label": "Micro Mages",
        "path": "/roms/mm.nes", "core_path": "/cores/nes.so", "players": "1-4"}
-argv = launcher.build_argv(rom)
-check(launcher.BIG_PICTURE not in argv,
-      "no Steam flag anywhere near it: %r" % (argv,))
-
-print("\nnothing Steam is asked for is waited on in the foreground")
-# `steam <anything>` with no client running *is* the client: it does not return
-# until Steam exits. Waiting on it with a timeout killed Steam after twenty
-# seconds, every time, and no game ever arrived.
-source = open(os.path.join(ROOT, "fourthplayer", "launcher.py"),
-              encoding="utf-8").read()
-start = source.split("def _start_steam")[1].split("\ndef ")[0]
-check("steam_client_up()" in start,
-      "it asks whether a client is already up before deciding how to run it")
-check("_run_unit(" in start.split("if not steam_client_up():")[1].split("return None")[0],
-      "with no client, the line is handed to a unit and not waited on")
-check("timeout=" in start.split("try:")[1],
-      "with a client, it is forwarded and returns at once")
-check(start.count("subprocess.run") == 1,
-      "and there is exactly one place that runs anything: %d"
-      % start.count("subprocess.run"))
+check("-applaunch" not in launcher.build_argv(rom),
+      "no Steam flag anywhere near it")
 
 print("\nSteam's own art is where a Steam game's cover comes from")
 check(hasattr(catalogue, "steam_art_path"), "there is a lookup for it")
