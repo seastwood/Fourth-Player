@@ -194,16 +194,20 @@ class Server:
                     # sits in front of a black screen.
                     if (not guest.input_only
                             and re.search(r"^m=video 0[ ]", sdp, re.M)):
-                        log.warning("%s: their browser refused the video "
-                                    "-- freeing the slot", guest.label)
-                        # They will never see a picture, so holding the slot
-                        # only locks the next person out -- including this one
-                        # after they reload. Give the page a moment to say what
-                        # happened, then let go.
+                        # A prediction, not a verdict. Safari on iOS answers a
+                        # renegotiation with port 0 while the picture it
+                        # already has carries on playing, and acting on that
+                        # freed the slot of somebody mid-game -- which
+                        # unplugged their pad and took the controller out of a
+                        # Steam game that had already bound it.
+                        #
+                        # So wait, then look. If they have media by then they
+                        # took the video after all and nothing happened.
+                        log.info("%s: answered with no video; giving it a "
+                                 "moment before freeing the slot", guest.label)
                         slot = guest.slot
                         self.loop.call_later(
-                            5.0, lambda s=slot: self.session
-                            and self.session.drop(s, reason="could not take the video"))
+                            5.0, lambda s=slot: self._free_if_no_video(s))
                     guest.peer.set_remote_answer(sdp)
                 elif kind == "ice" and message.get("candidate"):
                     guest.peer.add_ice_candidate(
@@ -534,6 +538,27 @@ class Server:
             if token:
                 reply["device"] = token
         await outbox.put(reply)
+
+    def _free_if_no_video(self, slot):
+        """Let a slot go only if the guest really never got a picture.
+
+        They will never see one, so holding the slot only locks the next
+        person out -- including this one after they reload. But a guest whose
+        media is running took the video whatever their answer said, and
+        dropping them there is how somebody lost a game they were playing.
+        """
+        if self.session is None:
+            return
+        guest = self.session.guests.get(slot)
+        if guest is None:
+            return
+        if guest.has_media():
+            log.info("%s took the video after all; keeping their slot",
+                     guest.label)
+            return
+        log.warning("%s: their browser would not take the video -- freeing "
+                    "the slot", guest.label)
+        self.session.drop(slot, reason="could not take the video")
 
     @staticmethod
     def _safely(call, *args):

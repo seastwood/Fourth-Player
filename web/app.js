@@ -1951,15 +1951,48 @@ if (el("use-keys")) {
   });
 }
 
+let refusedTimer = null;
+
+/* A video section answered with port 0.
+ *
+ * That reads as "this browser cannot take H.264", and on a first offer it
+ * usually is. On a renegotiation it is not: Safari on iOS answers port 0 on a
+ * re-offer while the picture it already has carries on playing perfectly, and
+ * the notice then sat over a working stream telling somebody their video could
+ * not start. Misleading is the polite word for it -- Safari plainly does H.264,
+ * which is what made the message read as nonsense.
+ *
+ * So an answer is treated as a prediction rather than a verdict: wait, look at
+ * the screen, and only say something if the picture really has not arrived. */
 function videoRefused() {
-  setLink("bad", "no H.264");
-  showHud(true);
-  showNotice(
-    "<strong>This browser will not accept the video.</strong>" +
-    "<p class=\"footnote\">It refused the H.264 stream, so the picture cannot " +
-    "start &mdash; your controller and the sound still work. Safari and Chrome " +
-    "handle it; a Firefox without its H.264 plug-in does not.</p>", true);
-  report("browser refused the video format");
+  clearTimeout(refusedTimer);
+  refusedTimer = setTimeout(() => {
+    if (pictureIsShowing()) return;
+    setLink("bad", "no H.264");
+    showHud(true);
+    showNotice(
+      "<strong>This browser will not accept the video.</strong>" +
+      "<p class=\"footnote\">It refused the H.264 stream, so the picture cannot " +
+      "start &mdash; your controller and the sound still work. Safari and Chrome " +
+      "handle it; a Firefox without its H.264 plug-in does not.</p>", true);
+    report("browser refused the video format");
+  }, 6000);
+}
+
+/* Whether there is a picture on the screen, as opposed to a connection that
+   ought to be carrying one. videoWidth is zero until frames have decoded. */
+function pictureIsShowing() {
+  return !!(video && video.videoWidth > 0 && video.videoHeight > 0);
+}
+
+/* The picture arrived after all, so nothing is refused. Called when frames
+   start, which is the only thing that settles it. */
+function videoArrived() {
+  clearTimeout(refusedTimer);
+  refusedTimer = null;
+  if (lastNotice && lastNotice.includes("will not accept the video")) {
+    hideNotice();
+  }
 }
 
 /* Moving between mobile data and wifi replaces every address this device had,
@@ -2307,6 +2340,13 @@ let pinchGap = 0, pinchAt = null;
 const gapBetween = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const middleOf = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
+// Frames have decoded, so whatever an SDP answer predicted, the picture is
+// here. This is what takes down a "will not accept the video" notice that a
+// renegotiation put up over a stream that was working all along.
+video.addEventListener("loadedmetadata", videoArrived);
+video.addEventListener("resize", videoArrived);
+video.addEventListener("playing", videoArrived);
+
 video.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "mouse" && event.button !== 0) return;
   held.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -2606,7 +2646,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05f";
+const CLIENT_BUILD = "2026-09-05g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
