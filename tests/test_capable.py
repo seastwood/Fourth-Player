@@ -509,6 +509,24 @@ check(session.locked, "the account that was given it can")
 session.set_locked(False, by=admin)
 drain(outbox)
 
+print("\nthe things that land on other people ask for a code")
+stale = FakeGuest(5, "a remembered phone", can=["kick", "lock", "grant"],
+                  fresh=False)
+for action, message in (("lock", {"on": True}), ("kick", {"slot": 1}),
+                        ("grant", {"name": "mate", "can": []})):
+    loop.run_until_complete(srv._act(stale, action, message, outbox))
+    reply = outbox.get_nowait()
+    drain(outbox)
+    check(reply.get("reason") == "code",
+          "%s asks for an authenticator code first: %r" % (action, reply))
+check(not session.locked, "and none of them happened")
+fresh = FakeGuest(5, "a phone in hand", can=["slots"], fresh=False)
+drain(outbox)
+loop.run_until_complete(srv._act(fresh, "limit", {"count": 2}, outbox))
+check(outbox.get_nowait().get("t") == "limits", "and it answers with the limits")
+check(session.limit() == 2,
+      "but setting the limit does not, because it throws nobody out")
+
 print("\ncoming back mid-game does not take the game away")
 # Sockets drop here constantly: a stalled encoder, a browser that refuses the
 # video, a phone changing network. Each one used to become "you are logged out
@@ -542,24 +560,6 @@ check(not session.holding(same)[0],
       "and the game is still theirs to play: %r" % (session.holding(same),))
 check(same.logged_in_at == 0.0,
       "though the authenticator code is not still fresh")
-
-print("\nthe things that land on other people ask for a code")
-stale = FakeGuest(5, "a remembered phone", can=["kick", "lock", "grant"],
-                  fresh=False)
-for action, message in (("lock", {"on": True}), ("kick", {"slot": 1}),
-                        ("grant", {"name": "mate", "can": []})):
-    loop.run_until_complete(srv._act(stale, action, message, outbox))
-    reply = outbox.get_nowait()
-    drain(outbox)
-    check(reply.get("reason") == "code",
-          "%s asks for an authenticator code first: %r" % (action, reply))
-check(not session.locked, "and none of them happened")
-fresh = FakeGuest(5, "a phone in hand", can=["slots"], fresh=False)
-drain(outbox)
-loop.run_until_complete(srv._act(fresh, "limit", {"count": 2}, outbox))
-check(outbox.get_nowait().get("t") == "limits", "and it answers with the limits")
-check(session.limit() == 2,
-      "but setting the limit does not, because it throws nobody out")
 
 loop.close()
 shutil.rmtree(folder, ignore_errors=True)
