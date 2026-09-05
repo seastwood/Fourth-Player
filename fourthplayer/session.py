@@ -1078,14 +1078,28 @@ class LiveSession:
         # Let go of everything on both pads first. Moving a guest whose thumb
         # is on a direction would otherwise leave that direction held down on a
         # pad nobody is driving any more, and the character walks into a wall.
-        guest.pad.forget(guest.slot)
+        #
+        # Through plug_in, so choosing a seat is not a way to make a device
+        # appear. A guest held out of the Steam game that is playing may still
+        # pick where they will sit -- they will want to be somewhere when it
+        # ends -- and Steam must not see a new controller arrive because they
+        # tapped a seat, which is the same disturbance as one joining.
+        mine = self.plug_in(guest)
+        if mine is not None:
+            mine.forget(guest.slot)
+        theirs = self.plug_in(other) if other is not None else None
         if other is not None:
-            other.pad.forget(other.slot)
+            if theirs is not None:
+                theirs.forget(other.slot)
             other.pad_index = guest.pad_index
         was, guest.pad_index = guest.pad_index, index
-        guest.pad.adopt_new_sender(guest.slot)
+        mine = self.plug_in(guest)
+        if mine is not None:
+            mine.adopt_new_sender(guest.slot)
         if other is not None:
-            other.pad.adopt_new_sender(other.slot)
+            theirs = self.plug_in(other)
+            if theirs is not None:
+                theirs.adopt_new_sender(other.slot)
             log.info("%s and %s swapped pads (%d <-> %d)",
                      guest.label, other.label, was, index)
         else:

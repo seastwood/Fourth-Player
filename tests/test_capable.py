@@ -589,6 +589,24 @@ check(session.plug_in(allowed) is not None,
       "the account that was given it does get one")
 check(made == [3], "and only theirs was made: %r" % made)
 
+# Choosing a seat is not a way in either: a guest held out of the game may
+# still pick where they will sit for when it ends, and Steam must not see a
+# controller arrive because somebody tapped a seat.
+made.clear()
+session.pads = [object()] * 4
+session.cfg = type("C", (), {"share_pads": False})()
+session.guests = {2: held_out}
+held_out.pad_index = 2
+session.publish_people = lambda: None
+session.publish_pad_names = lambda: None
+session.notify = lambda message: None
+try:
+    session.set_pad(held_out, 3)
+except Exception as exc:
+    check(False, "picking a seat while held raised: %r" % exc)
+check(made == [], "picking a seat made no device: %r" % made)
+check(held_out.pad_index == 3, "and the seat still moved")
+
 made.clear()
 session.steam_here("")
 check(session.plug_in(held_out) is not None,
