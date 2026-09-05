@@ -1371,6 +1371,28 @@ class LiveSession:
                          guest.label, now - guest.media_since)
                 self.drop(slot, reason="left")
 
+    def _unplug_orphans(self):
+        """Unplug any controller nobody is sitting on.
+
+        drop() releases a guest's pad as they go, and pads were surviving it
+        anyway -- three of them, with no guests connected and nothing
+        reconnecting. Whatever the route, a device with nobody behind it is
+        always wrong: it takes a player port in RetroArch, and Steam may hand
+        a running game to it, which is the one that cost an evening.
+
+        A janitor rather than a rule. It asks one question -- is anybody on
+        this seat -- and it runs on the sweep that is already ticking.
+        """
+        if self.pads is None:
+            return
+        taken = {g.pad_index for g in self.guests.values()}
+        for index, _pad in list(self.pads.live()):
+            if index in taken:
+                continue
+            if self.pads.release(index):
+                log.info("unplugged %s: nobody is sitting on it",
+                         self.pads.name_for(index))
+
     def reap_now(self, seconds=5.0):
         """Free slots whose connection has been dead for a few seconds.
 
@@ -2398,6 +2420,7 @@ class LiveSession:
                 if self.pending and self._now() >= self.pending["deadline"]:
                     self.deny_launch("nobody answered")
                 self._reap_ghosts()
+                self._unplug_orphans()
                 left = self.remaining()
                 for threshold in WARN_AT:
                     if left <= threshold and threshold not in self._warned:

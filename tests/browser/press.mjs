@@ -47,7 +47,7 @@ await p.evaluate(() => { keyboardOn = true; showTab("controls"); });
 await p.evaluate(() => send({ t: "games" }));
 await new Promise((r) => setTimeout(r, 1500));
 const id = await p.evaluate(() => {
-  const row = shelfRows.find((g) => g.label === "Broforce");
+  const row = shelfRows.find((g) => g.label === "DELTARUNE");
   if (row) send({ t: "launch", game: row.id });
   return row && row.id;
 });
