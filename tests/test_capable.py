@@ -308,6 +308,43 @@ check(session.may_join({"name": "seth"})[0], "somebody who logs in does")
 session.set_locked(False, by=admin)
 check(not session.locked and session.may_join(None)[0], "and it unlocks")
 
+print("\na Steam game is held from the moment it is asked for")
+# Steam takes about eighteen seconds to spawn the marker the poll looks for.
+# Waiting for it left a quarter of a minute in which a guest who had not been
+# given the game was not held from it -- which is most of the time anybody
+# would need.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+launcher.launch = lambda row, resume=False: None
+launcher.clear_the_screen = lambda: []
+clock = [1000.0]
+session._now = lambda: clock[0]
+watching = FakeGuest(3, "watching")
+loop.run_until_complete(session._start_game(dict(FakeCatalogue.ROWS[1])))
+check(session.steam_now == BROFORCE,
+      "the appid is written down at launch, not when the poll finds it: %r"
+      % session.steam_now)
+check(session.holding(watching)[0], "so a guest without it is held at once")
+
+# The poll, finding nothing yet, must not undo that.
+session.steam_here("")
+check(session.steam_now == BROFORCE,
+      "a poll that cannot see it yet does not unhold everybody")
+clock[0] += session.STEAM_STARTING + 1
+session.steam_here("")
+check(session.steam_now == "",
+      "but once it has had long enough, the process table is the truth")
+
+# A launch that failed holds nobody.
+session, loop = make_session()
+session.notify = lambda message: None
+session.notify_one = lambda guest, message: None
+launcher.launch = lambda row, resume=False: "it would not start"
+result = loop.run_until_complete(session._start_game(dict(FakeCatalogue.ROWS[1])))
+check(not result["ok"], "a launch can fail: %r" % result)
+check(session.steam_now == "", "and then nobody is held for it")
+
 print("\nthe stricter answer is settled first")
 # Both are read on one tick. In the other order there is a moment where the
 # shell hold has been released because a game is up and the appid has not been

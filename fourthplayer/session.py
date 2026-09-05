@@ -320,6 +320,9 @@ class LiveSession:
     # asks it once per frame per guest, which is no place for a subprocess.
     steam_now = ""
     steam_label = ""
+    # When a Steam game was asked for, so the poll's silence during Steam's
+    # start-up is not mistaken for the game not being there.
+    _steam_asked_at = 0.0
     # How many guests may be connected at once, and whether anybody without an
     # account may be one of them. Both are the owner narrowing a session that
     # is already open, rather than settings for the next one -- "there are too
@@ -1560,12 +1563,30 @@ class LiveSession:
                 return {"ok": False,
                         "error": "The game that is running would not close. "
                                  "Try again in a moment."}
+        # A Steam game is held from the moment it is asked for, not from the
+        # moment the poll can prove it.
+        #
+        # Steam takes about eighteen seconds to spawn the `reaper SteamLaunch
+        # AppId=` marker the poll looks for -- measured on this console --
+        # and until it does, nothing knows which game is coming up. That is a
+        # quarter of a minute in which a guest who has not been given the game
+        # is not held from it, which is most of the time anybody would need.
+        #
+        # This end knows the appid outright: it is in the row being launched.
+        # So it is written down first, and the poll's job becomes noticing when
+        # the game *goes* rather than when it arrives.
+        if row.get("kind") == "steam" and row.get("appid"):
+            self.steam_here(str(row["appid"]), row.get("label") or "",
+                            starting=True)
         problem = await self.loop.run_in_executor(
             None, functools.partial(launcher.launch, row, resume=resume))
         # Remembered so "start it again" knows what "it" is, without having to
         # go and read what the television wrote down.
         self.last_started = row
         if problem:
+            # It never started, so nobody is held for it.
+            if row.get("kind") == "steam":
+                self.steam_here("")
             return {"ok": False, "error": problem}
         self.notify({"t": "starting", "label": row["label"],
                      "short": row["short"], "resume": bool(resume)})
@@ -1900,9 +1921,26 @@ class LiveSession:
         # drive without being given it.
         return (str(appid), "")
 
-    def steam_here(self, appid, label=""):
-        """What Steam is running now. Tells anybody whose answer changed."""
+    # How long a Steam game just asked for is believed to be coming up, before
+    # the process table is taken as the truth. Steam took about eighteen
+    # seconds to spawn its marker on the console this was written for, so this
+    # is that with room to spare: for this long, "it has not appeared yet" is
+    # read as "it is still starting" rather than "it is not there".
+    STEAM_STARTING = 45.0
+
+    def steam_here(self, appid, label="", starting=False):
+        """What Steam is running now. Tells anybody whose answer changed.
+
+        `starting` marks an appid this end has just launched, which the
+        process table cannot confirm for another quarter of a minute.
+        """
         appid = str(appid or "")
+        if not appid and self._steam_asked_at and \
+                (self._now() - self._steam_asked_at) < self.STEAM_STARTING:
+            # Asked for and not visible yet. Believing the poll here would
+            # unhold everybody for the whole of Steam's start-up.
+            return
+        self._steam_asked_at = self._now() if (appid and starting) else 0.0
         if appid == self.steam_now:
             return
         was = self.steam_now
