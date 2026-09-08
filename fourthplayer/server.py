@@ -253,7 +253,10 @@ class Server:
                     # game was running.
                     await outbox.put({"t": "pads", "yours": guest.pad_index,
                                       **self.session.pad_state()})
-                elif kind in ("limit", "lock", "kick", "reshare", "grant"):
+                elif kind in self.ACTIONS:
+                    # Read from the table rather than listed again here. The
+                    # two lists said the same thing twice, which is one place
+                    # to add a new action and two places to forget to.
                     await self._act(guest, kind, message, outbox)
                 elif kind == "login":
                     await self._login(guest, socket_, message, outbox)
@@ -378,7 +381,7 @@ class Server:
     # session that is already open. That line is what keeps an admin password
     # from being a shell.
     ACTIONS = {"limit": "slots", "lock": "lock", "kick": "kick",
-               "reshare": "reshare", "grant": "grant"}
+               "reshare": "reshare", "grant": "grant", "desk": "desk"}
 
     async def _act(self, guest, kind, message, outbox):
         from . import accounts
@@ -442,6 +445,24 @@ class Server:
             token, pin = self.session.invite.clear_invite
             await outbox.put({"t": "reshared", "url": self.join_url(token),
                               "pin": pin})
+            return
+        if kind == "desk":
+            # Taking it and putting it down are the same action, because they
+            # are the same permission and the page has one button. Putting it
+            # down needs no code -- letting go of a keyboard is not something
+            # anybody needs protecting from.
+            if not message.get("take"):
+                self.session.put_the_desk_away("%s let it go" % guest.label)
+                await outbox.put({"t": "desk", "on": False})
+                return
+            why_not = self.session.take_the_desk(guest)
+            if why_not:
+                await outbox.put({"t": "error", "reason": "request",
+                                  "message": why_not})
+                return
+            log.warning("%s (as %s) took the keyboard and mouse",
+                        guest.label, guest.account)
+            await outbox.put({"t": "desk", "on": True})
             return
         if kind == "grant":
             await self._grant(guest, message, outbox)

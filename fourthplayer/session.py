@@ -19,8 +19,8 @@ import subprocess
 import sys
 import time
 
-from . import (accounts, catalogue as cataloguelib, gpu, invites, launcher,
-               steamgames,
+from . import (accounts, catalogue as cataloguelib, deskwire, gpu, invites,
+               launcher, steamgames,
                pads as padlib, protocol, retroarch, screen)
 from . import video
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
@@ -257,6 +257,11 @@ class GuestConnection:
         # nowhere. Counted rather than dropped silently: "my controller did
         # nothing" is a question somebody will ask, and this is the answer.
         self.held_frames = 0
+        # Desk messages that arrived from somebody not holding the keyboard,
+        # and ones that would not decode. Counted for the same reason the pad
+        # counts its own: "nothing I typed happened" needs an answer.
+        self.stray_desk = 0
+        self.bad_desk = 0
 
     @property
     def pad(self):
@@ -313,6 +318,35 @@ class GuestConnection:
         # and merge them rather than treating each as the other's stale one.
         self.pad.apply(state, sender=self.slot)
 
+    def feed_desk(self, data):
+        """A keyboard or mouse message. Never raises: a guest cannot crash us.
+
+        The check is on every message rather than at the moment control is
+        taken, and that is deliberate. Whether somebody may type here is
+        answered by the session, once, in one place -- so control taken away
+        while a key is down stops the very next message, and there is no
+        window in which a page that did not hear about it keeps typing.
+        """
+        if self.session is None or not self.session.at_the_desk(self):
+            self.stray_desk += 1
+            if self.stray_desk in (1, 100):
+                log.warning("%s: desk input from somebody who is not at it "
+                            "(%d so far)", self.label, self.stray_desk)
+            return
+        try:
+            actions = deskwire.decode(data)
+        except deskwire.DeskError as exc:
+            self.bad_desk += 1
+            if self.bad_desk in (1, 100):
+                log.warning("%s: unusable desk message (%d so far): %s",
+                            self.label, self.bad_desk, exc)
+            return
+        self.last_input = time.monotonic()
+        try:
+            self.session.desk_device.apply(actions)
+        except Exception:
+            log.exception("%s: the desk would not take that", self.label)
+
 
 class LiveSession:
     """Everything that exists only while the session is open."""
@@ -321,6 +355,14 @@ class LiveSession:
     # the same reason the guest has them: a session built without __init__ --
     # which is how some tests make one -- is still asked who is driving.
     driver = None
+    # Who, if anybody, is holding the keyboard and mouse, by slot -- and the
+    # devices themselves while they are. Distinct from `driver` on purpose:
+    # driving is a pad reaching past a shell that is in front, and is granted
+    # from the television. This is an admin operating the computer, granted to
+    # an account by its own capability. Same shape, different door.
+    desk_driver = None
+    desk_device = None
+    desk_label = ""
     # The row this session last put on the television, for "start it again".
     last_started = None
     # Where messages to guests go, set by the server. Class-level defaults for
@@ -410,6 +452,9 @@ class LiveSession:
         self._chat_id = 0
         self._chat_at = {}
         self.driver = None
+        self.desk_driver = None
+        self.desk_device = None
+        self.desk_label = ""
         # And what it was granted against. A permission to drive Moonlight is
         # not a permission to drive Steam's store, and the way somebody gets
         # from one to the other is closing one and opening the other -- which
@@ -913,6 +958,7 @@ class LiveSession:
 
         def configure(peer):
             peer.on_input = guest.feed
+            peer.on_desk = guest.feed_desk
             peer.on_broken = lambda why: self._peer_broke(guest, peer, why)
             # The media connection dying is what ends a guest -- not their
             # signalling socket, which they only need to arrive and
@@ -1280,6 +1326,11 @@ class LiveSession:
                 "input_only": bool(g.input_only),
                 "seconds": round(time.monotonic() - g.joined_at),
                 "driving": g.slot == self.driver,
+                # Shown to everybody, not only to admins. Somebody typing on
+                # this computer is not a thing to keep from the people sitting
+                # in the same session as it.
+                "at_desk": (self.desk_driver is not None
+                            and g.slot == self.desk_driver),
                 "rtt": health.get("rtt"),
                 "loss": health.get("loss"),
                 "fps": health.get("fps"),
@@ -1974,6 +2025,68 @@ class LiveSession:
             log.info("the guest who was driving has gone; nobody is now")
             self.driver = None
             self.driver_shell = ""
+        if self.desk_driver is not None and self.desk_driver == gone_slot:
+            self.put_the_desk_away("whoever was at it has gone")
+
+    # -- the keyboard and mouse ----------------------------------------------
+
+    def take_the_desk(self, guest):
+        """Hand one guest a keyboard and mouse. Returns why not, or None.
+
+        The devices are made here and destroyed in put_the_desk_away, which is
+        the point rather than an implementation detail: there is no keyboard
+        attached to this machine while nobody is holding one. See desk.py.
+        """
+        if self.desk_driver is not None and self.desk_driver != guest.slot:
+            if not guest.primary:
+                return ("%s is using the keyboard and mouse."
+                        % (self.desk_label or "Somebody"))
+            # The primary admin can take it from anybody. They cannot be
+            # locked out of anything else either, and a keyboard somebody
+            # walked away from holding is exactly the case that needs it.
+            self.put_the_desk_away("%s took it over" % guest.label)
+        if self.desk_device is None:
+            try:
+                from . import desk as deskdev
+                self.desk_device = deskdev.Desk()
+            except Exception:
+                log.exception("could not create the desk devices")
+                return "The keyboard and mouse could not be created."
+        self.desk_driver = guest.slot
+        self.desk_label = guest.label
+        log.info("%s has the keyboard and mouse", guest.label)
+        self.publish_people()
+        self.notify({"t": "desk", "who": guest.label, "on": True})
+        return None
+
+    def put_the_desk_away(self, why="released"):
+        """Close the devices and forget who had them. Safe when nobody did.
+
+        Everything held is let go on the way out -- that is `Desk.close` -- so
+        a driver who leaves mid-keystroke cannot leave a key down on somebody
+        else's computer.
+        """
+        if self.desk_driver is None and self.desk_device is None:
+            return False
+        who = self.desk_label
+        if self.desk_device is not None:
+            try:
+                self.desk_device.close()
+            except Exception:
+                log.exception("could not close the desk devices")
+        self.desk_device = None
+        self.desk_driver = None
+        self.desk_label = ""
+        log.info("the keyboard and mouse are put away (%s)", why)
+        self.publish_people()
+        self.notify({"t": "desk", "who": who, "on": False, "why": why})
+        return True
+
+    def at_the_desk(self, guest):
+        """Whether this guest's keystrokes should reach the machine."""
+        return (self.desk_device is not None
+                and self.desk_driver is not None
+                and self.desk_driver == guest.slot)
 
     # -- how many, and who ---------------------------------------------------
     #
@@ -2452,6 +2565,14 @@ class LiveSession:
                     self.deny_launch("nobody answered")
                 self._reap_ghosts()
                 self._unplug_orphans()
+                # A keyboard left holding a key does it to somebody's actual
+                # computer, and nothing on the machine will time that out by
+                # itself the way a game eventually would.
+                if self.desk_device is not None:
+                    try:
+                        self.desk_device.sweep()
+                    except Exception:
+                        log.exception("the desk sweep failed")
                 left = self.remaining()
                 for threshold in WARN_AT:
                     if left <= threshold and threshold not in self._warned:

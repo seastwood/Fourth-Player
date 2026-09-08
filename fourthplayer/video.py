@@ -793,7 +793,9 @@ class Peer:
         # next to somebody who already has it.
         self.media = media
         self.channel = None
+        self.desk_channel = None
         self.on_input = None          # set by the session; called with raw bytes
+        self.on_desk = None           # ditto, for keyboard and mouse messages
         self.on_dead = None           # called when the media connection is over
         self.on_broken = None         # called when this peer's branch errors
         # Whether this peer currently has a usable path. A peer *object* is not
@@ -892,6 +894,22 @@ class Peer:
                       lambda _c: log.info("peer %s: input open", self.id))
         self._connect(self.channel, "on-close",
                       lambda _c: log.info("peer %s: input closed", self.id))
+
+        # Reliable and ordered, which is the opposite of the channel above and
+        # for the opposite reason. A pad frame is a snapshot: losing one is
+        # nothing, because the next one is the whole truth again. A keyboard
+        # message is an event: a lost release leaves a key held down on
+        # somebody's computer and there is no later message that corrects it.
+        # See deskwire.py -- the cost is that a lost packet makes the pointer
+        # late rather than wrong, which is the right way round for a desktop.
+        desk_options = Gst.Structure.new_from_string(
+            "options, ordered=(boolean)true")
+        self.desk_channel = self.webrtc.emit("create-data-channel", "desk",
+                                             desk_options)
+        if self.desk_channel is None:
+            raise RuntimeError("webrtcbin would not create the desk channel")
+        self._connect(self.desk_channel, "on-message-string", self._on_desk_data)
+        self._connect(self.desk_channel, "on-message-data", self._on_desk_data)
 
         self._assembled = True
         self._negotiate()
@@ -1066,9 +1084,9 @@ class Peer:
             return
         started = time.monotonic()
         self._disconnect_all()
-        self.on_dead = self.on_broken = self.on_input = None
+        self.on_dead = self.on_broken = self.on_input = self.on_desk = None
         pipeline, self.pipeline = self.pipeline, None
-        self.webrtc = self.channel = None
+        self.webrtc = self.channel = self.desk_channel = None
         self._sources = {}
         try:
             pipeline.set_state(Gst.State.NULL)
@@ -1333,6 +1351,15 @@ class Peer:
             return
         data = glib_bytes.get_data() if hasattr(glib_bytes, "get_data") else bytes(glib_bytes)
         self.stage.loop.call_soon_threadsafe(self.on_input, data)
+
+    def _on_desk_data(self, _channel, payload):
+        if self.on_desk is None or self.webrtc is None:
+            return
+        if hasattr(payload, "get_data"):
+            payload = payload.get_data()
+        elif not isinstance(payload, (str, bytes, bytearray)):
+            payload = bytes(payload)
+        self.stage.loop.call_soon_threadsafe(self.on_desk, payload)
 
     def _emit(self, kind, payload):
         # Read the callback at call time: the session may have re-pointed it at

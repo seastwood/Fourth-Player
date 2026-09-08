@@ -9,6 +9,7 @@ import socket
 import sys
 import time
 
+from . import accounts
 from .config import Config, CONFIG_PATH, PRESETS
 from .session import LAUNCH_POLICIES
 from .server import Server, CONTROL_SOCKET
@@ -204,7 +205,9 @@ def main(argv=None):
     admin_can = admin_sub.add_parser("can", help="show or set what an account may do")
     admin_can.add_argument("name")
     admin_can.add_argument("capability", nargs="*",
-                           help="the complete list; none at all shows it instead")
+                           help="the complete list; none at all shows it "
+                                "instead. One of: " + ", ".join(
+                                    accounts.CAPABILITIES))
     admin_pass = admin_sub.add_parser("passwd", help="change an account's password")
     admin_pass.add_argument("name")
     admin_2fa = admin_sub.add_parser("reset-2fa", help="new authenticator secret")
@@ -444,7 +447,6 @@ def _admin(args):
     """
     import getpass
     import subprocess
-    from . import accounts
 
     def ask_password(who):
         """Twice, and never from the command line.
