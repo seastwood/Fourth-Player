@@ -2056,7 +2056,11 @@ class LiveSession:
         self.desk_label = guest.label
         log.info("%s has the keyboard and mouse", guest.label)
         self.publish_people()
-        self.notify({"t": "desk", "who": guest.label, "on": True})
+        # The slot, not just the label: every page compares it against its
+        # own and gets an unambiguous answer to "is that me", which two
+        # guests sharing a name would not.
+        self.notify({"t": "desk", "who": guest.label,
+                     "slot": guest.slot, "on": True})
         return None
 
     def put_the_desk_away(self, why="released"):
@@ -2068,7 +2072,7 @@ class LiveSession:
         """
         if self.desk_driver is None and self.desk_device is None:
             return False
-        who = self.desk_label
+        who, was = self.desk_label, self.desk_driver
         if self.desk_device is not None:
             try:
                 self.desk_device.close()
@@ -2079,7 +2083,8 @@ class LiveSession:
         self.desk_label = ""
         log.info("the keyboard and mouse are put away (%s)", why)
         self.publish_people()
-        self.notify({"t": "desk", "who": who, "on": False, "why": why})
+        self.notify({"t": "desk", "who": who, "slot": was,
+                     "on": False, "why": why})
         return True
 
     def at_the_desk(self, guest):

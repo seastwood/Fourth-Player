@@ -469,6 +469,7 @@ function connect(hello) {
       case "granted":       return granted(message);
       case "limits":        return limitsFrom(message);
       case "reshared":      return reshared(message);
+      case "desk":          return deskFrom(message);
       case "people":        return peopleFrom(message);
       case "chat":          return heardChat(message);
       case "chatlog":       return (message.messages || []).forEach(heardChat);
@@ -575,6 +576,9 @@ function backToGate() {
 const HOPELESS = ["credential", "closed"];
 
 function onError(message) {
+  // Whatever was refused, this page is no longer waiting on an answer about
+  // the keyboard. Left set, the button would ignore every later press.
+  deskAsking = false;
   if (message.reason === "code") {
     // Not a refusal to be argued with: it is a request for the six digits.
     waitingOnCode = lastAction;
@@ -720,6 +724,15 @@ async function answer(message) {
   });
 
   pc.addEventListener("datachannel", (event) => {
+    // Two channels arrive now, and they are not interchangeable: pads on an
+    // unreliable one, keyboard and mouse on a reliable one. Taking whichever
+    // turned up last would put pad frames down the ordered channel and key
+    // presses down the lossy one.
+    if (event.channel.label === "desk") {
+      deskChannel = event.channel;
+      deskChannel.addEventListener("close", () => { deskChannel = null; });
+      return;
+    }
     input = event.channel;
     input.binaryType = "arraybuffer";
     input.addEventListener("open", () => setLink("ok"));
@@ -2706,7 +2719,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-05k";
+const CLIENT_BUILD = "2026-09-08a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3312,7 +3325,7 @@ function may(capability) {
 /* Anything in the Session tab. The tab itself is not drawn without one of
    these, so an account given only a Steam game never sees an owner's panel. */
 function mayAnything() {
-  return ["slots", "lock", "kick", "reshare", "grant"].some(may);
+  return ["slots", "lock", "kick", "reshare", "grant", "desk"].some(may);
 }
 
 function savedDevice() {
@@ -3491,6 +3504,8 @@ function paintSession() {
   show("session-reshare", may("reshare"));
   show("session-kick", may("kick"));
   show("session-grant", may("grant"));
+  show("session-desk", may("desk"));
+  deskPaint();
 
   const count = el("limit-count");
   if (count && sessionLimits) {
@@ -3546,6 +3561,229 @@ let lastAction = null;
 function act(message) {
   lastAction = message;
   send(message);
+}
+
+/* ------------------------------------------------------------------ *
+ * The keyboard and mouse, for an admin operating the console itself.
+ *
+ * Two states, and they are not the same thing. *Holding* the desk is a
+ * permission the host granted and only the host can take away. *Capturing*
+ * is this page having the pointer and the keys right now, which the browser
+ * can end at any moment -- clicking away, Escape, switching tab. So the
+ * button asks for the first, and clicking the video asks for the second.
+ * Conflating them is how a page ends up believing it is typing into a
+ * machine that stopped listening several seconds ago.
+ * ------------------------------------------------------------------ */
+
+let deskChannel = null;        // the reliable channel, when it arrives
+let deskHeld = false;          // the host says these are ours
+let deskAsking = false;        // we asked and have not heard back
+const deskPending = { dx: 0, dy: 0, wdx: 0, wdy: 0 };
+let deskFrame = 0;
+
+/* Matches deskwire.MOTION_LIMIT. Over it the host refuses the whole message
+   rather than half of it, so a flick that overshoots must be clamped here
+   and not discovered as a batch of movement that silently did nothing. */
+const DESK_MOTION_LIMIT = 1000;
+const DESK_WHEEL_LIMIT = 20;
+
+function deskCaptured() {
+  return document.pointerLockElement === video;
+}
+
+function deskSend(list) {
+  if (!deskChannel || deskChannel.readyState !== "open" || !list.length) return;
+  try { deskChannel.send(JSON.stringify(list)); } catch (_) { /* going away */ }
+}
+
+const deskClamp = (n, limit) => Math.max(-limit, Math.min(limit, n));
+
+/* Movement is gathered and sent once a frame rather than per event. A mouse
+   reports far faster than the screen changes, and sixty messages a second
+   carrying one pixel each is the same movement at sixty times the cost.
+   Fractions are kept rather than rounded away: the host wants whole pixels,
+   and dropping the remainder every frame makes a slow drag travel nowhere. */
+function deskFlush() {
+  deskFrame = 0;
+  const out = [];
+  const dx = Math.trunc(deskPending.dx), dy = Math.trunc(deskPending.dy);
+  deskPending.dx -= dx; deskPending.dy -= dy;
+  if (dx || dy) {
+    out.push({ t: "m", dx: deskClamp(dx, DESK_MOTION_LIMIT),
+               dy: deskClamp(dy, DESK_MOTION_LIMIT) });
+  }
+  const wx = Math.trunc(deskPending.wdx), wy = Math.trunc(deskPending.wdy);
+  deskPending.wdx -= wx; deskPending.wdy -= wy;
+  if (wx || wy) {
+    out.push({ t: "w", dx: deskClamp(wx, DESK_WHEEL_LIMIT),
+               dy: deskClamp(wy, DESK_WHEEL_LIMIT) });
+  }
+  deskSend(out);
+}
+
+function deskSoon() {
+  if (!deskFrame) deskFrame = requestAnimationFrame(deskFlush);
+}
+
+function deskMoved(dx, dy) {
+  deskPending.dx += dx;
+  deskPending.dy += dy;
+  deskSoon();
+}
+
+/* One notch, whatever unit the browser chose to say it in. deltaMode 0 is
+   pixels (about a hundred to a notch), 1 is lines (about three), 2 is pages.
+   The sign flips because a browser counts down as positive and a wheel
+   counts up as positive. */
+function deskWheeled(event) {
+  const per = event.deltaMode === 1 ? 3 : event.deltaMode === 2 ? 1 : 100;
+  deskPending.wdy -= event.deltaY / per;
+  deskPending.wdx += event.deltaX / per;
+  deskSoon();
+}
+
+function deskRelease() {
+  deskSend([{ t: "r" }]);
+  deskPending.dx = deskPending.dy = deskPending.wdx = deskPending.wdy = 0;
+}
+
+function deskKey(event) {
+  if (!deskHeld || !deskCaptured()) return;
+  // Escape is how somebody gets their own pointer back, and the browser ends
+  // the capture on it whatever we do -- it cannot be prevented. Forwarding it
+  // as well would mean every attempt to leave also pressed Escape on the
+  // console. The button in the panel is there to send a real one.
+  if (event.code === "Escape") return;
+  event.preventDefault();
+  // X repeats a held key by itself, at the console's own rate. Forwarding the
+  // browser's repeats would be writing a key that is already down -- which
+  // the kernel drops as no change -- and racing our own release.
+  if (event.repeat) return;
+  deskSend([{ t: "k", c: event.code, d: event.type === "keydown" ? 1 : 0 }]);
+}
+
+function deskButton(event) {
+  if (!deskHeld || !deskCaptured()) return;
+  event.preventDefault();
+  deskSend([{ t: "b", b: event.button, d: event.type === "mousedown" ? 1 : 0 }]);
+}
+
+function deskCapture() {
+  if (!deskHeld || deskCaptured()) return;
+  const ask = video.requestPointerLock && video.requestPointerLock();
+  // Chrome returns a promise and rejects it if the gesture was not one it
+  // liked. Swallowed: the page already says what to do, and an unhandled
+  // rejection in the console helps nobody.
+  if (ask && ask.catch) ask.catch(() => {});
+}
+
+function deskPaint() {
+  const block = el("session-desk");
+  if (!block || block.hidden) return;
+  const button = el("desk-take");
+  const note = el("desk-note");
+  if (button) {
+    button.textContent = deskHeld ? "Give the keyboard and mouse back"
+                                  : "Take the keyboard and mouse";
+    button.classList.toggle("is-on", deskHeld);
+  }
+  if (!note) return;
+  note.textContent = !deskHeld
+    ? "Operate the console itself. Your keyboard and mouse go to the machine "
+      + "until you give them back."
+    : deskCaptured()
+      ? "You are driving the console. Press Escape to get your own pointer "
+        + "back -- you keep the keyboard and mouse until you hand them over."
+      : "Click the picture to start driving.";
+  show("desk-escape", deskHeld);
+}
+
+/* Everything that has to be listened for while somebody is driving. Bound
+   once at load rather than added and removed with the permission: a listener
+   that is added on one path and removed on another is how a page ends up
+   forwarding keystrokes after it stopped being allowed to. Every one of these
+   checks whether it is holding the desk before it does anything. */
+function deskListen() {
+  window.addEventListener("keydown", deskKey, true);
+  window.addEventListener("keyup", deskKey, true);
+  video.addEventListener("mousedown", deskButton, true);
+  video.addEventListener("mouseup", deskButton, true);
+  video.addEventListener("mousemove", (event) => {
+    if (deskHeld && deskCaptured()) {
+      deskMoved(event.movementX || 0, event.movementY || 0);
+    }
+  }, true);
+  video.addEventListener("wheel", (event) => {
+    if (!deskHeld || !deskCaptured()) return;
+    event.preventDefault();
+    deskWheeled(event);
+  }, { passive: false, capture: true });
+  video.addEventListener("contextmenu", (event) => {
+    // The right button is a button on the console, not a menu here.
+    if (deskHeld && deskCaptured()) event.preventDefault();
+  });
+  video.addEventListener("click", () => { if (deskHeld) deskCapture(); });
+
+  document.addEventListener("pointerlockchange", () => {
+    // Losing the pointer -- Escape, a click elsewhere, the browser deciding
+    // on its own -- must let go of everything that was down. Otherwise a
+    // modifier held at the moment the capture ended stays held on somebody
+    // else's computer, and the host's own dead-man switch is the only thing
+    // that would ever notice.
+    if (!deskCaptured()) deskRelease();
+    deskPaint();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && deskHeld) deskRelease();
+  });
+  window.addEventListener("blur", () => { if (deskHeld) deskRelease(); });
+
+  const take = el("desk-take");
+  if (take) {
+    take.addEventListener("click", () => {
+      if (deskAsking) return;
+      deskAsking = true;
+      act({ t: "desk", take: !deskHeld });
+    });
+  }
+  const escape = el("desk-escape");
+  if (escape) {
+    escape.addEventListener("click", () => {
+      // The one key the capture eats on the way out, so it needs its own way
+      // in. Sent as a press and a release together: there is no moment
+      // between them that anybody could use.
+      if (deskHeld) deskSend([{ t: "k", c: "Escape", d: 1 },
+                               { t: "k", c: "Escape", d: 0 }]);
+    });
+  }
+}
+
+deskListen();
+
+/* What the host said about the keyboard and mouse. Two shapes arrive here:
+   a reply to something this page asked, which carries no slot, and a notice
+   to everybody, which does. The slot is what makes "somebody took it" and
+   "you took it" different messages rather than a guess. */
+function deskFrom(message) {
+  const mine = typeof message.slot !== "number" || message.slot === mySlot;
+  if (mine) {
+    deskHeld = !!message.on;
+    deskAsking = false;
+  } else if (message.on) {
+    // Somebody else has them now. Only the host can do that, and only to the
+    // primary admin's order, so there is nothing to argue with.
+    deskHeld = false;
+  }
+  if (!deskHeld && deskCaptured() && document.exitPointerLock) {
+    document.exitPointerLock();
+  }
+  if (message.who && !mine) {
+    showNotice("<p>" + escapeText(message.who)
+               + (message.on ? " is using the keyboard and mouse."
+                             : " has put the keyboard and mouse down.")
+               + "</p>", false);
+  }
+  deskPaint();
 }
 
 function paintLock() {
@@ -3674,6 +3912,7 @@ const GRANTABLE = [
   ["slots", "Set how many may connect"],
   ["lock", "Lock the session to accounts"],
   ["grant", "Change what others may do"],
+  ["desk", "Use the keyboard and mouse"],
 ];
 
 function peopleFrom(message) {
@@ -3918,6 +4157,9 @@ class ExtraPlayer {
     if (this.pc) { try { this.pc.close(); } catch (_) {} }
     this.pc = new RTCPeerConnection({ iceServers: [] });
     this.pc.addEventListener("datachannel", (event) => {
+      // Only the pad channel. This connection is somebody else's picture on
+      // this page, and nobody operates a console through one of those.
+      if (event.channel.label === "desk") return;
       this.input = event.channel;
       this.input.binaryType = "arraybuffer";
       this.input.addEventListener("open", () => {
