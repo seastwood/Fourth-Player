@@ -81,7 +81,7 @@ def mouse_capabilities():
 class Desk:
     """The devices, and everything currently held down on them."""
 
-    def __init__(self, label="Fourth Player", now=None):
+    def __init__(self, label="Fourth Player", now=None, display=":0"):
         self._clock = now or time.monotonic
         self.keyboard = UInput(keyboard_capabilities(), name=label + " Keyboard",
                                vendor=VENDOR, product=PRODUCT,
@@ -91,6 +91,14 @@ class Desk:
                             version=VERSION, bustype=BUSTYPE)
         self.held_keys = set()
         self.held_buttons = set()
+        # How to reach each character on this console's keyboard. Read once,
+        # here, rather than per keystroke: it is a subprocess, and somebody
+        # typing a password should not pay for one between letters.
+        self.chars = keymap.char_map(display)
+        if not self.chars:
+            log.warning("could not read the console's keyboard map; a phone's "
+                        "on-screen keyboard will not be able to type")
+        self.unknown_chars = 0
         self.last_seen = self._clock()
         # Counted rather than logged each time: a guest whose browser insists
         # on a key we do not carry would otherwise write a line per press.
@@ -120,6 +128,8 @@ class Desk:
                 wheeled = wheeled or bool(action.dx or action.dy)
             elif name == "Key":
                 self._key(action)
+            elif name == "Char":
+                self._char(action)
             elif name == "Button":
                 self._button(action)
             elif name == "ReleaseAll":
@@ -146,6 +156,36 @@ class Desk:
         self.keyboard.write(e.EV_KEY, code, 1 if action.down else 0)
         self.keyboard.syn()
         (self.held_keys.add if action.down else self.held_keys.discard)(code)
+
+    def _char(self, action):
+        """Type one character, shifting for it if that is how it is reached.
+
+        Whatever is already held stays held: somebody holding Ctrl on the
+        on-screen modifier row and then tapping a letter means Ctrl and that
+        letter, and releasing their modifier for them would quietly turn
+        every shortcut into plain typing.
+
+        Shift is only added when the character needs it and is taken away
+        again straight after -- unless the person is already holding shift,
+        in which case it was theirs and stays theirs.
+        """
+        found = self.chars.get(action.ch)
+        if found is None:
+            self.unknown_chars += 1
+            if self.unknown_chars in (1, 100):
+                log.warning("no key on this console types %r (%d so far)",
+                            action.ch, self.unknown_chars)
+            return
+        code, needs_shift = found
+        held_shift = bool(self.held_keys & {e.KEY_LEFTSHIFT, e.KEY_RIGHTSHIFT})
+        borrow = needs_shift and not held_shift
+        if borrow:
+            self.keyboard.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
+        self.keyboard.write(e.EV_KEY, code, 1)
+        self.keyboard.write(e.EV_KEY, code, 0)
+        if borrow:
+            self.keyboard.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
+        self.keyboard.syn()
 
     def _button(self, action):
         code = keymap.button_for(action.index)

@@ -96,6 +96,78 @@ CTRL_KEYS = frozenset((e.KEY_LEFTCTRL, e.KEY_RIGHTCTRL))
 ALT_KEYS = frozenset((e.KEY_LEFTALT, e.KEY_RIGHTALT))
 
 
+# X's names for the printable ASCII characters. Needed because a phone cannot
+# tell us which key was pressed -- see char_map below -- so it sends the
+# character and this is how a character is found on the console's keyboard.
+KEYSYM_CHARS = {
+    "space": " ", "exclam": "!", "quotedbl": '"', "numbersign": "#",
+    "dollar": "$", "percent": "%", "ampersand": "&", "apostrophe": "'",
+    "parenleft": "(", "parenright": ")", "asterisk": "*", "plus": "+",
+    "comma": ",", "minus": "-", "period": ".", "slash": "/",
+    "colon": ":", "semicolon": ";", "less": "<", "equal": "=",
+    "greater": ">", "question": "?", "at": "@", "bracketleft": "[",
+    "backslash": "\\", "bracketright": "]", "asciicircum": "^",
+    "underscore": "_", "grave": "`", "braceleft": "{", "bar": "|",
+    "braceright": "}", "asciitilde": "~",
+}
+for _c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
+    KEYSYM_CHARS[_c] = _c
+
+# X numbers its keycodes eight higher than the kernel does. The offset is
+# historical and fixed, and it is the whole translation between what xmodmap
+# prints and what a uinput device writes.
+X_KEYCODE_OFFSET = 8
+
+
+def char_map(display=":0", xauthority=None):
+    """{character: (kernel key code, shift needed)} for the console's layout.
+
+    Read from the console's own keyboard map rather than assumed, because the
+    console is what decides. A phone's keyboard sends us characters, not key
+    positions -- iOS and Android both report a keydown with no usable `code`
+    for their on-screen keys -- so a character has to be turned back into the
+    key that produces it *here*. Ask the wrong keyboard and somebody typing an
+    apostrophe on a US console gets whatever sits in that spot on theirs.
+
+    Levels beyond shift are left out. AltGr characters are real but they are
+    not what somebody types into a login box from a phone, and a wrong guess
+    at a third level is worse than not offering one.
+    """
+    import os
+    import subprocess
+
+    env = {"DISPLAY": display, "PATH": "/usr/bin:/bin",
+           "XAUTHORITY": xauthority or os.path.expanduser("~/.Xauthority")}
+    try:
+        done = subprocess.run(["xmodmap", "-pke"], capture_output=True,
+                              timeout=10, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if done.returncode != 0:
+        return {}
+
+    found = {}
+    for line in done.stdout.decode("utf-8", "replace").splitlines():
+        # "keycode  38 = a A a A"
+        parts = line.split()
+        if len(parts) < 4 or parts[0] != "keycode" or parts[2] != "=":
+            continue
+        try:
+            code = int(parts[1]) - X_KEYCODE_OFFSET
+        except ValueError:
+            continue
+        if code <= 0:
+            continue
+        for level, keysym in enumerate(parts[3:5]):
+            char = KEYSYM_CHARS.get(keysym)
+            # First one wins: the keymap lists a keycode once, but a character
+            # can sit on more than one (the numpad repeats the digits), and
+            # the main row comes first.
+            if char is not None and char not in found:
+                found[char] = (code, level == 1)
+    return found
+
+
 def key_for(name):
     """The kernel code for a browser key name, or None if we do not carry it."""
     return CODES.get(name)

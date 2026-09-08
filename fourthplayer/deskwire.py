@@ -20,6 +20,8 @@ Messages are JSON, one object or a list of them:
     {"t": "m", "dx": int, "dy": int}     pointer moved this far
     {"t": "w", "dx": int, "dy": int}     wheel turned this many notches
     {"t": "k", "c": "KeyA", "d": 1}      key down (0 for up)
+    {"t": "c", "ch": "A"}                type this character, however it is
+                                         reached on the console's keyboard
     {"t": "b", "b": 0, "d": 1}           mouse button down (0 for up)
     {"t": "r"}                           release everything, now
 
@@ -74,6 +76,21 @@ class Key:
 
 
 @dataclass(frozen=True)
+class Char:
+    """One character to type, rather than one key to press.
+
+    The two are not the same request and cannot be collapsed. A physical
+    keyboard knows which key was struck and says so; a phone's on-screen
+    keyboard does not -- both iOS and Android report a keydown with no usable
+    `code` for their own keys -- and only knows what character came out. So
+    the phone says what it meant and the console works out which of its keys
+    produces that, which is also the only way a guest on one layout can type
+    correctly into a console on another.
+    """
+    ch: str
+
+
+@dataclass(frozen=True)
 class Button:
     index: int
     down: bool
@@ -114,6 +131,13 @@ def _one(item):
         if not isinstance(name, str) or not name or len(name) > NAME_LIMIT:
             raise DeskError("not a key name: %r" % (name,))
         return Key(name, bool(item.get("d")))
+    if kind == "c":
+        ch = item.get("ch")
+        # One character. A string of them would be a second way to do the
+        # same thing, and a batch already carries several of these.
+        if not isinstance(ch, str) or len(ch) != 1:
+            raise DeskError("not a single character: %r" % (ch,))
+        return Char(ch)
     if kind == "b":
         index = item.get("b")
         if isinstance(index, bool) or not isinstance(index, int):
