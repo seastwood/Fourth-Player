@@ -1,9 +1,16 @@
-"""Closing Steam must not start Steam.
+"""Closing Steam must not put a dialogue on the television.
 
-`steam -shutdown` on a machine with no client running starts one: it comes up,
-runs its start-up checks, puts its dialogue about user namespaces on the
-television, and only then exits. Every "End game" was raising that dialogue,
-which read as a fault in the game and was a fault in the way it was closed.
+Ending a game raised "Steam now requires user namespaces to be enabled" every
+time, and there were two reasons, of which the sandbox is the real one.
+
+This service runs with NoNewPrivileges and RestrictNamespaces. A child cannot
+drop either, so a Steam binary started directly by the server fails its
+namespace check however the kernel is configured: it shows that dialogue and
+exits without delivering the shutdown it was asked for. So the shutdown has to
+be handed to the service manager, exactly as a game launch is.
+
+The lesser reason: `steam -shutdown` with no client running starts one, which
+is a strange way to stop a program even when it is harmless.
 """
 import os
 import sys
@@ -40,8 +47,36 @@ print("\nwith a client running")
 launcher.steam_running = lambda: True
 launcher.stop_steam()
 check(len(asked) == 1, "it closes it")
-check(any("-shutdown" in str(part) for part in asked[0]),
-      "with -shutdown, which is the polite way: %r" % (asked[0],))
+argv = [part for part in asked[0] if isinstance(part, list)][0]
+check("-shutdown" in argv,
+      "with -shutdown, which is the polite way: %r" % (argv,))
+check(argv.index("-shutdown") == len(argv) - 1
+      and argv[argv.index("-shutdown") - 1].endswith("steam"),
+      "and -shutdown is an argument to steam, not to the wrapper: %r" % (argv,))
+
+print("\nand it is the service manager that runs it")
+check("systemd-run" in argv[0],
+      "handed off rather than run under this service's confinement, which no "
+      "child can drop and Steam cannot start under: %r" % (argv,))
+check("--user" in argv, "as the user, where the running client is")
+check(argv.count("--") == 1 and argv.index("--") < argv.index("-shutdown"),
+      "with the command separated from systemd-run's own options")
+unit = argv[argv.index("--unit") + 1]
+check(unit.startswith(launcher.HELPER_PREFIX),
+      "in a helper unit, %r" % unit)
+check(not unit.startswith(launcher.UNIT_PREFIX),
+      "and not one the game stop's glob would sweep up: stopping a game is "
+      "precisely when this runs")
+check(any(part == "DISPLAY=:0" for part in argv),
+      "with a display to talk to")
+
+print("\nwithout a service manager to hand it to")
+real_which = launcher.shutil.which
+launcher.shutil.which = lambda name: None if name == "systemd-run" else "/usr/games/steam"
+plain = launcher.outside_sandbox(["/usr/games/steam", "-shutdown"])
+check(plain == ["/usr/games/steam", "-shutdown"],
+      "the command is passed through rather than mangled: %r" % (plain,))
+launcher.shutil.which = real_which
 
 launcher.steam_running, launcher._close = real_running, real_close
 

@@ -206,17 +206,26 @@ def moonlight_running():
 def stop_steam():
     """Close Steam completely, and wait until it is actually gone.
 
-    Nothing is asked of Steam if Steam is not running, and that is the whole
-    of this function that is not obvious. `steam -shutdown` on a machine with
-    no client *starts one* -- it comes up, runs its start-up checks, puts its
-    dialogue about user namespaces on the television, and only then exits. So
-    every "End game" was raising that dialogue, which read as a fault in the
-    game and was a fault in the way it was being closed.
+    Two things here are not obvious, and both are about the same dialogue --
+    "Steam now requires user namespaces to be enabled", which appeared on the
+    television every time a guest ended a game.
+
+    The shutdown runs outside this service's sandbox. See outside_sandbox: run
+    directly, the bootstrap `steam -shutdown` starts inherits confinement it
+    cannot drop, fails its namespace check, shows that dialogue and exits
+    without ever delivering the shutdown -- which is why the log said Steam
+    would not close politely every single time, and why it always came down to
+    signals in the end.
+
+    And nothing is asked of Steam at all if Steam is not running, because
+    `steam -shutdown` on a machine with no client *starts* one: it comes up,
+    runs its checks and only then exits. Harmless once the sandbox is out of
+    the way, but there is no reason to start a program in order to stop it.
     """
     if not steam_running():
         return True
     exe = shutil.which("steam") or "/usr/games/steam"
-    return _close("Steam", STEAM_PROCESSES, [exe, "-shutdown"],
+    return _close("Steam", STEAM_PROCESSES, outside_sandbox([exe, "-shutdown"]),
                   STEAM_GRACE, STEAM_LIMIT)
 
 
@@ -538,6 +547,42 @@ def new_unit_name():
     last one is taking to be cleaned up.
     """
     return "%s-%d" % (UNIT_PREFIX, time.monotonic_ns())
+
+
+# Helpers get their own prefix rather than sharing the game one, because the
+# game stop is a glob: `systemctl --user stop fourth-player-game*` would take
+# a helper with it, and the one helper there is exists to run during a stop.
+HELPER_PREFIX = "fourth-player-helper"
+
+
+def outside_sandbox(argv, display=":0"):
+    """The same argv, wrapped so the service manager runs it, not us.
+
+    This service is confined on purpose -- NoNewPrivileges and
+    RestrictNamespaces, among others. Both are inherited by every descendant
+    and neither can be dropped by one, so a program this service starts
+    directly can never create a user namespace, whatever the kernel allows.
+
+    Steam cannot start under that. Its runtime check asks for a namespace,
+    does not get one, and puts "Steam now requires user namespaces to be
+    enabled" on the television. Games escape it by being launched through
+    systemd-run, which asks the user manager to spawn them in a unit of their
+    own; anything else that runs a Steam binary has to go the same way.
+
+    `steam -shutdown` is the one that bit: run directly it never delivered the
+    shutdown at all -- the dialog is what the television got instead, and the
+    stop then fell through to signals every single time.
+    """
+    runner = shutil.which("systemd-run")
+    if not runner:
+        return argv
+    env = {"DISPLAY": display,
+           "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
+    command = [runner, "--user", "--collect", "--quiet",
+               "--unit", "%s-%d" % (HELPER_PREFIX, time.monotonic_ns())]
+    for key, value in env.items():
+        command += ["--setenv", "%s=%s" % (key, value)]
+    return command + ["--"] + argv
 
 
 def launch(row, display=":0", resume=False):
