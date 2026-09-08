@@ -49,8 +49,12 @@ print("\nand the game is asked first, Steam second")
 source = open(os.path.join(ROOT, "fourthplayer", "launcher.py"),
               encoding="utf-8").read()
 stop = source.split("def stop_steam_game")[1].split("\ndef ")[0]
-check(stop.index("pkill") < stop.index("stop_steam("),
+# The last stop_steam(), not the first: there is an early one for "no game,
+# but Steam is still sitting on the television", which is a different case.
+check(stop.index("pkill") < stop.rindex("stop_steam("),
       "TERM to the game before Steam is closed under it")
+check(stop.index("pkill") > stop.index("if appid is None"),
+      "and the no-game case is answered before any of that")
 
 print()
 if fails:

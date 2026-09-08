@@ -41,20 +41,32 @@ except ImportError as exc:
     sys.exit(0)
 
 print("what the device declares")
+# The whole Xbox 360 button set, guide included, whether or not a guest may
+# press it. This device says it is vendor 045e product 028e; SDL matches a
+# controller by that identity and applies its built-in mapping, which
+# describes eleven buttons. Declaring ten made it a device claiming to be a
+# 360 pad and not shaped like one, and SDL games would not take it -- which is
+# why Sunshine's virtual pad drove DELTARUNE and this one did not.
 with_guide = padlib.button_codes(True)
 without = padlib.button_codes(False)
-check(e.BTN_MODE in with_guide, "the guide button exists when it is asked for")
-check(e.BTN_MODE not in without, "and is simply not there when it is not")
-check(len(without) == len(with_guide) - 1, "nothing else went with it")
-check(e.BTN_MODE not in padlib.capabilities(False)[e.EV_KEY],
-      "the capability set is the same list, so the device cannot press it")
+check(e.BTN_MODE in with_guide, "the guide button is declared")
+check(without == with_guide,
+      "and declared just the same when guests may not press it")
+check(e.BTN_MODE in padlib.capabilities(False)[e.EV_KEY],
+      "the capability set is the same list: a whole controller either way")
 
 print("what a press turns into")
+# Which is where a guest is actually stopped. It has to be here anyway: a
+# guest's own physical pad has a guide button whatever this device declares.
 state = P.PadState(buttons=1 << P.BTN_GUIDE)
 codes = [code for kind, code, value in padlib.to_events(state, False)
          if kind == e.EV_KEY and value]
 check(e.BTN_MODE not in codes,
-      "a guest holding guide writes nothing: not filtered later, never written")
+      "a guest holding guide writes nothing: the press is never made")
+others = [code for kind, code, value in padlib.to_events(
+              P.PadState(buttons=1 << P.BTN_A), False)
+          if kind == e.EV_KEY and value]
+check(e.BTN_A in others, "while every other button still goes through")
 codes = [code for kind, code, value in padlib.to_events(state, True)
          if kind == e.EV_KEY and value]
 check(e.BTN_MODE in codes, "and with the button declared, it is written")
