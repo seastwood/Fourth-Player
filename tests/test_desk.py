@@ -84,6 +84,19 @@ for bad, why in [
     except deskwire.DeskError:
         check(True, why)
 
+print("\ntyping a character rather than pressing a key")
+check(deskwire.decode('{"t":"c","ch":"A"}') == [deskwire.Char("A")],
+      "a phone says which character it meant")
+for bad, why in [('{"t":"c","ch":"ab"}', "two characters at once"),
+                 ('{"t":"c","ch":""}', "no character at all"),
+                 ('{"t":"c"}', "a character message with no character")]:
+    try:
+        deskwire.decode(bad)
+        check(False, why + " is refused")
+    except deskwire.DeskError:
+        check(True, why + " is refused")
+
+
 print("\nand a bad event takes the whole message with it")
 try:
     deskwire.decode('[{"t":"k","c":"KeyA","d":1},{"t":"m","dx":99999,"dy":0}]')
@@ -222,6 +235,25 @@ try:
         device.apply(deskwire.decode('{"t":"k","c":"Nonsense","d":1}'))
         check(device.unknown_keys == 1,
               "a key we do not carry is counted and dropped")
+
+        # Read from this console's own keyboard map, so the check is about
+        # shape rather than about a layout this test cannot know.
+        if device.chars:
+            check(device.chars.get("a") and device.chars.get("A"),
+                  "the console's keyboard map has letters in both cases")
+            lower, upper = device.chars["a"], device.chars["A"]
+            check(lower[0] == upper[0] and upper[1] and not lower[1],
+                  "a and A are the same key, one of them shifted: %r %r"
+                  % (lower, upper))
+            device.release_all()
+            device.apply(deskwire.decode('{"t":"c","ch":"A"}'))
+            check(not device.held_keys,
+                  "typing a shifted character leaves nothing held afterwards")
+            device.apply(deskwire.decode('{"t":"c","ch":"\u00a5\u00a5"[0]}'))
+            check(device.unknown_chars >= 0,
+                  "a character with no key on this console is survivable")
+        else:
+            print("  .... no keyboard map here, so no character checks")
 
         device.last_seen -= desk.DEADMAN_SECONDS + 1
         check(device.sweep() is True, "going quiet while holding keys sweeps")

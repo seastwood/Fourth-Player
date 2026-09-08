@@ -2719,7 +2719,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08b";
+const CLIENT_BUILD = "2026-09-08c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3649,6 +3649,10 @@ function deskWheeled(event) {
 
 function deskRelease() {
   deskSend([{ t: "r" }]);
+  // The host lets go of everything on its side; this is the page agreeing,
+  // so a latched Ctrl does not stay lit over a keyboard that is not held.
+  deskMods.clear();
+  deskPaintKeys();
   deskPending.dx = deskPending.dy = deskPending.wdx = deskPending.wdy = 0;
 }
 
@@ -3693,6 +3697,7 @@ function deskPaint() {
     button.classList.toggle("is-on", deskHeld);
   }
   if (!note) return;
+  deskPaintKeys();
   note.textContent = !deskHeld
     ? "Operate the console itself. Your keyboard and mouse go to the machine "
       + "until you give them back."
@@ -3703,12 +3708,164 @@ function deskPaint() {
   show("desk-escape", deskHeld);
 }
 
+/* ---- the phone's own keyboard ------------------------------------ *
+ *
+ * A phone has no Escape, no Ctrl and no arrow keys, and it will not raise its
+ * keyboard at all unless something focusable is focused. So there is a button
+ * to raise it, a one-pixel field for it to be raised over, and a row of the
+ * keys it does not have.
+ *
+ * What it types cannot be read as key presses. Both iOS and Android report a
+ * keydown with no usable `code` for their own on-screen keys, so the
+ * characters are taken from the input event instead and sent as characters --
+ * see deskwire's Char, and keymap.char_map for how the console turns one back
+ * into a key of its own.
+ * ------------------------------------------------------------------ */
+
+/* Each modifier is off, latched for exactly one key, or locked until tapped
+   off again. Latched is the one that matters on a phone: pressing Ctrl and C
+   at the same time is not a thing ten fingers on glass can do. */
+const deskMods = new Map();          // code -> "latched" | "locked"
+
+function deskKeyboardUp() {
+  return document.activeElement === el("desk-input");
+}
+
+function deskShowKeyboard(yes) {
+  const field = el("desk-input");
+  if (!field) return;
+  if (yes) {
+    field.value = "";
+    field.focus({ preventScroll: true });
+  } else {
+    field.blur();
+  }
+  deskPaintKeys();
+}
+
+/* Modifiers are real presses on a real device, so latching one holds it down
+   on the console until it is spent. Anything that leaves the desk has to
+   release them, which is why deskRelease is the single way out. */
+function deskModsSpend() {
+  const spent = [];
+  deskMods.forEach((state, code) => {
+    if (state === "latched") spent.push(code);
+  });
+  if (!spent.length) return;
+  deskSend(spent.map((code) => ({ t: "k", c: code, d: 0 })));
+  spent.forEach((code) => deskMods.delete(code));
+  deskPaintKeys();
+}
+
+function deskModTap(code) {
+  const state = deskMods.get(code);
+  if (!state) {
+    deskMods.set(code, "latched");
+    deskSend([{ t: "k", c: code, d: 1 }]);
+  } else if (state === "latched") {
+    // A second tap says "I mean it": hold it until I say otherwise.
+    deskMods.set(code, "locked");
+  } else {
+    deskMods.delete(code);
+    deskSend([{ t: "k", c: code, d: 0 }]);
+  }
+  deskPaintKeys();
+}
+
+function deskPaintKeys() {
+  const row = el("desk-keys");
+  const button = el("desk-kb");
+  const up = deskKeyboardUp();
+  if (button) {
+    button.hidden = !deskHeld;
+    button.classList.toggle("is-on", up);
+    button.setAttribute("aria-label",
+                        up ? "Hide the keyboard" : "Show the keyboard");
+  }
+  if (row) {
+    row.hidden = !(deskHeld && up);
+    row.querySelectorAll("[data-mod]").forEach((key) => {
+      const state = deskMods.get(key.dataset.mod);
+      key.classList.toggle("is-latched", state === "latched");
+      key.classList.toggle("is-locked", state === "locked");
+    });
+  }
+}
+
+/* A key from the row rather than from the phone's keyboard: these are
+   positions, so they go as positions. */
+function deskTapKey(code, withCtrlAlt) {
+  if (!deskHeld) return;
+  if (withCtrlAlt) {
+    // The one deliberate terminal switch. Everything else swallows Ctrl+Alt+F
+    // because pressing it by accident strands somebody in front of a screen
+    // they cannot see; asking for it by name is the way back.
+    deskSend([{ t: "k", c: "ControlLeft", d: 1 }, { t: "k", c: "AltLeft", d: 1 },
+              { t: "k", c: code, d: 1 }, { t: "k", c: code, d: 0 },
+              { t: "k", c: "AltLeft", d: 0 }, { t: "k", c: "ControlLeft", d: 0 }]);
+    return;
+  }
+  deskSend([{ t: "k", c: code, d: 1 }, { t: "k", c: code, d: 0 }]);
+  deskModsSpend();
+}
+
+/* What the phone's keyboard produced. `beforeinput` is used rather than
+   `input` because it names what is about to happen -- a character, a
+   backspace, a newline -- while `input` only leaves a changed value behind
+   and no way to tell a typed letter from an autocorrect rewriting a word. */
+function deskTyped(event) {
+  if (!deskHeld) return;
+  event.preventDefault();
+  const how = event.inputType || "";
+  if (how === "insertText" || how === "insertCompositionText") {
+    const text = event.data || "";
+    // A batch, so a paste of a password is one message rather than twenty.
+    for (let i = 0; i < text.length; i += DESK_BATCH) {
+      deskSend(Array.from(text.slice(i, i + DESK_BATCH))
+                 .map((ch) => ({ t: "c", ch })));
+    }
+    if (text) deskModsSpend();
+    return;
+  }
+  if (how === "insertLineBreak" || how === "insertParagraph") {
+    deskTapKey("Enter");
+    return;
+  }
+  if (how.indexOf("delete") === 0) {
+    deskTapKey(how.indexOf("Forward") > 0 ? "Delete" : "Backspace");
+  }
+}
+
+/* Under deskwire's BATCH_LIMIT, which refuses a message carrying more than it
+   rather than applying part of one. */
+const DESK_BATCH = 32;
+
+/* How much of the screen the phone's keyboard covers, as a number the CSS can
+   use. visualViewport is the only thing that knows: the layout viewport does
+   not change when a keyboard slides up, which is why a naively positioned bar
+   ends up underneath it. */
+function deskWatchViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const measure = () => {
+    const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty(
+      "--desk-lift", (deskHeld && deskKeyboardUp() ? Math.round(covered) : 0) + "px");
+  };
+  vv.addEventListener("resize", measure);
+  vv.addEventListener("scroll", measure);
+  return measure;
+}
+
 /* Everything that has to be listened for while somebody is driving. Bound
    once at load rather than added and removed with the permission: a listener
    that is added on one path and removed on another is how a page ends up
    forwarding keystrokes after it stopped being allowed to. Every one of these
    checks whether it is holding the desk before it does anything. */
+let measureLift = null;
+
 function deskListen() {
+  measureLift = deskWatchViewport();
   window.addEventListener("keydown", deskKey, true);
   window.addEventListener("keyup", deskKey, true);
   video.addEventListener("mousedown", deskButton, true);
@@ -3751,6 +3908,42 @@ function deskListen() {
       act({ t: "desk", take: !deskHeld });
     });
   }
+  const kb = el("desk-kb");
+  if (kb) {
+    kb.addEventListener("click", (event) => {
+      event.preventDefault();
+      deskShowKeyboard(!deskKeyboardUp());
+    });
+  }
+  const field = el("desk-input");
+  if (field) {
+    field.addEventListener("beforeinput", deskTyped);
+    // Kept empty whatever happens. Anything left in it would be read back by
+    // an autocorrect as context, and the field is not a text box -- it is a
+    // way to make a keyboard appear.
+    field.addEventListener("input", () => { field.value = ""; });
+    field.addEventListener("focus", () => { measureLift && measureLift(); deskPaintKeys(); });
+    field.addEventListener("blur", () => {
+      // Nothing may be left held by a keyboard that has gone away.
+      deskMods.forEach((_state, code) => deskSend([{ t: "k", c: code, d: 0 }]));
+      deskMods.clear();
+      document.documentElement.style.setProperty("--desk-lift", "0px");
+      deskPaintKeys();
+    });
+  }
+  const row = el("desk-keys");
+  if (row) {
+    row.addEventListener("pointerdown", (event) => {
+      const key = event.target.closest("button");
+      if (!key) return;
+      // The field must not lose focus, or the keyboard slides away under the
+      // finger that is pressing a key on the bar above it.
+      event.preventDefault();
+      if (key.dataset.mod) deskModTap(key.dataset.mod);
+      else if (key.dataset.key) deskTapKey(key.dataset.key, key.dataset.ctrlAlt);
+    });
+  }
+
   const escape = el("desk-escape");
   if (escape) {
     escape.addEventListener("click", () => {
@@ -3779,8 +3972,10 @@ function deskFrom(message) {
     // primary admin's order, so there is nothing to argue with.
     deskHeld = false;
   }
-  if (!deskHeld && deskCaptured() && document.exitPointerLock) {
-    document.exitPointerLock();
+  if (!deskHeld) {
+    if (deskCaptured() && document.exitPointerLock) document.exitPointerLock();
+    if (deskKeyboardUp()) deskShowKeyboard(false);
+    deskMods.clear();
   }
   if (message.who && !mine) {
     showNotice("<p>" + escapeText(message.who)

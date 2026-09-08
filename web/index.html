@@ -702,6 +702,44 @@
        all come from LAYOUTS in app.js; everything below is the frame they are
        hung on, so a new controller is an entry in that table rather than more
        markup here. -->
+  <!-- Driving the console from a phone. Hidden unless somebody holds the
+       keyboard and mouse, because it is meaningless otherwise. -->
+  <button id="desk-kb" class="desk-kb" type="button" hidden
+          aria-label="Show the keyboard">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="5.5" width="21" height="13" rx="1.5"></rect>
+      <path d="M5 9h1M8 9h1M11 9h1M14 9h1M17 9h1M5 12h1M8 12h1M11 12h1M14
+               12h1M17 12h1M7 15h10"></path>
+    </svg>
+  </button>
+
+  <!-- The field exists to make a phone raise its keyboard, and for no other
+       reason: what is typed into it is read and thrown away. It has to be
+       focusable and on screen -- a display:none input raises nothing -- so it
+       is one transparent pixel behind everything. -->
+  <input id="desk-input" class="desk-input" type="text"
+         autocomplete="off" autocorrect="off" autocapitalize="off"
+         spellcheck="false" aria-label="Type to the console" tabindex="-1">
+
+  <!-- The keys a phone's own keyboard does not have, sitting above it. -->
+  <div id="desk-keys" class="desk-keys" hidden>
+    <button type="button" data-key="Escape">esc</button>
+    <button type="button" data-key="Tab">tab</button>
+    <button type="button" data-mod="ControlLeft">ctrl</button>
+    <button type="button" data-mod="AltLeft">alt</button>
+    <button type="button" data-mod="MetaLeft" aria-label="Windows key">win</button>
+    <button type="button" data-mod="ShiftLeft">shift</button>
+    <button type="button" data-key="ArrowLeft" aria-label="Left">&#8592;</button>
+    <button type="button" data-key="ArrowUp" aria-label="Up">&#8593;</button>
+    <button type="button" data-key="ArrowDown" aria-label="Down">&#8595;</button>
+    <button type="button" data-key="ArrowRight" aria-label="Right">&#8594;</button>
+    <button type="button" data-key="Home">home</button>
+    <button type="button" data-key="End">end</button>
+    <button type="button" data-key="Delete">del</button>
+    <button type="button" data-key="F7" data-ctrl-alt="1"
+            aria-label="Return the console to its session">tty</button>
+  </div>
+
   <div id="touch" class="touch" hidden aria-label="On-screen controller">
     <div class="shoulders shoulders-left" id="shoulders-left"></div>
     <div class="shoulders shoulders-right" id="shoulders-right"></div>

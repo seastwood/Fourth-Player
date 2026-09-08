@@ -2397,3 +2397,97 @@ input.name {
   color: var(--accent) !important;
   margin-top: .6rem !important;
 }
+
+/* ---------------------------------------------------------------- *
+ * Driving the console from a phone.
+ *
+ * The keyboard button sits bottom-right, out of the way of the on-screen
+ * controller's sticks, and only exists while somebody holds the desk.
+ * ---------------------------------------------------------------- */
+
+/* How much of the screen the phone's keyboard is covering. Set from JS off
+   visualViewport, because there is no CSS that knows. Everything that has to
+   get out of the way reads this one number. */
+:root { --desk-lift: 0px; }
+
+.desk-kb {
+  position: fixed;
+  right: max(.75rem, env(safe-area-inset-right, 0px));
+  bottom: calc(max(.75rem, env(safe-area-inset-bottom, 0px)) + var(--desk-lift));
+  z-index: 45;
+  display: flex;
+  width: 2.6rem;
+  height: 2.6rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid var(--dim);
+  border-radius: 0;
+  background: rgba(16, 14, 40, .82);
+  color: var(--ink);
+  transition: bottom .18s ease;
+}
+.desk-kb[hidden] { display: none; }
+.desk-kb.is-on { border-color: var(--accent); color: var(--accent); }
+.desk-kb svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+/* One transparent pixel. It must be focusable and rendered for a phone to
+   raise its keyboard, and must never be seen or scrolled to. */
+.desk-input {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;          /* under 16px and iOS zooms the page on focus */
+}
+
+.desk-keys {
+  position: fixed;
+  right: 0;
+  bottom: var(--desk-lift);
+  left: 0;
+  z-index: 46;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: .25rem;
+  overflow-x: auto;
+  padding: .3rem max(.4rem, env(safe-area-inset-left, 0px));
+  border-top: 2px solid var(--dim);
+  background: rgba(16, 14, 40, .95);
+  scrollbar-width: none;
+}
+.desk-keys[hidden] { display: none; }
+.desk-keys::-webkit-scrollbar { display: none; }
+.desk-keys button {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
+  padding: .45rem .5rem;
+  border: 2px solid var(--dim);
+  border-radius: 0;
+  background: rgba(28, 22, 66, .9);
+  color: var(--ink);
+  font-family: var(--pixel);
+  font-size: .58rem;
+  line-height: 1;
+}
+/* Latched for the next key only, and locked until tapped off. Two states
+   worth telling apart: one of them is about to disappear on its own. */
+.desk-keys button.is-latched { border-color: var(--accent); color: var(--accent); }
+.desk-keys button.is-locked {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
