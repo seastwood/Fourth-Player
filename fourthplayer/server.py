@@ -517,6 +517,7 @@ class Server:
         for changed in self.session.refresh_capabilities(name):
             self._send_one(changed, {"t": "loggedin", "name": changed.account,
                                      "can": list(changed.capabilities),
+                                     "primary": bool(changed.primary),
                                      "fresh": bool(changed.logged_in_at)})
         await outbox.put({"t": "granted", "name": target["name"],
                           "can": sorted(set(wanted))})
@@ -549,7 +550,8 @@ class Server:
                 return
             can = self.session.login_ok(guest, account, address, fresh=False)
             await outbox.put({"t": "loggedin", "name": account["name"],
-                              "can": list(can), "fresh": False})
+                              "can": list(can), "primary": bool(guest.primary),
+                              "fresh": False})
             return
 
         try:
@@ -580,8 +582,14 @@ class Server:
             return
 
         can = self.session.login_ok(guest, account, address)
+        # Said separately from `can`, because it is not a capability: the
+        # primary admin holds every one there is and every one there will
+        # ever be, which is not a list. Without this the page draws itself
+        # from a list the host does not use, and the two disagree the moment
+        # a capability is added -- as `desk` was, to an account made before
+        # it existed.
         reply = {"t": "loggedin", "name": account["name"], "can": list(can),
-                 "fresh": True}
+                 "primary": bool(guest.primary), "fresh": True}
         if message.get("remember"):
             token = await self.loop.run_in_executor(
                 None, lambda: self._safely(accounts.remember_device,

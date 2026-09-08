@@ -2719,7 +2719,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08a";
+const CLIENT_BUILD = "2026-09-08b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3316,6 +3316,10 @@ let loginOpen = false;
 
 function may(capability) {
   if (!account) return false;
+  // The primary admin holds everything, which is what the host enforces and
+  // so is what this has to draw. A list would go stale the moment a new
+  // capability existed -- and one did.
+  if (account.primary) return true;
   const can = account.can || [];
   if (can.includes(capability)) return true;
   // Plain "steam" covers every game on the list, the same rule the host uses.
@@ -3342,6 +3346,7 @@ function rememberDevice(token) {
 function loggedIn(message) {
   const first = !account;
   account = { name: message.name, can: message.can || [],
+              primary: !!message.primary,
               fresh: message.fresh !== false };
   if (message.device) rememberDevice(message.device);
   loginOpen = false;
