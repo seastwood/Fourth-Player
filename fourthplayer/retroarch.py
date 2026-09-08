@@ -117,12 +117,26 @@ BUTTON_SETTINGS = {
 
 
 def button_lines(guide=True):
-    """The `input_*_btn = "n"` block, numbered the way RetroArch will number it."""
+    """The `input_*_btn = "n"` block, numbered the way RetroArch will number it.
+
+    Numbered over every code the device declares, which is now all of them
+    whether or not a guest may press guide -- the device has to be a whole
+    Xbox 360 pad to be recognised as one. So the numbering no longer shifts:
+    the thumbs are 9 and 10 either way, and nothing below them moves.
+
+    What `guide` still decides is whether RetroArch's menu is bound at all.
+    A guest's guide press is never written, so button 8 never fires for them;
+    leaving the menu unbound as well costs nothing and means there is no way
+    in even if something else ever did write it.
+    """
     lines = []
-    for index, code in enumerate(sorted(padlib.button_codes(guide))):
+    for index, code in enumerate(sorted(padlib.button_codes())):
         name = BUTTON_SETTINGS.get(code)
-        if name:
-            lines.append('input_%s_btn = "%d"' % (name, index))
+        if not name:
+            continue
+        if name == "menu_toggle" and not guide:
+            continue
+        lines.append('input_%s_btn = "%d"' % (name, index))
     return "\n".join(lines)
 
 

@@ -82,16 +82,18 @@ lines = dict(line.split(" = ") for line in
              retroarch.button_lines(False).splitlines())
 check("input_menu_toggle_btn" not in lines,
       "without it, nothing is bound to a menu the pad cannot open")
-check(lines['input_l3_btn'] == '"8"' and lines['input_r3_btn'] == '"9"',
-      "and the thumbs move down to 8 and 9 -- which is the whole hazard: "
-      "left in place they would have been the menu button")
+check(lines['input_l3_btn'] == '"9"' and lines['input_r3_btn'] == '"10"',
+      "and the thumbs stay at 9 and 10: the device declares the guide button "
+      "either way now, so nothing renumbers underneath it")
 check(lines['input_a_btn'] == '"1"' and lines['input_start_btn'] == '"7"',
       "everything below the guide button is where it was")
 
 print("and the two lists cannot drift")
-numbered = [name for name in retroarch.button_lines(False).splitlines()]
-check(len(numbered) == len(without),
-      "one profile line per declared code, counted from the same list")
+numbered = retroarch.button_lines(True).splitlines()
+check(len(numbered) == len([c for c in without
+                            if retroarch.BUTTON_SETTINGS.get(c)]),
+      "one profile line per declared code that has a setting, from the same "
+      "list the device is built from")
 
 print("off by default")
 from fourthplayer import config
