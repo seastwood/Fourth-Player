@@ -2468,6 +2468,11 @@ input.name {
   border-top: 2px solid var(--dim);
   background: rgba(16, 14, 40, .95);
   scrollbar-width: none;
+  /* It scrolls sideways when there are more keys than room, and it must not
+     do anything else: the stage below refuses gestures entirely, and a row
+     that allowed pinching would be the one way to zoom the page while
+     driving. */
+  touch-action: pan-x;
 }
 .desk-keys[hidden] { display: none; }
 .desk-keys::-webkit-scrollbar { display: none; }
