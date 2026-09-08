@@ -54,6 +54,21 @@ TRIGGER_MAX = 255
 def button_codes(guide=True):
     """The evdev codes a guest's pad declares, in the order it declares them.
 
+    Every one of them, always, `guide` or not -- the argument is kept because
+    callers pass it and is deliberately ignored here.
+
+    This device says it is an Xbox 360 pad: vendor 045e, product 028e. SDL
+    matches a controller by that identity and then applies its built-in
+    mapping for it, and that mapping describes eleven buttons. Declaring ten
+    made this a device claiming to be a 360 pad and not shaped like one, and
+    SDL games treated it accordingly -- which is why DELTARUNE took a
+    controller from Sunshine, whose virtual pad declares the lot, and not from
+    this one.
+
+    The guest still cannot press guide. to_events never writes it, which is
+    where that has to be enforced anyway: a guest's own physical pad has a
+    guide button whatever this device declares.
+
     One list, because two things read it and they must not drift: this, which
     builds the device, and retroarch.py, which writes the profile RetroArch
     matches against it. RetroArch numbers buttons by ascending evdev code over
@@ -62,10 +77,7 @@ def button_codes(guide=True):
     and 10 to 8 and 9. Left to two hand-written lists, that would show up as
     pressing the left stick opening the emulator's menu.
     """
-    codes = [code for _, code in _BUTTON_MAP]
-    if not guide:
-        codes = [code for code in codes if code != e.BTN_MODE]
-    return codes
+    return [code for _, code in _BUTTON_MAP]
 
 
 def capabilities(guide=True):
@@ -104,15 +116,18 @@ def to_events(state, guide=True):
     Split out from the device so it can be tested without a kernel: given a
     PadState this is a pure function, and `tests/test_pads.py` leans on that.
 
-    A guide press on a pad that never declared one is not written. The device
-    would ignore it -- uinput drops codes outside the declared set -- but a
-    write that is known to go nowhere is better not made than relied upon to
-    be discarded.
+    A guide press from a guest is not written when `guide` is off. This is the
+    only place that is enforced now: the device declares the button, because a
+    device claiming to be an Xbox 360 pad and missing one of its buttons is
+    not recognised as one by SDL, and it has to be recognised to be played.
     """
     out = []
-    allowed = set(button_codes(guide))
     for bit, code in _BUTTON_MAP:
-        if code not in allowed:
+        # The one button a guest may not press. Filtered here rather than left
+        # off the device: the device has to be a whole Xbox 360 pad for SDL to
+        # recognise it as one, and a press that is never written is a press
+        # that never happens.
+        if code == e.BTN_MODE and not guide:
             continue
         out.append((e.EV_KEY, code, 1 if state.pressed(bit) else 0))
     for axis, code in _STICK_MAP:

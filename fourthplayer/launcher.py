@@ -204,7 +204,17 @@ def moonlight_running():
 
 
 def stop_steam():
-    """Close Steam completely, and wait until it is actually gone."""
+    """Close Steam completely, and wait until it is actually gone.
+
+    Nothing is asked of Steam if Steam is not running, and that is the whole
+    of this function that is not obvious. `steam -shutdown` on a machine with
+    no client *starts one* -- it comes up, runs its start-up checks, puts its
+    dialogue about user namespaces on the television, and only then exits. So
+    every "End game" was raising that dialogue, which read as a fault in the
+    game and was a fault in the way it was being closed.
+    """
+    if not steam_running():
+        return True
     exe = shutil.which("steam") or "/usr/games/steam"
     return _close("Steam", STEAM_PROCESSES, [exe, "-shutdown"],
                   STEAM_GRACE, STEAM_LIMIT)
