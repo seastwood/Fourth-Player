@@ -86,6 +86,28 @@ def _roots():
             yield full
 
 
+def library_stamp():
+    """A mark that changes when Steam installs or removes a game.
+
+    The catalogue is rebuilt when its fingerprint changes, and the fingerprint
+    watched the owner's chosen list and the ROM playlists -- not Steam's own
+    library. So a game uninstalled from Steam stayed in the browser until
+    something else happened to change the fingerprint, and offering a guest a
+    game that is not there any more is a button that can only fail.
+
+    A steamapps directory's own mtime moves when an appmanifest appears or
+    goes, which is exactly the event worth noticing, and it is one stat per
+    library rather than a walk.
+    """
+    marks = []
+    for here in _libraries():
+        try:
+            marks.append((here, os.stat(here).st_mtime_ns))
+        except OSError:
+            marks.append((here, 0))
+    return tuple(marks)
+
+
 def _libraries():
     """Every steamapps directory this machine has, including extra drives."""
     seen = []

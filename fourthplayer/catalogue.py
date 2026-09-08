@@ -194,9 +194,11 @@ class Catalogue:
         game being added -- sync_games.py rewrites the playlist file.
 
         The Steam list is in here too: putting a game on it has to show up
-        without restarting the server, the same as dropping in a ROM does.
+        without restarting the server, the same as dropping in a ROM does --
+        and so does Steam's own library, or a game uninstalled from Steam
+        stays in the browser as a button that can only fail.
         """
-        marks = []
+        marks = [steamgames.library_stamp()]
         for path in (PLAYLIST_DIR, PLAYERS, steamgames.CHOSEN):
             try:
                 marks.append(os.stat(path).st_mtime_ns)
