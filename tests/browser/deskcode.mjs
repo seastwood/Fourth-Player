@@ -1,3 +1,22 @@
+/* Being asked for an authenticator code, and being able to answer.
+ *
+ * The whole shape of the fault this exists for: logged in by a remembered
+ * device, tap "use the mouse", the host asks for a code -- and there has to
+ * be somewhere to type it that a person can actually see. Twice this looked
+ * correct in every way a test that reads the DOM would check, because the
+ * form was drawn, was not display:none, and had no size: once because the
+ * code field only existed inside the logged-out login form, and once because
+ * the panel holding it was the pads panel and the wrong one was opened.
+ *
+ * So this measures *height*, not visibility flags. A form with no height is
+ * a form that is not there.
+ *
+ * Not in run.sh: it needs an open session and an account with `desk`.
+ *
+ *   fourth-player admin add uiprobe --can desk
+ *   fourth-player reshare
+ *   LINK=... PIN=... USER=... PASS=... SECRET=... node tests/browser/deskcode.mjs
+ */
 import puppeteer from "puppeteer-core";
 import crypto from "crypto";
 const { LINK, PIN, USER, PASS, SECRET } = process.env;
@@ -76,6 +95,24 @@ const seen = await p.evaluate(() => {
            loginIn: look("login-in"), again: look("login-again"),
            field: look("login-again-code"), note: (document.getElementById("login-again-note")||{}).textContent };
 });
-console.log("after tapping cursor:", JSON.stringify(seen, null, 1));
+console.log("after tapping cursor: field height",
+            seen.chain[0].h, " note:", seen.note);
+
+// Wait for a step this account has not spent, then answer.
+const spent = code();
+while (code() === spent) await wait(2000);
+await p.evaluate((c) => {
+  document.getElementById("login-again-code").value = c;
+  document.getElementById("login-again")
+    .dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+}, code());
+await wait(3500);
+const done = await p.evaluate(() => ({
+  fresh: account && account.fresh, held: deskHeld, cursor: cursorOn,
+  waiting: !!waitingOnCode,
+  panelShut: document.getElementById("pads").hidden,
+  driving: cursorDriving(),
+}));
+console.log("after entering the code:", JSON.stringify(done));
 console.log("errors:", errs.slice(0, 3));
 await b.close();

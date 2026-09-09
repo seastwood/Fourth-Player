@@ -5,3 +5,6 @@ __pycache__/
 # this machine generated for itself. None of it means anything on another box.
 state/
 cert/
+
+# Working files from a browser session, never part of the suite.
+tests/browser/*.tmp.mjs
