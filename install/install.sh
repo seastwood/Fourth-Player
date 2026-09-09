@@ -128,6 +128,21 @@ if systemctl --user enable fourth-player >/dev/null 2>&1; then
 else
   echo "could not enable it; run: systemctl --user enable --now fourth-player"
 fi
+# And restarted, if it was already running. Enabling a service that is already
+# up does nothing to the copy that is up: an update would land on disk and the
+# old code would keep serving until the next reboot, which is the whole of
+# "I updated it and nothing changed".
+#
+# It does end whatever session is open -- the link and PIN go with it -- so it
+# is said rather than done quietly.
+if systemctl --user is-active --quiet fourth-player; then
+  if systemctl --user restart fourth-player >/dev/null 2>&1; then
+    echo "restarted, so what is running is what was just installed"
+    echo "(any session that was open has ended; re-share for a new link)"
+  else
+    echo "could not restart it; run: systemctl --user restart fourth-player"
+  fi
+fi
 
 say "the Kodi add-on"
 if [ -d "$HOME/.kodi/addons" ]; then
