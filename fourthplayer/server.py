@@ -765,12 +765,14 @@ class Server:
             can = self.session.login_ok(guest, account, address,
                                         fresh=bool(login))
             signed_in = {"name": account["name"], "can": list(can),
+                         "primary": bool(guest.primary),
                          "fresh": bool(login)}
         elif getattr(guest, "account", None):
             # A resume back into a seat that was already logged in. Said in the
             # welcome, because the page starts every load knowing nothing and
             # the whole fault this replaced was the two of them disagreeing.
             signed_in = {"name": guest.account, "can": list(guest.capabilities),
+                         "primary": bool(guest.primary),
                          "fresh": bool(guest.logged_in_at)}
 
         await outbox.put({

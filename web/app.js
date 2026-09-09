@@ -2772,7 +2772,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08e";
+const CLIENT_BUILD = "2026-09-08f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3462,6 +3462,11 @@ function paintAccount() {
   // as it was opened, and wrong in the moment before.
   paintLogin();
   paintSession();
+  // And the desk bar, which is not in this panel at all -- it sits over the
+  // picture. paintSession stops early on a closed panel, which is right for
+  // everything inside it and wrong for this: the panel is shut whenever
+  // somebody is actually watching, which is exactly when the bar is wanted.
+  deskPaintKeys();
 }
 
 /* The login sheet. It sits in the Account tab and stays there -- three
