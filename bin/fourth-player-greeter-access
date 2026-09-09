@@ -1,0 +1,36 @@
+#!/bin/sh
+# Let one local user read the greeter's screen, and nothing else.
+#
+# Run by LightDM as root when a greeter starts, via greeter-setup-script.
+# DISPLAY is already set to the greeter's own display when this runs.
+#
+# Why this exists: a screen locker or a "switch user" starts a second X server
+# for the login screen and switches the monitor to it. That server has its own
+# cookie, kept where only root can read it, so Fourth Player -- which runs as
+# an ordinary user -- can capture the session's display and not the login
+# screen in front of it. A guest gets a black rectangle and no explanation.
+#
+# Sunshine solves the same problem differently: its binary carries
+# CAP_SYS_ADMIN and it reads the scanout buffer straight off the GPU. That
+# works and it is a bigger hammer -- a capability on a program that listens on
+# the network, to capture a screen an X server will hand over if asked.
+#
+# What this grants is narrow: one named local user may connect to the greeter's
+# display. It is not network access (X still listens on no port), it is not
+# root, and it lasts exactly as long as that greeter does -- the display is
+# destroyed when the login completes and the grant goes with it.
+#
+# It does mean that user can see and type at the login screen. That is the
+# entire point, and it is the same user who is already logged in on the
+# machine.
+set -eu
+
+USER_TO_ALLOW="${FOURTH_PLAYER_USER:-retro}"
+
+[ -n "${DISPLAY:-}" ] || exit 0
+command -v xhost >/dev/null 2>&1 || exit 0
+
+# Server-interpreted, so it is "this local user" rather than "this host" --
+# `xhost +local:` would admit every local user, which is more than is meant.
+xhost "+SI:localuser:${USER_TO_ALLOW}" >/dev/null 2>&1 || true
+exit 0

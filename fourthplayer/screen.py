@@ -104,6 +104,76 @@ def foreground():
     return (" ".join(part for part in (kind, name) if part)).lower()
 
 
+# Where the kernel says which virtual terminal is on the monitor. Readable by
+# anybody, which is the whole reason this approach is possible without asking
+# for a privilege.
+ACTIVE_VT = "/sys/class/tty/tty0/active"
+
+
+def front_display():
+    """The X display currently on the monitor, or None if it cannot be told.
+
+    Usually our own, and the interesting case is when it is not. A screen
+    locker, a "switch user", or anything that asks the display manager for a
+    greeter starts a *second* X server on a *second* virtual terminal and
+    switches the monitor to it. Our own display is then still there, still
+    capturable, and no longer the thing anybody is looking at -- which is why
+    a guest saw a black rectangle and the console showed a login screen.
+
+    Found by asking the kernel which terminal is in front and then which X
+    server was started on it. Both halves are world-readable; nothing here
+    needs a privilege, and being unable to answer is a perfectly ordinary
+    result rather than an error.
+    """
+    try:
+        with open(ACTIVE_VT, encoding="utf-8") as handle:
+            active = handle.read().strip()
+    except OSError:
+        return None
+    if not active.startswith("tty"):
+        return None
+    wanted = "vt" + active[3:]
+
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open("/proc/%s/cmdline" % entry, "rb") as handle:
+                argv = handle.read().split(b"\0")
+        except OSError:
+            continue
+        if not argv or not argv[0].endswith(b"Xorg"):
+            continue
+        words = [word.decode("utf-8", "replace") for word in argv if word]
+        if wanted not in words:
+            continue
+        for word in words:
+            # ":0", ":1" -- the display it was started for.
+            if len(word) > 1 and word[0] == ":" and word[1:].isdigit():
+                return word
+    return None
+
+
+def can_capture(display, xauthority=None):
+    """Whether this user may read that display at all.
+
+    A greeter's X server is started by the display manager with its own
+    cookie, kept where only root can read it, so the answer is no until
+    something has granted it -- see the greeter hook in `bin/`. Asked rather
+    than assumed, because "the picture is black" and "we are not allowed to
+    look" are different things to tell somebody.
+    """
+    env = dict(os.environ, DISPLAY=display)
+    if xauthority:
+        env["XAUTHORITY"] = xauthority
+    try:
+        done = subprocess.run(["xdpyinfo"], capture_output=True, timeout=5,
+                              env=env)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def is_shell(text, shells=SHELLS):
     """Whether that window is one a guest has no business driving.
 

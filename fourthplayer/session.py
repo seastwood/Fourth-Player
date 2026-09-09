@@ -19,6 +19,8 @@ import subprocess
 import sys
 import time
 
+import dataclasses
+
 from . import (accounts, catalogue as cataloguelib, deskwire, gpu, invites,
                launcher, steamgames,
                pads as padlib, protocol, retroarch, screen)
@@ -363,6 +365,7 @@ class LiveSession:
     desk_driver = None
     desk_device = None
     desk_label = ""
+    foreign_screen = ""
     # The row this session last put on the television, for "start it again".
     last_started = None
     # Where messages to guests go, set by the server. Class-level defaults for
@@ -455,6 +458,9 @@ class LiveSession:
         self.desk_driver = None
         self.desk_device = None
         self.desk_label = ""
+        # A display that is in front but is not ours, once we have said so.
+        # Remembered so it is said once rather than twice a second.
+        self.foreign_screen = ""
         # And what it was granted against. A permission to drive Moonlight is
         # not a permission to drive Steam's store, and the way somebody gets
         # from one to the other is closing one and opening the other -- which
@@ -833,8 +839,62 @@ class LiveSession:
         await self._recapture(shared)
         return shared
 
-    async def _recapture(self, codec):
-        """Restart the capture in a different codec and re-offer to everybody."""
+    async def _follow_the_monitor(self):
+        """Capture whatever the monitor is actually showing.
+
+        A locker, a "switch user", or anything else that asks for a greeter
+        starts a second X server on a second virtual terminal and switches the
+        monitor to it. Our own display is still there and still capturable --
+        it is simply no longer what anybody is looking at, which is why this
+        used to be a black rectangle with nothing said about it.
+
+        Two things can happen and they need different answers. If the greeter
+        can be read, capture it: a guest holding the keyboard and mouse can
+        then log the console back in, which is the whole point. If it cannot,
+        say so -- "we are not allowed to look at what is in front" is a
+        different thing from "the screen is black", and only one of them has
+        anything the person watching can do about it.
+        """
+        front = await self.loop.run_in_executor(None, screen.front_display)
+        if not front or front == self.cfg.display:
+            if self.foreign_screen:
+                self.foreign_screen = ""
+                self.notify({"t": "note", "message":
+                             "The console is back on its own screen."})
+            return
+        if front == self.foreign_screen:
+            return                      # already said, and already tried
+
+        readable = await self.loop.run_in_executor(
+            None, lambda: screen.can_capture(front))
+        if not readable:
+            self.foreign_screen = front
+            log.warning("the monitor is showing %s, which this user may not "
+                        "read; capturing %s regardless", front, self.cfg.display)
+            self.notify({"t": "note", "message":
+                         "The console is showing its login screen, which this "
+                         "session is not allowed to look at. Whoever holds the "
+                         "keyboard and mouse can still type into it."})
+            return
+
+        log.info("the monitor moved to %s; following it", front)
+        self.foreign_screen = front
+        self.notify({"t": "note", "message":
+                     "The console is showing its login screen."})
+        # Whatever is already being encoded. Moving the capture to another
+        # screen is no reason to renegotiate the codec as well.
+        playing = getattr(self.stage, "codec", None)
+        await self._recapture(playing, display=front)
+
+    async def _recapture(self, codec, display=None):
+        """Restart the capture and re-offer to everybody.
+
+        `display` moves the capture to another X server, which is what
+        following the login screen amounts to: the greeter is a whole second
+        display, so there is nothing to adjust and everything to rebuild.
+        """
+        if display:
+            self.cfg = dataclasses.replace(self.cfg, display=display)
         old, self.stage = self.stage, None
         others = [g for g in self.guests.values() if g.peer is not None]
         log.info("recapture: re-offering to %d guest(s)", len(others))
@@ -2583,6 +2643,11 @@ class LiveSession:
                     self.deny_launch("nobody answered")
                 self._reap_ghosts()
                 self._unplug_orphans()
+                # Twice a second is far more often than a monitor changes
+                # which X server it is showing, so this is asked on a slow
+                # tick rather than every one.
+                if self._ticks % 20 == 0:
+                    await self._follow_the_monitor()
                 # A keyboard left holding a key does it to somebody's actual
                 # computer, and nothing on the machine will time that out by
                 # itself the way a game eventually would.
