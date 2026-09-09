@@ -15,6 +15,7 @@ try:
     import gi
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
+    from fourthplayer import video as videolib
     from fourthplayer.video import Stage, init
     from fourthplayer.config import Config
 except (ImportError, ValueError) as exc:
@@ -52,9 +53,22 @@ stage.peers = {}
 stage.has_audio = False
 stage.public_ip = ""
 stage._fmtp = ""
+# Whichever software H.264 encoder this machine has, rather than the one this
+# machine had. x264enc is in gstreamer's "ugly" set and openh264enc is in
+# "bad"; a Mint desktop installs bad and not ugly, and naming one of them
+# here made this suite fail on a perfectly good machine with `no element
+# "x264enc"` -- a fault in the test, reported as a fault in the program.
+ENCODER = videolib._first_present(videolib._ELEMENTS["h264"][1])
+if ENCODER is None:
+    print("SKIPPED: no software H.264 encoder here, so there is no pipeline "
+          "to recover")
+    sys.exit(0)
+# openh264enc has neither of x264enc's knobs and refuses to start if given
+# them, so the settings go with the encoder rather than beside it.
+TUNING = "" if ENCODER == "openh264enc" else " tune=zerolatency"
 stage.pipeline = Gst.parse_launch(
     "videotestsrc is-live=true ! video/x-raw,width=320,height=180,framerate=15/1 "
-    "! x264enc tune=zerolatency ! h264parse ! rtph264pay ! "
+    "! " + ENCODER + TUNING + " ! h264parse ! rtph264pay ! "
     "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
     "tee name=vtee allow-not-linked=true")
 stage.tee = stage.pipeline.get_by_name("vtee")
