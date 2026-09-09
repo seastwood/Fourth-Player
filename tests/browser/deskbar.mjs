@@ -134,6 +134,35 @@ try {
         "while a banner still does both, for the things that have to be read: "
         + notes.loudH + " against " + notes.before);
 
+  // "Controls paused" is the answer to a question a desk holder is not asking.
+  const paused = await page.evaluate(async () => {
+    hideNotice();
+    stage.classList.add("immersive"); immersive = true;
+    const tall = video.offsetHeight;
+    deskHeld = false;
+    holdInput({ held: true, driving: false });
+    const guest = { h: video.offsetHeight,
+                    banner: !document.getElementById("notice").hidden };
+    hideNotice(); stage.classList.add("immersive"); immersive = true;
+    deskHeld = true;
+    holdInput({ held: true, driving: false });
+    const admin = { h: video.offsetHeight, immersive,
+                    banner: !document.getElementById("notice").hidden,
+                    held: document.documentElement.classList.contains("held") };
+    deskHeld = false; hideNotice();
+    return { tall, guest, admin };
+  });
+  check(paused.guest.banner && paused.guest.h < paused.tall,
+        "a guest whose controller is paused is still told why, banner and all: "
+        + paused.guest.h + " against " + paused.tall);
+  check(!paused.admin.banner && paused.admin.h === paused.tall
+        && paused.admin.immersive,
+        "somebody holding the keyboard and mouse is not, and keeps every pixel "
+        + "of the picture: " + paused.admin.h);
+  check(paused.admin.held,
+        "though the page still knows the pad is held, so everything else that "
+        + "says so is right");
+
   check(errors.length === 0, "no script errors: " + errors.slice(0, 2));
 } finally {
   await browser.close();

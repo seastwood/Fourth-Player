@@ -2927,7 +2927,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08r";
+const CLIENT_BUILD = "2026-09-08s";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3418,6 +3418,26 @@ function holdInput(message) {
   const driving = !!message.driving;
   const held = !!message.held && !driving;
   document.documentElement.classList.toggle("held", held);
+
+  // Not to somebody holding the keyboard and mouse. "Controls paused, the
+  // television is in a menu" answers a real question -- why does my
+  // controller do nothing -- and it is the wrong question entirely for
+  // somebody who is not using a controller. They are operating the machine,
+  // the television is on the desktop because they put it there, and their
+  // keyboard and mouse are working. Telling them their pad is paused costs a
+  // banner's worth of picture to say something they did on purpose.
+  //
+  // The class above still goes on, so everything that dims or explains a
+  // held pad elsewhere on the page is right; it is only the banner that is
+  // silenced.
+  if (deskHeld) {
+    if (!el("notice").hidden
+        && (lastNotice.includes("Controls paused")
+            || lastNotice.includes("You are driving"))) {
+      hideNotice();
+    }
+    return;
+  }
   if (driving) {
     document.documentElement.classList.remove("held");
     showNotice("<p><strong>You are driving " + escapeText(message.why || "the screen")
@@ -4586,6 +4606,12 @@ function deskFrom(message) {
   if (mine) {
     deskHeld = !!message.on;
     deskAsking = false;
+    // A "controls paused" banner that was already up is about a controller
+    // they have just stopped using. See holdInput.
+    if (deskHeld && !el("notice").hidden
+        && lastNotice.includes("Controls paused")) {
+      hideNotice();
+    }
     if (deskHeld && deskWanted) {
       const wanted = deskWanted;
       deskWanted = "";
