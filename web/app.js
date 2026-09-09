@@ -2381,17 +2381,28 @@ function panTowards(pan, towards, ratio) {
 
 function applyZoom() {
   zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
-  if (zoom <= ZOOM_MIN + 0.001) {
-    zoom = ZOOM_MIN;
-    panX = 0;
-    panY = 0;
-  } else {
-    const picture = pictureBox();
-    const maxX = panRoom(picture.width, picture.box.width, zoom);
-    const maxY = panRoom(picture.height, picture.box.height, zoom);
-    panX = Math.max(-maxX, Math.min(maxX, panX));
-    panY = Math.max(-maxY, Math.min(maxY, panY));
-  }
+  if (zoom <= ZOOM_MIN + 0.001) zoom = ZOOM_MIN;
+  const picture = pictureBox();
+  // The picture belongs in the middle of what can be *seen*, and what can be
+  // seen is shorter than the element whenever a keyboard is covering the
+  // bottom of it. That one sentence is the whole of this: `middle` moves the
+  // picture up into the space that is left, and `seen` is what it is measured
+  // against.
+  //
+  // Stated this way it is right in both cases, which an earlier version of it
+  // was not. When the picture is taller than the visible strip it has to
+  // cover it, and the room to move is how much it overhangs. When it is
+  // shorter -- a 16:9 picture on an upright phone, letterboxed, at any zoom
+  // below about three -- there is no room at all and it simply sits in the
+  // middle. Treating the second case as though it were the first pushed the
+  // picture up past the keyboard and left black underneath it.
+  const inset = bottomInset();
+  const seen = Math.max(0, picture.box.height - inset);
+  const middle = -inset / 2;
+  const maxX = panRoom(picture.width, picture.box.width, zoom);
+  const maxY = panRoom(picture.height, seen, zoom);
+  panX = Math.max(-maxX, Math.min(maxX, panX));
+  panY = Math.max(middle - maxY, Math.min(middle + maxY, panY));
   video.style.transform = zoom === ZOOM_MIN
     ? "" : "translate(" + panX + "px, " + panY + "px) scale(" + zoom + ")";
   paintZoom();
@@ -2800,7 +2811,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08l";
+const CLIENT_BUILD = "2026-09-08m";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3882,8 +3893,12 @@ function cursorMove(du, dv) {
 function cursorFollow() {
   if (zoom <= ZOOM_MIN) return;
   const picture = pictureBox();
+  // The middle of what can be *seen*, which is not the middle of the element
+  // when a keyboard is covering the bottom of it. Half the covered height is
+  // the difference between the two.
+  const inset = bottomInset();
   panX = -(cursorU - 0.5) * picture.width * zoom;
-  panY = -(cursorV - 0.5) * picture.height * zoom;
+  panY = -(cursorV - 0.5) * picture.height * zoom - inset / 2;
   applyZoom();
 }
 
@@ -4182,12 +4197,39 @@ function deskWatchViewport() {
   if (!vv) return;
   const measure = () => {
     const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    document.documentElement.style.setProperty(
-      "--desk-lift", (deskHeld && deskKeyboardUp() ? Math.round(covered) : 0) + "px");
+    deskLift = deskHeld && deskKeyboardUp() ? Math.round(covered) : 0;
+    document.documentElement.style.setProperty("--desk-lift", deskLift + "px");
+    // The picture has less room than it had a moment ago, so where it may sit
+    // has changed. Without this the keyboard slides up over the bottom of the
+    // game and the picture stays exactly where it was, underneath it.
+    applyZoom();
+    if (cursorDriving()) cursorFollow();
   };
   vv.addEventListener("resize", measure);
   vv.addEventListener("scroll", measure);
   return measure;
+}
+
+/* How much of the picture is covered along the bottom edge.
+ *
+ * The phone's keyboard and the row of keys above it are drawn over the
+ * bottom of the stage, so the part of the picture a person can actually see
+ * is shorter than the element it is in. Everything that decides where the
+ * picture may sit has to know that, or the bottom of the picture can never
+ * be brought out from under them -- which is exactly what it did: the
+ * pointer could walk down to the bottom of the screen and the view would not
+ * follow it there, because as far as the arithmetic was concerned that part
+ * was already on show.
+ *
+ * The three little buttons in the corner are deliberately not counted. They
+ * are small, they float over one corner rather than a strip, and shifting the
+ * whole picture up for them would be worse than what they cover. */
+let deskLift = 0;
+
+function bottomInset() {
+  const row = el("desk-keys");
+  const rowHeight = row && !row.hidden ? row.getBoundingClientRect().height : 0;
+  return deskLift + rowHeight;
 }
 
 /* Everything that has to be listened for while somebody is driving. Bound
