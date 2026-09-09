@@ -2520,6 +2520,22 @@ video.addEventListener("pointerdown", (event) => {
   // happen before anything else decides what this touch is for.
   if (cursorDriving()) {
     cursorStopCoasting();
+    if (held.size === 1) {
+      // A second finger. Might be a pinch, might be a two-finger tap, and
+      // which it was is only known when they come off again.
+      cursorTwo = { at: event.timeStamp, moved: 0 };
+      if (cursorDragging) {
+        // Whatever this is about to be, it is not a one-finger drag any more.
+        cursorDragging = false;
+        deskSend([{ t: "b", b: 0, d: 0 }]);
+      }
+    } else if (!held.size && event.timeStamp - cursorLastTap < DOUBLE_MS) {
+      // Tap, then tap and stay down: the trackpad way of picking something up
+      // and dragging it, on a surface with no button to hold. The button goes
+      // down now and stays down until the finger leaves.
+      cursorDragging = true;
+      deskSend([{ t: "b", b: 0, d: 1 }]);
+    }
     cursorFrom = { x: event.clientX, y: event.clientY,
                    at: event.timeStamp, moved: 0 };
     // Tapping the picture must not put the keyboard away. A tap on anything
@@ -2561,6 +2577,10 @@ video.addEventListener("pointermove", (event) => {
       // somebody keeps hold of what they were looking at while resizing it.
       if (pinchAt) { panX += at.x - pinchAt.x; panY += at.y - pinchAt.y; }
       applyZoom();
+    }
+    if (cursorTwo && pinchAt) {
+      cursorTwo.moved += Math.abs(gap - pinchGap)
+                       + Math.hypot(at.x - pinchAt.x, at.y - pinchAt.y);
     }
     pinchGap = gap;
     pinchAt = at;
@@ -2606,18 +2626,50 @@ function letGoOfPicture(event) {
   held.delete(event.pointerId);
   if (held.size < 2) { pinchGap = 0; pinchAt = null; }
   try { video.releasePointerCapture(event.pointerId); } catch (_) {}
-  if (!cursorFrom || held.size) return;
-  const from = cursorFrom;
+
+  if (held.size) return;                  // still a finger down somewhere
+
+  // Every gesture ends here, so everything it was carrying is put down here
+  // too -- in one place, before deciding what it was. Leaving any of it set
+  // meant the next gesture read the last one's notes: two fingers were seen
+  // as a double tap, and the tap after that as the right button.
+  const two = cursorTwo, from = cursorFrom, dragging = cursorDragging;
+  cursorTwo = null;
   cursorFrom = null;
-  if (!cursorDriving()) return;
+  cursorDragging = false;
+
+  if (dragging) {
+    // A drag that ended with the button still down is a window left stuck to
+    // somebody's pointer.
+    deskSend([{ t: "b", b: 0, d: 0 }]);
+    cursorLastTap = 0;
+    return;
+  }
+
+  if (two) {
+    if (cursorDriving() && event.type === "pointerup"
+        && event.timeStamp - two.at < TAP_MS && two.moved < TAP_SLOP * 2) {
+      // Two fingers down and straight off again, having gone nowhere: the
+      // trackpad gesture for the right button. A pinch is the same two
+      // fingers doing something, which is why this is only decided once they
+      // have both gone.
+      deskSend([{ t: "b", b: 2, d: 1 }, { t: "b", b: 2, d: 0 }]);
+    }
+    cursorLastTap = 0;
+    return;
+  }
+
+  if (!from || !cursorDriving()) return;
   const quick = event.timeStamp - from.at < TAP_MS;
   if (from.moved < TAP_SLOP && event.type === "pointerup") {
     // A tap is a click where the pointer already is. It is not a move: the
     // finger is somewhere on a picture, and the pointer is wherever it was
     // left, which is the whole difference between this and a touchscreen.
     deskSend([{ t: "b", b: 0, d: 1 }, { t: "b", b: 0, d: 0 }]);
+    cursorLastTap = event.timeStamp;
     return;
   }
+  cursorLastTap = 0;
   if (quick && Math.hypot(coastX, coastY) > COAST_STOP) {
     cursorCoast(performance.now());
   } else {
@@ -2868,7 +2920,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08p";
+const CLIENT_BUILD = "2026-09-08q";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3929,6 +3981,17 @@ const COAST_STOP = 0.02;
 const COAST_MAX = 3;
 /* A press this short that moved this little was a tap, not a drag. */
 const TAP_MS = 250, TAP_SLOP = 10;
+/* And a second tap starting this soon after the first ended belongs with it. */
+const DOUBLE_MS = 300;
+
+/* When the last single-finger tap let go, so the next one can tell whether it
+   is the second half of something. */
+let cursorLastTap = 0;
+/* Whether the left button is being held down by a tap-and-hold, which is how
+   a trackpad drags something without a button to press. */
+let cursorDragging = false;
+/* Two fingers down: a pinch until it turns out to have been a tap. */
+let cursorTwo = null;
 
 /* Dragging the cursor is what one finger does whenever the cursor or the
    keyboard is up. The controller is the other state: with it showing, one
@@ -4350,6 +4413,20 @@ function deskListen() {
   });
   video.addEventListener("click", () => { if (deskHeld) deskCapture(); });
 
+  // Keeping the keyboard up when the picture is tapped, properly this time.
+  //
+  // Preventing the default of `pointerdown` does not stop a phone moving
+  // focus: the focus follows the *touch* and the compatibility mouse event
+  // behind it, and those are the ones that have to be refused. Doing it here
+  // means focus never leaves the field, so the keyboard never begins to go
+  // down -- which is what the flash was: it started to leave and was called
+  // back.
+  const keepFocus = (event) => {
+    if (deskKeyboardUp() && deskHeld) event.preventDefault();
+  };
+  video.addEventListener("touchstart", keepFocus, { passive: false });
+  video.addEventListener("mousedown", keepFocus, { passive: false });
+
   document.addEventListener("pointerlockchange", () => {
     // Losing the pointer -- Escape, a click elsewhere, the browser deciding
     // on its own -- must let go of everything that was down. Otherwise a
@@ -4420,8 +4497,11 @@ function deskListen() {
       // give focus back ends the argument rather than flickering for ever.
       if (deskWantKeyboard && deskHeld && deskRefocus < 3) {
         deskRefocus += 1;
-        setTimeout(() => { try { field.focus({ preventScroll: true }); }
-                           catch (_) {} }, 0);
+        // Straight away rather than after a turn of the event loop. A phone
+        // starts putting its keyboard away the moment focus leaves, and
+        // taking it back in the same beat is the difference between nothing
+        // happening and a keyboard that visibly flinches.
+        try { field.focus({ preventScroll: true }); } catch (_) {}
         setTimeout(() => { deskRefocus = 0; }, 1000);
         return;
       }
