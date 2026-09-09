@@ -82,6 +82,39 @@ else
   echo "add it with: echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.profile"
 fi
 
+say "the login screen"
+# Optional, and needs root once, which is why it asks rather than assumes.
+#
+# Without it a screen locker or a "switch user" leaves guests looking at a
+# black rectangle: the greeter is a second X server with its own cookie, and
+# this user is not allowed to read it. With it, the capture follows the
+# monitor and whoever holds the keyboard and mouse can log the console back
+# in from wherever they are.
+GREETER_CONF=/etc/lightdm/lightdm.conf.d/90-fourth-player.conf
+if [ ! -d /etc/lightdm/lightdm.conf.d ]; then
+  echo "no LightDM here, so nothing to do"
+elif [ -f "$GREETER_CONF" ]; then
+  echo "already installed"
+else
+  echo "Fourth Player can show the console's login screen instead of a black"
+  echo "screen, so you can log it back in from your phone. That needs one"
+  echo "root-installed hook, which grants only this user access to the"
+  echo "greeter's display -- not root, not the network."
+  printf "install it? [y/N] "
+  read -r answer
+  case "$answer" in
+    [Yy]*)
+      sudo install -m 755 "$REPO/bin/fourth-player-greeter-access" \
+        /usr/local/bin/fourth-player-greeter-access &&
+      sudo sh -c "sed 's|^greeter-setup-script=.*|greeter-setup-script=/usr/local/bin/fourth-player-greeter-access|' \
+        '$REPO/bin/fourth-player-greeter.conf' > '$GREETER_CONF'" &&
+      echo "installed; it takes effect the next time LightDM starts" ||
+      echo "not installed -- run it again with sudo available"
+      ;;
+    *) echo "skipped; the login screen will show as black until you do" ;;
+  esac
+fi
+
 say "the service"
 mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/fourth-player"
 sed "s|%h/fourth-player|$REPO|" "$REPO/system/fourth-player.service" \
