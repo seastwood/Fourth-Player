@@ -386,6 +386,10 @@ class Stage:
         # a guest who joins mid-session has the parameter sets they need only if
         # they happened to be listening at the start, which they never are.
         description = (
+            # The pointer is off while nobody is driving: a mouse cursor
+            # sitting over a game is noise, and there is nothing to point
+            # with. Stage.show_pointer turns it on for as long as somebody
+            # holds the desk -- see there for why it cannot simply be left on.
             f"ximagesrc display-name={cfg.display} use-damage=0 show-pointer=false "
             f"! video/x-raw,framerate={cfg.fps}/1 "
             f"! {convert} "
@@ -764,6 +768,35 @@ class Stage:
                 log.debug("peer %s would not take a %s buffer: %s",
                           peer.id, kind, exc)
         return Gst.FlowReturn.OK
+
+    def show_pointer(self, yes):
+        """Draw the mouse pointer into the picture, or stop. True if it took.
+
+        Off by default and on only while somebody holds the keyboard and
+        mouse. Two reasons it is not simply left on: a cursor parked over a
+        game is noise nobody asked for, and -- the one that matters -- the
+        pointer is not part of the screen's contents. X draws it from a
+        separate cursor image, so it has to be composited in by hand, which is
+        work per frame for something almost nobody is looking at.
+
+        It is why the cursor could be seen in Kodi and nowhere else: Kodi
+        draws its own pointer as part of its picture, so that one arrives in
+        the capture whatever this says. Everything else on the machine relies
+        on the X cursor, which was being left out.
+        """
+        if self.pipeline is None:
+            return False
+        element = self.pipeline.get_by_name("capture")
+        if element is None:
+            return False
+        try:
+            element.set_property("show-pointer", bool(yes))
+        except Exception:
+            log.exception("could not change whether the pointer is captured")
+            return False
+        log.info("the mouse pointer is %s in the picture",
+                 "showing" if yes else "hidden")
+        return True
 
     def _peer_named(self, text):
         for peer_id, peer in self.peers.items():

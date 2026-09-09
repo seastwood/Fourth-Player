@@ -2054,6 +2054,14 @@ class LiveSession:
                 return "The keyboard and mouse could not be created."
         self.desk_driver = guest.slot
         self.desk_label = guest.label
+        # Now there is something to point with, so the pointer goes into the
+        # picture. Everybody watching sees it, which is right: somebody is
+        # moving a cursor around on this machine and that should be plain.
+        if self.stage is not None:
+            try:
+                self.stage.show_pointer(True)
+            except Exception:
+                log.exception("could not turn the pointer on")
         log.info("%s has the keyboard and mouse", guest.label)
         self.publish_people()
         # The slot, not just the label: every page compares it against its
@@ -2081,6 +2089,11 @@ class LiveSession:
         self.desk_device = None
         self.desk_driver = None
         self.desk_label = ""
+        if self.stage is not None:
+            try:
+                self.stage.show_pointer(False)
+            except Exception:
+                log.exception("could not turn the pointer off")
         log.info("the keyboard and mouse are put away (%s)", why)
         self.publish_people()
         self.notify({"t": "desk", "who": who, "slot": was,

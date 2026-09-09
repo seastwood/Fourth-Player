@@ -2342,9 +2342,18 @@ el("screen").addEventListener("click", () => {
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, dragged = false;
 
-/* The picture inside the element, in screen pixels, before any zoom. */
+/* The picture inside the element, in screen pixels, before any zoom.
+ *
+ * Measured from the layout box and deliberately not from
+ * getBoundingClientRect, which returns the box *after* the transform. Once
+ * zoomed, that rect is `zoom` times too big, so every number derived from it
+ * was too big by the same factor -- including the limit on how far the
+ * picture may be moved. Panning could therefore run past the edge of the
+ * picture and into the element's own black background, which is where the
+ * black down the sides of a zoomed picture came from, and it is why keeping
+ * the pointer in the middle drifted off as soon as the zoom was not 1. */
 function pictureBox() {
-  const box = video.getBoundingClientRect();
+  const box = { width: video.offsetWidth, height: video.offsetHeight };
   const w = video.videoWidth, h = video.videoHeight;
   if (!w || !h || !box.width || !box.height) {
     return { width: box.width, height: box.height, box };
@@ -2423,6 +2432,10 @@ function zoomAbout(next, clientX, clientY) {
   panY = panTowards(panY, towardsY, ratio);
   zoom = to;
   applyZoom();
+  // Whoever is driving stays in the middle whatever the zoom becomes. Without
+  // this the pointer was centred only until the picture was resized around
+  // it, and pinching left it off to one side until it was next moved.
+  if (cursorDriving()) cursorFollow();
 }
 
 const held = new Map();
@@ -2787,7 +2800,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08j";
+const CLIENT_BUILD = "2026-09-08k";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
