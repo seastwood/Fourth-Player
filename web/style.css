@@ -2410,11 +2410,17 @@ input.name {
    get out of the way reads this one number. */
 :root { --desk-lift: 0px; }
 
-.desk-kb {
+.desk-bar {
   position: fixed;
   right: max(.75rem, env(safe-area-inset-right, 0px));
   bottom: calc(max(.75rem, env(safe-area-inset-bottom, 0px)) + var(--desk-lift));
   z-index: 45;
+  display: flex;
+  gap: .4rem;
+  transition: bottom .18s ease;
+}
+.desk-bar[hidden] { display: none; }
+.desk-bar button {
   display: flex;
   width: 2.6rem;
   height: 2.6rem;
@@ -2425,11 +2431,9 @@ input.name {
   border-radius: 0;
   background: rgba(16, 14, 40, .82);
   color: var(--ink);
-  transition: bottom .18s ease;
 }
-.desk-kb[hidden] { display: none; }
-.desk-kb.is-on { border-color: var(--accent); color: var(--accent); }
-.desk-kb svg {
+.desk-bar button.is-on { border-color: var(--accent); color: var(--accent); }
+.desk-bar svg {
   width: 1.5rem;
   height: 1.5rem;
   display: block;
@@ -2437,6 +2441,7 @@ input.name {
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* One transparent pixel. It must be focusable and rendered for a phone to

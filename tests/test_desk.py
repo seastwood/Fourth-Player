@@ -215,6 +215,88 @@ except Exception as exc:                                   # pragma: no cover
     print("  .... skipped, cannot import the session here (%s)" % exc)
 
 
+print("\nand a guest with no account can reach none of it")
+try:
+    import asyncio
+    from fourthplayer import accounts, server as serverlib
+
+    class Bare(GuestConnection):
+        """A guest who joined with the link and the PIN, and nothing else."""
+        def __init__(self, slot=3):
+            self.slot = slot
+            self.label = "A guest"
+            self.session = None
+            self.account = None
+            self.capabilities = ()
+            self.primary = False
+            self.logged_in_at = 0.0
+            self.stray_desk = 0
+            self.bad_desk = 0
+            self.last_input = 0.0
+
+    loop = asyncio.new_event_loop()
+    stranger = Bare()
+    check(stranger.can("desk") is False,
+          "they may not use the keyboard and mouse")
+
+    took = []
+    server = serverlib.Server.__new__(serverlib.Server)
+    server.session = LiveSession.__new__(LiveSession)
+    server.session.desk_driver = None
+    server.session.desk_device = None
+    server.session.desk_label = ""
+    server.session.take_the_desk = lambda guest: took.append(guest) or None
+    server.loop = loop
+
+    outbox = asyncio.Queue()
+    loop.run_until_complete(
+        server._act(stranger, "desk", {"take": True}, outbox))
+    check(not took, "asking for it outright does not reach the session at all")
+    reply = outbox.get_nowait()
+    check(reply.get("reason") == "denied",
+          "they are told no rather than quietly ignored: %r" % (reply,))
+
+    # An account that exists, has been given other things, and not this one.
+    ordinary = Bare(slot=4)
+    ordinary.account = "someone"
+    ordinary.capabilities = ("steam", "stop", "slots")
+    ordinary.logged_in_at = 100.0
+    check(ordinary.can("desk") is False,
+          "nor may an account that was given other capabilities")
+    loop.run_until_complete(
+        server._act(ordinary, "desk", {"take": True}, outbox))
+    check(not took, "and asking gets them no further")
+
+    # Given it, but from a remembered device rather than a code just now.
+    stale = Bare(slot=5)
+    stale.account = "someone"
+    stale.capabilities = ("desk",)
+    stale.logged_in_at = 0.0
+    check(stale.can("desk") is True, "an account given desk may use it")
+    loop.run_until_complete(
+        server._act(stale, "desk", {"take": True}, outbox))
+    check(not took, "but not from a device that only remembers who they are")
+    reply = outbox.get_nowait()
+    while not outbox.empty():
+        reply = outbox.get_nowait()
+    check(reply.get("reason") == "code",
+          "they are asked for an authenticator code first: %r" % (reply,))
+
+    fresh = Bare(slot=6)
+    fresh.account = "someone"
+    fresh.capabilities = ("desk",)
+    fresh.logged_in_at = 100.0
+    loop.run_until_complete(
+        server._act(fresh, "desk", {"take": True}, outbox))
+    check(len(took) == 1, "with the code just given, it is granted")
+
+    check("desk" in accounts.NEEDS_CODE,
+          "and that gate is not incidental: desk is in NEEDS_CODE")
+    loop.close()
+except Exception as exc:                                   # pragma: no cover
+    print("  .... skipped, cannot import the server here (%s)" % exc)
+
+
 print("\nthe devices themselves")
 try:
     from fourthplayer import desk

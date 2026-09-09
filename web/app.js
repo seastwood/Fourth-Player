@@ -693,6 +693,9 @@ function joined(message) {
   }
   gate.hidden = true;
   stage.hidden = false;
+  // The desk bar is fixed to the viewport and is drawn only over the picture,
+  // so it has to be reconsidered the moment the picture appears.
+  deskPaintKeys();
   // Which guest this page is. Kept as the number rather than the name because
   // two people are free to call themselves the same thing, and "which of
   // these is me" has to have exactly one answer.
@@ -2422,6 +2425,14 @@ video.addEventListener("playing", videoArrived);
 
 video.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "mouse" && event.button !== 0) return;
+  // A finger back on the glass stops a coasting pointer dead. This is what
+  // makes a trackball controllable rather than only flickable, and it has to
+  // happen before anything else decides what this touch is for.
+  if (cursorDriving()) {
+    cursorStopCoasting();
+    cursorFrom = { x: event.clientX, y: event.clientY,
+                   at: event.timeStamp, moved: 0 };
+  }
   held.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (held.size === 2) {
     const [a, b] = Array.from(held.values());
@@ -2461,6 +2472,25 @@ video.addEventListener("pointermove", (event) => {
     event.preventDefault();
     return;
   }
+  // One finger, with the cursor up: the pointer goes where the finger says.
+  // Two fingers still pinch, above -- zooming in to see something and then
+  // pointing at it is one job, not two.
+  if (cursorDriving() && cursorFrom) {
+    const scale = cursorScale();
+    const dx = now.x - was.x, dy = now.y - was.y;
+    cursorMove(dx * scale.x, dy * scale.y);
+    // Speed is taken from this move alone rather than averaged over the
+    // drag: what a flick means is how fast the finger was going as it left,
+    // and an average of the whole gesture is mostly how it started.
+    const dt = Math.max(1, event.timeStamp - cursorFrom.at) / 1000;
+    coastX = (dx * scale.x) / dt;
+    coastY = (dy * scale.y) / dt;
+    cursorFrom.at = event.timeStamp;
+    cursorFrom.moved += Math.hypot(dx, dy);
+    dragged = true;
+    event.preventDefault();
+    return;
+  }
   if (zoom > ZOOM_MIN) {
     panX += now.x - was.x;
     panY += now.y - was.y;
@@ -2470,10 +2500,28 @@ video.addEventListener("pointermove", (event) => {
   }
 });
 
+
 function letGoOfPicture(event) {
   held.delete(event.pointerId);
   if (held.size < 2) { pinchGap = 0; pinchAt = null; }
   try { video.releasePointerCapture(event.pointerId); } catch (_) {}
+  if (!cursorFrom || held.size) return;
+  const from = cursorFrom;
+  cursorFrom = null;
+  if (!cursorDriving()) return;
+  const quick = event.timeStamp - from.at < TAP_MS;
+  if (from.moved < TAP_SLOP && event.type === "pointerup") {
+    // A tap is a click where the pointer already is. It is not a move: the
+    // finger is somewhere on a picture, and the pointer is wherever it was
+    // left, which is the whole difference between this and a touchscreen.
+    deskSend([{ t: "b", b: 0, d: 1 }, { t: "b", b: 0, d: 0 }]);
+    return;
+  }
+  if (quick && Math.hypot(coastX, coastY) > COAST_STOP) {
+    cursorCoast(performance.now());
+  } else {
+    coastX = coastY = 0;
+  }
 }
 
 video.addEventListener("pointerup", letGoOfPicture);
@@ -2719,7 +2767,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08c";
+const CLIENT_BUILD = "2026-09-08d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3652,6 +3700,7 @@ function deskRelease() {
   // The host lets go of everything on its side; this is the page agreeing,
   // so a latched Ctrl does not stay lit over a keyboard that is not held.
   deskMods.clear();
+  cursorStopCoasting();
   deskPaintKeys();
   deskPending.dx = deskPending.dy = deskPending.wdx = deskPending.wdy = 0;
 }
@@ -3706,6 +3755,112 @@ function deskPaint() {
         + "back -- you keep the keyboard and mouse until you hand them over."
       : "Click the picture to start driving.";
   show("desk-escape", deskHeld);
+}
+
+/* ---- the cursor, as a trackball ---------------------------------- *
+ *
+ * A finger dragging on the video moves the console's pointer. It is sent as a
+ * *position* rather than a movement, and the reason is that this page has to
+ * know where the pointer is: keeping it in the middle of a zoomed picture is
+ * not possible otherwise, and the position cannot be worked out from deltas
+ * because the console applies its own acceleration to those. So the page owns
+ * the pointer's position and tells the console what it is.
+ *
+ * Held as a fraction of the picture rather than in pixels, because the page
+ * does not know the console's resolution and does not need to: 0.5, 0.5 is
+ * the middle of the screen whatever that screen turns out to be.
+ * ------------------------------------------------------------------ */
+
+let cursorU = 0.5, cursorV = 0.5;    // where the console's pointer is, 0..1
+let cursorOn = false;                // the cursor button, on its own
+let coastX = 0, coastY = 0;          // fractions per second, while coasting
+let coasting = 0;                    // the animation frame, or 0
+/* Where this touch started, so a tap can be told from a drag and a flick
+   from a stop. Null whenever no finger is driving the pointer. */
+let cursorFrom = null;
+
+/* Matches deskwire.POINT_MAX. */
+const POINT_MAX = 32767;
+
+/* How much speed survives each second of coasting. Low enough to stop in a
+   moment and high enough that a flick crosses the screen -- this is the whole
+   feel of the thing, and it is one number. */
+const COAST_KEEP = 0.06;
+/* Below this it has stopped, in fractions of the screen per second. */
+const COAST_STOP = 0.02;
+/* A press this short that moved this little was a tap, not a drag. */
+const TAP_MS = 250, TAP_SLOP = 10;
+
+/* Dragging the cursor is what one finger does whenever the cursor or the
+   keyboard is up. The controller is the other state: with it showing, one
+   finger pans the picture exactly as it always did. */
+function cursorDriving() {
+  return deskHeld && (cursorOn || deskKeyboardUp());
+}
+
+function cursorSend() {
+  deskSend([{ t: "p",
+              x: Math.round(cursorU * POINT_MAX),
+              y: Math.round(cursorV * POINT_MAX) }]);
+}
+
+/* Move the pointer by a fraction of the picture, stopping at its edges, and
+   bring the view along. Returns whether it actually went anywhere -- a
+   cursor already against an edge stops a coast rather than grinding there. */
+function cursorMove(du, dv) {
+  const wasU = cursorU, wasV = cursorV;
+  cursorU = Math.max(0, Math.min(1, cursorU + du));
+  cursorV = Math.max(0, Math.min(1, cursorV + dv));
+  if (cursorU === wasU && cursorV === wasV) return false;
+  cursorSend();
+  cursorFollow();
+  return true;
+}
+
+/* Keep the pointer in the middle of what can be seen, which only means
+   anything while zoomed in. applyZoom clamps the pan to the edges of the
+   picture, and that clamp is exactly the "until the viewport hits an edge"
+   half of this: near an edge the view stops and the pointer walks on across
+   it, which is the only way to reach a corner. */
+function cursorFollow() {
+  if (zoom <= ZOOM_MIN) return;
+  const picture = pictureBox();
+  panX = -(cursorU - 0.5) * picture.width * zoom;
+  panY = -(cursorV - 0.5) * picture.height * zoom;
+  applyZoom();
+}
+
+/* Screen pixels to a fraction of the picture. Dividing by the *zoomed* size
+   is what makes a zoomed-in drag finer rather than faster: the finger moves
+   the same distance on glass and the pointer moves less of the console. */
+function cursorScale() {
+  const picture = pictureBox();
+  const w = picture.width * zoom, h = picture.height * zoom;
+  return { x: w > 0 ? 1 / w : 0, y: h > 0 ? 1 / h : 0 };
+}
+
+function cursorStopCoasting() {
+  if (coasting) cancelAnimationFrame(coasting);
+  coasting = 0;
+  coastX = coastY = 0;
+}
+
+/* The trackball. A flick leaves the pointer moving and friction takes it
+   down; putting a finger back on the glass stops it dead, which is what
+   makes one flickable and controllable rather than only flickable. */
+function cursorCoast(last) {
+  coasting = requestAnimationFrame((now) => {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    const keep = Math.pow(COAST_KEEP, dt);
+    coastX *= keep;
+    coastY *= keep;
+    const speed = Math.hypot(coastX, coastY);
+    if (speed < COAST_STOP || !cursorMove(coastX * dt, coastY * dt)) {
+      cursorStopCoasting();
+      return;
+    }
+    cursorCoast(now);
+  });
 }
 
 /* ---- the phone's own keyboard ------------------------------------ *
@@ -3772,16 +3927,86 @@ function deskModTap(code) {
   deskPaintKeys();
 }
 
+/* The three buttons are one choice with three positions, not three switches.
+   The controller and the cursor cannot both have the finger: with the pad
+   showing, a drag pans the picture, and that is the state to come back to. */
+function deskChoose(what) {
+  if (!deskHeld) {
+    // Asking for either of these is asking for the keyboard and mouse. The
+    // host may want an authenticator code first, and says so; onError puts
+    // the request aside and it is replayed once the code is in.
+    deskWanted = what;
+    if (!deskAsking) { deskAsking = true; act({ t: "desk", take: true }); }
+    return;
+  }
+  if (what === "pad") {
+    cursorOn = false;
+    cursorStopCoasting();
+    if (deskKeyboardUp()) deskShowKeyboard(false);
+    setController(true);
+  } else if (what === "cursor") {
+    cursorOn = !cursorOn;
+    if (cursorOn) setController(false);
+    if (!cursorOn) cursorStopCoasting();
+  } else if (what === "keyboard") {
+    const up = deskKeyboardUp();
+    if (!up) setController(false);
+    deskShowKeyboard(!up);
+  }
+  deskPaintKeys();
+}
+
+/* Put the controller away while the desk has the finger, and bring back
+   whichever one it was afterwards.
+ *
+ * Deliberately not written to localStorage. That holds what the guest chose,
+ * and reaching for the mouse for a minute is not a change of mind about which
+ * controller they use -- one of which is the keyboard-as-a-controller layout,
+ * a real choice that anybody may make and that this must not quietly undo.
+ * So the choice is remembered here, in memory, and given back. */
+let padWas = "";
+
+function setController(on) {
+  if (!on) {
+    const now = chosenLayout();
+    if (now !== "off") padWas = now;
+    applyLayoutChoice("off");
+    mirrorPicker();
+    return;
+  }
+  const back = padWas || chosenLayout();
+  applyLayoutChoice(back === "off" ? DEFAULT_LAYOUT : back);
+  mirrorPicker();
+}
+
+let deskWanted = "";
+
 function deskPaintKeys() {
   const row = el("desk-keys");
-  const button = el("desk-kb");
   const up = deskKeyboardUp();
-  if (button) {
-    button.hidden = !deskHeld;
-    button.classList.toggle("is-on", up);
-    button.setAttribute("aria-label",
-                        up ? "Hide the keyboard" : "Show the keyboard");
+  const bar = el("desk-bar");
+  if (bar) {
+    // Drawn for an account that may use it, whether or not it is holding it
+    // yet -- the button is how it gets held. Never for anybody else: the host
+    // refuses all of it regardless, and offering a control that will be
+    // refused is just a worse way of saying no.
+    // Only while the picture is actually on screen: the bar is fixed to the
+    // viewport, and would otherwise float over the join screen.
+    bar.hidden = !may("desk") || stage.hidden;
   }
+  const kb = el("desk-kb");
+  if (kb) {
+    kb.classList.toggle("is-on", up);
+    kb.setAttribute("aria-label", up ? "Hide the keyboard" : "Show the keyboard");
+  }
+  const cur = el("desk-cursor");
+  if (cur) {
+    cur.classList.toggle("is-on", cursorOn);
+    cur.setAttribute("aria-label", cursorOn ? "Stop using the mouse"
+                                            : "Use the mouse");
+  }
+  const pad = el("desk-pad");
+  if (pad) pad.classList.toggle("is-on", !cursorOn && !up);
   if (row) {
     row.hidden = !(deskHeld && up);
     row.querySelectorAll("[data-mod]").forEach((key) => {
@@ -3908,11 +4133,14 @@ function deskListen() {
       act({ t: "desk", take: !deskHeld });
     });
   }
-  const kb = el("desk-kb");
-  if (kb) {
-    kb.addEventListener("click", (event) => {
+  const bar = el("desk-bar");
+  if (bar) {
+    bar.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
       event.preventDefault();
-      deskShowKeyboard(!deskKeyboardUp());
+      deskChoose(button.id === "desk-pad" ? "pad"
+                 : button.id === "desk-cursor" ? "cursor" : "keyboard");
     });
   }
   const field = el("desk-input");
@@ -3967,6 +4195,17 @@ function deskFrom(message) {
   if (mine) {
     deskHeld = !!message.on;
     deskAsking = false;
+    if (deskHeld && deskWanted) {
+      const wanted = deskWanted;
+      deskWanted = "";
+      // The button press that asked for the desk is also the press that
+      // asked for the cursor or the keyboard. Making somebody press it twice
+      // -- once to be allowed and once to mean it -- is a worse way of
+      // saying yes.
+      deskChoose(wanted);
+    } else if (!deskHeld) {
+      deskWanted = "";
+    }
   } else if (message.on) {
     // Somebody else has them now. Only the host can do that, and only to the
     // primary admin's order, so there is nothing to argue with.
@@ -3976,6 +4215,10 @@ function deskFrom(message) {
     if (deskCaptured() && document.exitPointerLock) document.exitPointerLock();
     if (deskKeyboardUp()) deskShowKeyboard(false);
     deskMods.clear();
+    // The pointer is not ours any more, so nothing here may keep moving it,
+    // and the controller comes back because that is the state to return to.
+    cursorStopCoasting();
+    if (cursorOn) { cursorOn = false; setController(true); }
   }
   if (message.who && !mine) {
     showNotice("<p>" + escapeText(message.who)

@@ -702,16 +702,33 @@
        all come from LAYOUTS in app.js; everything below is the frame they are
        hung on, so a new controller is an entry in that table rather than more
        markup here. -->
-  <!-- Driving the console from a phone. Hidden unless somebody holds the
-       keyboard and mouse, because it is meaningless otherwise. -->
-  <button id="desk-kb" class="desk-kb" type="button" hidden
-          aria-label="Show the keyboard">
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="1.5" y="5.5" width="21" height="13" rx="1.5"></rect>
-      <path d="M5 9h1M8 9h1M11 9h1M14 9h1M17 9h1M5 12h1M8 12h1M11 12h1M14
-               12h1M17 12h1M7 15h10"></path>
-    </svg>
-  </button>
+  <!-- Driving the console. Only ever drawn for an account that holds `desk`;
+       the host refuses every one of these to anybody else whatever the page
+       chooses to show. Controller, cursor, keyboard, left to right: the
+       controller is the ordinary state and the two beside it are the ways of
+       reaching past the game to the machine. -->
+  <div id="desk-bar" class="desk-bar" hidden>
+    <button id="desk-pad" type="button" aria-label="Show the controller">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M7.5 8.5h9a4.5 4.5 0 0 1 4.4 3.6l.7 3.6a2.2 2.2 0 0 1-4 1.7
+                 L15.6 15H8.4l-2 2.4a2.2 2.2 0 0 1-4-1.7l.7-3.6A4.5 4.5 0 0 1
+                 7.5 8.5Z"></path>
+        <path d="M6.2 11.4v2.2M5.1 12.5h2.2M16.6 11.8h.01M18.4 13.2h.01"></path>
+      </svg>
+    </button>
+    <button id="desk-cursor" type="button" aria-label="Use the mouse">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M6 3.5 18.5 12 13 13.2l3 6.2-2.4 1.1-3-6.3L6 18Z"></path>
+      </svg>
+    </button>
+    <button id="desk-kb" type="button" aria-label="Show the keyboard">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="1.5" y="5.5" width="21" height="13" rx="1.5"></rect>
+        <path d="M5 9h1M8 9h1M11 9h1M14 9h1M17 9h1M5 12h1M8 12h1M11 12h1M14
+                 12h1M17 12h1M7 15h10"></path>
+      </svg>
+    </button>
+  </div>
 
   <!-- The field exists to make a phone raise its keyboard, and for no other
        reason: what is typed into it is read and thrown away. It has to be
