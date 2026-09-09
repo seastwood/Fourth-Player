@@ -106,10 +106,29 @@ class PipelineWorker:
 # better picture rather than a faster one.
 CODEC_PREFERENCE = ("h265", "h264")
 
+# Per codec: the hardware encoder, then the software ones in the order they
+# would be chosen, then the parser and the payloader.
+#
+# More than one software encoder because they come from different packages and
+# a machine has whichever it happens to have. x264enc is in gstreamer's "ugly"
+# set and openh264enc is in "bad", and a Mint desktop installs bad and not
+# ugly -- so a machine can have no x264enc, encode H.265 perfectly well, and
+# report that it cannot do H.264 at all. Which breaks the promise the rest of
+# this leans on: H.264 is the one every browser takes, and it is what a
+# browser that tells us nothing is given.
 _ELEMENTS = {
-    "h264": ("vah264enc", "x264enc", "h264parse", "rtph264pay"),
-    "h265": ("vah265enc", "x265enc", "h265parse", "rtph265pay"),
+    "h264": (("vah264enc",), ("x264enc", "openh264enc"),
+             "h264parse", "rtph264pay"),
+    "h265": (("vah265enc",), ("x265enc",), "h265parse", "rtph265pay"),
 }
+
+
+def _first_present(names):
+    """The first of these element factories this machine actually has."""
+    for name in names:
+        if Gst.ElementFactory.find(name):
+            return name
+    return None
 
 _host_codecs = None
 
@@ -145,11 +164,11 @@ def host_codecs(hardware=True):
     init()
     found = []
     for codec in CODEC_PREFERENCE:
-        va, sw, parser, payloader = _ELEMENTS[codec]
+        vas, sws, parser, payloader = _ELEMENTS[codec]
         # Fall back the same way the pipeline does, or this promises H.265 on
         # a machine that has no VA driver and the offer is a lie.
-        encoder = va if (hardware and Gst.ElementFactory.find(va)) else sw
-        if (Gst.ElementFactory.find(encoder)
+        encoder = (_first_present(vas) if hardware else None) or _first_present(sws)
+        if (encoder
                 and Gst.ElementFactory.find(parser)
                 and Gst.ElementFactory.find(payloader)):
             found.append(codec)
@@ -362,10 +381,20 @@ class Stage:
                        f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} "
                        f"cpb-size={cpb} b-frames=0")
         else:
-            element = "x265enc" if hevc else "x264enc"
-            encoder = (f"{element} name=enc speed-preset=ultrafast "
-                       f"tune=zerolatency bitrate={cfg.bitrate_kbps} "
-                       f"key-int-max={keyint}")
+            element = _first_present(_ELEMENTS["h265" if hevc else "h264"][1])
+            if element == "openh264enc":
+                # A different encoder with different knobs: it has no
+                # speed-preset and no tune, its bitrate is in bits rather than
+                # kilobits, and asking it for x264's settings makes it refuse
+                # to start at all.
+                encoder = (f"openh264enc name=enc complexity=low "
+                           f"rate-control=bitrate "
+                           f"bitrate={cfg.bitrate_kbps * 1000} "
+                           f"gop-size={keyint}")
+            else:
+                encoder = (f"{element} name=enc speed-preset=ultrafast "
+                           f"tune=zerolatency bitrate={cfg.bitrate_kbps} "
+                           f"key-int-max={keyint}")
         # Pin the profile between encoder and parser: the payloader reads it
         # from these caps to build profile-level-id, and without it a browser
         # is guessing.
