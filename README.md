@@ -378,24 +378,92 @@ button and that B is drawn below X.
 
 The single most important property here, and it is structural rather than
 enforced. Each guest is wired to one `uinput` device that declares gamepad
-capabilities **and nothing else** — no keyboard codes, no relative axes. There
-is no keyboard path, no mouse path, no clipboard and no file transfer anywhere
-in the server.
+capabilities **and nothing else** — no keyboard codes, no relative axes.
 
 A guest who completely compromises their own browser tab still cannot type a
 character on your machine, because the device they are attached to cannot
-express a keystroke. `tests/test_pads.py` asserts this directly.
+express a keystroke. `tests/test_pads.py` and `tests/test_desk.py` both assert
+it.
 
-Guests can now *play* on a keyboard, and that is not a hole in this: it is the
+Guests can *play* on a keyboard, and that is not a hole in this: it is the
 guest's own browser deciding that their Z key means the A button, before
 anything is sent. What goes on the wire is the same pad frame it always was.
-The property here is about what the host can be made to do, not about what the
+The property is about what the host can be made to do, not about what the
 guest happens to be holding.
 
-The price is real: games that need a keyboard and mouse stay local-only. That
-was a deliberate trade and it should stay one. If remote desktop control is ever
-wanted it must arrive as a separate, explicitly-armed mode — never as a
-permission flag on an ordinary guest session.
+### The one exception, and how it keeps the rule
+
+There is a keyboard and a mouse now — see **The desk** below. It is the
+separate, explicitly-armed mode this section used to say was the only
+acceptable way to add one, and it keeps the property above intact:
+
+- they are **separate devices**, not extra capabilities on somebody's pad. A
+  guest's pad is exactly as incapable of typing as it ever was
+- they **exist only while somebody is holding them**. Taking the keyboard and
+  mouse creates them; giving them back, leaving, or going quiet destroys them.
+  There is no keyboard attached to this machine at rest
+- only an account that has been given `desk`, and has entered an authenticator
+  code at that moment, can bring them into existence — and only one account at
+  a time
+
+So the boundary has not moved. It has one door in it, the door needs a key and
+six digits, and it is not there when nobody is holding it open.
+
+## Accounts
+
+Most of what a guest does needs no account: they join with the link and the
+PIN and they have a controller. Accounts exist for the things that reach past
+the picture.
+
+```sh
+fourth-player admin add seth       # prints an authenticator secret, once
+fourth-player admin can seth steam stop lock desk    # the complete list
+fourth-player admin list
+fourth-player admin passwd seth
+fourth-player admin remove seth
+```
+
+What can be given: `steam` (and `steam:<appid>` for one game), `stop`, `kick`,
+`reshare`, `slots`, `lock`, `grant`, `desk`.
+
+The **first account made is given `grant`** and later ones start with nothing.
+That first account is the primary admin: it holds every capability there is,
+including ones that did not exist when it was made, and a session lock can
+never shut it out. Both of those are derived from the file rather than stored
+in it, so there is nothing that can disagree with it.
+
+`kick`, `reshare`, `lock`, `grant` and `desk` ask for an authenticator code at
+the moment they are used, **even from a remembered device**. A remembered
+device says who somebody is; it does not stand in for their being there. A
+device stays remembered for a fortnight.
+
+## The desk
+
+An account with `desk` can drive the console itself — a real keyboard and a
+real mouse — for the times when something needs fixing, a game needs moving
+into a folder, or a title only a mouse can start.
+
+Three buttons sit in the bottom-right corner of the picture, collapsed behind
+one: the **controller**, the **cursor** and the **keyboard**. The controller
+is the ordinary state. With the cursor or the keyboard up, a finger on the
+picture moves the console's pointer instead of panning it, and the picture
+follows the pointer while it has room to.
+
+On a touchscreen: a tap is a left click, two fingers or a press-and-hold is a
+right click, and a tap followed by a tap-and-hold drags. A flick coasts and a
+finger back on the glass stops it. On a desktop, clicking the picture takes a
+pointer lock and the mouse works as a mouse.
+
+Two details worth knowing:
+
+- **Ctrl+Alt+F1** to **F12** are swallowed. Not because a driver may not
+  switch virtual terminal — they own the machine — but because it is an
+  ordinary browser habit and an extraordinary thing to do to a television. The
+  `tty` key on the on-screen row sends it deliberately, which is how a console
+  that has switched away from its session is brought back.
+- Characters typed on a phone are sent **as characters** and matched against
+  the console's own keyboard map, because a phone's on-screen keyboard cannot
+  say which key was pressed. Keys from a real keyboard are sent as positions.
 
 ## Letting guests start games
 
@@ -1343,7 +1411,8 @@ which is what `test_webframe.py` and a human with a controller are for.
 
 Played for real with two remote guests plus the host. Video, sound, input,
 invites, expiry, extension, kicking, reconnection, the overlay and the Kodi
-add-on all work. Not yet done:
+add-on all work, as do accounts, Steam games, and the keyboard and mouse.
+Not yet done:
 
 - **ICE ports are ephemeral.** `webrtcbin`'s `ice-agent` cannot safely be
   touched from Python on GStreamer 1.24 — reading the property corrupts the
