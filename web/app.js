@@ -480,8 +480,15 @@ function connect(hello) {
       case "people":        return peopleFrom(message);
       case "chat":          return heardChat(message);
       case "chatlog":       return (message.messages || []).forEach(heardChat);
-      case "note":          return showNotice(
-        "<p>" + escapeText(message.message) + "</p>", false);
+      // Two weights of the same thing. A banner opens the chips, drops the
+      // page out of the stripped-back view, and resizes the picture to make
+      // room for itself -- which is right for something that has to be read
+      // and answered, and far too much for "somebody picked up the mouse".
+      // Quiet ones go to the toast: it floats over a corner, takes no
+      // gestures at all, and fades by itself.
+      case "note":          return message.quiet
+        ? showToast(message.message)
+        : showNotice("<p>" + escapeText(message.message) + "</p>", false);
       case "launchdenied":  return showNotice(
         "<p>Not started: " + escapeText(message.reason || "refused") + "</p>",
         false);
@@ -2920,7 +2927,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08q";
+const CLIENT_BUILD = "2026-09-08r";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4426,6 +4433,13 @@ function deskListen() {
   };
   video.addEventListener("touchstart", keepFocus, { passive: false });
   video.addEventListener("mousedown", keepFocus, { passive: false });
+  // The banner too. Dismissing something that appeared over the picture is
+  // not a decision to stop typing, and it was taking the keyboard with it.
+  const banner = el("notice");
+  if (banner) {
+    banner.addEventListener("touchstart", keepFocus, { passive: false });
+    banner.addEventListener("mousedown", keepFocus, { passive: false });
+  }
 
   document.addEventListener("pointerlockchange", () => {
     // Losing the pointer -- Escape, a click elsewhere, the browser deciding
@@ -4598,10 +4612,8 @@ function deskFrom(message) {
     if (cursorOn) { cursorOn = false; setController(true); }
   }
   if (message.who && !mine) {
-    showNotice("<p>" + escapeText(message.who)
-               + (message.on ? " is using the keyboard and mouse."
-                             : " has put the keyboard and mouse down.")
-               + "</p>", false);
+    showToast(message.who + (message.on ? " is using the keyboard and mouse."
+                                        : " has put the keyboard and mouse down."));
   }
   deskPaint();
 }

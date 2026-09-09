@@ -859,7 +859,7 @@ class LiveSession:
         if not front or front == self.cfg.display:
             if self.foreign_screen:
                 self.foreign_screen = ""
-                self.notify({"t": "note", "message":
+                self.notify({"t": "note", "quiet": True, "message":
                              "The console is back on its own screen."})
             return
         if front == self.foreign_screen:
@@ -871,7 +871,7 @@ class LiveSession:
             self.foreign_screen = front
             log.warning("the monitor is showing %s, which this user may not "
                         "read; capturing %s regardless", front, self.cfg.display)
-            self.notify({"t": "note", "message":
+            self.notify({"t": "note", "quiet": True, "message":
                          "The console is showing its login screen, which this "
                          "session is not allowed to look at. Whoever holds the "
                          "keyboard and mouse can still type into it."})
@@ -879,7 +879,7 @@ class LiveSession:
 
         log.info("the monitor moved to %s; following it", front)
         self.foreign_screen = front
-        self.notify({"t": "note", "message":
+        self.notify({"t": "note", "quiet": True, "message":
                      "The console is showing its login screen."})
         # Whatever is already being encoded. Moving the capture to another
         # screen is no reason to renegotiate the codec as well.

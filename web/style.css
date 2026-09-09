@@ -1767,7 +1767,10 @@ html.held .touch::after {
 .toast {
   position: absolute;
   left: .6rem;
-  bottom: calc(var(--bottom-safe, 0px) + .6rem);
+  /* Above the keyboard when one is up, or it says its piece from underneath
+     it. --desk-lift is zero for everybody else, so this is the same corner
+     it has always been in. */
+  bottom: calc(var(--bottom-safe, 0px) + .6rem + var(--desk-lift, 0px));
   z-index: 5;                      /* under the notice and the panels */
   max-width: min(22rem, 70vw);
   display: flex;
@@ -1780,7 +1783,7 @@ html.held .touch::after {
   pointer-events: none;            /* never in the way of the game */
   opacity: 0;
   transform: translateY(.4rem);
-  transition: opacity .28s ease, transform .28s ease;
+  transition: opacity .28s ease, transform .28s ease, bottom .18s ease;
 }
 .toast.show { opacity: 1; transform: none; }
 .toast-what {

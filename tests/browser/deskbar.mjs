@@ -110,6 +110,30 @@ try {
             document.getElementById("desk-bar").classList.contains("is-open"))),
         "tapping the picture shuts it");
 
+  // A note about the desk must not cost the picture anything.
+  const notes = await page.evaluate(async () => {
+    stage.classList.add("immersive"); immersive = true;
+    const before = video.offsetHeight;
+    showToast("Somebody picked up the mouse.");
+    await new Promise((r) => setTimeout(r, 100));
+    const quiet = { h: video.offsetHeight, immersive,
+                    taps: getComputedStyle(document.getElementById("toast"))
+                            .pointerEvents };
+    showNotice("<p>Something that needs reading.</p>", false);
+    await new Promise((r) => setTimeout(r, 100));
+    return { before, quiet, loudH: video.offsetHeight };
+  });
+  check(notes.quiet.h === notes.before,
+        "a quiet note costs the picture no height: " + notes.before
+        + " before, " + notes.quiet.h + " after");
+  check(notes.quiet.immersive,
+        "and does not drag the page out of the stripped-back view");
+  check(notes.quiet.taps === "none",
+        "and takes no taps, so dismissing it cannot cost anybody their keyboard");
+  check(notes.loudH < notes.before,
+        "while a banner still does both, for the things that have to be read: "
+        + notes.loudH + " against " + notes.before);
+
   check(errors.length === 0, "no script errors: " + errors.slice(0, 2));
 } finally {
   await browser.close();
