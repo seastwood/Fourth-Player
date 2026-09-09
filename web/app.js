@@ -2411,11 +2411,51 @@ function applyZoom() {
   const inset = bottomInset();
   const seen = Math.max(0, picture.box.height - inset);
   const middle = -inset / 2;
+
+  // How far the picture may move along each axis.
+  //
+  // When it overhangs what can be seen, it must keep covering it, and the
+  // room is half the overhang -- that is panRoom, and it is the whole story
+  // for somebody just looking at a game.
+  //
+  // While somebody is driving it is not. An upright phone shows a 16:9
+  // picture as a strip about a quarter of the height of the screen, so the
+  // picture does not overhang at all until roughly three and a half times
+  // zoom -- there is no room, the picture cannot move, and a pointer near the
+  // top of the game therefore sits near the top of the screen with the view
+  // unable to follow it. Which is exactly what "it sits too high" is.
+  //
+  // So while driving, a picture *smaller* than the strip may slide about
+  // inside it, by half the slack. It costs nothing: the black it moves
+  // through is the letterboxing, which was already on the screen above and
+  // below it. Moving it only decides which side of the picture that black is.
+  if (cursorDriving()) {
+    // Centring wins outright. Stopping at the picture's edge and keeping the
+    // pointer in the middle are the same rule only while the picture is
+    // bigger than what can be seen -- and on an upright phone it never is:
+    // a 16:9 picture is about a quarter of the height of the screen, so the
+    // edge rule bites immediately and the pointer sits wherever the picture
+    // put it, which near the top of a game means near the top of the screen.
+    //
+    // So while somebody is driving, cursorFollow's answer stands. What that
+    // costs is black beyond the picture when the pointer is near an edge, and
+    // never more than half the screen, because the pointer is always *on* the
+    // picture and the picture therefore always covers the middle. Black at
+    // the edge of the desktop is a smaller price than a pointer that will not
+    // stay where the eye is.
+    return paintAfterZoom();
+  }
   const maxX = panRoom(picture.width, picture.box.width, zoom);
   const maxY = panRoom(picture.height, seen, zoom);
   panX = Math.max(-maxX, Math.min(maxX, panX));
   panY = Math.max(middle - maxY, Math.min(middle + maxY, panY));
-  video.style.transform = zoom === ZOOM_MIN
+  return paintAfterZoom();
+}
+
+/* Put the numbers on the screen. Split out only so the driving path above can
+   reach it without repeating itself. */
+function paintAfterZoom() {
+  video.style.transform = (zoom === ZOOM_MIN && !panX && !panY)
     ? "" : "translate(" + panX + "px, " + panY + "px) scale(" + zoom + ")";
   paintZoom();
 }
@@ -2829,7 +2869,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08n";
+const CLIENT_BUILD = "2026-09-08o";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3923,7 +3963,6 @@ function cursorMove(du, dv) {
    half of this: near an edge the view stops and the pointer walks on across
    it, which is the only way to reach a corner. */
 function cursorFollow() {
-  if (zoom <= ZOOM_MIN) return;
   const picture = pictureBox();
   // The middle of what can be *seen*, which is not the middle of the element
   // when a keyboard is covering the bottom of it. Half the covered height is
