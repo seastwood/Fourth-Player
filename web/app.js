@@ -597,7 +597,7 @@ function onError(message) {
     // Not a refusal to be argued with: it is a request for the six digits.
     waitingOnCode = lastAction;
     loginOpen = true;
-    showTab("session");
+    openPanelToAsk();
     paintLogin();
     const said = message.message || "Enter your authenticator code to do that.";
     // Both notes: which form is showing depends on whether they are already
@@ -2787,7 +2787,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08h";
+const CLIENT_BUILD = "2026-09-08i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3426,6 +3426,8 @@ function loggedIn(message) {
     if (note) note.hidden = true;
     showToast("Code accepted \u2014 finishing that now");
     send(finish);
+    // Back to the picture. They asked for the mouse, not for a panel.
+    closePanelIfAsked();
   }
   if (first) {
     showToast("Logged in as " + message.name);
@@ -4282,6 +4284,7 @@ function deskListen() {
     againCancel.addEventListener("click", () => {
       waitingOnCode = null;
       paintLogin();
+      closePanelIfAsked();
     });
   }
 
@@ -6249,6 +6252,39 @@ function resumeVideo() {
       chaseSound();
     });
   }
+}
+
+/* Open the panel far enough to ask somebody something, and no further.
+ *
+ * showTab only unhides one tab *inside* the panel; the panel itself is hidden
+ * while somebody is watching the picture. Every other thing that asks for an
+ * authenticator code -- kick, reshare, lock, grant -- is a button inside that
+ * panel, so the panel was always already open and nobody ever noticed. The
+ * desk buttons sit over the picture and are the first controls that can ask
+ * for a code from outside it: the prompt appeared correctly, inside a panel
+ * of zero height, which reads exactly like being asked for a code and given
+ * nowhere to type one.
+ *
+ * Not openBrowser: that asks the host for the game list and empties the
+ * shelf, which is a lot to do to somebody who pressed "use the mouse". */
+let panelOpenedToAsk = false;
+
+function openPanelToAsk() {
+  const browser = el("browser");
+  if (browser && browser.hidden) {
+    browser.hidden = false;
+    panelOpenedToAsk = true;
+  }
+  showTab("session");
+}
+
+/* And put it away again once the question has been answered, so somebody who
+   asked for the mouse ends up looking at the picture rather than at a panel
+   they never wanted. */
+function closePanelIfAsked() {
+  if (!panelOpenedToAsk) return;
+  panelOpenedToAsk = false;
+  closeBrowser();
 }
 
 function openBrowser() {
