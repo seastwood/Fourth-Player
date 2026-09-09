@@ -59,7 +59,19 @@ const seen = await p.evaluate(() => {
     const r = e.getBoundingClientRect();
     return { hidden: e.hidden, display: cs.display, visible: r.width > 0 && r.height > 0,
              top: Math.round(r.top), h: Math.round(r.height) }; };
-  return { waiting: !!waitingOnCode,
+  const chain = [];
+  let node = document.getElementById("login-again-code");
+  while (node && node !== document.documentElement) {
+    const cs = getComputedStyle(node);
+    const r = node.getBoundingClientRect();
+    chain.push({ id: node.id || null, cls: (node.className && node.className.baseVal !== undefined
+                   ? node.className.baseVal : node.className) || null,
+                 hidden: node.hidden === true, display: cs.display,
+                 vis: cs.visibility, h: Math.round(r.height), w: Math.round(r.width),
+                 overflow: cs.overflow, maxH: cs.maxHeight });
+    node = node.parentElement;
+  }
+  return { chain, waiting: !!waitingOnCode,
            tabSession: !document.getElementById("tab-session").hidden,
            loginIn: look("login-in"), again: look("login-again"),
            field: look("login-again-code"), note: (document.getElementById("login-again-note")||{}).textContent };

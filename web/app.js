@@ -2787,7 +2787,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08i";
+const CLIENT_BUILD = "2026-09-08j";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -6270,9 +6270,14 @@ function resumeVideo() {
 let panelOpenedToAsk = false;
 
 function openPanelToAsk() {
-  const browser = el("browser");
-  if (browser && browser.hidden) {
-    browser.hidden = false;
+  // The tabs live in the pads panel, not in the game browser. Opening the
+  // wrong one is how this was still invisible after the first attempt at it:
+  // the form was drawn, inside a panel that was display:none, inside a stage
+  // that was 844 pixels tall -- which measures exactly like a form that is
+  // not there.
+  const panel = el("pads");
+  if (panel && panel.hidden) {
+    openPads();
     panelOpenedToAsk = true;
   }
   showTab("session");
@@ -6284,7 +6289,7 @@ function openPanelToAsk() {
 function closePanelIfAsked() {
   if (!panelOpenedToAsk) return;
   panelOpenedToAsk = false;
-  closeBrowser();
+  closePads();
 }
 
 function openBrowser() {
