@@ -4070,7 +4070,11 @@ function cursorWatchForHold() {
     if (!cursorFrom || cursorFrom.moved >= TAP_SLOP || !cursorDriving()) return;
     cursorPressed = true;
     deskSend([{ t: "b", b: 2, d: 1 }, { t: "b", b: 2, d: 0 }]);
-    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+    // Through the helper, like every other buzz on the page: it is the one
+    // place the on-off switch and the strength setting are consulted, and a
+    // second way of asking would be a buzz that ignores both. It also covers
+    // the iPhone, which has no vibrate at all and gets a switch tap instead.
+    buzz();
   }, HOLD_MS);
 }
 
