@@ -2433,6 +2433,19 @@ input.name {
   color: var(--ink);
 }
 .desk-bar button.is-on { border-color: var(--accent); color: var(--accent); }
+
+/* Collapsed, only the toggle is there, in the corner. The rest open out to
+   its left. Three buttons standing over a thumbstick is three too many, and
+   the on-screen controller is the thing most likely to be underneath. */
+.desk-bar:not(.is-open) .desk-more-only { display: none; }
+.desk-bar.is-open #desk-more svg { transform: rotate(180deg); }
+#desk-more svg { transition: transform .18s ease; }
+/* Quieter than the rest while it is the only thing showing, so it sits over a
+   game without asking for attention. It comes back to full strength when it
+   is touched or opened -- something you are using should not be faint. */
+.desk-bar:not(.is-open) #desk-more { opacity: .55; }
+.desk-bar:not(.is-open) #desk-more:active,
+.desk-bar:not(.is-open) #desk-more:focus-visible { opacity: 1; }
 .desk-bar svg {
   width: 1.5rem;
   height: 1.5rem;

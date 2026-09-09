@@ -55,12 +55,19 @@ const BACKLOG_LIMIT = 4096;
  * zoom away from someone who needs it, to fix a gesture, is a poor trade. */
 let lastTapEnd = 0;
 document.addEventListener("touchend", (event) => {
-  /* Not on the pad. Two presses of a button inside 350 ms is not a double tap
-     to be swallowed, it is somebody playing, and cancelling the second one
-     takes the switch flip -- and so the feeling -- with it. The pad does not
-     need this guard anyway: `touch-action: none` on it stops the zoom by
-     saying so rather than by cancelling touches after the fact. */
-  if (event.target && event.target.closest && event.target.closest(".touch")) {
+  /* Not on the controls. Two presses inside 350 ms is not a double tap to be
+     swallowed: on the pad it is somebody playing, and cancelling the second
+     one takes the switch flip -- and so the feeling -- with it; on the desk
+     bar it is somebody opening it and then choosing from it, which is two
+     taps in about a fifth of a second every single time.
+     Cancelling touchend is what stops a click being made at all, so a control
+     caught by this does not misbehave, it does nothing whatsoever -- which is
+     a great deal harder to recognise than a zoom.
+     None of these need the guard anyway: `touch-action: none` on them stops
+     the zoom by saying so rather than by cancelling touches after the fact. */
+  const onControls = event.target && event.target.closest
+    && event.target.closest(".touch, .desk-bar, .desk-keys");
+  if (onControls) {
     lastTapEnd = 0;
     return;
   }
@@ -578,7 +585,14 @@ const HOPELESS = ["credential", "closed"];
 function onError(message) {
   // Whatever was refused, this page is no longer waiting on an answer about
   // the keyboard. Left set, the button would ignore every later press.
+  const wasAsking = deskAsking;
   deskAsking = false;
+  if (wasAsking && message.reason === "code") {
+    // The prompt itself opens in the Account tab. Somebody who tapped a
+    // button over the picture is not looking at the Account tab, and a
+    // control that appears to do nothing is worse than one that refuses.
+    showToast("Enter your authenticator code to use the keyboard and mouse");
+  }
   if (message.reason === "code") {
     // Not a refusal to be argued with: it is a request for the six digits.
     waitingOnCode = lastAction;
@@ -2772,7 +2786,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08f";
+const CLIENT_BUILD = "2026-09-08g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3947,20 +3961,33 @@ function deskModTap(code) {
    The controller and the cursor cannot both have the finger: with the pad
    showing, a drag pans the picture, and that is the state to come back to. */
 function deskChoose(what) {
-  if (!deskHeld) {
-    // Asking for either of these is asking for the keyboard and mouse. The
-    // host may want an authenticator code first, and says so; onError puts
-    // the request aside and it is replayed once the code is in.
-    deskWanted = what;
-    if (!deskAsking) { deskAsking = true; act({ t: "desk", take: true }); }
-    return;
-  }
+  // The controller is not a desk control and never asks for one. Showing and
+  // hiding the on-screen pad is something anybody may do to their own screen,
+  // and routing it through "may I have the keyboard and mouse" was a way of
+  // refusing somebody the use of their own controller.
   if (what === "pad") {
     cursorOn = false;
     cursorStopCoasting();
     if (deskKeyboardUp()) deskShowKeyboard(false);
-    setController(true);
-  } else if (what === "cursor") {
+    setController(el("touch").hidden);
+    deskPaintKeys();
+    return;
+  }
+  if (!deskHeld) {
+    // Asking for either of the other two is asking for the keyboard and
+    // mouse. The host may want an authenticator code first, and says so;
+    // onError puts the request aside and replays it once the code is in.
+    // Said out loud here, because the answer arrives in the Account tab and
+    // somebody who tapped a button over the picture is not looking there.
+    deskWanted = what;
+    if (!deskAsking) {
+      deskAsking = true;
+      showToast("Asking for the keyboard and mouse\u2026");
+      act({ t: "desk", take: true });
+    }
+    return;
+  }
+  if (what === "cursor") {
     cursorOn = !cursorOn;
     if (cursorOn) setController(false);
     if (!cursorOn) cursorStopCoasting();
@@ -3970,6 +3997,20 @@ function deskChoose(what) {
     deskShowKeyboard(!up);
   }
   deskPaintKeys();
+}
+
+/* Open and shut. Collapsed it is one button in the corner; open, the three
+   sit to its left. Anywhere else on the page shuts it again, which is the
+   only way it can be certain not to be in the way of a game. */
+function deskOpen(yes) {
+  const bar = el("desk-bar");
+  if (!bar) return;
+  bar.classList.toggle("is-open", yes);
+  const more = el("desk-more");
+  if (more) {
+    more.setAttribute("aria-expanded", yes ? "true" : "false");
+    more.setAttribute("aria-label", yes ? "Fewer controls" : "More controls");
+  }
 }
 
 /* Put the controller away while the desk has the finger, and bring back
@@ -4022,7 +4063,16 @@ function deskPaintKeys() {
                                             : "Use the mouse");
   }
   const pad = el("desk-pad");
-  if (pad) pad.classList.toggle("is-on", !cursorOn && !up);
+  // Lit when the controller is actually on screen, which is what this button
+  // now says. It used to be lit for "not the cursor and not the keyboard",
+  // which is a different thing and was wrong the moment somebody turned the
+  // pad off from the picker instead.
+  if (pad) {
+    const showing = !el("touch").hidden;
+    pad.classList.toggle("is-on", showing);
+    pad.setAttribute("aria-label",
+                     showing ? "Hide the controller" : "Show the controller");
+  }
   if (row) {
     row.hidden = !(deskHeld && up);
     row.querySelectorAll("[data-mod]").forEach((key) => {
@@ -4149,12 +4199,26 @@ function deskListen() {
       act({ t: "desk", take: !deskHeld });
     });
   }
+  // Anywhere that is not the bar shuts it. Registered on the capture phase so
+  // it runs before whatever was actually tapped -- shutting the bar must not
+  // also cost somebody the tap they meant.
+  document.addEventListener("pointerdown", (event) => {
+    const bar = el("desk-bar");
+    if (!bar || !bar.classList.contains("is-open")) return;
+    if (bar.contains(event.target)) return;
+    deskOpen(false);
+  }, true);
+
   const bar = el("desk-bar");
   if (bar) {
     bar.addEventListener("click", (event) => {
       const button = event.target.closest("button");
       if (!button) return;
       event.preventDefault();
+      if (button.id === "desk-more") {
+        deskOpen(!bar.classList.contains("is-open"));
+        return;
+      }
       deskChoose(button.id === "desk-pad" ? "pad"
                  : button.id === "desk-cursor" ? "cursor" : "keyboard");
     });
