@@ -25,7 +25,19 @@
 # machine.
 set -eu
 
-USER_TO_ALLOW="${FOURTH_PLAYER_USER:-retro}"
+# Who to let in, named by whoever installed this rather than guessed here.
+# LightDM runs this as root, with no idea which account the console belongs
+# to, so the answer has to be baked in when it is installed -- see the conf
+# file beside this script. It was a default of "retro", which is right on
+# exactly one machine in the world and silently wrong on every other: the
+# grant goes to an account that does not exist and the login screen stays
+# black with nothing to say why.
+USER_TO_ALLOW="${1:-${FOURTH_PLAYER_USER:-}}"
+if [ -z "$USER_TO_ALLOW" ]; then
+  exit 0
+fi
+# And only to somebody who is actually here.
+id -u "$USER_TO_ALLOW" >/dev/null 2>&1 || exit 0
 
 [ -n "${DISPLAY:-}" ] || exit 0
 command -v xhost >/dev/null 2>&1 || exit 0

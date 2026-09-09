@@ -109,24 +109,14 @@ else
     # asking whether they can hear the question, not whether they could
     # answer one.
     echo "not asking, because this is not a terminal. To add it later:"
-    echo "    sudo install -m 755 $REPO/bin/fourth-player-greeter-access \\"
-    echo "        /usr/local/bin/fourth-player-greeter-access"
-    echo "    sudo install -m 644 $REPO/bin/fourth-player-greeter.conf \\"
-    echo "        /etc/lightdm/lightdm.conf.d/90-fourth-player.conf"
+    echo "    $REPO/install/greeter-access.sh"
     answer=n
   else
     printf "install it? [y/N] "
     read -r answer
   fi
   case "$answer" in
-    [Yy]*)
-      sudo install -m 755 "$REPO/bin/fourth-player-greeter-access" \
-        /usr/local/bin/fourth-player-greeter-access &&
-      sudo sh -c "sed 's|^greeter-setup-script=.*|greeter-setup-script=/usr/local/bin/fourth-player-greeter-access|' \
-        '$REPO/bin/fourth-player-greeter.conf' > '$GREETER_CONF'" &&
-      echo "installed; it takes effect the next time LightDM starts" ||
-      echo "not installed -- run it again with sudo available"
-      ;;
+    [Yy]*) "$REPO/install/greeter-access.sh" ;;
     *) echo "skipped; the login screen will show as black until you do" ;;
   esac
 fi
