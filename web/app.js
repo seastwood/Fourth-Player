@@ -2485,6 +2485,11 @@ video.addEventListener("pointermove", (event) => {
     const dt = Math.max(1, event.timeStamp - cursorFrom.at) / 1000;
     coastX = (dx * scale.x) / dt;
     coastY = (dy * scale.y) / dt;
+    const rush = Math.hypot(coastX, coastY);
+    if (rush > COAST_MAX) {
+      coastX *= COAST_MAX / rush;
+      coastY *= COAST_MAX / rush;
+    }
     cursorFrom.at = event.timeStamp;
     cursorFrom.moved += Math.hypot(dx, dy);
     dragged = true;
@@ -2767,7 +2772,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08d";
+const CLIENT_BUILD = "2026-09-08e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3788,6 +3793,12 @@ const POINT_MAX = 32767;
 const COAST_KEEP = 0.06;
 /* Below this it has stopped, in fractions of the screen per second. */
 const COAST_STOP = 0.02;
+/* And no faster than this, in screens per second. Speed is taken from the
+   last move alone, which is what makes a flick feel like a flick -- but it
+   also means one event with a short gap behind it can imply an absurd speed.
+   Three screens a second is faster than anybody flicks and slow enough to
+   stay a pointer rather than a teleport. */
+const COAST_MAX = 3;
 /* A press this short that moved this little was a tap, not a drag. */
 const TAP_MS = 250, TAP_SLOP = 10;
 
