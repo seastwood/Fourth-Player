@@ -2531,6 +2531,7 @@ video.addEventListener("pointerdown", (event) => {
       // A second finger. Might be a pinch, might be a two-finger tap, and
       // which it was is only known when they come off again.
       cursorTwo = { at: event.timeStamp, moved: 0 };
+      cursorForgetHold();          // two fingers is not a press
       if (cursorDragging) {
         // Whatever this is about to be, it is not a one-finger drag any more.
         cursorDragging = false;
@@ -2542,6 +2543,9 @@ video.addEventListener("pointerdown", (event) => {
       // down now and stays down until the finger leaves.
       cursorDragging = true;
       deskSend([{ t: "b", b: 0, d: 1 }]);
+    } else if (!held.size) {
+      // A first finger, going nowhere in particular yet.
+      cursorWatchForHold();
     }
     cursorFrom = { x: event.clientX, y: event.clientY,
                    at: event.timeStamp, moved: 0 };
@@ -2615,6 +2619,8 @@ video.addEventListener("pointermove", (event) => {
     }
     cursorFrom.at = event.timeStamp;
     cursorFrom.moved += Math.hypot(dx, dy);
+    // Moving means it was never a press.
+    if (cursorFrom.moved >= TAP_SLOP) cursorForgetHold();
     dragged = true;
     event.preventDefault();
     return;
@@ -2641,9 +2647,20 @@ function letGoOfPicture(event) {
   // meant the next gesture read the last one's notes: two fingers were seen
   // as a double tap, and the tap after that as the right button.
   const two = cursorTwo, from = cursorFrom, dragging = cursorDragging;
+  const pressed = cursorPressed;
+  cursorForgetHold();
+  cursorPressed = false;
   cursorTwo = null;
   cursorFrom = null;
   cursorDragging = false;
+
+  if (pressed) {
+    // The right click already happened, under the finger, while it was still
+    // down. Letting go is not a second thing.
+    cursorLastTap = 0;
+    coastX = coastY = 0;
+    return;
+  }
 
   if (dragging) {
     // A drag that ended with the button still down is a window left stuck to
@@ -2769,6 +2786,13 @@ function hideNotice() {
 let noticeTimer = null;
 
 el("notice").addEventListener("click", hideNotice);
+// And on pointerup as well. Refusing the touch's default is what stops a tap
+// moving focus off the keyboard field -- see keepFocus -- but on a phone the
+// click is synthesised from that same touch, so refusing it takes the click
+// with it. This is the tap arriving by the road that is still open.
+el("notice").addEventListener("pointerup", () => {
+  if (deskKeyboardUp()) hideNotice();
+});
 
 // Guarded, unlike the buttons around it, because this one arrived after the
 // page it lives in: a browser holding an older index.html would otherwise
@@ -2927,7 +2951,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08s";
+const CLIENT_BUILD = "2026-09-08t";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4010,6 +4034,10 @@ const COAST_MAX = 3;
 const TAP_MS = 250, TAP_SLOP = 10;
 /* And a second tap starting this soon after the first ended belongs with it. */
 const DOUBLE_MS = 300;
+/* A finger that stays still this long has stopped being a tap and become a
+   press. Long enough not to fire while somebody is deciding where to put
+   their finger, short enough to be worth waiting for. */
+const HOLD_MS = 500;
 
 /* When the last single-finger tap let go, so the next one can tell whether it
    is the second half of something. */
@@ -4019,6 +4047,32 @@ let cursorLastTap = 0;
 let cursorDragging = false;
 /* Two fingers down: a pinch until it turns out to have been a tap. */
 let cursorTwo = null;
+/* One finger, staying put: on its way to being a right click. */
+let cursorHoldTimer = 0;
+let cursorPressed = false;
+
+function cursorForgetHold() {
+  if (cursorHoldTimer) clearTimeout(cursorHoldTimer);
+  cursorHoldTimer = 0;
+}
+
+/* Press and hold, which is the other way a surface with no buttons asks for
+   the right one. Two fingers is the trackpad's answer and this is the
+   touchscreen's; people arrive expecting whichever they already use, so both
+   are here. */
+function cursorWatchForHold() {
+  cursorForgetHold();
+  cursorPressed = false;
+  cursorHoldTimer = setTimeout(() => {
+    cursorHoldTimer = 0;
+    // Only if the finger is still down and has not wandered. A drag that
+    // happens to pause is not a press.
+    if (!cursorFrom || cursorFrom.moved >= TAP_SLOP || !cursorDriving()) return;
+    cursorPressed = true;
+    deskSend([{ t: "b", b: 2, d: 1 }, { t: "b", b: 2, d: 0 }]);
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+  }, HOLD_MS);
+}
 
 /* Dragging the cursor is what one finger does whenever the cursor or the
    keyboard is up. The controller is the other state: with it showing, one
@@ -4250,6 +4304,11 @@ function setController(on) {
 let deskWanted = "";
 
 function deskPaintKeys() {
+  // Whether the page is being driven, said on the stage so the stylesheet can
+  // answer it. In portrait the chips and messages join the flow above the
+  // picture, which is right for watching and wrong for this: it resizes the
+  // video element, and the pointer's geometry is measured from that.
+  stage.classList.toggle("driving", cursorDriving());
   const row = el("desk-keys");
   const up = deskKeyboardUp();
   const bar = el("desk-bar");

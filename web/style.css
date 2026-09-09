@@ -1072,6 +1072,33 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     flex: 0 0 auto;
     max-height: none;
   }
+
+  /* Except while somebody is driving, when all of that is exactly wrong.
+   *
+   * The arrangement above is right for watching: the picture is letterboxed
+   * on an upright phone, so a strip above it costs nothing that was being
+   * looked at. Driving, the picture is zoomed and panned and is not
+   * letterboxed at all -- so the strip takes real picture -- and worse, the
+   * pointer's whole geometry is measured from the height of the video
+   * element. A message arriving in the flow changes that height underneath
+   * the arithmetic: the picture resizes, and where the pointer sits on the
+   * screen moves with it, mid-drag.
+   *
+   * So they float again, over the picture, and nothing is resized. */
+  .stage.driving .hud {
+    position: absolute;
+    order: 0;
+    padding-top: .5rem;
+    background: rgba(16, 14, 40, .82);
+  }
+  .stage.driving .notice {
+    position: absolute;
+    order: 0;
+    margin: 0;
+    border-left: 3px solid var(--edge);
+    border-right: 3px solid var(--edge);
+    max-height: 42vh;
+  }
 }
 
 /* ---- the game list ---- */

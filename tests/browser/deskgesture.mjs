@@ -47,6 +47,19 @@ const out = await p.evaluate(async () => {
   at("pointerup", cx - 20, cy, 2); at("pointerup", cx + 20, cy, 3);
 
   await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 400));
+  mark("press and hold");
+  at("pointerdown", cx, cy, 8);
+  await new Promise((r) => setTimeout(r, 650));   // past HOLD_MS
+  at("pointerup", cx, cy, 8);
+
+  await new Promise((r) => setTimeout(r, 400));
+  mark("hold, but moving");
+  at("pointerdown", cx, cy, 9);
+  for (let i = 1; i <= 3; i++) at("pointermove", cx + i * 15, cy, 9);
+  await new Promise((r) => setTimeout(r, 650));
+  at("pointerup", cx + 45, cy, 9);
+
   mark("double tap and drag");
   at("pointerdown", cx, cy, 4); at("pointerup", cx, cy, 4);   // first tap
   at("pointerdown", cx, cy, 5);                                // second, held
@@ -78,6 +91,13 @@ const drag = said("double tap and drag");
 check(/^b0- b0\+ b0- (move )+b0\+$/.test(drag),
       "tap, then tap and stay, holds the left button down through the drag "
       + "and lets go at the end: " + drag);
+check(said("press and hold") === "b2- b2+",
+      "one finger held still is a right click, and letting go is not a second "
+      + "thing: " + said("press and hold"));
+check(!/b2/.test(said("hold, but moving")),
+      "a drag that happens to take a while is not a press: "
+      + said("hold, but moving"));
+
 check(errs.length === 0, "no script errors: " + errs.slice(0, 2));
 
 await b.close();
