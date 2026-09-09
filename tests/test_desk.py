@@ -297,6 +297,19 @@ except Exception as exc:                                   # pragma: no cover
     print("  .... skipped, cannot import the server here (%s)" % exc)
 
 
+print("\nand a page coming back is told where it stands")
+try:
+    server_src = open(os.path.join(ROOT, "fourthplayer", "server.py"),
+                      encoding="utf-8").read()
+    joined = server_src.split('"t": "joined"')[1].split("})")[0]
+    check('"desk"' in joined,
+          "the joined message says whether this guest holds the desk")
+    check('desk_driver' in joined and 'guest.slot' in joined,
+          "answered for this guest rather than for whoever holds it")
+except Exception as exc:                                   # pragma: no cover
+    print("  .... skipped (%s)" % exc)
+
+
 print("\nthe devices themselves")
 try:
     from fourthplayer import desk

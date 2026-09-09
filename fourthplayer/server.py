@@ -839,6 +839,14 @@ class Server:
             "limits": self.session.limits(),
             # Who they logged in as on the way through, if they did.
             "account": signed_in,
+            # And whether they still hold the keyboard and mouse. A page that
+            # was put away and reopened starts knowing nothing, and a seat
+            # that was swept while it was gone no longer holds anything -- so
+            # without this the page came back believing it was still driving
+            # and everything it sent went nowhere, silently.
+            "desk": {"on": (self.session.desk_driver is not None
+                            and self.session.desk_driver == guest.slot),
+                     "who": self.session.desk_label},
         })
         return guest
 

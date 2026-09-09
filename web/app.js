@@ -715,6 +715,18 @@ function joined(message) {
   // two people are free to call themselves the same thing, and "which of
   // these is me" has to have exactly one answer.
   mySlot = typeof message.slot === "number" ? message.slot : mySlot;
+  // What the host says about the keyboard and mouse, which outranks whatever
+  // this page remembered from before it was put away.
+  if (message.desk) {
+    deskHeld = !!message.desk.on;
+    if (!deskHeld) {
+      cursorOn = false;
+      cursorStopCoasting();
+      if (deskKeyboardUp()) deskShowKeyboard(false);
+      deskMods.clear();
+    }
+    deskPaintKeys();
+  }
   setChip("slot", message.label, "ok");
   setLink("");
   showHud();
@@ -2471,6 +2483,12 @@ video.addEventListener("pointerdown", (event) => {
     cursorStopCoasting();
     cursorFrom = { x: event.clientX, y: event.clientY,
                    at: event.timeStamp, moved: 0 };
+    // Tapping the picture must not put the keyboard away. A tap on anything
+    // that is not the field moves focus off it, and a phone takes its
+    // keyboard down with the focus -- so somebody typing at the console lost
+    // the keyboard the moment they pointed at what they were typing into.
+    // Preventing the default here is what stops the focus moving at all.
+    if (deskKeyboardUp()) event.preventDefault();
   }
   held.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (held.size === 2) {
@@ -2811,7 +2829,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08m";
+const CLIENT_BUILD = "2026-09-08n";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3706,8 +3724,22 @@ function deskCaptured() {
   return document.pointerLockElement === video;
 }
 
+let deskSaidNoRoute = false;
+
 function deskSend(list) {
-  if (!deskChannel || deskChannel.readyState !== "open" || !list.length) return;
+  if (!list.length) return;
+  if (!deskChannel || deskChannel.readyState !== "open") {
+    // Said once rather than swallowed. The channel goes with the media
+    // connection, so a page that was away long enough to be renegotiated can
+    // hold the desk and have nowhere to send it -- which looks exactly like
+    // the cursor having quietly stopped working, because it has.
+    if (deskHeld && !deskSaidNoRoute) {
+      deskSaidNoRoute = true;
+      showToast("The keyboard and mouse have no route to the console yet");
+    }
+    return;
+  }
+  deskSaidNoRoute = false;
   try { deskChannel.send(JSON.stringify(list)); } catch (_) { /* going away */ }
 }
 
@@ -3958,9 +3990,18 @@ function deskKeyboardUp() {
   return document.activeElement === el("desk-input");
 }
 
+/* Whether the keyboard is *wanted*, which is not the same as whether it is
+   up. A phone takes its keyboard down for its own reasons -- a tap somewhere
+   else, the app going away and coming back -- and that is not somebody
+   deciding they are finished typing. */
+let deskWantKeyboard = false;
+let deskRefocus = 0;
+
 function deskShowKeyboard(yes) {
   const field = el("desk-input");
   if (!field) return;
+  deskWantKeyboard = yes;
+  deskRefocus = 0;
   if (yes) {
     deskFieldClear(field);
     field.focus({ preventScroll: true });
@@ -4324,10 +4365,24 @@ function deskListen() {
     });
     field.addEventListener("focus", () => { measureLift && measureLift(); deskPaintKeys(); });
     field.addEventListener("blur", () => {
+      // Preventing the tap's default keeps focus here on most browsers. Where
+      // it does not, this puts it back -- but only while the keyboard is
+      // still *wanted*, so pressing the keyboard button to put it away still
+      // works, and only a few times in a row, so a browser that refuses to
+      // give focus back ends the argument rather than flickering for ever.
+      if (deskWantKeyboard && deskHeld && deskRefocus < 3) {
+        deskRefocus += 1;
+        setTimeout(() => { try { field.focus({ preventScroll: true }); }
+                           catch (_) {} }, 0);
+        setTimeout(() => { deskRefocus = 0; }, 1000);
+        return;
+      }
       // Nothing may be left held by a keyboard that has gone away.
       deskMods.forEach((_state, code) => deskSend([{ t: "k", c: code, d: 0 }]));
       deskMods.clear();
+      deskLift = 0;
       document.documentElement.style.setProperty("--desk-lift", "0px");
+      applyZoom();
       deskPaintKeys();
     });
   }
