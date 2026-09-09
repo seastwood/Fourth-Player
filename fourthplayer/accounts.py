@@ -443,6 +443,42 @@ def forget_devices(name):
     raise AccountError("There is no account called %r." % name)
 
 
+def verify_code(name, code, now=None):
+    """Just the second factor, for an account whose identity is settled.
+
+    The password is not asked for again and that is the point rather than a
+    shortcut. A remembered device establishes *who* somebody is; the code
+    establishes that they are *there*, which is the whole of what NEEDS_CODE
+    is asking. Making them type their password as well would be asking again
+    for the half already answered, and there is nowhere on a television remote
+    to type a password anyway.
+
+    This is only ever reached for a connection the host has already
+    authenticated as this account -- see the caller. On its own it proves
+    nothing, so it must never become a way in.
+
+    The used step is written down here exactly as `verify` does it: a code
+    that has been accepted once is spent, whichever door it was presented at.
+    """
+    account = find(name)
+    if account is None:
+        return None
+    step = check_code(account.get("totp") or "", code,
+                      now=now, after=int(account.get("used_step", -1)))
+    if step is None:
+        return None
+
+    data = _read()
+    for stored in data["accounts"]:
+        if _key(stored.get("name")) == _key(account["name"]):
+            stored["used_step"] = step
+            stored["last_seen"] = int(now if now is not None else time.time())
+            account = stored
+            break
+    _write(data)
+    return account
+
+
 def verify(name, password, code, now=None):
     """A login. Returns the account, or None -- and never says which half failed.
 

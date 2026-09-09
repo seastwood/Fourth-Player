@@ -534,6 +534,45 @@ class Server:
         address = self._address(socket_)
         name = str(message.get("name") or "")[:64]
 
+        # Just a code, from a connection that is already this account. This is
+        # the other half of NEEDS_CODE: a remembered device restored who they
+        # are without proving they are there, and everything that reaches past
+        # the screen asks them to prove it at the moment they ask for it.
+        # Without this there was no way to answer -- the code field lives in
+        # the login form, and the login form is not drawn for somebody who is
+        # already logged in, so the host asked a question the page could not
+        # put to anybody.
+        code_only = str(message.get("code") or "")
+        if (code_only and not message.get("password")
+                and not message.get("device") and guest.account):
+            try:
+                self.session.login_check(address, guest.account)
+            except invites.LockedOut as exc:
+                await outbox.put({"t": "error", "reason": "locked",
+                                  "retry_after": round(exc.seconds),
+                                  "message": f"Too many tries. Wait {round(exc.seconds)}s."})
+                return
+            account = await self.loop.run_in_executor(
+                None, lambda: self._safely(accounts.verify_code,
+                                           guest.account, code_only))
+            if account is None:
+                # Counted, because six digits is a small enough space that an
+                # unlimited number of guesses is the whole of the problem.
+                waited = self.session.login_failed(address, guest.account)
+                if waited:
+                    await outbox.put({"t": "error", "reason": "locked",
+                                      "retry_after": round(waited),
+                                      "message": f"Too many tries. Wait {round(waited)}s."})
+                else:
+                    await outbox.put({"t": "error", "reason": "login",
+                                      "message": LOGIN_REFUSED})
+                return
+            can = self.session.login_ok(guest, account, address)
+            await outbox.put({"t": "loggedin", "name": account["name"],
+                              "can": list(can), "primary": bool(guest.primary),
+                              "fresh": True})
+            return
+
         # A remembered device, rather than a password. It restores who
         # somebody is and nothing more: logged_in_at stays at zero, which is
         # what the capabilities that affect other people ask about.

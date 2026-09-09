@@ -564,6 +564,22 @@
             <p class="footnote" id="login-remembered" hidden>This device is
                remembered, so anything that affects other people will ask for
                your authenticator code.</p>
+            <!-- The second factor, asked for at the moment something needs
+                 it. Its own form rather than the login one: the account is
+                 already known, and the only open question is whether the
+                 person holding the phone is here now. -->
+            <form id="login-again" autocomplete="off" hidden>
+              <p class="footnote acct-asking" id="login-again-note"></p>
+              <label for="login-again-code">Code from your authenticator</label>
+              <input id="login-again-code" name="login-again-code" type="text"
+                     inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                     autocomplete="one-time-code" placeholder="000000">
+              <div class="acct-row">
+                <button type="submit" class="choice">Confirm</button>
+                <button id="login-again-cancel" type="button"
+                        class="ghost">Cancel</button>
+              </div>
+            </form>
             <button id="login-out" type="button" class="ghost">Log out</button>
           </div>
 

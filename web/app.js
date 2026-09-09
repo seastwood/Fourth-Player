@@ -599,12 +599,13 @@ function onError(message) {
     loginOpen = true;
     showTab("session");
     paintLogin();
+    const said = message.message || "Enter your authenticator code to do that.";
+    // Both notes: which form is showing depends on whether they are already
+    // logged in, and the message belongs on whichever one they are looking at.
     const note = el("login-code-note");
-    if (note) {
-      note.textContent = message.message
-        || "Enter your authenticator code to do that.";
-      note.hidden = false;
-    }
+    if (note) { note.textContent = said; note.hidden = false; }
+    const again = el("login-again-note");
+    if (again) again.textContent = said;
     const box = el("login-code");
     if (box) { box.value = ""; box.focus(); }
     return;
@@ -2786,7 +2787,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08g";
+const CLIENT_BUILD = "2026-09-08h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3494,16 +3495,27 @@ function paintLogin() {
   const sheet = el("login-sheet");
   if (!sheet) return;
   // Logged in already, and asked for a fresh code by something that needs
-  // one. The form comes back with the name filled in, so all that is left to
-  // type is the six digits.
+  // one. Its own small form, inside the panel that says who they are: the
+  // account is settled and the only open question is whether they are here
+  // now, so asking for the password again would be asking for the half
+  // already answered.
   const reauth = !!waitingOnCode && !!account;
   sheet.hidden = false;
-  el("login-in").hidden = !account || reauth;
+  el("login-in").hidden = !account;
   el("login-outside").hidden = !!account || loginOpen;
-  el("login-form").hidden = reauth ? false : (!!account || !loginOpen);
-  if (reauth) {
-    const who = el("login-user");
-    if (who && !who.value) who.value = account.name;
+  el("login-form").hidden = !!account || !loginOpen;
+  const again = el("login-again");
+  if (again) {
+    again.hidden = !reauth;
+    if (reauth) {
+      const field = el("login-again-code");
+      if (field && document.activeElement !== field) {
+        field.value = "";
+        // Focused, because the whole fault this replaces was a page that
+        // asked for six digits and gave nowhere to put them.
+        try { field.focus({ preventScroll: false }); } catch (_) {}
+      }
+    }
   }
   if (account) {
     el("login-as").textContent = account.name;
@@ -4249,6 +4261,27 @@ function deskListen() {
       event.preventDefault();
       if (key.dataset.mod) deskModTap(key.dataset.mod);
       else if (key.dataset.key) deskTapKey(key.dataset.key, key.dataset.ctrlAlt);
+    });
+  }
+
+  const again = el("login-again");
+  if (again) {
+    again.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const field = el("login-again-code");
+      const code = (field && field.value || "").trim();
+      if (code.length < 6) return;
+      // Only the code. The host knows which account this connection is, and
+      // says no if the connection is not one.
+      send({ t: "login", code });
+      if (field) field.value = "";
+    });
+  }
+  const againCancel = el("login-again-cancel");
+  if (againCancel) {
+    againCancel.addEventListener("click", () => {
+      waitingOnCode = null;
+      paintLogin();
     });
   }
 
