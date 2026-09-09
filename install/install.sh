@@ -100,8 +100,22 @@ else
   echo "screen, so you can log it back in from your phone. That needs one"
   echo "root-installed hook, which grants only this user access to the"
   echo "greeter's display -- not root, not the network."
-  printf "install it? [y/N] "
-  read -r answer
+  if [ ! -t 0 ]; then
+    # Nobody is there to answer. This installer is run from kodi-retrobox's
+    # through a pipe -- output goes to sed, which buffers -- so the question
+    # is never seen and the read waits for ever: the whole install stops
+    # here, silently, with the last thing printed being an explanation of
+    # something it is about to not do.
+    echo "not asking, because this is not a terminal. To add it later:"
+    echo "    sudo install -m 755 $REPO/bin/fourth-player-greeter-access \\"
+    echo "        /usr/local/bin/fourth-player-greeter-access"
+    echo "    sudo install -m 644 $REPO/bin/fourth-player-greeter.conf \\"
+    echo "        /etc/lightdm/lightdm.conf.d/90-fourth-player.conf"
+    answer=n
+  else
+    printf "install it? [y/N] "
+    read -r answer
+  fi
   case "$answer" in
     [Yy]*)
       sudo install -m 755 "$REPO/bin/fourth-player-greeter-access" \
