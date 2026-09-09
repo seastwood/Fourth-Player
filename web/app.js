@@ -2429,22 +2429,21 @@ function applyZoom() {
   // inside it, by half the slack. It costs nothing: the black it moves
   // through is the letterboxing, which was already on the screen above and
   // below it. Moving it only decides which side of the picture that black is.
-  if (cursorDriving()) {
-    // Centring wins outright. Stopping at the picture's edge and keeping the
-    // pointer in the middle are the same rule only while the picture is
-    // bigger than what can be seen -- and on an upright phone it never is:
-    // a 16:9 picture is about a quarter of the height of the screen, so the
-    // edge rule bites immediately and the pointer sits wherever the picture
-    // put it, which near the top of a game means near the top of the screen.
-    //
-    // So while somebody is driving, cursorFollow's answer stands. What that
-    // costs is black beyond the picture when the pointer is near an edge, and
-    // never more than half the screen, because the pointer is always *on* the
-    // picture and the picture therefore always covers the middle. Black at
-    // the edge of the desktop is a smaller price than a pointer that will not
-    // stay where the eye is.
-    return paintAfterZoom();
-  }
+  // The same limits whether somebody is driving or looking, and the reason is
+  // worth writing down because it was briefly otherwise.
+  //
+  // Keeping the pointer in the middle and stopping at the picture's edge are
+  // the same rule while the picture is bigger than what can be seen. Where
+  // they disagree -- at the edges, and on an upright phone where a 16:9
+  // picture is shorter than the screen at any ordinary zoom -- the edge wins.
+  // Letting the pointer stay in the middle there means dragging the picture
+  // off its own edge and filling the space with black, and black is worse
+  // than a pointer that is no longer quite in the middle.
+  //
+  // So: centred while there is room to move, and once there is not, the
+  // picture holds still and the pointer walks on towards the edge by itself.
+  // When the picture is smaller than what can be seen there is no room at
+  // all, and it simply sits in the middle of it.
   const maxX = panRoom(picture.width, picture.box.width, zoom);
   const maxY = panRoom(picture.height, seen, zoom);
   panX = Math.max(-maxX, Math.min(maxX, panX));
@@ -2869,7 +2868,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08o";
+const CLIENT_BUILD = "2026-09-08p";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4308,8 +4307,18 @@ let deskLift = 0;
 
 function bottomInset() {
   const row = el("desk-keys");
-  const rowHeight = row && !row.hidden ? row.getBoundingClientRect().height : 0;
-  return deskLift + rowHeight;
+  if (!row || row.hidden) return 0;
+  // Measured from where the row actually landed, rather than added up from
+  // what the keyboard is thought to be doing. The row sits on top of the
+  // keyboard, so its top edge *is* the top of everything covering the bottom
+  // of the picture -- the keyboard, whatever furniture the phone puts above
+  // it, and the row itself, in one number that cannot disagree with the
+  // screen. Adding up a keyboard height and a row height instead means two
+  // measurements that can each be right while the sum is wrong, which is how
+  // the picture ended up lifted further than anything was covering it.
+  const top = row.getBoundingClientRect().top;
+  const bottom = video.offsetTop + video.offsetHeight;
+  return Math.max(0, Math.min(bottom, bottom - top));
 }
 
 /* Everything that has to be listened for while somebody is driving. Bound

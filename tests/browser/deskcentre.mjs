@@ -46,44 +46,83 @@ try {
     applyLayoutChoice("off"); deskPaintKeys();
 
     const top = video.offsetTop, H = video.offsetHeight;
-    const driving = [];
+    const rows = [];
     for (const lift of [0, 300]) {
-      deskLift = lift;
-      const want = top + (H - lift) / 2;
-      for (const z of [1, 2, 3]) {
-        for (const v of [0, 0.1, 0.5, 0.9, 1]) {
+      // The row is what the inset is measured from, so put it where a
+      // keyboard of that height would put it.
+      const row = document.getElementById("desk-keys");
+      row.hidden = lift === 0;
+      document.documentElement.style.setProperty("--desk-lift", lift + "px");
+      for (const z of [1, 2, 3, 4]) {
+        for (const v of [0, 0.25, 0.5, 0.75, 1]) {
           zoom = z; cursorU = 0.5; cursorV = v;
           cursorFollow();
           const pic = pictureBox();
-          const y = top + panY + H / 2 + (v - 0.5) * pic.height * z;
-          driving.push({ lift, z, v, off: Math.round(y - want) });
+          const inset = bottomInset();
+          const strip = { top: top, bottom: top + H - inset };
+          const picTop = top + panY + H / 2 - (pic.height * z) / 2;
+          const picBottom = picTop + pic.height * z;
+          const pointer = picTop + v * pic.height * z;
+          const middle = (strip.top + strip.bottom) / 2;
+          rows.push({
+            lift, z, v,
+            // Black is any part of the strip the picture does not cover, on
+            // an axis where the picture is big enough to have covered it.
+            blackTop: Math.round(Math.max(0, picTop - strip.top)),
+            blackBottom: Math.round(Math.max(0, strip.bottom - picBottom)),
+            fits: pic.height * z <= (strip.bottom - strip.top) + 1,
+            off: Math.round(pointer - middle),
+            room: Math.round(Math.max(0,
+              (pic.height * z - (strip.bottom - strip.top)) / 2)),
+            wanted: Math.round(Math.abs((v - 0.5) * pic.height * z)),
+          });
         }
       }
     }
+    const row = document.getElementById("desk-keys");
+    row.hidden = true;
+    document.documentElement.style.setProperty("--desk-lift", "0px");
 
-    // And with nobody driving, the picture behaves exactly as it always did:
-    // it may not be dragged off its own edges.
-    deskLift = 0; deskHeld = false; cursorOn = false;
+    deskHeld = false; cursorOn = false;
     zoom = 2; panX = -99999; panY = -99999; applyZoom();
     const pic = pictureBox();
-    const looking = {
-      panX: Math.round(panX),
-      limit: Math.round(panRoom(pic.width, pic.box.width, zoom)),
-      panY: Math.round(panY),
-    };
-    return { driving, looking, H, top };
+    return { rows, looking: { panX: Math.round(panX),
+             limit: Math.round(panRoom(pic.width, pic.box.width, zoom)) } };
   });
 
-  const strayed = out.driving.filter((r) => Math.abs(r.off) > 1);
-  check(strayed.length === 0,
-        "the pointer is in the middle of what can be seen in all "
-        + out.driving.length + " cases: "
-        + (strayed.length ? JSON.stringify(strayed.slice(0, 3)) : "none stray"));
+  // No black, ever. That is the half of the rule that was asked for second:
+  // at the edges the pointer gives up the middle rather than the picture
+  // giving up the screen.
+  const bled = out.rows.filter((r) => !r.fits
+                                      && (r.blackTop > 1 || r.blackBottom > 1));
+  check(bled.length === 0,
+        "a picture that fills the screen never lets black in at an edge, in "
+        + out.rows.filter((r) => !r.fits).length + " such cases: "
+        + (bled.length ? JSON.stringify(bled.slice(0, 2)) : "none"));
 
-  const withKeyboard = out.driving.filter((r) => r.lift === 300);
-  check(withKeyboard.length > 0 && withKeyboard.every((r) => Math.abs(r.off) <= 1),
-        "including with a keyboard covering the bottom 300px, which moves the "
-        + "middle it is measured against");
+  // Centred wherever there is room to be.
+  const shouldCentre = out.rows.filter((r) => r.wanted <= r.room);
+  const missed = shouldCentre.filter((r) => Math.abs(r.off) > 1);
+  check(shouldCentre.length > 0 && missed.length === 0,
+        "the pointer is centred in all " + shouldCentre.length
+        + " cases where the picture has room to move: "
+        + (missed.length ? JSON.stringify(missed.slice(0, 2)) : "none missed"));
+
+  // And where there is not, it walks towards the edge rather than dragging
+  // the picture off with it.
+  const atEdge = out.rows.filter((r) => r.wanted > r.room);
+  check(atEdge.length > 0 && atEdge.every((r) => Math.abs(r.off) > 1),
+        "and walks off-centre at the edges rather than showing black, in "
+        + atEdge.length + " cases");
+
+  // A picture smaller than the strip sits in the middle of it -- which is
+  // where the keyboard comes in: the middle it is measured against moves.
+  const small = out.rows.filter((r) => r.fits && r.v === 0.5);
+  const wonky = small.filter((r) => Math.abs(r.blackTop - r.blackBottom) > 2);
+  check(small.length > 0 && wonky.length === 0,
+        "a picture shorter than the screen sits in the middle of what can be "
+        + "seen, keyboard or no keyboard: "
+        + (wonky.length ? JSON.stringify(wonky.slice(0, 2)) : "even on both sides"));
 
   check(Math.abs(out.looking.panX) === out.looking.limit && out.looking.limit > 0,
         "and with nobody driving, the picture still stops at its own edge: "

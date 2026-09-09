@@ -2463,7 +2463,12 @@ input.name {
    -- see the markup. */
 .desk-input {
   position: fixed;
-  bottom: 0;
+  /* At the top, not the bottom. A phone scrolls the page to bring a focused
+     field into view above its keyboard, and a field pinned to the bottom is
+     the one place guaranteed to make it do that -- which slides the whole
+     picture up by an amount nothing here knows about. At the top there is
+     nothing to scroll to. */
+  top: 0;
   left: 0;
   z-index: -1;
   width: 1px;
