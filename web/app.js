@@ -2800,7 +2800,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08k";
+const CLIENT_BUILD = "2026-09-08l";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -3947,7 +3947,7 @@ function deskShowKeyboard(yes) {
   const field = el("desk-input");
   if (!field) return;
   if (yes) {
-    field.value = "";
+    deskFieldClear(field);
     field.focus({ preventScroll: true });
   } else {
     field.blur();
@@ -4131,18 +4131,33 @@ function deskTapKey(code, withCtrlAlt) {
    `input` because it names what is about to happen -- a character, a
    backspace, a newline -- while `input` only leaves a changed value behind
    and no way to tell a typed letter from an autocorrect rewriting a word. */
+/* The field is a contenteditable, so it has text rather than a value. Both
+   of these exist so nothing else has to know that. */
+function deskFieldText(field) {
+  return (field && field.textContent || "").replace(/[\r\n]/g, "");
+}
+
+function deskFieldClear(field) {
+  if (!field) return;
+  if (field.textContent !== "") field.textContent = "";
+}
+
+/* Characters, in batches under deskwire's limit -- so pasting a password is
+   a message or two rather than one per letter. */
+function deskSendText(text) {
+  for (let i = 0; i < text.length; i += DESK_BATCH) {
+    deskSend(Array.from(text.slice(i, i + DESK_BATCH))
+               .map((ch) => ({ t: "c", ch })));
+  }
+  if (text) deskModsSpend();
+}
+
 function deskTyped(event) {
   if (!deskHeld) return;
   event.preventDefault();
   const how = event.inputType || "";
   if (how === "insertText" || how === "insertCompositionText") {
-    const text = event.data || "";
-    // A batch, so a paste of a password is one message rather than twenty.
-    for (let i = 0; i < text.length; i += DESK_BATCH) {
-      deskSend(Array.from(text.slice(i, i + DESK_BATCH))
-                 .map((ch) => ({ t: "c", ch })));
-    }
-    if (text) deskModsSpend();
+    deskSendText(event.data || "");
     return;
   }
   if (how === "insertLineBreak" || how === "insertParagraph") {
@@ -4253,10 +4268,18 @@ function deskListen() {
   const field = el("desk-input");
   if (field) {
     field.addEventListener("beforeinput", deskTyped);
-    // Kept empty whatever happens. Anything left in it would be read back by
-    // an autocorrect as context, and the field is not a text box -- it is a
-    // way to make a keyboard appear.
-    field.addEventListener("input", () => { field.value = ""; });
+    // The safety net, and the reason switching to a contenteditable is not a
+    // gamble. beforeinput names what is about to happen and is preventable,
+    // which is the good path -- but a preventDefault on a composition (an
+    // autocorrect finishing a word) is not always honoured, and if anything
+    // slips through, whatever landed in the element is read here and sent as
+    // the characters it is. Either way the element ends up empty, because
+    // text left in it becomes context for the next autocorrect.
+    field.addEventListener("input", () => {
+      const landed = deskFieldText(field);
+      if (landed) deskSendText(landed);
+      deskFieldClear(field);
+    });
     field.addEventListener("focus", () => { measureLift && measureLift(); deskPaintKeys(); });
     field.addEventListener("blur", () => {
       // Nothing may be left held by a keyboard that has gone away.

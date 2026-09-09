@@ -2458,7 +2458,9 @@ input.name {
 }
 
 /* One transparent pixel. It must be focusable and rendered for a phone to
-   raise its keyboard, and must never be seen or scrolled to. */
+   raise its keyboard, and must never be seen or scrolled to.
+   A contenteditable rather than an input, to dodge iOS's form accessory bar
+   -- see the markup. */
 .desk-input {
   position: fixed;
   bottom: 0;
@@ -2469,7 +2471,17 @@ input.name {
   padding: 0;
   border: 0;
   opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 16px;          /* under 16px and iOS zooms the page on focus */
+  /* Said out loud, and not optional. The stage refuses selection so that
+     dragging the picture does not select the furniture, and a contenteditable
+     that inherits `none` cannot be typed into at all -- which would be this
+     change quietly breaking the thing it exists to improve. */
+  user-select: text;
+  -webkit-user-select: text;
+  /* There is nothing to see in it, so nothing should blink there either. */
+  caret-color: transparent;
 }
 
 .desk-keys {

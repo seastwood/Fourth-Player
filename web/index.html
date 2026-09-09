@@ -760,11 +760,20 @@
 
   <!-- The field exists to make a phone raise its keyboard, and for no other
        reason: what is typed into it is read and thrown away. It has to be
-       focusable and on screen -- a display:none input raises nothing -- so it
-       is one transparent pixel behind everything. -->
-  <input id="desk-input" class="desk-input" type="text"
-         autocomplete="off" autocorrect="off" autocapitalize="off"
-         spellcheck="false" aria-label="Type to the console" tabindex="-1">
+       focusable and on screen -- a display:none field raises nothing -- so it
+       is one transparent pixel behind everything.
+
+       A contenteditable rather than an <input>, and that is the whole point
+       of it: iOS draws its form accessory bar -- the strip with the arrows
+       and Done -- above the keyboard whenever a form control has focus, and
+       a web page has no way to remove it. A contenteditable is not a form
+       control, and on some versions of iOS the bar does not appear for one.
+       Whether it works here is a question only a real iPhone can answer, so
+       the typing path below is written to survive it either way. -->
+  <div id="desk-input" class="desk-input" contenteditable="true"
+       role="textbox" inputmode="text"
+       autocorrect="off" autocapitalize="off" spellcheck="false"
+       aria-label="Type to the console"></div>
 
   <!-- The keys a phone's own keyboard does not have, sitting above it. -->
   <div id="desk-keys" class="desk-keys" hidden>
