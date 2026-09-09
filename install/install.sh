@@ -100,12 +100,14 @@ else
   echo "screen, so you can log it back in from your phone. That needs one"
   echo "root-installed hook, which grants only this user access to the"
   echo "greeter's display -- not root, not the network."
-  if [ ! -t 0 ]; then
-    # Nobody is there to answer. This installer is run from kodi-retrobox's
-    # through a pipe -- output goes to sed, which buffers -- so the question
-    # is never seen and the read waits for ever: the whole install stops
-    # here, silently, with the last thing printed being an explanation of
-    # something it is about to not do.
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    # Both, and stdout is the one that matters. kodi-retrobox runs this
+    # installer as `install.sh 2>&1 | sed`, which redirects the *output* and
+    # leaves the input alone -- so stdin is still a terminal, the question is
+    # asked, and it goes into sed's buffer where nobody will ever see it while
+    # the read waits for ever. Asking whether anybody is listening means
+    # asking whether they can hear the question, not whether they could
+    # answer one.
     echo "not asking, because this is not a terminal. To add it later:"
     echo "    sudo install -m 755 $REPO/bin/fourth-player-greeter-access \\"
     echo "        /usr/local/bin/fourth-player-greeter-access"
