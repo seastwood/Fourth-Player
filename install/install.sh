@@ -201,10 +201,17 @@ else
 fi
 
 say "config"
+# From the repository, and that is not a detail. `python3 -m fourthplayer`
+# finds the package because the working directory holds it -- so run by hand
+# from inside the checkout, as it always was, this worked; run by
+# kodi-retrobox's installer, which calls it by absolute path from its own
+# directory, it failed with "No module named fourthplayer" and took the rest
+# of the install with it. The cd was already here, three lines further down,
+# which is one line too late.
+cd "$REPO"
 [ -f "$HOME/.config/fourth-player/config.json" ] || python3 -m fourthplayer write-config
 
 say "checks"
-cd "$REPO"
 python3 -m fourthplayer check || true
 # Both streams. The suites log through Python's logging, which writes to
 # stderr, so a passing run still printed a page of warnings about paused
