@@ -18,6 +18,7 @@ briefly wrong, which for operating a desktop is the right way round.
 Messages are JSON, one object or a list of them:
 
     {"t": "m", "dx": int, "dy": int}     pointer moved this far
+    {"t": "p", "x": int, "y": int}       pointer is exactly here, 0..32767
     {"t": "w", "dx": int, "dy": int}     wheel turned this many notches
     {"t": "k", "c": "KeyA", "d": 1}      key down (0 for up)
     {"t": "c", "ch": "A"}                type this character, however it is
@@ -61,6 +62,31 @@ class DeskError(ValueError):
 class Move:
     dx: int
     dy: int
+
+
+# Where an absolute pointer may be put, on both axes. Wider than any screen,
+# so the page's idea of where the pointer is never has to be rounded to the
+# console's pixels before it is sent.
+POINT_MAX = 32767
+
+
+@dataclass(frozen=True)
+class Point:
+    """Where the pointer is, rather than how far it moved.
+
+    Both exist because they answer different questions. A hand on a mouse
+    knows only that it moved, and relative motion is what a game wants -- it
+    has no edges to run into.
+
+    A finger dragging on a video knows exactly where the pointer should end
+    up, and needs the *page* to know too: keeping the pointer in the middle of
+    a zoomed picture means the page has to know where it is, and it cannot
+    work that out from deltas it has sent, because the console applies its own
+    pointer acceleration to those. Sending the position instead makes the
+    page's copy right by construction.
+    """
+    x: int
+    y: int
 
 
 @dataclass(frozen=True)
@@ -116,6 +142,15 @@ def _whole(value, limit, what):
     return value
 
 
+def _span(value, what):
+    """A whole number on the absolute pointer's scale."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DeskError("%s must be a whole number, got %r" % (what, value))
+    if value < 0 or value > POINT_MAX:
+        raise DeskError("%s of %d is outside 0..%d" % (what, value, POINT_MAX))
+    return value
+
+
 def _one(item):
     if not isinstance(item, dict):
         raise DeskError("expected an object, got %r" % type(item).__name__)
@@ -123,6 +158,8 @@ def _one(item):
     if kind == "m":
         return Move(_whole(item.get("dx"), MOTION_LIMIT, "dx"),
                     _whole(item.get("dy"), MOTION_LIMIT, "dy"))
+    if kind == "p":
+        return Point(_span(item.get("x"), "x"), _span(item.get("y"), "y"))
     if kind == "w":
         return Wheel(_whole(item.get("dx"), WHEEL_LIMIT, "wheel dx"),
                      _whole(item.get("dy"), WHEEL_LIMIT, "wheel dy"))

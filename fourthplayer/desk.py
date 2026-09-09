@@ -24,9 +24,9 @@ written against that; a keyboard is a keyboard, and X will take it as one.
 import logging
 import time
 
-from evdev import UInput, ecodes as e
+from evdev import AbsInfo, UInput, ecodes as e
 
-from . import keymap
+from . import deskwire, keymap
 
 log = logging.getLogger("fourthplayer.desk")
 
@@ -63,6 +63,28 @@ def keyboard_capabilities():
     return {e.EV_KEY: list(keymap.KEY_CODES)}
 
 
+def pointer_capabilities():
+    """An absolute pointer, beside the relative one rather than instead of it.
+
+    Two devices because they answer different questions and a single device
+    claiming both axes is read as neither by libinput. A hand on a real mouse
+    sends relative motion, which is what a game wants; a finger dragging on a
+    video sends a position, which is what a page needs so it can keep the
+    pointer in the middle of a zoomed picture.
+
+    No BTN_TOUCH: that is what would make this a touchscreen rather than a
+    pointer, and a touchscreen has no cursor to move. The buttons stay on the
+    relative device -- X merges every pointer into one cursor, so a click sent
+    there happens wherever this one last put it.
+    """
+    span = AbsInfo(value=0, min=0, max=deskwire.POINT_MAX,
+                   fuzz=0, flat=0, resolution=0)
+    return {
+        e.EV_ABS: [(e.ABS_X, span), (e.ABS_Y, span)],
+        e.EV_KEY: list(MOUSE_BUTTONS),
+    }
+
+
 def mouse_capabilities():
     """A relative pointer, which is what a trackpad is.
 
@@ -89,6 +111,9 @@ class Desk:
         self.mouse = UInput(mouse_capabilities(), name=label + " Mouse",
                             vendor=VENDOR, product=PRODUCT + 1,
                             version=VERSION, bustype=BUSTYPE)
+        self.pointer = UInput(pointer_capabilities(), name=label + " Pointer",
+                              vendor=VENDOR, product=PRODUCT + 2,
+                              version=VERSION, bustype=BUSTYPE)
         self.held_keys = set()
         self.held_buttons = set()
         # How to reach each character on this console's keyboard. Read once,
@@ -120,6 +145,10 @@ class Desk:
                 if action.dy:
                     self.mouse.write(e.EV_REL, e.REL_Y, action.dy)
                 moved = moved or bool(action.dx or action.dy)
+            elif name == "Point":
+                self.pointer.write(e.EV_ABS, e.ABS_X, action.x)
+                self.pointer.write(e.EV_ABS, e.ABS_Y, action.y)
+                self.pointer.syn()
             elif name == "Wheel":
                 if action.dy:
                     self.mouse.write(e.EV_REL, e.REL_WHEEL, action.dy)
@@ -234,7 +263,7 @@ class Desk:
         try:
             self.release_all()
         finally:
-            for device in (self.keyboard, self.mouse):
+            for device in (self.keyboard, self.mouse, self.pointer):
                 try:
                     device.close()
                 except Exception:
