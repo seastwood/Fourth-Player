@@ -88,6 +88,27 @@ for codec in video.CODEC_PREFERENCE:
           "%s: offered=%s, buildable=%s -- never offered without being "
           "buildable" % (codec, offered, pickable))
 
+print("\nH.265 is only offered when the card can encode it")
+# The case this exists for: an Intel HD 530 encodes H.264 in hardware and
+# H.265 not at all, so the only H.265 encoder present is x265enc. Offering
+# H.265 there picks the better codec and the far worse session -- 1080p at a
+# load average of fifty-five, against hardware H.264 that barely registers.
+h265 = video.pick_encoder("h265")
+offered265 = "h265" in video.host_codecs()
+if h265 is None:
+    check(not offered265, "nothing here encodes H.265, and none is offered")
+elif h265[1] == "software":
+    check(not offered265,
+          "only %s encodes H.265 here, so H.265 is not offered" % h265[0])
+else:
+    check(offered265, "%s encodes H.265 in hardware, so it is offered"
+          % h265[0])
+check("h265" not in video.host_codecs() or video.pick_encoder("h265")[1] == "hardware",
+      "put the other way round: H.265 offered implies H.265 in hardware")
+check("h264" in video.host_codecs(),
+      "and H.264 is always offered, so refusing H.265 never leaves a host "
+      "with nothing to send")
+
 print("\nthe software cap")
 cfg = Config()
 check(cfg.software_max_height == 720,

@@ -243,6 +243,18 @@ def host_codecs(hardware=True):
         # codec the pipeline then refuses to build -- which is how a machine
         # with no VA driver came to offer H.265 and hand out a lie.
         chosen = pick_encoder(codec, hardware)
+        # H.265 only when the card can do it. Its whole advantage is fitting
+        # the same picture into fewer bits, and x265enc will not pay for that
+        # at thirty frames a second on a desktop -- a Skylake box here sat at
+        # a load average of fifty-five encoding 1080p that way, while its own
+        # HD 530 could have done H.264 in hardware and barely warmed up. So a
+        # host that cannot encode H.265 in hardware offers H.264 instead,
+        # rather than choosing the better codec and the worse session.
+        if chosen and codec == "h265" and chosen[1] != "hardware":
+            log.info("not offering H.265: only %s can encode it here, and "
+                     "encoding H.265 in software costs more than the bitrate "
+                     "it saves", chosen[0])
+            continue
         if (chosen
                 and Gst.ElementFactory.find(parser)
                 and Gst.ElementFactory.find(payloader)):
