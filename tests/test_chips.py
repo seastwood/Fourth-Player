@@ -71,6 +71,14 @@ let clockTimer = null;
 function clearInterval() {}
 function setInterval() { return 1; }
 
+// What setLink reads besides the chip itself. A session that has ended hides
+// the retry button and does not raise the HUD, so both are stated here rather
+// than left undefined -- which is a ReferenceError on every case, not a
+// failure of the one that cares.
+let ended = false;
+const gate = { hidden: true };             // playing, not on the join screen
+function showHud() {}
+
 const out = {};
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 if (job.link) { setLink(job.link[0], job.link[1]); out.link = nodes.link; }

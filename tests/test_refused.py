@@ -98,8 +98,21 @@ global.gate = { hidden: true };            // playing: the join screen is away
 global.askForPin = (why) => { asked = why; };
 global.setLink = (kind, said) => { chip = said; };
 
+// The rest of what onError touches. Only the refusals below are exercised
+// here, but the function reads deskAsking before it looks at the reason at
+// all, so leaving these out is a ReferenceError on every case rather than a
+// failure of the one that needed them. Each is stubbed to the state a guest
+// is actually in: not waiting on a keyboard, not logged in, nothing pending.
+let deskAsking = false, waitingOnCode = null, lastAction = null;
+let loginOpen = false, toast = null;
+global.openPanelToAsk = () => {};
+global.paintLogin = () => {};
+global.showToast = (said) => { toast = said; };
+global.el = () => null;                    // no document under bare node
+
 onError({ t: "error", message: job.message, reason: job.reason });
-console.log(JSON.stringify({ asked, chip, refused: resumeRefused }));
+console.log(JSON.stringify({ asked, chip, refused: resumeRefused, toast,
+                             waitingOnCode, loginOpen }));
 """
 
 code = "\n\n".join([re.search(r"const HOPELESS = \[[^\]]*\];", app).group(0),
@@ -144,6 +157,18 @@ out = run("That pad is taken.", "request", already=1)
 check(out["asked"] is None,
       "and still not counted on the second one, or two fumbled seat changes "
       "would end a session")
+
+print("\nand being asked for an authenticator code")
+# Not a refusal of the link at all, which is the point: it is a request for six
+# digits from somebody already here. Counting it would end a good session after
+# two mistyped codes, and sending them back to the join screen would lose the
+# seat they are sitting in.
+out = run("Enter your authenticator code first.", "code")
+check(out["asked"] is None,
+      "does not send them back to the join screen: their link is fine")
+check(out["refused"] == 0, "and is not counted as a refusal")
+check(out["waitingOnCode"] is not None or out["loginOpen"],
+      "the page opens the login instead, and remembers what to finish")
 
 print("\nand a host too old to say why")
 out = run("That link or PIN is not valid.")

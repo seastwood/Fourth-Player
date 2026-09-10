@@ -152,11 +152,20 @@ print("\nand it takes no room at all when it is closed")
 # intrinsic width -- so width:0 alone left a slider's worth of empty space
 # between the speaker and the chip after it.
 css = open(os.path.join(ROOT, "web", "style.css")).read()
-collapsed = re.search(r"\.vol-range \{([^}]*)\}", css).group(1)
+# The selector, not the rule: the volume slider and the zoom slider are styled
+# together now, and pinning ".vol-range {" meant this stopped finding anything
+# and died on None rather than reporting a thing that was still true.
+def rule(selector):
+    found = re.search(r"(?m)^[^{}]*\B" + re.escape(selector)
+                      + r"[^{}]*\{([^}]*)\}", css)
+    assert found, "no CSS rule sets " + selector
+    return found.group(1)
+
+collapsed = rule(".vol-range")
 check("width: 0" in collapsed, "the closed slider is zero wide")
 check("min-width: 0" in collapsed,
       "and is allowed to be, which width alone does not achieve")
-opened = re.search(r"\.vol\.open \.vol-range \{([^}]*)\}", css).group(1)
+opened = rule(".vol.open .vol-range")
 check("width:" in opened, "opening gives it a width back")
 
 print()

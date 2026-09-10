@@ -47,6 +47,10 @@ const FPFrame = require(process.argv[1]);
 """ + body + """
 const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
 let touchButtons = job.touch || 0;
+// The keyboard-standing-in-for-a-controller device, which any guest may pick.
+// sendFrame folds its buttons in with the pad's and the on-screen pad's, so it
+// has to exist here even when a case is not using it.
+let keyButtons = job.keys || 0;
 let touchAxes = job.touchAxes || [0, 0, 0, 0];
 let lastSent = null, lastSentAt = 0, seq = 0;
 const HEARTBEAT_MS = 0, BACKLOG_LIMIT = 1e9, AXIS_EPSILON = 0.01;
