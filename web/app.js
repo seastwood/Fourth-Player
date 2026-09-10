@@ -729,7 +729,7 @@ function joined(message) {
     if (!deskHeld) {
       cursorOn = false;
       cursorStopCoasting();
-      if (deskKeyboardUp()) deskShowKeyboard(false);
+      deskShowKeyboard(false);
       deskMods.clear();
     }
     deskPaintKeys();
@@ -2954,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10c";
+const CLIENT_BUILD = "2026-09-10d";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4240,7 +4240,7 @@ function deskChoose(what) {
   if (what === "pad") {
     cursorOn = false;
     cursorStopCoasting();
-    if (deskKeyboardUp()) deskShowKeyboard(false);
+    deskShowKeyboard(false);
     setController(el("touch").hidden);
     deskPaintKeys();
     return;
@@ -4264,7 +4264,11 @@ function deskChoose(what) {
     if (cursorOn) setController(false);
     if (!cursorOn) cursorStopCoasting();
   } else if (what === "keyboard") {
-    const up = deskKeyboardUp();
+    // Toggled on what was *asked for*, not on whether the field happens to
+    // hold focus this instant. A phone can take focus away without the
+    // keyboard having been put away, and toggling on focus meant the button
+    // sometimes opened the keyboard again when it was pressed to close it.
+    const up = deskWantKeyboard;
     if (!up) setController(false);
     deskShowKeyboard(!up);
   }
@@ -4583,6 +4587,14 @@ function deskListen() {
     banner.addEventListener("touchstart", keepFocus, { passive: false });
     banner.addEventListener("mousedown", keepFocus, { passive: false });
   }
+  // And the strip itself -- the keys, the three buttons, and the arrow that
+  // opens them. Tapping any of those is somebody working the keyboard, not
+  // leaving it, and every one of them was moving the focus off the field.
+  const strip = el("desk-dock");
+  if (strip) {
+    strip.addEventListener("touchstart", keepFocus, { passive: false });
+    strip.addEventListener("mousedown", keepFocus, { passive: false });
+  }
 
   document.addEventListener("pointerlockchange", () => {
     // Losing the pointer -- Escape, a click elsewhere, the browser deciding
@@ -4647,19 +4659,30 @@ function deskListen() {
     });
     field.addEventListener("focus", () => { measureLift && measureLift(); deskPaintKeys(); });
     field.addEventListener("blur", () => {
-      // Preventing the tap's default keeps focus here on most browsers. Where
-      // it does not, this puts it back -- but only while the keyboard is
-      // still *wanted*, so pressing the keyboard button to put it away still
-      // works, and only a few times in a row, so a browser that refuses to
-      // give focus back ends the argument rather than flickering for ever.
-      if (deskWantKeyboard && deskHeld && deskRefocus < 3) {
-        deskRefocus += 1;
-        // Straight away rather than after a turn of the event loop. A phone
-        // starts putting its keyboard away the moment focus leaves, and
-        // taking it back in the same beat is the difference between nothing
-        // happening and a keyboard that visibly flinches.
-        try { field.focus({ preventScroll: true }); } catch (_) {}
-        setTimeout(() => { deskRefocus = 0; }, 1000);
+      // The keyboard closes when it is asked to close, and at no other time.
+      // Asking means the keyboard button, or the controller taking the
+      // screen; both go through deskShowKeyboard, which is the only thing
+      // that clears deskWantKeyboard.
+      //
+      // It used to give up after three blurs in a second and put the keyboard
+      // away itself. A double tap on the picture makes several, and every tap
+      // on the buttons made one, so it kept closing under people who had not
+      // asked for anything of the sort.
+      //
+      // The counter that remains is only there to stop a browser that refuses
+      // focus turning this into a loop. Reaching it stops the *arguing*, not
+      // the wanting: nothing is put away, and the next tap on the field opens
+      // it again.
+      if (deskWantKeyboard && deskHeld && !document.hidden) {
+        if (deskRefocus < 12) {
+          deskRefocus += 1;
+          // Straight away rather than after a turn of the event loop. A phone
+          // starts putting its keyboard away the moment focus leaves, and
+          // taking it back in the same beat is the difference between nothing
+          // happening and a keyboard that visibly flinches.
+          try { field.focus({ preventScroll: true }); } catch (_) {}
+          setTimeout(() => { deskRefocus = Math.max(0, deskRefocus - 1); }, 1000);
+        }
         return;
       }
       // Nothing may be left held by a keyboard that has gone away.
@@ -4790,7 +4813,7 @@ function deskFrom(message) {
   }
   if (!deskHeld) {
     if (deskCaptured() && document.exitPointerLock) document.exitPointerLock();
-    if (deskKeyboardUp()) deskShowKeyboard(false);
+    deskShowKeyboard(false);
     deskMods.clear();
     // The pointer is not ours any more, so nothing here may keep moving it,
     // and the controller comes back because that is the state to return to.

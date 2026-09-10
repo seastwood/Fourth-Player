@@ -163,6 +163,37 @@ try {
         "though the page still knows the pad is held, so everything else that "
         + "says so is right");
 
+  // The keyboard closes when it is asked to, and at no other time.
+  const kb = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((q) => setTimeout(q, ms));
+    const field = document.getElementById("desk-input");
+    deskHeld = true; deskSend = () => {};
+    deskShowKeyboard(true); await wait(50);
+    const opened = deskWantKeyboard;
+    // A double tap on the picture and a few taps on the buttons each blur it.
+    for (let i = 0; i < 6; i++) { field.blur(); await wait(15); }
+    const afterBlurs = deskWantKeyboard;
+    document.getElementById("desk-more").click(); await wait(40);
+    const afterArrow = deskWantKeyboard;
+    document.getElementById("desk-cursor").click(); await wait(40);
+    const afterCursor = deskWantKeyboard;
+    document.getElementById("desk-kb").click(); await wait(40);
+    const afterKeyboard = deskWantKeyboard;
+    deskShowKeyboard(true); await wait(40);
+    document.getElementById("desk-pad").click(); await wait(40);
+    const afterController = deskWantKeyboard;
+    return { opened, afterBlurs, afterArrow, afterCursor, afterKeyboard,
+             afterController };
+  });
+  check(kb.opened, "the keyboard opens");
+  check(kb.afterBlurs,
+        "and survives losing focus over and over -- a double tap on the "
+        + "picture makes several, and it used to give up after three");
+  check(kb.afterArrow, "tapping the arrow that collapses the buttons leaves it up");
+  check(kb.afterCursor, "so does tapping the cursor");
+  check(!kb.afterKeyboard, "the keyboard button closes it");
+  check(!kb.afterController, "and so does asking for the controller");
+
   check(errors.length === 0, "no script errors: " + errors.slice(0, 2));
 } finally {
   await browser.close();
