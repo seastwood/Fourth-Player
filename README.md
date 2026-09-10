@@ -416,12 +416,43 @@ PIN and they have a controller. Accounts exist for the things that reach past
 the picture.
 
 ```sh
-fourth-player admin add seth       # prints an authenticator secret, once
-fourth-player admin can seth steam stop lock desk    # the complete list
+fourth-player admin add robin      # prints an authenticator secret, once
+fourth-player admin can robin steam stop lock desk   # the complete list
 fourth-player admin list
-fourth-player admin passwd seth
-fourth-player admin remove seth
+fourth-player admin passwd robin
+fourth-player admin reset-2fa robin        # a new authenticator secret
+fourth-player admin forget-devices robin   # sign out every remembered device
+fourth-player admin remove robin
 ```
+
+### Setting up an authenticator
+
+`admin add` prints the shared secret once and never again, because it is not
+stored anywhere it could be printed from a second time.
+
+`admin reset-2fa` issues a new one. It is what to run for a phone that was
+lost or replaced, for an account whose authenticator was never set up in the
+first place, or for anybody who still has the account and no longer has the
+six digits. It prints the secret, the `otpauth://` URI, and a QR code to point
+a camera at:
+
+```
+$ fourth-player admin reset-2fa robin
+robin has a new authenticator secret, and every remembered device was signed out.
+
+Set up an authenticator app for robin now -- this is shown once.
+
+  secret:  2WLW7ASVA3WQF2EQLTZ2RWVFSN47PERI
+  or URI:  otpauth://totp/Fourth%20Player%3Arobin?secret=...&issuer=Fourth%20Player&digits=6&period=30
+```
+
+Every device that account had remembered is signed out at the same time. A
+new secret is asked for because a phone went missing, and that phone is
+exactly the kind of thing that was remembered.
+
+It has to be run at the console. Issuing a second factor is not something a
+second factor can authorise, so there is no way to do it from the browser --
+the same reason `admin add` is not there either.
 
 What can be given: `steam` (and `steam:<appid>` for one game), `stop`, `kick`,
 `reshare`, `slots`, `lock`, `grant`, `desk`.
@@ -759,6 +790,7 @@ python3 -m fourthplayer serve --audio-device NAME  # a specific monitor source
 `python3 -m fourthplayer check` lists the monitor sources this machine offers.
 
 Everything is also settable in `~/.config/fourth-player/config.json`.
+`fourth-player write-config` writes that file out with every default filled in, which is easier to edit than a blank one.
 
 ### How long a session lasts
 

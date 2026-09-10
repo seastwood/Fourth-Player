@@ -492,13 +492,28 @@ def _admin(args):
         print()
         print("  secret:  %s" % secret)
         print("  or URI:  %s" % accounts.otpauth(name, secret))
-        # A nicety when the tool happens to be installed. The secret above is
-        # the real answer; this only saves typing it.
+        # Typing thirty-two base32 characters into a phone, correctly, once,
+        # with no echo of what the phone thinks it heard, is a miserable way to
+        # start. So: the same URI as something to point a camera at.
+        #
+        # python3-qrcode rather than the qrencode binary. Both draw the same
+        # thing, but qrcode is in install/packages.txt and qrencode is in
+        # nothing at all -- so this branch never once ran on either machine
+        # here, and the secret was always typed by hand.
+        uri = accounts.otpauth(name, secret)
         try:
-            subprocess.run(["qrencode", "-t", "ANSIUTF8",
-                            accounts.otpauth(name, secret)], check=True)
-        except (OSError, subprocess.SubprocessError):
-            pass
+            import qrcode
+            drawn = qrcode.QRCode(border=2)
+            drawn.add_data(uri)
+            # invert=True gives dark-on-light, which is what a phone camera
+            # expects; a terminal on a dark background otherwise offers it a
+            # photographic negative that most scanners refuse.
+            drawn.print_ascii(invert=True)
+        except ImportError:
+            try:
+                subprocess.run(["qrencode", "-t", "ANSIUTF8", uri], check=True)
+            except (OSError, subprocess.SubprocessError):
+                print("  (install python3-qrcode for a code to scan)")
         print()
 
     try:
