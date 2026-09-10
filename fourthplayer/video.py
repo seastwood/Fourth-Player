@@ -130,6 +130,80 @@ def _first_present(names):
             return name
     return None
 
+
+# Every encoder this knows how to drive, best first, with the settings that
+# particular one wants. They are not interchangeable: bitrate is kilobits here
+# and bits there, the keyframe interval is key-int-max or gop-size depending,
+# and handing one encoder another's properties makes it refuse to start rather
+# than ignore them.
+#
+# Ordered hardware first, and within that by how widely the plugin is right:
+# VA covers Intel and AMD through mesa, NVENC covers nvidia, v4l2 covers the
+# ARM boards. Whatever is present is used; whatever is not is skipped. A
+# machine with none of them encodes in software, which is slower and works.
+#
+# `converter` is what has to sit in front of it: the VA encoders take frames
+# the GPU already holds, so they want vapostproc rather than videoconvert.
+_VA = "vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width={w},height={h}"
+_SW = ("videoscale ! videoconvert ! video/x-raw,format=I420,"
+       "width={w},height={h}")
+
+ENCODERS = {
+    "h264": (
+        ("vah264enc", "hardware", _VA,
+         "{el} name=enc target-usage={usage} bitrate={kbps} "
+         "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        ("vah264lpenc", "hardware", _VA,
+         "{el} name=enc target-usage={usage} bitrate={kbps} "
+         "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        ("nvh264enc", "hardware", _SW,
+         "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
+         "rc-mode=cbr"),
+        ("v4l2h264enc", "hardware", _SW,
+         "{el} name=enc extra-controls=\"controls,video_bitrate={bps}\""),
+        ("x264enc", "software", _SW,
+         "{el} name=enc speed-preset=ultrafast tune=zerolatency "
+         "bitrate={kbps} key-int-max={keyint}"),
+        ("openh264enc", "software", _SW,
+         "{el} name=enc complexity=low rate-control=bitrate bitrate={bps} "
+         "gop-size={keyint}"),
+    ),
+    "h265": (
+        ("vah265enc", "hardware", _VA,
+         "{el} name=enc target-usage={usage} bitrate={kbps} "
+         "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        ("vah265lpenc", "hardware", _VA,
+         "{el} name=enc target-usage={usage} bitrate={kbps} "
+         "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        ("nvh265enc", "hardware", _SW,
+         "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
+         "rc-mode=cbr"),
+        ("x265enc", "software", _SW,
+         "{el} name=enc speed-preset=ultrafast tune=zerolatency "
+         "bitrate={kbps} key-int-max={keyint}"),
+    ),
+}
+
+
+def pick_encoder(codec, allow_hardware=True):
+    """The best encoder for this codec on this machine, or None.
+
+    Returns (element, kind, converter, settings). Presence of the factory is
+    the test: the VA plugin registers vah264enc only where a device can do it,
+    and the nvidia plugin registers nvh264enc only where NVENC answers, so a
+    factory that exists is a strong claim. Anything that still fails at
+    build time falls through to the next one -- see Stage._describe.
+    """
+    for element, kind, converter, settings in ENCODERS.get(codec, ()):
+        if kind == "hardware" and not allow_hardware:
+            continue
+        if kind == "hardware" and converter is _VA \
+                and not Gst.ElementFactory.find("vapostproc"):
+            continue                      # the encoder without its converter
+        if Gst.ElementFactory.find(element):
+            return element, kind, converter, settings
+    return None
+
 _host_codecs = None
 
 
@@ -164,11 +238,12 @@ def host_codecs(hardware=True):
     init()
     found = []
     for codec in CODEC_PREFERENCE:
-        vas, sws, parser, payloader = _ELEMENTS[codec]
-        # Fall back the same way the pipeline does, or this promises H.265 on
-        # a machine that has no VA driver and the offer is a lie.
-        encoder = (_first_present(vas) if hardware else None) or _first_present(sws)
-        if (encoder
+        _vas, _sws, parser, payloader = _ELEMENTS[codec]
+        # Asked exactly as the pipeline will ask, so this cannot promise a
+        # codec the pipeline then refuses to build -- which is how a machine
+        # with no VA driver came to offer H.265 and hand out a lie.
+        chosen = pick_encoder(codec, hardware)
+        if (chosen
                 and Gst.ElementFactory.find(parser)
                 and Gst.ElementFactory.find(payloader)):
             found.append(codec)
@@ -365,51 +440,60 @@ class Stage:
         # new install does and the last thing it explains. `check` noticed and
         # told the user to edit the config; doing it here means they never have
         # to. Software encoding is slower, not broken.
-        hardware = cfg.hardware_encode
-        if hardware:
-            missing = [name for name in
-                       (("vah265enc" if hevc else "vah264enc"), "vapostproc")
-                       if not Gst.ElementFactory.find(name)]
-            if missing:
-                log.warning("no %s on this machine, so encoding in software "
-                            "instead (slower, and it works)",
-                            " or ".join(missing))
-                hardware = False
-        if hardware:
-            element = "vah265enc" if hevc else "vah264enc"
-            encoder = (f"{element} name=enc target-usage={cfg.target_usage} "
-                       f"bitrate={cfg.bitrate_kbps} key-int-max={keyint} "
-                       f"cpb-size={cpb} b-frames=0")
+        # Whatever this machine can actually do, best first. Asking for
+        # hardware that is not there used to fail at pipeline construction --
+        # `no element "vapostproc"` -- and the session simply would not start;
+        # then it hard-coded VA, which is right on AMD and Intel and leaves an
+        # nvidia or an ARM board encoding in software for no reason.
+        chosen = pick_encoder("h265" if hevc else "h264", cfg.hardware_encode)
+        if chosen is None:
+            raise RuntimeError("this machine has no encoder for %s"
+                               % ("H.265" if hevc else "H.264"))
+        element, kind, converter, settings = chosen
+        self.encoder_name = element
+        self.encoder_kind = kind
+        if kind == "software" and cfg.hardware_encode:
+            log.warning("no hardware encoder on this machine, so encoding in "
+                        "software with %s (slower, and it works)", element)
         else:
-            element = _first_present(_ELEMENTS["h265" if hevc else "h264"][1])
-            if element == "openh264enc":
-                # A different encoder with different knobs: it has no
-                # speed-preset and no tune, its bitrate is in bits rather than
-                # kilobits, and asking it for x264's settings makes it refuse
-                # to start at all.
-                encoder = (f"openh264enc name=enc complexity=low "
-                           f"rate-control=bitrate "
-                           f"bitrate={cfg.bitrate_kbps * 1000} "
-                           f"gop-size={keyint}")
-            else:
-                encoder = (f"{element} name=enc speed-preset=ultrafast "
-                           f"tune=zerolatency bitrate={cfg.bitrate_kbps} "
-                           f"key-int-max={keyint}")
+            log.info("encoding with %s (%s)", element, kind)
+
+        # And a software encoder is not asked for more than a CPU can carry.
+        # This is a guard rather than a preference: 1080p in software took a
+        # machine to load average fifty and kept it there, with no ssh and no
+        # web server, until somebody could reach the power button. A smaller
+        # picture is a far smaller thing than that.
+        width, height = cfg.width, cfg.height
+        cap = max(240, int(cfg.software_max_height or 0) or 720)
+        if kind == "software" and height > cap:
+            width = max(2, int(round(width * cap / height)) // 2 * 2)
+            height = cap
+            log.warning("%dx%d is more than a software encoder should be "
+                        "asked for; using %dx%d instead (software_max_height "
+                        "in the config raises this)",
+                        cfg.width, cfg.height, width, height)
+        encoder = settings.format(el=element, usage=cfg.target_usage,
+                                  kbps=cfg.bitrate_kbps,
+                                  bps=cfg.bitrate_kbps * 1000,
+                                  keyint=keyint, cpb=cpb)
         # Pin the profile between encoder and parser: the payloader reads it
         # from these caps to build profile-level-id, and without it a browser
         # is guessing.
         profile = "" if hevc else f"! video/x-h264,profile={cfg.h264_profile} "
         self._fmtp = "" if hevc else (
-            f"profile-level-id={h264_profile_level_id(cfg.h264_profile, cfg.height)};"
+            # The level is read off the picture that is actually sent, not
+            # the one that was asked for: a browser told level 4.0 and handed
+            # 540p is being told something untrue about the stream it is
+            # decoding.
+            f"profile-level-id={h264_profile_level_id(cfg.h264_profile, height)};"
             f"packetization-mode=1;level-asymmetry-allowed=1")
         parser = "h265parse" if hevc else "h264parse"
         payloader = "rtph265pay" if hevc else "rtph264pay"
         encoding = "H265" if hevc else "H264"
         self.encoding = encoding
-        convert = (f"vapostproc ! {_caps(cfg.width, cfg.height)}"
-                   if hardware else
-                   f"videoscale ! videoconvert ! video/x-raw,format=I420,"
-                   f"width={cfg.width},height={cfg.height}")
+        # What is actually going out, which is not always what was asked for.
+        self.sending_width, self.sending_height = width, height
+        convert = converter.format(w=width, h=height)
 
         # config-interval=-1 puts SPS/PPS in front of every keyframe. Without it
         # a guest who joins mid-session has the parameter sets they need only if
@@ -565,9 +649,10 @@ class Stage:
                 return self.start()
             raise RuntimeError(
                 f"the capture pipeline stalled reaching PLAYING (got {state.value_nick})")
-        log.info("capture running: %dx%d @%d, %d kb/s, audio %s",
-                 self.cfg.width, self.cfg.height, self.cfg.fps,
-                 self.cfg.bitrate_kbps, "on" if self.has_audio else "off")
+        log.info("capture running: %dx%d @%d, %d kb/s, %s, audio %s",
+                 self.sending_width, self.sending_height, self.cfg.fps,
+                 self.cfg.bitrate_kbps, self.encoder_name,
+                 "on" if self.has_audio else "off")
 
     def stop(self):
         """Stop capturing. Must not block, whatever state anything is in.

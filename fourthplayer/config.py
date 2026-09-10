@@ -49,6 +49,12 @@ class Config:
     # turns into delay. Conservative is therefore the low-latency choice.
     bitrate_kbps: int = 1500
     hardware_encode: bool = True
+    # The tallest picture a *software* encoder will be asked for, whatever
+    # `height` says. A CPU encoding 1080p can take a machine down entirely --
+    # not slow, but load average fifty and no ssh, which is how one of these
+    # was lost for an afternoon. Hardware encoders are not capped: that is
+    # what they are for. Raise it if your CPU is up to it.
+    software_max_height: int = 720
     # target-usage 1 measured *fastest* on Polaris, which is the opposite of
     # what the name suggests; 4 and 7 both came in a third slower.
     target_usage: int = 1
