@@ -28,6 +28,7 @@ def check(cond, msg):
 
 try:
     from fourthplayer.session import LiveSession, _common, CODEC_RANK
+    from fourthplayer import video
     from fourthplayer.video import best_shared_codec
 except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
@@ -68,6 +69,13 @@ def session(stage_codec, guests):
 BOTH = ["h265", "h264"]
 ONLY264 = ["h264"]
 
+# What this host can encode is pinned rather than probed. The question below is
+# whether a session climbs back up once the guest holding it down has left, and
+# the answer must not depend on the card in whichever machine runs the test: an
+# Intel HD 530 decodes H.265 and cannot encode it, so there the host offers
+# H.264 alone and every case here passes by being vacuous.
+video._host_codecs = ["h265", "h264"]
+
 print("the shape of the fault")
 s = session("h264", [FakeGuest(BOTH), FakeGuest(BOTH)])
 LOOP.run_until_complete(s._codec_after_leaving())
@@ -103,6 +111,16 @@ s = session("h264", [FakeGuest(BOTH)])
 s.cfg = type("C", (), {"codec": "h264", "hardware_encode": False})()
 LOOP.run_until_complete(s._codec_after_leaving())
 check(s.moved == [], "a codec set in the config is not second-guessed")
+
+print("\nand a host that cannot encode the better codec stays put")
+# The other half of pinning it: on a host offering H.264 alone, two guests who
+# both decode H.265 are still watching H.264, because nothing here can make it.
+video._host_codecs = ["h264"]
+s = session("h264", [FakeGuest(BOTH), FakeGuest(BOTH)])
+LOOP.run_until_complete(s._codec_after_leaving())
+check(s.moved == [],
+      "both guests take h265 and the host cannot encode it: %r" % (s.moved,))
+video._host_codecs = ["h265", "h264"]
 
 print("\nleaving is what asks the question")
 source = open(os.path.join(ROOT, "fourthplayer", "session.py"),
