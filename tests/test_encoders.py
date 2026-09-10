@@ -88,6 +88,27 @@ for codec in video.CODEC_PREFERENCE:
           "%s: offered=%s, buildable=%s -- never offered without being "
           "buildable" % (codec, offered, pickable))
 
+print("\na VA encoder is used with or without vapostproc")
+# Skylake registers vah264lpenc and no vapostproc, and requiring the pair sent
+# an HD 530 to x264enc while its own encoder went unused.
+import fourthplayer.video as _v
+find = _v.Gst.ElementFactory.find
+have_pp = find("vapostproc") is not None
+for codec in ("h264", "h265"):
+    got = video.pick_encoder(codec)
+    if got is None or not got[0].startswith("va"):
+        continue
+    check(got[2] is (_v._VA if have_pp else _v._SW),
+          "%s feeds %s from %s memory (vapostproc %s)"
+          % (got[0], codec, "card" if have_pp else "system",
+             "here" if have_pp else "missing"))
+va_h264 = find("vah264enc") or find("vah264lpenc")
+if va_h264:
+    got = video.pick_encoder("h264")
+    check(got is not None and got[1] == "hardware",
+          "a machine with a VA H.264 encoder uses it, not x264enc (got %s)"
+          % (got[0] if got else None))
+
 print("\nH.265 is only offered when the card can encode it")
 # The case this exists for: an Intel HD 530 encodes H.264 in hardware and
 # H.265 not at all, so the only H.265 encoder present is x265enc. Offering

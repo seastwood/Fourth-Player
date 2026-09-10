@@ -197,11 +197,19 @@ def pick_encoder(codec, allow_hardware=True):
     for element, kind, converter, settings in ENCODERS.get(codec, ()):
         if kind == "hardware" and not allow_hardware:
             continue
-        if kind == "hardware" and converter is _VA \
-                and not Gst.ElementFactory.find("vapostproc"):
-            continue                      # the encoder without its converter
-        if Gst.ElementFactory.find(element):
-            return element, kind, converter, settings
+        if not Gst.ElementFactory.find(element):
+            continue
+        # vapostproc is the fast way into a VA encoder -- it converts and
+        # scales on the card, so a frame never crosses the bus twice -- but it
+        # is not the only way in. Skylake registers vah264lpenc and no
+        # vapostproc at all, and requiring the pair sent an HD 530 to x264enc
+        # while its own encoder sat there unused. Where the converter is
+        # missing, hand the encoder ordinary system-memory frames and let it
+        # upload them itself: slower than staying on the card, still far
+        # cheaper than encoding on the CPU.
+        if converter is _VA and not Gst.ElementFactory.find("vapostproc"):
+            converter = _SW
+        return element, kind, converter, settings
     return None
 
 _host_codecs = None
