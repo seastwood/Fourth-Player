@@ -145,6 +145,11 @@ def _first_present(names):
 # `converter` is what has to sit in front of it: the VA encoders take frames
 # the GPU already holds, so they want vapostproc rather than videoconvert.
 _VA = "vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width={w},height={h}"
+# The way into a VA encoder on a machine with no vapostproc. Same elements as
+# _SW but NV12, not I420: a VA encoder takes system-memory frames and uploads
+# them itself, and NV12 is the only format its sink pad offers for them.
+_VA_SYS = ("videoscale ! videoconvert ! video/x-raw,format=NV12,"
+           "width={w},height={h}")
 _SW = ("videoscale ! videoconvert ! video/x-raw,format=I420,"
        "width={w},height={h}")
 
@@ -208,7 +213,7 @@ def pick_encoder(codec, allow_hardware=True):
         # upload them itself: slower than staying on the card, still far
         # cheaper than encoding on the CPU.
         if converter is _VA and not Gst.ElementFactory.find("vapostproc"):
-            converter = _SW
+            converter = _VA_SYS
         return element, kind, converter, settings
     return None
 

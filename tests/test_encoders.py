@@ -98,7 +98,7 @@ for codec in ("h264", "h265"):
     got = video.pick_encoder(codec)
     if got is None or not got[0].startswith("va"):
         continue
-    check(got[2] is (_v._VA if have_pp else _v._SW),
+    check(got[2] is (_v._VA if have_pp else _v._VA_SYS),
           "%s feeds %s from %s memory (vapostproc %s)"
           % (got[0], codec, "card" if have_pp else "system",
              "here" if have_pp else "missing"))
@@ -108,6 +108,34 @@ if va_h264:
     check(got is not None and got[1] == "hardware",
           "a machine with a VA H.264 encoder uses it, not x264enc (got %s)"
           % (got[0] if got else None))
+
+print("\nthe converter this machine would use actually links to the encoder")
+# String checks cannot catch this one. vah264lpenc takes system-memory frames,
+# but only as NV12, and being handed I420 it failed the only way it can: at
+# run time, on a guest's first connection, as "could not link videoconvert0 to
+# enc". So build the front of the real pipeline and make it negotiate.
+for codec in video.CODEC_PREFERENCE:
+    got = video.pick_encoder(codec)
+    if got is None:
+        continue
+    element, kind, converter, settings = got
+    line = ("videotestsrc num-buffers=1 ! " + converter + " ! "
+            + settings + " ! fakesink").format(
+                el=element, w=640, h=480, usage=4, kbps=1000, bps=1000000,
+                keyint=60, cpb=48)
+    try:
+        pipe = _v.Gst.parse_launch(line)
+    except Exception as exc:
+        check(False, "%s: %s will not even parse (%s)" % (codec, element, exc))
+        continue
+    # PAUSED, not READY: caps are negotiated on the way to PAUSED, and READY
+    # succeeds on a pipeline whose formats do not meet.
+    ret = pipe.set_state(_v.Gst.State.PAUSED)
+    if ret == _v.Gst.StateChangeReturn.ASYNC:
+        ret, _s, _p = pipe.get_state(3 * _v.Gst.SECOND)
+    check(ret != _v.Gst.StateChangeReturn.FAILURE,
+          "%s: %s links to its converter and negotiates caps" % (codec, element))
+    pipe.set_state(_v.Gst.State.NULL)
 
 print("\nH.265 is only offered when the card can encode it")
 # The case this exists for: an Intel HD 530 encodes H.264 in hardware and
