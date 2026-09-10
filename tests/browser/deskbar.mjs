@@ -194,6 +194,57 @@ try {
   check(!kb.afterKeyboard, "the keyboard button closes it");
   check(!kb.afterController, "and so does asking for the controller");
 
+  // Nothing over the dock may refuse a touch's default.
+  //
+  // Twice now something has: first a page-wide double-tap-to-zoom guard, then
+  // a handler on the strip meant to stop the keyboard closing when a key was
+  // tapped. Both cancelled the native pan, so the key row would not scroll
+  // sideways, and both suppressed the synthesised click, so the three buttons
+  // and the collapse arrow did nothing at all -- the whole dock inert, and
+  // only while the keyboard was up, which is the one time it is on screen.
+  //
+  // The checks above could not see it, because .click() fires the handler
+  // directly and never goes near the touch pipeline. These dispatch a real
+  // cancelable touchstart and ask whether anybody refused it.
+  const guard = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((q) => setTimeout(q, ms));
+    deskHeld = true; deskSend = () => {};
+    deskShowKeyboard(true); await wait(50);
+    const refused = (id) => {
+      const node = document.getElementById(id);
+      const touch = new Touch({ identifier: 1, target: node,
+                                clientX: 10, clientY: 10 });
+      const event = new TouchEvent("touchstart",
+                                   { bubbles: true, cancelable: true,
+                                     touches: [touch], targetTouches: [touch],
+                                     changedTouches: [touch] });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    return { keys: refused("desk-keys"), bar: refused("desk-bar"),
+             more: refused("desk-more"), up: deskWantKeyboard };
+  });
+  check(guard.up, "with the keyboard up, which is when the row is on screen");
+  check(!guard.keys,
+        "a touch on the key row is not refused, so the row can still scroll "
+        + "sideways");
+  check(!guard.bar, "nor one on the three buttons");
+  check(!guard.more, "nor one on the arrow that opens them");
+
+  // And the whole way through, by tapping rather than clicking.
+  const tapped = await page.evaluate(() => {
+    deskHeld = true; deskSend = () => {};
+    deskShowKeyboard(true);
+    return document.getElementById("desk-bar").classList.contains("is-open");
+  });
+  await page.tap("#desk-more");
+  await new Promise((r) => setTimeout(r, 250));
+  const nowOpen = await page.evaluate(() =>
+    document.getElementById("desk-bar").classList.contains("is-open"));
+  check(tapped !== nowOpen,
+        "and a real tap on the arrow still works the buttons while the "
+        + "keyboard is up");
+
   check(errors.length === 0, "no script errors: " + errors.slice(0, 2));
 } finally {
   await browser.close();

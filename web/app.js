@@ -2954,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10d";
+const CLIENT_BUILD = "2026-09-10e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4587,14 +4587,19 @@ function deskListen() {
     banner.addEventListener("touchstart", keepFocus, { passive: false });
     banner.addEventListener("mousedown", keepFocus, { passive: false });
   }
-  // And the strip itself -- the keys, the three buttons, and the arrow that
-  // opens them. Tapping any of those is somebody working the keyboard, not
-  // leaving it, and every one of them was moving the focus off the field.
-  const strip = el("desk-dock");
-  if (strip) {
-    strip.addEventListener("touchstart", keepFocus, { passive: false });
-    strip.addEventListener("mousedown", keepFocus, { passive: false });
-  }
+  // Not the strip. It is tempting -- tapping a key is working the keyboard,
+  // not leaving it -- and it was done here once, and it broke every control in
+  // the dock at a stroke: refusing the default on touchstart cancels the
+  // native pan, so the key row would not scroll, and it suppresses the
+  // synthesised click, so the three buttons and the collapse arrow did
+  // nothing. All of it only while the keyboard was up, which is the one time
+  // the row is on screen.
+  //
+  // Nothing is needed here anyway. Focus leaving the field is already put
+  // back by the blur handler below, for as long as the keyboard is wanted,
+  // and that is the mechanism that should carry this. The same mistake in a
+  // different place -- a double-tap guard refusing touchend across the whole
+  // page -- is why .desk-bar and .desk-keys are exempted there too.
 
   document.addEventListener("pointerlockchange", () => {
     // Losing the pointer -- Escape, a click elsewhere, the browser deciding
