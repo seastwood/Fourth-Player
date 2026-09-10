@@ -148,8 +148,51 @@ const row = await p.evaluate(async () => {
   ev("pointerdown", cx, cy); ev("pointercancel", cx, cy);
   await new Promise((q) => setTimeout(q, 150));
   const cancelled = count();
+
+  // The row settling under a finger that is already down.
+  //
+  // This asked for the scroll position to be *identical* between the finger
+  // landing and it leaving, and a phone's scroller is never that still: it
+  // coasts on from the flick that brought the key into view. One pixel of
+  // that drift threw the press away, so the keys somebody had to scroll to
+  // reach were precisely the ones that did nothing -- reported, accurately,
+  // as esc and home not working.
+  sent.length = 0;
+  keys.scrollLeft = 0;
+  ev("pointerdown", cx, cy);
+  keys.scrollLeft = 6;
+  ev("pointerup", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const drifted = count();
+
+  // A row genuinely being flung past is still not somebody pressing whatever
+  // went by under their finger.
+  sent.length = 0;
+  keys.scrollLeft = 0;
+  ev("pointerdown", cx, cy);
+  keys.scrollLeft = 120;
+  ev("pointerup", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const flung = count();
+
+  // And something to look at while it happens. The row refuses the tap's
+  // default -- that is what stops the phone's keyboard leaving -- and a
+  // refused default means :active never arrives, so without a class of its
+  // own a key looks identical pressed and unpressed. There was no way to tell
+  // a key that had not been noticed from one that had been sent and ignored.
+  sent.length = 0;
+  keys.scrollLeft = 0;
+  ev("pointerdown", cx, cy);
+  const lookHeld = esc.classList.contains("is-pressing");
+  ev("pointerup", cx, cy);
+  const lookFired = esc.classList.contains("is-firing");
+  await new Promise((q) => setTimeout(q, 400));
+  const lookAfter = esc.classList.contains("is-pressing")
+                    || esc.classList.contains("is-firing");
+
   deskSend = real;
-  return { tapped, dragged, cancelled };
+  return { tapped, dragged, cancelled, drifted, flung,
+           lookHeld, lookFired, lookAfter };
 });
 check(row.tapped === 2, "tapping a utility key presses it: " + row.tapped);
 check(row.dragged === 0,
@@ -158,6 +201,17 @@ check(row.dragged === 0,
 check(row.cancelled === 0,
       "and neither does a pan the browser takes over, which is how a real "
       + "scroll on a phone arrives: " + row.cancelled + " events");
+
+check(row.drifted === 2,
+      "a key still fires when the row drifts a few pixels under the finger, "
+      + "which is what a scroller coasting to a stop does: " + row.drifted
+      + " events");
+check(row.flung === 0,
+      "but not when the row is being flung past: " + row.flung + " events");
+check(row.lookHeld, "a key held down says so, since :active never arrives here");
+check(row.lookFired, "and lights when it fires, so a press that was sent and "
+      + "ignored looks different from one that was never noticed");
+check(!row.lookAfter, "both let go afterwards");
 
 check(errs.length === 0, "no script errors: " + errs.slice(0, 2));
 

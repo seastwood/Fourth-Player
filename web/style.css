@@ -2603,3 +2603,22 @@ input.name {
   background: var(--accent);
   color: var(--bg);
 }
+/* Under the finger, and just after it fired. After the latch states on
+   purpose, so both win over them: what a key is doing right now matters more
+   than what it will do to the next one.
+
+   These exist because there was nothing at all. The row refuses the tap's
+   default -- that is what keeps the phone's keyboard from leaving -- and a
+   refused default means :active never arrives, so a plain key like esc or
+   home looked identical pressed and unpressed. There was no way to tell a key
+   that had not been noticed from one that had been sent and ignored. */
+.desk-keys button.is-pressing {
+  background: var(--dim);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+.desk-keys button.is-firing {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}

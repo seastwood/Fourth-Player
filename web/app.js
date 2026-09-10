@@ -2954,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10e";
+const CLIENT_BUILD = "2026-09-10f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4385,6 +4385,25 @@ function deskPaintKeys() {
  * never does. That is the whole of "escape does not register". */
 const KEY_HOLD_MS = 60;
 
+/* How far the row may drift during a tap and still count as a tap.
+ *
+ * Not zero, which is what it was: a phone's scroller is still settling when
+ * the finger lands on it, and one pixel of that was enough to discard the
+ * press entirely. Wide enough to swallow that settling, narrow enough that a
+ * row being flung past is not read as somebody pressing what went by. */
+const SCROLL_SLOP = 12;
+
+/* How long a key stays lit after it fires. Longer than KEY_HOLD_MS on
+ * purpose: the point of the hold is that a console notices, and the point of
+ * this is that a person does. Sixty milliseconds is under four frames. */
+const KEY_FLASH_MS = 140;
+
+function deskFlashKey(key) {
+  if (!key) return;
+  key.classList.add("is-firing");
+  setTimeout(() => key.classList.remove("is-firing"), KEY_FLASH_MS);
+}
+
 function deskTapKey(code, withCtrlAlt) {
   if (!deskHeld) return;
   if (withCtrlAlt) {
@@ -4715,21 +4734,29 @@ function deskListen() {
     // it tells us so by cancelling the pointer, which is the clearest signal
     // there is that this was a scroll and not a press.
     let pressing = null;
-    const forget = () => { pressing = null; };
+    const forget = () => {
+      if (pressing) pressing.key.classList.remove("is-pressing");
+      pressing = null;
+    };
     row.addEventListener("pointerdown", (event) => {
       const key = event.target.closest("button");
       if (!key) return;
       event.preventDefault();
       pressing = { key, x: event.clientX, y: event.clientY,
                    scroll: row.scrollLeft };
+      // Something to look at while the finger is down. Refusing the default
+      // above is what stops the keyboard leaving, and it also means :active
+      // never arrives -- so without this a key changes in no way at all when
+      // it is pressed, and the only way to find out whether it worked is to
+      // look at the television.
+      key.classList.add("is-pressing");
     });
     row.addEventListener("pointermove", (event) => {
       if (!pressing) return;
-      // A finger that has wandered, or a row that has moved under it, is
-      // scrolling rather than pressing.
+      // A finger that has wandered is scrolling rather than pressing. The row
+      // moving is judged at the end, where how far it moved can be measured.
       if (Math.hypot(event.clientX - pressing.x, event.clientY - pressing.y)
-            > TAP_SLOP
-          || row.scrollLeft !== pressing.scroll) {
+            > TAP_SLOP) {
         forget();
       }
     });
@@ -4738,10 +4765,23 @@ function deskListen() {
       const was = pressing;
       forget();
       if (!was) return;
-      if (row.scrollLeft !== was.scroll) return;
+      // How far the row moved, not whether it moved.
+      //
+      // This asked for the scroll position to be identical, and a single
+      // pixel of drift threw the press away. A phone drifts: the row is still
+      // coasting from the flick that brought the key into view, and it settles
+      // under a finger that is already down. So the keys somebody had to
+      // scroll to reach were the ones that did nothing -- which is exactly how
+      // it was reported, as esc and home not working.
+      //
+      // A real drag is still not a press: the finger moving is caught above,
+      // the browser taking the gesture over cancels the pointer, and a row
+      // travelling faster than this is being flung rather than tapped.
+      if (Math.abs(row.scrollLeft - was.scroll) > SCROLL_SLOP) return;
       // And still on the key it started on.
       const key = event.target.closest ? event.target.closest("button") : null;
       if (key && key !== was.key) return;
+      deskFlashKey(was.key);
       if (was.key.dataset.mod) deskModTap(was.key.dataset.mod);
       else if (was.key.dataset.key) {
         deskTapKey(was.key.dataset.key, was.key.dataset.ctrlAlt);
