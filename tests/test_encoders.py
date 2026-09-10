@@ -57,11 +57,14 @@ for codec, entries in video.ENCODERS.items():
         check("{" not in line and "{" not in rendered,
               "%s leaves nothing unfilled" % element)
 
-print("\nVA needs its converter, and says so")
+print("\nthe three ways into an encoder")
 check(video._VA.startswith("vapostproc"),
-      "the VA encoders take frames the GPU already holds")
-check("videoconvert" in video._SW,
-      "and everything else takes them from the CPU")
+      "with vapostproc, a VA encoder takes frames the card already holds")
+check("videoconvert" in video._VA_SYS and "NV12" in video._VA_SYS,
+      "without it, the same encoder takes system-memory frames as NV12 -- "
+      "the one format its sink pad offers for them")
+check("videoconvert" in video._SW and "I420" in video._SW,
+      "and a software encoder takes I420 from the CPU")
 
 print("\nwhat this machine picks")
 best = video.pick_encoder("h264")
