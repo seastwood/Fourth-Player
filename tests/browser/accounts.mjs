@@ -173,15 +173,25 @@ function check(cond, msg) {
     onError({ t: "error", reason: "code",
               message: "Enter your authenticator code first." });
     return { sent: out, form: !document.getElementById("login-form").hidden,
+             again: !document.getElementById("login-again").hidden,
+             againNote: document.getElementById("login-again-note").textContent,
              note: document.getElementById("login-code-note").textContent,
              noteShown: !document.getElementById("login-code-note").hidden,
              tab: !document.getElementById("tab-session").hidden };
   });
   check(asked.sent.length === 1 && asked.sent[0].t === "lock",
         "the lock was asked for: " + JSON.stringify(asked.sent));
-  check(asked.form && asked.noteShown,
-        "being told a code is needed opens the login and says so");
-  check(/authenticator/i.test(asked.note), "in the host's words: " + asked.note);
+  // The re-auth form, not the log-in one. This account is already logged in --
+  // it is being asked for six digits, not for a password -- and there are two
+  // forms for exactly that reason. The test named the wrong one and went on
+  // saying the code prompt did not open, which it always had.
+  check(asked.again && !asked.form,
+        "being told a code is needed opens the form that asks for the code, "
+        + "not the one that asks for a password");
+  check(/authenticator/i.test(asked.againNote),
+        "in the host's words: " + asked.againNote);
+  check(/authenticator/i.test(asked.note),
+        "and the other form carries it too, for whoever is not logged in yet");
 
   const finished = await page.evaluate(() => {
     const out = [];

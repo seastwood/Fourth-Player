@@ -60,9 +60,33 @@ mark = source.split("def _fingerprint")[1].split("\n    def ")[0]
 check("library_stamp()" in mark,
       "the fingerprint asks Steam's library, not only the chosen list")
 
+print("\nand it does not depend on the clock being fine enough")
+# The case that found this: a directory timestamp on ext4 is granular to about
+# ten milliseconds, so a game installed in the same tick as the last stamp left
+# the mtime exactly where it was. No sleep here, on purpose -- that is the
+# whole point. Both stamps are taken as fast as the machine will take them.
+quick = tempfile.mkdtemp(prefix="fp-steamtick-")
+quicklib = os.path.join(quick, "steamapps")
+os.makedirs(quicklib)
+steamgames._libraries = lambda: [quicklib]
+before = steamgames.library_stamp()
+open(os.path.join(quicklib, "appmanifest_570.acf"), "w").write("x")
+tick = steamgames.library_stamp()
+check(tick != before,
+      "a game installed in the same tick as the last stamp is still noticed")
+if before[0][1] == tick[0][1]:
+    check(True, "and the mtime really did not move, so it is the names that "
+                "caught it")
+else:
+    # Not a failure. The clock happened to tick between the two stamps, so
+    # this run did not reproduce the collision -- asserting it had would make
+    # the suite fail at random on a machine with a finer clock.
+    print("  --   the clock ticked between the two stamps, so this run did "
+          "not exercise the collision; the check above still holds")
+
 print("\na library that has gone is not an error")
 steamgames._libraries = lambda: ["/nowhere/steamapps"]
-check(steamgames.library_stamp() == (("/nowhere/steamapps", 0),),
+check(steamgames.library_stamp() == (("/nowhere/steamapps", 0, ()),),
       "a missing library reads as nothing rather than raising: %r"
       % (steamgames.library_stamp(),))
 

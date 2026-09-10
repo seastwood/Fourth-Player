@@ -140,11 +140,17 @@ check('min="100"' in open(os.path.join(ROOT, "web", "index.html")).read()
       "and the slider starts where the picture fits")
 
 print("nothing about this asks the host for anything")
-for name in ("applyZoom", "zoomAbout", "paintZoom"):
+for name in ("applyZoom", "zoomAbout", "paintAfterZoom", "paintZoom"):
     body = lift(name)
     check("send(" not in body and "socket" not in body,
           "%s changes this page and tells the host nothing" % name)
-check("video.style.transform" in lift("applyZoom"),
+# paintAfterZoom, not applyZoom: the two were one function once, and naming the
+# old one here meant the test went on passing right up until the split, then
+# started reporting that the picture was no longer moved by a transform, which
+# was never true. Follow the call rather than trusting the name.
+check("return paintAfterZoom();" in lift("applyZoom"),
+      "applyZoom settles the numbers and hands them on to be painted")
+check("video.style.transform" in lift("paintAfterZoom"),
       "the picture is moved by a transform, so the stream is untouched")
 check("videoWidth" in lift("pictureBox"),
       "and the picture's own shape is read from the stream, not assumed")

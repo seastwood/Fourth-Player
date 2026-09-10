@@ -95,16 +95,26 @@ def library_stamp():
     something else happened to change the fingerprint, and offering a guest a
     game that is not there any more is a button that can only fail.
 
-    A steamapps directory's own mtime moves when an appmanifest appears or
-    goes, which is exactly the event worth noticing, and it is one stat per
-    library rather than a walk.
+    The manifests themselves are listed, rather than the directory's mtime
+    taken on its own. The mtime moves when an appmanifest appears or goes,
+    which is the right event -- but only if the clock can tell the two moments
+    apart, and a directory timestamp here is granular to about ten
+    milliseconds. A game installed inside the same tick as the last stamp
+    leaves the mtime exactly where it was, and the catalogue never rebuilds.
+
+    Listing the names is immune to that, catches an install and an uninstall
+    in the same tick (which no count would), and costs one readdir of one
+    directory per library -- still not the walk this was written to avoid. The
+    mtime stays alongside it, for a manifest edited in place.
     """
     marks = []
     for here in _libraries():
         try:
-            marks.append((here, os.stat(here).st_mtime_ns))
+            games = tuple(sorted(n for n in os.listdir(here)
+                                 if n.startswith("appmanifest_")))
+            marks.append((here, os.stat(here).st_mtime_ns, games))
         except OSError:
-            marks.append((here, 0))
+            marks.append((here, 0, ()))
     return tuple(marks)
 
 
