@@ -52,7 +52,10 @@ def session(stage_codec, guests):
     s = LiveSession.__new__(LiveSession)
     s.cfg = type("C", (), {"codec": "auto", "hardware_encode": False})()
     s.stage = FakeStage(stage_codec)
-    s.open = True
+    # `open` is derived from the invite rather than set, so give it one that
+    # is alive rather than trying to assign to a property.
+    s.invite = type("I", (), {"alive": lambda self, now: True})()
+    s._now = lambda: 0.0
     s.guests = {i: g for i, g in enumerate(guests)}
     s.moved = []
     async def recapture(codec, display=None):
