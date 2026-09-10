@@ -29,6 +29,11 @@ except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
     sys.exit(0)
 
+# Before anything is asked about elements. Gst.ElementFactory.find answers
+# "no" for everything until GStreamer has been initialised, which reads
+# exactly like a machine with no encoders -- and did, until this line.
+video.init()
+
 print("every encoder it knows how to drive")
 for codec, entries in video.ENCODERS.items():
     kinds = [kind for _el, kind, _c, _s in entries]
@@ -76,7 +81,10 @@ print("\nand it agrees with what is offered to browsers")
 for codec in video.CODEC_PREFERENCE:
     pickable = video.pick_encoder(codec) is not None
     offered = codec in video.host_codecs()
-    check(pickable == offered or not pickable,
+    # Offered implies buildable. Stated that way round on purpose: the weak
+    # version of this passed whenever nothing was buildable, which is the one
+    # case worth catching.
+    check(pickable or not offered,
           "%s: offered=%s, buildable=%s -- never offered without being "
           "buildable" % (codec, offered, pickable))
 
