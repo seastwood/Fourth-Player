@@ -98,6 +98,24 @@ check(!/b2/.test(said("hold, but moving")),
       "a drag that happens to take a while is not a press: "
       + said("hold, but moving"));
 
+// A press nobody can see is a press that did not happen.
+const held = await p.evaluate(async () => {
+  const sent = [];
+  const real = deskSend;
+  deskSend = (list) => list.forEach((m) => sent.push({ ...m, at: performance.now() }));
+  deskHeld = true;
+  deskTapKey("Escape");
+  await new Promise((r) => setTimeout(r, 200));
+  deskSend = real;
+  const esc = sent.filter((m) => m.c === "Escape");
+  return esc.length === 2 ? Math.round(esc[1].at - esc[0].at) : -1;
+});
+check(held >= 40,
+      "a tapped key is held down long enough to be noticed: " + held + "ms. "
+      + "Sent as one message it was 0.125ms at the device, and anything that "
+      + "reads input by looking rather than by queue -- Kodi looks once a "
+      + "frame -- never saw it");
+
 check(errs.length === 0, "no script errors: " + errs.slice(0, 2));
 
 await b.close();

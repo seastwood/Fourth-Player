@@ -2541,6 +2541,9 @@ video.addEventListener("pointerdown", (event) => {
       // Tap, then tap and stay down: the trackpad way of picking something up
       // and dragging it, on a surface with no button to hold. The button goes
       // down now and stays down until the finger leaves.
+      // Finish the tap that came a moment ago before starting to drag, or
+      // its release lands mid-drag and drops what was just picked up.
+      deskSettleButton();
       cursorDragging = true;
       deskSend([{ t: "b", b: 0, d: 1 }]);
     } else if (!held.size) {
@@ -2677,7 +2680,7 @@ function letGoOfPicture(event) {
       // trackpad gesture for the right button. A pinch is the same two
       // fingers doing something, which is why this is only decided once they
       // have both gone.
-      deskSend([{ t: "b", b: 2, d: 1 }, { t: "b", b: 2, d: 0 }]);
+      deskTapButton(2);
     }
     cursorLastTap = 0;
     return;
@@ -2689,7 +2692,7 @@ function letGoOfPicture(event) {
     // A tap is a click where the pointer already is. It is not a move: the
     // finger is somewhere on a picture, and the pointer is wherever it was
     // left, which is the whole difference between this and a touchscreen.
-    deskSend([{ t: "b", b: 0, d: 1 }, { t: "b", b: 0, d: 0 }]);
+    deskTapButton(0);
     cursorLastTap = event.timeStamp;
     return;
   }
@@ -2951,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10a";
+const CLIENT_BUILD = "2026-09-10b";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4069,7 +4072,7 @@ function cursorWatchForHold() {
     // happens to pause is not a press.
     if (!cursorFrom || cursorFrom.moved >= TAP_SLOP || !cursorDriving()) return;
     cursorPressed = true;
-    deskSend([{ t: "b", b: 2, d: 1 }, { t: "b", b: 2, d: 0 }]);
+    deskTapButton(2);
     // Through the helper, like every other buzz on the page: it is the one
     // place the on-off switch and the strength setting are consulted, and a
     // second way of asking would be a buzz that ignores both. It also covers
@@ -4365,6 +4368,19 @@ function deskPaintKeys() {
 
 /* A key from the row rather than from the phone's keyboard: these are
    positions, so they go as positions. */
+/* How long a tapped key is held down before it is let go.
+ *
+ * Sending the press and the release together looks right and is not: they
+ * arrive in one message, the console writes both and syncs between them, and
+ * the key is down for about an eighth of a millisecond. Measured at the
+ * device: 0.125 ms, against the 50-100 ms of somebody's finger.
+ *
+ * Anything that reads input by looking, rather than by queue, therefore never
+ * sees it. Kodi looks once a frame -- about every 16 ms -- so a press that
+ * short lands only if a frame happens to fall inside it, which it essentially
+ * never does. That is the whole of "escape does not register". */
+const KEY_HOLD_MS = 60;
+
 function deskTapKey(code, withCtrlAlt) {
   if (!deskHeld) return;
   if (withCtrlAlt) {
@@ -4372,12 +4388,47 @@ function deskTapKey(code, withCtrlAlt) {
     // because pressing it by accident strands somebody in front of a screen
     // they cannot see; asking for it by name is the way back.
     deskSend([{ t: "k", c: "ControlLeft", d: 1 }, { t: "k", c: "AltLeft", d: 1 },
-              { t: "k", c: code, d: 1 }, { t: "k", c: code, d: 0 },
-              { t: "k", c: "AltLeft", d: 0 }, { t: "k", c: "ControlLeft", d: 0 }]);
+              { t: "k", c: code, d: 1 }]);
+    setTimeout(() => deskSend(
+      [{ t: "k", c: code, d: 0 }, { t: "k", c: "AltLeft", d: 0 },
+       { t: "k", c: "ControlLeft", d: 0 }]), KEY_HOLD_MS);
     return;
   }
-  deskSend([{ t: "k", c: code, d: 1 }, { t: "k", c: code, d: 0 }]);
-  deskModsSpend();
+  deskSend([{ t: "k", c: code, d: 1 }]);
+  setTimeout(() => {
+    deskSend([{ t: "k", c: code, d: 0 }]);
+    // After the release, so a latched modifier is still held for the whole
+    // press rather than let go in the middle of it.
+    deskModsSpend();
+  }, KEY_HOLD_MS);
+}
+
+/* A button, held for as long as a finger would hold it, for the same reason.
+ *
+ * The release is owed rather than sent, so anything that needs to happen
+ * before it can settle it first -- see deskSettleButton. A tap followed
+ * closely by a tap-and-hold is exactly that case: the first tap's release
+ * would otherwise land in the middle of the drag and put down whatever had
+ * just been picked up. */
+let deskOwedRelease = 0;
+let deskOwedButton = 0;
+
+function deskTapButton(index) {
+  deskSettleButton();
+  deskOwedButton = index;
+  deskSend([{ t: "b", b: index, d: 1 }]);
+  deskOwedRelease = setTimeout(() => {
+    deskOwedRelease = 0;
+    deskSend([{ t: "b", b: deskOwedButton, d: 0 }]);
+  }, KEY_HOLD_MS);
+}
+
+/* Pay any release that is owed, now, rather than when it was due. */
+function deskSettleButton() {
+  if (!deskOwedRelease) return;
+  clearTimeout(deskOwedRelease);
+  deskOwedRelease = 0;
+  deskSend([{ t: "b", b: deskOwedButton, d: 0 }]);
 }
 
 /* What the phone's keyboard produced. `beforeinput` is used rather than
@@ -4661,8 +4712,8 @@ function deskListen() {
       // The one key the capture eats on the way out, so it needs its own way
       // in. Sent as a press and a release together: there is no moment
       // between them that anybody could use.
-      if (deskHeld) deskSend([{ t: "k", c: "Escape", d: 1 },
-                               { t: "k", c: "Escape", d: 0 }]);
+      // Through the same path as the row, so it is held rather than flashed.
+      deskTapKey("Escape");
     });
   }
 }
