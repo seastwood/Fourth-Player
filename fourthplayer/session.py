@@ -839,6 +839,38 @@ class LiveSession:
         await self._recapture(shared)
         return shared
 
+    async def _codec_after_leaving(self):
+        """Go back up to the better codec when the reason to be down has left.
+
+        The downgrade is not symmetric with the upgrade -- see agree_codec --
+        because upwards disturbs people who are watching happily and downwards
+        is the difference between a guest joining and a guest being turned
+        away. That asymmetry is right at the moment somebody *arrives*.
+
+        It is wrong for ever afterwards. One browser that could only take
+        H.264 pinned the whole session to it, and stayed pinned long after
+        that browser had gone -- so everybody left behind watched the worse
+        picture, at twice the bitrate, for as long as the session lasted. The
+        cost of putting it right is one renegotiation, about a second of
+        picture; the cost of not doing it is the rest of the evening.
+        """
+        if (self.cfg.codec.lower() != "auto" or self.stage is None
+                or not self.open):
+            return
+        watching = [g for g in self.guests.values() if g.peer is not None]
+        if not watching:
+            # Nobody to see the better picture. The next one to arrive settles
+            # it from scratch anyway.
+            return
+        shared = best_shared_codec(_common(watching), self.cfg.hardware_encode)
+        if shared == self.stage.codec:
+            return
+        if CODEC_RANK.get(shared, 0) <= CODEC_RANK.get(self.stage.codec, 0):
+            return
+        log.info("everybody left can take %s now; moving up from %s",
+                 shared, self.stage.codec)
+        await self._recapture(shared)
+
     async def _follow_the_monitor(self):
         """Capture whatever the monitor is actually showing.
 
@@ -1198,6 +1230,9 @@ class LiveSession:
         self.publish_pad_names()
         self.publish_people()
         log.info("%s %s", guest.label, reason)
+        # The guest who could only take H.264 may have been the reason
+        # everybody is watching H.264. See _codec_after_leaving.
+        self.loop.create_task(self._codec_after_leaving())
         return True
 
     def kick(self, slot):
