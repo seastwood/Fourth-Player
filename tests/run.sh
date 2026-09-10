@@ -23,7 +23,8 @@ echo
 if [ "$skipped" -ne 0 ]; then
   echo "$skipped suite(s) SKIPPED -- not run here, so not proven here:"
   for suite in $skiplist; do echo "    $suite"; done
-  echo "  (node runs the browser halves; python3-evdev and python3-websockets"
+  echo "  (node runs most browser halves; a headless Chrome runs the four"
+  echo "   that load the real page; python3-evdev and python3-websockets run"
   echo "   the host ones. Install what is missing to actually test them.)"
 fi
 if [ "$failed" -eq 0 ]; then
