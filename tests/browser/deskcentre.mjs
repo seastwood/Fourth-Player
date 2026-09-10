@@ -48,10 +48,21 @@ try {
     const top = video.offsetTop, H = video.offsetHeight;
     const rows = [];
     for (const lift of [0, 300]) {
-      // The row is what the inset is measured from, so put it where a
-      // keyboard of that height would put it.
+      // The strip is what the inset is measured from, so put it in the state
+      // a keyboard of that height would put it in. Setting only the key row's
+      // hidden flag used to be enough; once the keys and the buttons shared a
+      // strip it stopped being, and this suite went on passing while
+      // measuring nothing -- both of its cases became the no-keyboard one.
       const row = document.getElementById("desk-keys");
+      const dock = document.getElementById("desk-dock");
+      // No animation while measuring. The strip slides to its new position
+      // over about a fifth of a second, and geometry read in the middle of
+      // that is the old position -- which is how this measured 53 pixels
+      // where 353 was meant, and would have gone on agreeing with itself.
+      dock.style.transition = "none";
       row.hidden = lift === 0;
+      dock.classList.toggle("has-keys", lift !== 0);
+      deskLift = lift;
       document.documentElement.style.setProperty("--desk-lift", lift + "px");
       for (const z of [1, 2, 3, 4]) {
         for (const v of [0, 0.25, 0.5, 0.75, 1]) {
@@ -72,6 +83,7 @@ try {
             blackBottom: Math.round(Math.max(0, strip.bottom - picBottom)),
             fits: pic.height * z <= (strip.bottom - strip.top) + 1,
             off: Math.round(pointer - middle),
+            inset: Math.round(inset),
             room: Math.round(Math.max(0,
               (pic.height * z - (strip.bottom - strip.top)) / 2)),
             wanted: Math.round(Math.abs((v - 0.5) * pic.height * z)),
@@ -81,6 +93,8 @@ try {
     }
     const row = document.getElementById("desk-keys");
     row.hidden = true;
+    document.getElementById("desk-dock").classList.remove("has-keys");
+    deskLift = 0;
     document.documentElement.style.setProperty("--desk-lift", "0px");
 
     deskHeld = false; cursorOn = false;
@@ -93,6 +107,14 @@ try {
   // No black, ever. That is the half of the rule that was asked for second:
   // at the edges the pointer gives up the middle rather than the picture
   // giving up the screen.
+  // Proof that the keyboard cases measure a covered strip at all. Without it
+  // this suite passed for a while while both of its cases were the same one.
+  const measured = out.rows.filter((r) => r.lift === 300 && r.inset > 0);
+  const insets = [...new Set(out.rows.map((r) => r.lift + ":" + r.inset))];
+  check(measured.length > 0,
+        "the keyboard cases actually measure something covering the bottom "
+        + "(lift:inset seen = " + insets.join(", ") + ")");
+
   const bled = out.rows.filter((r) => !r.fits
                                       && (r.blackTop > 1 || r.blackBottom > 1));
   check(bled.length === 0,

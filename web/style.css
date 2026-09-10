@@ -2440,14 +2440,57 @@ input.name {
    get out of the way reads this one number. */
 :root { --desk-lift: 0px; }
 
-.desk-bar {
+/* One strip along the bottom holding the scrolling keys and the buttons.
+ *
+ * The buttons used to be fixed to the bottom-right corner on their own, which
+ * the key row then covered whenever it was wider than the screen -- in a
+ * browser it always is, because the row has more room to want than it does in
+ * the installed app. Sharing a strip puts the row's scrolling and the
+ * buttons' position in the same layout instead of leaving them to argue about
+ * one corner.
+ *
+ * It takes no taps of its own: the strip spans the width, and most of that
+ * width is picture. Its children take theirs back. */
+.desk-dock {
   position: fixed;
-  right: max(.75rem, env(safe-area-inset-right, 0px));
-  bottom: calc(max(.75rem, env(safe-area-inset-bottom, 0px)) + var(--desk-lift));
+  right: 0;
+  left: 0;
+  bottom: var(--desk-lift);
   z-index: 45;
   display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
   gap: .4rem;
+  padding: 0 max(.6rem, env(safe-area-inset-right, 0px))
+           max(.75rem, env(safe-area-inset-bottom, 0px))
+           max(.6rem, env(safe-area-inset-left, 0px));
+  pointer-events: none;
   transition: bottom .18s ease;
+}
+.desk-dock > * { pointer-events: auto; }
+
+/* With the keys up, the strip is a bar across the screen and the padding that
+   floats the buttons in a corner would be a gap in it. */
+.desk-dock.has-keys {
+  padding: 0;
+  align-items: stretch;
+  background: rgba(16, 14, 40, .95);
+  border-top: 2px solid var(--dim);
+}
+
+.desk-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: .4rem;
+}
+.desk-dock.has-keys .desk-bar {
+  /* Pinned to the right of the row rather than scrolling with it: these are
+     how the row is put away, and a control that scrolls out of reach is a
+     control nobody has. */
+  gap: .25rem;
+  padding: .3rem max(.4rem, env(safe-area-inset-right, 0px)) .3rem .3rem;
+  border-left: 2px solid var(--dim);
+  background: rgba(16, 14, 40, .95);
 }
 .desk-bar[hidden] { display: none; }
 .desk-bar button {
@@ -2520,18 +2563,17 @@ input.name {
 }
 
 .desk-keys {
-  position: fixed;
-  right: 0;
-  bottom: var(--desk-lift);
-  left: 0;
-  z-index: 46;
+  /* In the strip now rather than fixed to the viewport, so the buttons beside
+     it are laid out against it instead of over it. min-width is what lets it
+     actually scroll: a flex item refuses to shrink below its content without
+     it, so the row would push the buttons off the screen instead. */
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   gap: .25rem;
   overflow-x: auto;
-  padding: .3rem max(.4rem, env(safe-area-inset-left, 0px));
-  border-top: 2px solid var(--dim);
-  background: rgba(16, 14, 40, .95);
+  padding: .3rem .3rem .3rem max(.4rem, env(safe-area-inset-left, 0px));
   scrollbar-width: none;
   /* It scrolls sideways when there are more keys than room, and it must not
      do anything else: the stage below refuses gestures entirely, and a row

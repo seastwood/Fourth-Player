@@ -723,6 +723,35 @@
        chooses to show. Controller, cursor, keyboard, left to right: the
        controller is the ordinary state and the two beside it are the ways of
        reaching past the game to the machine. -->
+  <!-- One strip along the bottom, holding both. The keys scroll inside it and
+       the buttons pin to its right, so they cannot be covered by a key row
+       that has more keys than room -- which is what happened in a browser,
+       where the row is wider than it is in the installed app. With the keys
+       away the buttons are alone at the right end of the strip, which is the
+       bottom-right corner they used to be fixed to. -->
+  <div id="desk-dock" class="desk-dock">
+  <!-- The keys a phone's own keyboard does not have, sitting above it. -->
+  <div id="desk-keys" class="desk-keys" hidden>
+    <button type="button" data-key="Escape">esc</button>
+    <button type="button" data-key="Tab">tab</button>
+    <button type="button" data-mod="ControlLeft">ctrl</button>
+    <button type="button" data-mod="AltLeft">alt</button>
+    <button type="button" data-mod="MetaLeft" aria-label="Windows key">win</button>
+    <button type="button" data-mod="ShiftLeft">shift</button>
+    <button type="button" data-key="ArrowLeft" aria-label="Left">&#8592;</button>
+    <button type="button" data-key="ArrowUp" aria-label="Up">&#8593;</button>
+    <button type="button" data-key="ArrowDown" aria-label="Down">&#8595;</button>
+    <button type="button" data-key="ArrowRight" aria-label="Right">&#8594;</button>
+    <!-- Beside the arrows because that is what it is for here: a phone's own
+         return key goes through the character path, and Kodi wants a real
+         Enter to act on what the arrows just moved to. -->
+    <button type="button" data-key="Enter" aria-label="Enter">enter</button>
+    <button type="button" data-key="Home">home</button>
+    <button type="button" data-key="End">end</button>
+    <button type="button" data-key="Delete">del</button>
+    <button type="button" data-key="F7" data-ctrl-alt="1"
+            aria-label="Return the console to its session">tty</button>
+  </div>
   <div id="desk-bar" class="desk-bar" hidden>
     <button id="desk-pad" type="button" class="desk-more-only"
             aria-label="Show the controller">
@@ -757,6 +786,7 @@
       </svg>
     </button>
   </div>
+  </div>
 
   <!-- The field exists to make a phone raise its keyboard, and for no other
        reason: what is typed into it is read and thrown away. It has to be
@@ -775,24 +805,6 @@
        autocorrect="off" autocapitalize="off" spellcheck="false"
        aria-label="Type to the console"></div>
 
-  <!-- The keys a phone's own keyboard does not have, sitting above it. -->
-  <div id="desk-keys" class="desk-keys" hidden>
-    <button type="button" data-key="Escape">esc</button>
-    <button type="button" data-key="Tab">tab</button>
-    <button type="button" data-mod="ControlLeft">ctrl</button>
-    <button type="button" data-mod="AltLeft">alt</button>
-    <button type="button" data-mod="MetaLeft" aria-label="Windows key">win</button>
-    <button type="button" data-mod="ShiftLeft">shift</button>
-    <button type="button" data-key="ArrowLeft" aria-label="Left">&#8592;</button>
-    <button type="button" data-key="ArrowUp" aria-label="Up">&#8593;</button>
-    <button type="button" data-key="ArrowDown" aria-label="Down">&#8595;</button>
-    <button type="button" data-key="ArrowRight" aria-label="Right">&#8594;</button>
-    <button type="button" data-key="Home">home</button>
-    <button type="button" data-key="End">end</button>
-    <button type="button" data-key="Delete">del</button>
-    <button type="button" data-key="F7" data-ctrl-alt="1"
-            aria-label="Return the console to its session">tty</button>
-  </div>
 
   <div id="touch" class="touch" hidden aria-label="On-screen controller">
     <div class="shoulders shoulders-left" id="shoulders-left"></div>

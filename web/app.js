@@ -2951,7 +2951,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-08t";
+const CLIENT_BUILD = "2026-09-10a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4347,6 +4347,12 @@ function deskPaintKeys() {
     pad.setAttribute("aria-label",
                      showing ? "Hide the controller" : "Show the controller");
   }
+  const dock = el("desk-dock");
+  if (dock) {
+    // The strip becomes a bar across the screen when the keys are in it, and
+    // goes back to floating the buttons in the corner when they are not.
+    dock.classList.toggle("has-keys", !!(deskHeld && up));
+  }
   if (row) {
     row.hidden = !(deskHeld && up);
     row.querySelectorAll("[data-mod]").forEach((key) => {
@@ -4459,8 +4465,11 @@ function deskWatchViewport() {
 let deskLift = 0;
 
 function bottomInset() {
-  const row = el("desk-keys");
-  if (!row || row.hidden) return 0;
+  // Measured from the strip, which is what actually covers the bottom of the
+  // picture now -- the keys and the buttons are both inside it, so asking
+  // either one on its own would miss whichever is taller.
+  const row = el("desk-dock");
+  if (!row || !row.classList.contains("has-keys")) return 0;
   // Measured from where the row actually landed, rather than added up from
   // what the keyboard is thought to be doing. The row sits on top of the
   // keyboard, so its top edge *is* the top of everything covering the bottom

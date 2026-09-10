@@ -374,7 +374,17 @@ def _print_status(reply):
         print(f"  link: {reply['url']}")
         print(f"  PIN:  {reply['pin']}")
     else:
-        print("  link and PIN were forgotten on restart -- re-share to get new ones")
+        # Precise, because the vague version cost real links. It said they
+        # were "forgotten -- re-share to get new ones", which reads as though
+        # the invite had stopped working; it has not. Only the digests are
+        # kept across a restart, so the link and PIN already in somebody's
+        # hands go on working exactly as before and this can no longer print
+        # them. Re-sharing is the one thing that *does* break them, and that
+        # message is what talked people into doing it.
+        print("  the link and PIN still work, but cannot be shown again "
+              "after a restart")
+        print("  (only their digests are kept, so nothing here can read them "
+              "back -- re-share only if you want to replace them)")
     limit, slots = reply.get("limit"), reply.get("slots")
     # Always said, never only when it is on. "I'm not sure what it's set at
     # now" is what a setting that only announces itself half the time gets.
