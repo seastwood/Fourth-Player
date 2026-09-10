@@ -2954,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10b";
+const CLIENT_BUILD = "2026-09-10c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4673,14 +4673,51 @@ function deskListen() {
   }
   const row = el("desk-keys");
   if (row) {
+    // A key fires when the finger comes off it, not when it lands.
+    //
+    // Acting on pointerdown meant the row could not be scrolled: dragging it
+    // sideways pressed whatever key the drag started from, every time, which
+    // on a row with more keys than screen is most of the ways to reach the
+    // rest of them.
+    //
+    // The default is still refused on the way down, because that is what
+    // stops the focus leaving the field and taking the phone's keyboard with
+    // it. Refusing it does not stop the row panning -- touch-action says the
+    // row takes a horizontal pan, and when the browser takes the gesture over
+    // it tells us so by cancelling the pointer, which is the clearest signal
+    // there is that this was a scroll and not a press.
+    let pressing = null;
+    const forget = () => { pressing = null; };
     row.addEventListener("pointerdown", (event) => {
       const key = event.target.closest("button");
       if (!key) return;
-      // The field must not lose focus, or the keyboard slides away under the
-      // finger that is pressing a key on the bar above it.
       event.preventDefault();
-      if (key.dataset.mod) deskModTap(key.dataset.mod);
-      else if (key.dataset.key) deskTapKey(key.dataset.key, key.dataset.ctrlAlt);
+      pressing = { key, x: event.clientX, y: event.clientY,
+                   scroll: row.scrollLeft };
+    });
+    row.addEventListener("pointermove", (event) => {
+      if (!pressing) return;
+      // A finger that has wandered, or a row that has moved under it, is
+      // scrolling rather than pressing.
+      if (Math.hypot(event.clientX - pressing.x, event.clientY - pressing.y)
+            > TAP_SLOP
+          || row.scrollLeft !== pressing.scroll) {
+        forget();
+      }
+    });
+    row.addEventListener("pointercancel", forget);
+    row.addEventListener("pointerup", (event) => {
+      const was = pressing;
+      forget();
+      if (!was) return;
+      if (row.scrollLeft !== was.scroll) return;
+      // And still on the key it started on.
+      const key = event.target.closest ? event.target.closest("button") : null;
+      if (key && key !== was.key) return;
+      if (was.key.dataset.mod) deskModTap(was.key.dataset.mod);
+      else if (was.key.dataset.key) {
+        deskTapKey(was.key.dataset.key, was.key.dataset.ctrlAlt);
+      }
     });
   }
 

@@ -116,6 +116,49 @@ check(held >= 40,
       + "reads input by looking rather than by queue -- Kodi looks once a "
       + "frame -- never saw it");
 
+// Scrolling the row must not press the key it started from.
+const row = await p.evaluate(async () => {
+  const keys = document.getElementById("desk-keys");
+  document.getElementById("desk-dock").classList.add("has-keys");
+  keys.hidden = false;
+  const sent = [];
+  const real = deskSend;
+  deskSend = (l) => l.forEach((m) => sent.push(m));
+  deskHeld = true;
+  const esc = keys.querySelector('[data-key="Escape"]');
+  const r = esc.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const ev = (t, x, y) => esc.dispatchEvent(new PointerEvent(t,
+    { pointerId: 1, pointerType: "touch", clientX: x, clientY: y,
+      bubbles: true, cancelable: true }));
+  const count = () => sent.filter((m) => m.c === "Escape").length;
+
+  ev("pointerdown", cx, cy); ev("pointerup", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const tapped = count();
+
+  sent.length = 0;
+  ev("pointerdown", cx, cy);
+  for (let i = 1; i <= 4; i++) ev("pointermove", cx - i * 20, cy);
+  ev("pointerup", cx - 80, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const dragged = count();
+
+  sent.length = 0;
+  ev("pointerdown", cx, cy); ev("pointercancel", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const cancelled = count();
+  deskSend = real;
+  return { tapped, dragged, cancelled };
+});
+check(row.tapped === 2, "tapping a utility key presses it: " + row.tapped);
+check(row.dragged === 0,
+      "dragging the row to scroll it does not press the key the drag started "
+      + "from: " + row.dragged + " events");
+check(row.cancelled === 0,
+      "and neither does a pan the browser takes over, which is how a real "
+      + "scroll on a phone arrives: " + row.cancelled + " events");
+
 check(errs.length === 0, "no script errors: " + errs.slice(0, 2));
 
 await b.close();
