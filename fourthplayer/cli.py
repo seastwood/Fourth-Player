@@ -705,13 +705,29 @@ def _check(cfg):
         for element in ("ximagesrc", "webrtcbin", "rtph264pay", "h264parse"):
             if not Gst.ElementFactory.find(element):
                 problems.append(f"the GStreamer element {element} is missing")
-        if cfg.hardware_encode and not Gst.ElementFactory.find("vah264enc"):
-            # Not an instruction any more: the server drops to software on its
-            # own when the hardware is not there. Worth saying, because it is
-            # the difference between a session that is smooth and one that is
-            # merely watchable.
-            notes.append("no hardware encoder here (vah264enc); sessions will "
-                         "encode in software, which is slower and works")
+        # Whatever this machine will actually use, named. It used to ask about
+        # vah264enc alone, which says "no hardware encoder" on a perfectly
+        # good nvidia card and tells somebody looking for the reason their
+        # picture is slow to go and check the wrong thing.
+        from .video import pick_encoder
+        chosen = pick_encoder("h264", cfg.hardware_encode)
+        if chosen is None:
+            problems.append("this machine has no H.264 encoder at all "
+                            "(install gstreamer1.0-plugins-bad, or "
+                            "gstreamer1.0-plugins-ugly for x264enc)")
+        elif chosen[1] == "software":
+            # Not an instruction: the server drops to software on its own. It
+            # is worth saying because it is the difference between a session
+            # that is smooth and one that is merely watchable -- and because
+            # a software encoder is capped at software_max_height, so the
+            # picture is smaller than the config asks for.
+            notes.append("no hardware encoder here, so sessions encode with %s"
+                         " -- slower, and capped at %dp so a CPU is not asked "
+                         "for more than it can carry (va-driver-all and "
+                         "gstreamer1.0-plugins-bad are what provide one)"
+                         % (chosen[0], cfg.software_max_height))
+        else:
+            notes.append("hardware encoding with %s" % chosen[0])
         # webrtcbin loads without libnice and then refuses to run, which is a
         # uniquely annoying way to fail: the element exists, so every naive
         # check passes, and the error arrives only once a guest is waiting.
