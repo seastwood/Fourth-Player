@@ -1576,6 +1576,10 @@ class LiveSession:
                          guest.label, now - guest.media_since)
                 self.drop(slot, reason="left")
 
+    # How many pointless unplugs in a row are worth a word. The janitor is
+    # meant to fire now and then; a run of them is a loop.
+    ORPHAN_ALARM = 20
+
     def _unplug_orphans(self):
         """Unplug any controller nobody is sitting on.
 
@@ -1595,6 +1599,24 @@ class LiveSession:
             if index in taken:
                 continue
             if self.pads.release(index):
+                # A controller that is made and unmade over and over is not a
+                # tidy-up, it is a fight: something keeps asking for a seat
+                # nobody is sitting on, and this keeps taking it away. Seen
+                # once a second for forty minutes with a game on the
+                # television, which is what RetroArch and Steam both read as a
+                # controller being plugged and unplugged, forever.
+                #
+                # Counted rather than silent, because every one of these
+                # entries looks reasonable on its own and the fault is only
+                # visible in the rate.
+                self._orphan_unplugs = getattr(self, "_orphan_unplugs", 0) + 1
+                if self._orphan_unplugs == self.ORPHAN_ALARM:
+                    log.warning(
+                        "controller %d has been unplugged %d times for having "
+                        "nobody on it, and something keeps making it again -- "
+                        "to a game this looks like a controller connecting and "
+                        "disconnecting over and over",
+                        index, self._orphan_unplugs)
                 log.info("unplugged %s: nobody is sitting on it",
                          self.pads.name_for(index))
 
