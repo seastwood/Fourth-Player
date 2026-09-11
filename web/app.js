@@ -478,6 +478,8 @@ function connect(hello) {
       // Both shapes land here: the reply to this page's own ask, and the
       // notice sent to everybody when some other admin changed it.
       case "stream":        return paintStream(message);
+      // Everything this page may have missed while it was frozen.
+      case "state":         return stateFrom(message);
       case "streamresult":  return streamApplied(message);
       case "reshared":      return reshared(message);
       case "desk":          return deskFrom(message);
@@ -2236,6 +2238,14 @@ function cameBack() {
   }
   // Everything still claims to be up. It may even be true, and a short
   // background usually is, so let it prove it before pulling it down.
+  //
+  // But ask where we stand, because this branch is the one that gets no
+  // welcome. A frozen tab keeps its socket, so anything the host broadcast
+  // while this page was not running was delivered to nobody and is not coming
+  // again -- and the page comes back showing whatever it last heard. That is
+  // how "Controls paused" stayed up over a game that had started, with
+  // closing and reopening the app the only way out of it.
+  send({ t: "state" });
   stalledSince = 0;
   lastBytes = -1;
   mediaFresh = false;
@@ -2958,7 +2968,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10h";
+const CLIENT_BUILD = "2026-09-10i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -6836,6 +6846,19 @@ function wireStream() {
     back.addEventListener("click", () => {
       if (streamNow) paintStream(streamNow);
     });
+  }
+}
+
+function stateFrom(message) {
+  // The same appliers the welcome uses, so there is one way for each of these
+  // to be painted and no second copy to disagree with it.
+  if (message.launch) launchPolicy(message.launch);
+  if (message.pads) seatsFrom(message.pads);
+  if (message.limits) limitsFrom(message.limits);
+  if (message.hold) holdInput(message.hold);
+  if (message.desk) {
+    deskHeld = !!message.desk.on;
+    deskPaintKeys();
   }
 }
 

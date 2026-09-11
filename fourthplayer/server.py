@@ -305,6 +305,31 @@ class Server:
                             "message": "Asking the television for the player "
                                        "picker. The game will pause for a "
                                        "moment and come back where it was."})
+                elif kind == "state":
+                    # Where this guest stands, now. Asked for by a page that
+                    # has just come back to the foreground with its socket
+                    # still open -- which is the one case that gets no welcome
+                    # and therefore hears nothing it missed.
+                    #
+                    # A phone freezes a backgrounded tab without closing its
+                    # socket. Anything broadcast in that window is delivered
+                    # to a page that is not running and is gone by the time it
+                    # is; the page comes back believing whatever it last heard.
+                    # "Controls paused" over a game that had plainly started
+                    # is how that was reported, and closing and reopening the
+                    # app was the only cure.
+                    await outbox.put({
+                        "t": "state",
+                        "hold": self.session.hold_state(guest),
+                        "pads": {"yours": guest.pad_index,
+                                 **self.session.pad_state()},
+                        "limits": self.session.limits(),
+                        "launch": self.session.launch_state(),
+                        "desk": {"on": (self.session.desk_driver is not None
+                                        and self.session.desk_driver
+                                        == guest.slot),
+                                 "who": self.session.desk_label},
+                    })
                 elif kind == "games":
                     # The catalogue itself, which is public to anyone already
                     # in the session: labels, systems and player counts, and
