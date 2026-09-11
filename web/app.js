@@ -2954,7 +2954,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10f";
+const CLIENT_BUILD = "2026-09-10g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -4393,6 +4393,12 @@ const KEY_HOLD_MS = 60;
  * row being flung past is not read as somebody pressing what went by. */
 const SCROLL_SLOP = 12;
 
+/* How recently the row must have moved for a touch to count as stopping it
+ * rather than pressing something. Long enough to cover the gap between two
+ * frames of a coast, short enough that a deliberate tap a moment later is
+ * still a tap. */
+const COAST_STOP_MS = 250;
+
 /* How long a key stays lit after it fires. Longer than KEY_HOLD_MS on
  * purpose: the point of the hold is that a console notices, and the point of
  * this is that a person does. Sixty milliseconds is under four frames. */
@@ -4734,6 +4740,19 @@ function deskListen() {
     // it tells us so by cancelling the pointer, which is the clearest signal
     // there is that this was a scroll and not a press.
     let pressing = null;
+    // When the row last moved on its own. A finger landing on a scroller that
+    // is still coasting is stopping it, and everybody knows that gesture --
+    // it is how every list on a phone is arrested. Pressing whatever happened
+    // to be under the finger is not what was meant by it.
+    //
+    // This bit properly. The row is scrolled to reach the arrow keys, so the
+    // finger comes down mid-row to stop it, and mid-row is where the modifier
+    // keys are. A tap on `win` latches Meta; a second one locks it down, and
+    // from then on every arrow is Super+Arrow, which the window manager takes
+    // for its own tiling shortcuts and Kodi never sees. The symptom is the
+    // arrow keys quietly not working, with nothing on screen to explain it.
+    let movedAt = 0;
+    row.addEventListener("scroll", () => { movedAt = Date.now(); });
     const forget = () => {
       if (pressing) pressing.key.classList.remove("is-pressing");
       pressing = null;
@@ -4742,6 +4761,8 @@ function deskListen() {
       const key = event.target.closest("button");
       if (!key) return;
       event.preventDefault();
+      // Still moving when the finger arrived: this touch is the brake.
+      if (Date.now() - movedAt < COAST_STOP_MS) return;
       pressing = { key, x: event.clientX, y: event.clientY,
                    scroll: row.scrollLeft };
       // Something to look at while the finger is down. Refusing the default

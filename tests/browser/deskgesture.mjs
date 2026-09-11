@@ -157,8 +157,17 @@ const row = await p.evaluate(async () => {
   // that drift threw the press away, so the keys somebody had to scroll to
   // reach were precisely the ones that did nothing -- reported, accurately,
   // as esc and home not working.
+  // Each of these settles the row first and waits for it to count as still,
+  // so the case under test is the only thing deciding the outcome. Without
+  // that, moving the row to set a case up is itself a recent movement, and
+  // the arrest rule below answers before the case does.
+  const settle = async (at) => {
+    keys.scrollLeft = at;
+    await new Promise((q) => setTimeout(q, 320));
+  };
+
   sent.length = 0;
-  keys.scrollLeft = 0;
+  await settle(0);
   ev("pointerdown", cx, cy);
   keys.scrollLeft = 6;
   ev("pointerup", cx, cy);
@@ -168,12 +177,42 @@ const row = await p.evaluate(async () => {
   // A row genuinely being flung past is still not somebody pressing whatever
   // went by under their finger.
   sent.length = 0;
-  keys.scrollLeft = 0;
+  await settle(0);
   ev("pointerdown", cx, cy);
   keys.scrollLeft = 120;
   ev("pointerup", cx, cy);
   await new Promise((q) => setTimeout(q, 150));
   const flung = count();
+
+  // A finger landing on a row that is still coasting is stopping it, which is
+  // how every list on a phone is arrested, and it must press nothing.
+  //
+  // This is what made the arrow keys stop working in Kodi. The row is scrolled
+  // to reach the arrows, so the finger lands mid-row to stop it -- and mid-row
+  // is where the modifier keys are. A tap on `win` latches Meta, a second
+  // locks it, and from then on every arrow is Super+Arrow, which the window
+  // manager keeps for its own shortcuts. Nothing on screen explains it.
+  sent.length = 0;
+  await settle(40);
+  keys.scrollLeft = 46;                 // still moving as the finger arrives
+  // A turn of the loop, because a scroll event is queued rather than
+  // delivered on assignment. A real coast fires one a frame or two before the
+  // finger lands; dispatching pointerdown in the same tick as the assignment
+  // would test a row that has not told anybody it moved yet.
+  await new Promise((q) => setTimeout(q, 30));
+  ev("pointerdown", cx, cy);
+  ev("pointerup", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const arrested = count();
+
+  // And the very next tap, on a row that has come to rest, works normally --
+  // the brake costs one tap, not the use of the row.
+  sent.length = 0;
+  await settle(40);
+  ev("pointerdown", cx, cy);
+  ev("pointerup", cx, cy);
+  await new Promise((q) => setTimeout(q, 150));
+  const afterArrest = count();
 
   // And something to look at while it happens. The row refuses the tap's
   // default -- that is what stops the phone's keyboard leaving -- and a
@@ -181,7 +220,7 @@ const row = await p.evaluate(async () => {
   // own a key looks identical pressed and unpressed. There was no way to tell
   // a key that had not been noticed from one that had been sent and ignored.
   sent.length = 0;
-  keys.scrollLeft = 0;
+  await settle(0);
   ev("pointerdown", cx, cy);
   const lookHeld = esc.classList.contains("is-pressing");
   ev("pointerup", cx, cy);
@@ -191,7 +230,7 @@ const row = await p.evaluate(async () => {
                     || esc.classList.contains("is-firing");
 
   deskSend = real;
-  return { tapped, dragged, cancelled, drifted, flung,
+  return { tapped, dragged, cancelled, drifted, flung, arrested, afterArrest,
            lookHeld, lookFired, lookAfter };
 });
 check(row.tapped === 2, "tapping a utility key presses it: " + row.tapped);
@@ -208,6 +247,14 @@ check(row.drifted === 2,
       + " events");
 check(row.flung === 0,
       "but not when the row is being flung past: " + row.flung + " events");
+check(row.arrested === 0,
+      "a finger landing on a coasting row stops it and presses nothing -- "
+      + "mid-row is where the modifiers are, and a latched Meta turns every "
+      + "arrow into a window-manager shortcut Kodi never sees: "
+      + row.arrested + " events");
+check(row.afterArrest === 2,
+      "and the next tap on the stopped row works, so the brake costs one tap "
+      + "rather than the use of the row: " + row.afterArrest + " events");
 check(row.lookHeld, "a key held down says so, since :active never arrives here");
 check(row.lookFired, "and lights when it fires, so a press that was sent and "
       + "ignored looks different from one that was never noticed");
