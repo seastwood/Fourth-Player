@@ -16,6 +16,23 @@ ExecStart=/usr/bin/python3 -m fourthplayer serve
 Restart=on-failure
 RestartSec=3
 
+# A ceiling, so that a leak in here costs this service and not the machine.
+#
+# Measured: idle with no session, about 40 MB; a capture running with no
+# guests, about 87 MB. It has been seen at 15.3 GB, and at that point the
+# kernel's own OOM killer had already put the machine into swap so deep that
+# sshd would accept a connection and then never answer it -- the television
+# frozen, nothing reachable, and no way in short of the power button. Killing
+# one service is a far better outcome than losing the machine, and the log
+# says plainly which it was.
+#
+# MemoryHigh throttles first, which is the polite warning, and MemoryMax is
+# the hard stop. Both are enormous next to the numbers above, so nothing
+# legitimate should ever reach them; a run that does is a bug, and it is
+# supposed to be noticed.
+MemoryHigh=1500M
+MemoryMax=2G
+
 # The server needs three things from the system and nothing else: the X display
 # to capture, /dev/uinput to create pads on, and the render node to encode with.
 # Everything below removes something it has no business touching, so that a
