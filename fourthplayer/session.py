@@ -2345,22 +2345,31 @@ class LiveSession:
             return True, ""
         return False, ""
 
-    def check_profile(self, guest, profiles):
-        """Say so when a guest cannot decode the H.264 profile being offered.
+    async def check_profile(self, guest, profiles):
+        """Offer an H.264 profile the arriving guest can actually decode.
 
         The codec is negotiated -- agree_codec picks the best of H.264, H.265
-        and AV1 that every guest can manage. The profile inside H.264 is not:
-        it is pinned on the encoder, which encodes once for everybody, so it
-        cannot be chosen per guest.
+        and AV1 that every guest can manage. The profile inside H.264 is
+        pinned on the encoder, which encodes once for everybody, so it cannot
+        be chosen per guest: changing it means recapturing for the room.
 
-        That is a reasonable limitation and a terrible silent failure. A host
-        set to Main offers Main; a browser that only takes Constrained Baseline
-        answers with the video refused; the guest gets a black screen; and
-        nothing anywhere says why. It read as a network fault for hours.
+        That was left to a human, on the grounds that a recapture interrupts
+        whoever is already watching. It weighs about a second of held picture
+        against a guest who sees nothing whatsoever, and it is the same
+        asymmetry agree_codec already settles the other way: at the moment
+        somebody arrives, being able to see at all wins.
 
-        So it is read out loud. Nothing is changed automatically, because the
-        change is a recapture that would interrupt everybody already watching
-        -- and because the answer is one line in the config, which this says.
+        So it now moves, and only ever towards Constrained Baseline -- the one
+        profile every browser in the world decodes. One direction means it
+        cannot oscillate, and there is no second guest whose arrival could
+        undo it. It happens before this guest's peer is built, so they are
+        offered the right thing from the start rather than a black screen and
+        a correction.
+
+        A host set to Main offering Main to a browser that takes only
+        Constrained Baseline is not hypothetical: the guest connects, the
+        video is refused, the picture is black, and nothing anywhere says why.
+        It read as a network fault for hours.
         """
         # Only H.264 has profiles worth checking here, and only when that is
         # what is going out: "auto" that settled on H.265 or AV1 is a different
@@ -2374,19 +2383,42 @@ class LiveSession:
         theirs = {str(p).lower()[:4] for p in profiles}
         if want in theirs:
             return
+        universal = video.h264_profile_level_id(
+            "constrained-baseline", getattr(self.cfg, "height", 1080))[:4].lower()
+        mine = str(getattr(self.cfg, "h264_profile", "?"))
+        # The move is worth making only if it would actually help: their
+        # browser has to list the profile being moved to, and there has to be
+        # somewhere to move from.
+        if universal in theirs and mine.lower() != "constrained-baseline":
+            log.warning(
+                "%s's browser does not decode the H.264 profile this host "
+                "offers (%s, %s); it takes %s. Moving the whole session to "
+                "constrained-baseline, which every browser decodes -- anybody "
+                "already watching loses about a second of picture. Set "
+                "h264_profile to constrained-baseline in %s to start there "
+                "and skip this.",
+                guest.label, mine, want,
+                ", ".join(sorted(theirs)) or "nothing it would name",
+                getattr(self.cfg, "path", "the config"))
+            self.cfg = dataclasses.replace(
+                self.cfg, h264_profile="constrained-baseline")
+            if self.stage is not None:
+                await self._recapture(getattr(self.stage, "codec", "h264"))
+            return
+
+        # Nothing to be done: they do not name Constrained Baseline either, so
+        # there is no profile this host could offer that they would take.
         log.warning(
             "%s's browser does not list the H.264 profile this host offers "
-            "(%s, %s). They will connect and see a black screen. Their "
-            "browser takes: %s. Set h264_profile to constrained-baseline in "
-            "%s and restart to fix it for everybody.",
-            guest.label, getattr(self.cfg, "h264_profile", "?"), want,
-            ", ".join(sorted(theirs)) or "nothing it would name",
-            getattr(self.cfg, "path", "the config"))
+            "(%s, %s), and does not list constrained-baseline either, so "
+            "there is nothing to move to. They will connect and see a black "
+            "screen. Their browser takes: %s.",
+            guest.label, mine, want,
+            ", ".join(sorted(theirs)) or "nothing it would name")
         self.notify_one(guest, {
             "t": "note",
-            "message": "Your browser may not accept this host's video format. "
-                       "If the picture stays black, ask the owner to set "
-                       "h264_profile to constrained-baseline."})
+            "message": "Your browser does not accept any video format this "
+                       "host can send, so the picture will stay black."})
 
     def warn_about_joining(self, guest):
         """Say, when somebody joins mid-Steam-game, what that may cost.
