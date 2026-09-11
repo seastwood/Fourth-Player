@@ -119,6 +119,52 @@ try {
   });
   check(back === "60", "and there is a way back to what it was: " + back);
 
+  // The tabs are in the order somebody wants them in.
+  const order = await page.evaluate(() =>
+    [...document.querySelectorAll(".tabs .tab")].map((b) => b.textContent.trim()));
+  check(order.join(",") === "Controls,Game,Account,Admin",
+        "the tabs read Controls, Game, Account, Admin: " + order.join(", "));
+
+  // And both panels actually draw something.
+  //
+  // Every check above this one passed while the page was visibly broken: the
+  // Admin panel had been inserted around the Account panel rather than beside
+  // it, so Account was nested inside a hidden Admin and both came up empty.
+  // Reading `hidden` cannot see that -- the flags were all correct, and the
+  // element still had no height on screen. So measure the thing.
+  for (const [tab, inside] of [["session", "login-sheet"],
+                               ["admin", "session-stream"]]) {
+    const seen = await page.evaluate((which, id) => {
+      account = { name: "seth", can: ["kick", "lock", "slots", "grant", "desk",
+                                      "reshare", "stream"],
+                  primary: true, fresh: true };
+      // The sheet these panels live in, which a guest opens from the picture.
+      // Without it every panel measures zero however right the markup is.
+      document.getElementById("pads").hidden = false;
+      paintSession();
+      showTab(which);
+      const panel = document.getElementById("tab-" + which);
+      const child = document.getElementById(id);
+      return { panel: panel.getBoundingClientRect().height,
+               child: child ? child.getBoundingClientRect().height : -1,
+               offscreen: child ? child.offsetParent === null : true };
+    }, tab, inside);
+    check(seen.panel > 0,
+          tab + " draws something rather than coming up blank: " + seen.panel
+          + "px tall");
+    check(seen.child > 0 && !seen.offscreen,
+          "  and " + inside + " is really on screen inside it: " + seen.child
+          + "px");
+  }
+
+  // Neither panel may contain the other.
+  const nested = await page.evaluate(() => {
+    const a = document.getElementById("tab-session");
+    const b = document.getElementById("tab-admin");
+    return a.contains(b) || b.contains(a);
+  });
+  check(!nested, "and neither panel is inside the other");
+
   check(errors.length === 0, "no script errors: " + errors.slice(0, 2));
 } finally { await browser.close(); }
 if (fails.length) { console.log("\n" + fails.length + " FAILED"); process.exit(1); }

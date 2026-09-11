@@ -351,6 +351,8 @@
       <button id="tab-controls-pick" type="button" class="tab is-on"
               role="tab" aria-selected="true"
               aria-controls="tab-controls">Controls</button>
+      <button id="tab-game-pick" type="button" class="tab" role="tab"
+              aria-selected="false" aria-controls="tab-game">Game</button>
       <!-- Always shown, because logging in lives behind it and a login
            nobody can find is a login nobody has. It was tucked behind your
            own name in the people list at first, on the reasoning that a
@@ -360,12 +362,10 @@
            whether the door is signposted. -->
       <button id="tab-session-pick" type="button" class="tab" role="tab"
               aria-controls="tab-session" aria-selected="false">Account</button>
-      <button id="tab-game-pick" type="button" class="tab" role="tab"
-              aria-selected="false" aria-controls="tab-game">Game</button>
-      <!-- Hidden until an account can actually do something here. Everything
-           behind it used to live under Account, which made Account a drawer:
-           your own name and password beside six controls that govern the whole
-           room. They are different questions asked by different people. -->
+      <!-- Last, and hidden until an account has something to do behind it.
+           The order is the order somebody wants them in: the controls in
+           their hands, the game in front of them, who they are, and only then
+           what they may do to everybody else. -->
       <button id="tab-admin-pick" type="button" class="tab" role="tab"
               aria-selected="false" aria-controls="tab-admin" hidden>Admin</button>
     </div>
@@ -543,14 +543,6 @@
     </div>
     </div>
 
-    </div>
-  </div>
-
-  <!-- What governs the room, rather than what governs you. Only ever drawn
-       for an account that has been given something in it, and each section
-       inside appears on its own capability, so an account given only `kick`
-       sees only the removing. -->
-  <div id="tab-admin" class="tab-panel acct" role="tabpanel" hidden>
     <!-- The owner's half, and only ever drawn for an account that was given
          something to do in it. Nothing here creates a power: it hands out,
          narrows or takes back powers this box already has, which is the line
@@ -628,77 +620,92 @@
         </div>
       </section>
 
-      <!-- The owner's half, and only ever drawn for an account that was given
-           something to do in it. Nothing here creates a power: it hands out,
-           narrows or takes back powers this box already has, which is the
-           line that keeps a password on a public page from being a shell. -->
-      <section class="acct-block" id="session-limit" hidden>
-        <h3 class="acct-title">How many may connect</h3>
-        <p class="acct-state" id="session-who"></p>
-        <div class="acct-row">
-          <input id="limit-count" type="number" min="1" max="8" step="1"
-                 inputmode="numeric" aria-label="People who may be connected">
-          <button id="limit-set" type="button" class="choice">Set</button>
-        </div>
-        <p class="footnote">Nobody is thrown out. It takes effect as people
-           leave, and it never goes below the accounts that are here.</p>
-      </section>
+    </div>
 
-      <section class="acct-block" id="session-lock" hidden>
-        <h3 class="acct-title">Who may be here</h3>
-        <!-- Said before it is offered. "I'm not sure what it's set at now" is
-             a fair thing to say about a button that only toggles. -->
-        <p class="acct-state" id="lock-now">Anybody with the link and PIN.</p>
-        <div class="acct-choices">
-          <button id="lock-open" type="button" class="choice">Anybody with the
-            link and PIN</button>
-          <button id="lock-accounts" type="button" class="choice">Only people
-            logged in to an account</button>
-          <button id="lock-named" type="button" class="choice">Only me</button>
-        </div>
-        <p class="footnote" id="lock-note">Anybody who no longer qualifies is
-           removed. You are always let back in, whatever this says.</p>
-      </section>
+    <!-- What governs the room, rather than what governs you.
 
-      <section class="acct-block" id="session-desk" hidden>
-        <h3 class="acct-title">Keyboard and mouse</h3>
-        <button id="desk-take" type="button" class="choice">Take the keyboard
-          and mouse</button>
-        <p class="footnote" id="desk-note">Operate the console itself. Your
-           keyboard and mouse go to the machine until you give them back.</p>
-        <button id="desk-escape" type="button" class="choice" hidden>Send
-          Escape</button>
-      </section>
+         A sibling of Account, not a corner of it. These are two different
+         questions asked by two different people: your own name and password
+         on one side, and on the other six controls that govern everybody in
+         the room. Under one tab the second kind kept being found by accident
+         and the first kept being lost.
 
-      <section class="acct-block" id="session-reshare" hidden>
-        <h3 class="acct-title">The invite</h3>
-        <button id="reshare-now" type="button" class="choice">New link and
-          PIN</button>
-        <p class="footnote">The link and PIN you sent out stop working.
-           Everybody here keeps their place.</p>
-        <p class="footnote acct-new-link" id="reshare-new" hidden></p>
-      </section>
+         Drawn only for an account that has been given something in here, and
+         each section inside appears on its own capability -- an account given
+         only `kick` sees only the removing. -->
+    <div id="tab-admin" class="tab-panel acct" role="tabpanel" hidden>
+        <!-- The owner's half, and only ever drawn for an account that was given
+             something to do in it. Nothing here creates a power: it hands out,
+             narrows or takes back powers this box already has, which is the
+             line that keeps a password on a public page from being a shell. -->
+        <section class="acct-block" id="session-limit" hidden>
+          <h3 class="acct-title">How many may connect</h3>
+          <p class="acct-state" id="session-who"></p>
+          <div class="acct-row">
+            <input id="limit-count" type="number" min="1" max="8" step="1"
+                   inputmode="numeric" aria-label="People who may be connected">
+            <button id="limit-set" type="button" class="choice">Set</button>
+          </div>
+          <p class="footnote">Nobody is thrown out. It takes effect as people
+             leave, and it never goes below the accounts that are here.</p>
+        </section>
 
-      <section class="acct-block" id="session-kick" hidden>
-        <h3 class="acct-title">People here</h3>
-        <div id="kick-list" class="acct-people"></div>
-        <p class="footnote">Removing somebody stops their link working too, so
-           they cannot simply rejoin on it.</p>
-      </section>
+        <section class="acct-block" id="session-lock" hidden>
+          <h3 class="acct-title">Who may be here</h3>
+          <!-- Said before it is offered. "I'm not sure what it's set at now" is
+               a fair thing to say about a button that only toggles. -->
+          <p class="acct-state" id="lock-now">Anybody with the link and PIN.</p>
+          <div class="acct-choices">
+            <button id="lock-open" type="button" class="choice">Anybody with the
+              link and PIN</button>
+            <button id="lock-accounts" type="button" class="choice">Only people
+              logged in to an account</button>
+            <button id="lock-named" type="button" class="choice">Only me</button>
+          </div>
+          <p class="footnote" id="lock-note">Anybody who no longer qualifies is
+             removed. You are always let back in, whatever this says.</p>
+        </section>
 
-      <section class="acct-block" id="session-grant" hidden>
-        <h3 class="acct-title">What each account may do</h3>
-        <div id="grant-list"></div>
-        <p class="footnote">These are shares of what this box can already do.
-           Making an account, adding a Steam game and resetting somebody's
-           authenticator all happen at the console.</p>
-      </section>
-      <!-- The picture, as dials rather than as a config file somebody has to
-           ssh in to edit. Every one of these is fixed when the pipeline is
-           built, so changing any of them rebuilds it: about a second of held
-           picture for the whole room. That is why this has an Apply button
-           and not live sliders -- a dial that interrupts everybody on every
-           drag is a dial that should not move on its own. -->
+        <section class="acct-block" id="session-desk" hidden>
+          <h3 class="acct-title">Keyboard and mouse</h3>
+          <button id="desk-take" type="button" class="choice">Take the keyboard
+            and mouse</button>
+          <p class="footnote" id="desk-note">Operate the console itself. Your
+             keyboard and mouse go to the machine until you give them back.</p>
+          <button id="desk-escape" type="button" class="choice" hidden>Send
+            Escape</button>
+        </section>
+
+        <section class="acct-block" id="session-reshare" hidden>
+          <h3 class="acct-title">The invite</h3>
+          <button id="reshare-now" type="button" class="choice">New link and
+            PIN</button>
+          <p class="footnote">The link and PIN you sent out stop working.
+             Everybody here keeps their place.</p>
+          <p class="footnote acct-new-link" id="reshare-new" hidden></p>
+        </section>
+
+        <section class="acct-block" id="session-kick" hidden>
+          <h3 class="acct-title">People here</h3>
+          <div id="kick-list" class="acct-people"></div>
+          <p class="footnote">Removing somebody stops their link working too, so
+             they cannot simply rejoin on it.</p>
+        </section>
+
+        <section class="acct-block" id="session-grant" hidden>
+          <h3 class="acct-title">What each account may do</h3>
+          <div id="grant-list"></div>
+          <p class="footnote">These are shares of what this box can already do.
+             Making an account, adding a Steam game and resetting somebody's
+             authenticator all happen at the console.</p>
+        </section>
+
+      <!-- The picture, as dials rather than a config file somebody has to ssh
+           in to edit. Every one of these is fixed when the pipeline is built,
+           so applying any of them rebuilds it: about a second of held picture
+           for the whole room. That is why there is an Apply button and not
+           live sliders -- a dial that interrupts everybody on every drag is a
+           dial that should not move on its own. -->
       <section class="acct-block" id="session-stream" hidden>
         <h3 class="acct-title">The picture</h3>
         <p class="acct-state" id="stream-now">&mdash;</p>
@@ -706,8 +713,6 @@
         <div class="acct-row">
           <label class="tune-label" for="stream-size">Size</label>
           <select id="stream-size" class="chip"></select>
-          <span class="footnote">Smaller is sharper per pixel and cheaper to
-             send.</span>
         </div>
 
         <div class="acct-row">
@@ -719,10 +724,10 @@
             <option value="24">24</option>
             <option value="15">15</option>
           </select>
-          <span class="footnote">The biggest thing a controller feels: at 30
-             every press waits up to 33ms for the next frame, at 60 half
-             that.</span>
         </div>
+        <p class="footnote">Frame rate is the biggest thing a controller
+           feels: at 30 every press waits up to 33ms for the next frame, at 60
+           half that.</p>
 
         <div class="acct-row">
           <label class="tune-label" for="stream-bitrate">Quality</label>
@@ -742,12 +747,12 @@
           <span class="tune-value" id="stream-jitter-value">60 ms</span>
         </div>
         <p class="footnote">How long your browser holds the picture before
-           drawing it, to absorb packets that arrive late. Straight delay: on a
-           cable 40&ndash;60 is plenty, on mobile data 100 or more stops it
+           drawing it, to absorb packets that arrive late. Straight delay: on
+           a cable 40&ndash;60 is plenty, on mobile data 100 or more stops it
            juddering.</p>
 
         <details class="acct-more">
-          <summary>The two nobody should need</summary>
+          <summary>The ones nobody should need</summary>
           <div class="acct-row">
             <label class="tune-label" for="stream-queue">Send queue</label>
             <input id="stream-queue" class="pad-range retro-range" type="range"
@@ -767,11 +772,9 @@
           <div class="acct-row">
             <label class="tune-label" for="stream-codec">Codec</label>
             <select id="stream-codec" class="chip">
-              <option value="auto">Automatic &mdash; the best both ends
-                manage</option>
+              <option value="auto">Automatic</option>
               <option value="h264">H.264 &mdash; every browser</option>
-              <option value="h265">H.265 &mdash; fewer bits, fewer
-                browsers</option>
+              <option value="h265">H.265 &mdash; fewer bits, fewer browsers</option>
             </select>
           </div>
         </details>
@@ -781,9 +784,10 @@
           <button id="stream-reset" type="button" class="ghost">Back to what
             it was</button>
         </div>
-        <p class="footnote" id="stream-note">Applying rebuilds the stream:
-           everybody watching loses about a second of picture.</p>
+        <p class="footnote">Applying rebuilds the stream: everybody watching
+           loses about a second of picture.</p>
       </section>
+    </div>
   </div>
 
   <!-- Everything said this session, and a box to add to it. A panel rather
