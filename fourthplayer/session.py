@@ -518,6 +518,32 @@ class LiveSession:
         # numbers the device does not use.
         retroarch.write_profiles(list(self.pads.names),
                                  guide=self.cfg.guest_guide_button)
+        # The same rule, read the other way round.
+        #
+        # A pad that appears after a game starts is a pad that game will never
+        # see -- and the pads appear whenever this process does. So a service
+        # restarted while something is playing silently pulls the controller
+        # out from under it: the uinput device the game is holding stops
+        # existing, a new one takes its place, and nothing on either side says
+        # a word. The guest presses buttons and the television ignores them.
+        #
+        # Nothing here can fix that -- Steam Input and SDL both bind at launch
+        # and do not look again -- so the least it can do is say so, to the
+        # log and to whoever is holding the controller.
+        try:
+            playing = launcher.running()
+        except Exception:
+            playing = False
+        if playing:
+            log.warning("a game was already running when these controllers "
+                        "were made, so it is holding the previous ones and "
+                        "will ignore these -- restart the game to pick them "
+                        "up")
+            self.notify({
+                "t": "note",
+                "message": "The controllers were rebuilt while this game was "
+                           "running, so it is still looking for the old ones. "
+                           "Close the game and start it again."})
         self.stage = Stage(self.cfg, self.loop,
                            codec=None if self.codec == "auto" else self.codec)
         self.stage.start()
