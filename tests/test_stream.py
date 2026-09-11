@@ -37,6 +37,15 @@ except Exception as exc:
 
 LOOP = asyncio.new_event_loop()
 
+# set_stream writes the config, which is the point of it -- a dial that forgets
+# is a dial turned again every evening. It is also a live file on whatever
+# machine runs this suite, and the first version of this test duly saved its
+# way through every case and left a console running at 24 fps. So the write is
+# captured here instead, and then asserted, which is better than merely being
+# prevented.
+WRITTEN = []
+Config.save = lambda self, path=None: WRITTEN.append(self)
+
 
 class Stage:
     codec = "h264"
@@ -88,13 +97,18 @@ check(s.recaptured == ["h264"],
 check(out["changed"] == ["fps"], "and it says what moved: %r" % (out["changed"],))
 check(any(m.get("t") == "stream" for m in s.told),
       "everybody is told, not just whoever turned the dial")
+check(WRITTEN and WRITTEN[-1].fps == 60,
+      "and it is written down, so the next start is what was asked for rather "
+      "than what the file still said")
 
 print("\nchanging nothing does nothing")
 # Opening the panel and closing it again must not cost the room a second of
 # picture, so a request that matches what is already set is not a change.
 s = session(fps=60, bitrate_kbps=4000)
+WRITTEN.clear()
 out = ask(s, fps=60, bitrate_kbps=4000)
 check(out["changed"] == [], "nothing changed: %r" % (out["changed"],))
+check(WRITTEN == [], "and nothing was written")
 check(s.recaptured == [], "so nothing was rebuilt")
 check(s.told == [], "and nobody was interrupted to be told so")
 
