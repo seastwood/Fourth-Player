@@ -2250,6 +2250,123 @@ class LiveSession:
     def accounts_here(self):
         return [g for g in self.guests.values() if g.account]
 
+    # What an admin may change about the picture, and what each one may be.
+    #
+    # Bounded on purpose. These are dials on a live system, turned from a
+    # phone by somebody who cannot see the host's load, and the failure mode
+    # of getting one wrong is not a worse picture -- it is a host that cannot
+    # keep up, which looks to everybody like the network breaking. The ceilings
+    # are what this machine has been measured doing, not what the format
+    # allows.
+    STREAM_LIMITS = {
+        # (lowest, highest). Height carries width: the two are set together
+        # from a named size, so there is no way to ask for 1920x480.
+        "height": (480, 1080),
+        "fps": (15, 60),
+        "bitrate_kbps": (500, 20000),
+        # The buffer the *browser* holds before it draws. The floor is not
+        # zero: a little is what absorbs a burst arriving late, and a guest on
+        # mobile data wants more of it than somebody on a cable.
+        "jitter_ms": (0, 300),
+        # How much encoded video may pile up per guest before frames are
+        # dropped. Straight delay when a link is tight.
+        "queue_ms": (10, 500),
+        # The encoder's own buffer, in milliseconds of bitrate.
+        "cpb_ms": (20, 1000),
+    }
+
+    # The sizes offered by name, widest first. 4:3 is not here: the capture is
+    # whatever shape the television is, and these only say how much of it to
+    # send.
+    STREAM_SIZES = {
+        1080: (1920, 1080),
+        720: (1280, 720),
+        540: (960, 540),
+        480: (854, 480),
+    }
+
+    def stream_settings(self):
+        """What the picture is doing now, for the page to draw."""
+        cfg = self.cfg
+        stage = self.stage
+        # What is being sent, which is not always what was asked for: a
+        # software encoder is capped at software_max_height however tall the
+        # config says, and a page showing the request rather than the truth is
+        # a page that disagrees with the picture beside it.
+        sent_h = getattr(stage, "sending_height", None) or cfg.height
+        sent_w = getattr(stage, "sending_width", None) or cfg.width
+        return {
+            "width": cfg.width, "height": cfg.height, "fps": cfg.fps,
+            "bitrate_kbps": cfg.bitrate_kbps, "jitter_ms": cfg.jitter_ms,
+            "queue_ms": cfg.queue_ms, "cpb_ms": cfg.cpb_ms,
+            "codec": cfg.codec,
+            "sending": "%dx%d" % (sent_w, sent_h),
+            "playing": getattr(stage, "codec", "") or "",
+            "encoder": getattr(stage, "encoder_name", "") or "",
+            "hardware": getattr(stage, "encoder_kind", "") == "hardware",
+            "sizes": sorted(self.STREAM_SIZES, reverse=True),
+            "limits": {k: list(v) for k, v in self.STREAM_LIMITS.items()},
+        }
+
+    async def set_stream(self, asked, by=None):
+        """Change how the picture is sent, and start sending it that way.
+
+        Everything here costs a recapture, because every one of these is fixed
+        when the pipeline is built: you cannot re-rate an encoder that is
+        running. That is about a second of held picture for everybody, which
+        is why the page asks before it sends rather than firing on every drag
+        of a slider.
+
+        Only what actually changed is applied, and a request that changes
+        nothing does nothing -- otherwise opening the panel and closing it
+        again would interrupt the room for no reason.
+        """
+        changes = {}
+        for key, (low, high) in self.STREAM_LIMITS.items():
+            if key not in asked:
+                continue
+            try:
+                want = int(asked[key])
+            except (TypeError, ValueError):
+                raise ValueError("%s must be a number" % key)
+            want = max(low, min(want, high))
+            if key == "height":
+                if want not in self.STREAM_SIZES:
+                    raise ValueError("%dp is not one of the sizes offered"
+                                     % want)
+                width, height = self.STREAM_SIZES[want]
+                if (width, height) != (self.cfg.width, self.cfg.height):
+                    changes["width"], changes["height"] = width, height
+            elif want != getattr(self.cfg, key):
+                changes[key] = want
+
+        codec = str(asked.get("codec") or "").lower()
+        if codec in ("auto", "h264", "h265") and codec != self.cfg.codec:
+            changes["codec"] = codec
+
+        if not changes:
+            return {"ok": True, "changed": [], **self.stream_settings()}
+
+        self.cfg = dataclasses.replace(self.cfg, **changes)
+        log.info("%s changed the picture: %s", getattr(by, "label", "an admin"),
+                 ", ".join("%s=%s" % kv for kv in sorted(changes.items())))
+        # Kept, so the next start is what was asked for rather than what the
+        # file still says. A dial that forgets is a dial turned every evening.
+        try:
+            self.cfg.save()
+        except Exception as exc:
+            log.warning("could not write the config (%s); the change still "
+                        "applies to this session", exc)
+
+        if self.stage is not None:
+            want = self.cfg.codec
+            if want == "auto":
+                want = getattr(self.stage, "codec", "h264")
+            await self._recapture(want)
+        out = self.stream_settings()
+        self.notify({"t": "stream", **out})
+        return {"ok": True, "changed": sorted(changes), **out}
+
     def set_limit(self, count, by=None):
         """Set how many may be connected at once. Returns what it became.
 

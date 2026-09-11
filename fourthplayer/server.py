@@ -381,7 +381,8 @@ class Server:
     # session that is already open. That line is what keeps an admin password
     # from being a shell.
     ACTIONS = {"limit": "slots", "lock": "lock", "kick": "kick",
-               "reshare": "reshare", "grant": "grant", "desk": "desk"}
+               "reshare": "reshare", "grant": "grant", "desk": "desk",
+               "stream": "stream"}
 
     async def _act(self, guest, kind, message, outbox):
         from . import accounts
@@ -408,6 +409,16 @@ class Server:
             # Using it is being there, so the clock starts again.
             self.session.touch_presence(guest)
 
+        if kind == "stream":
+            try:
+                result = await self.session.set_stream(
+                    message.get("settings") or {}, by=guest)
+            except ValueError as exc:
+                await outbox.put({"t": "error", "reason": "request",
+                                  "message": str(exc)})
+                return
+            await outbox.put({"t": "streamresult", **result})
+            return
         if kind == "limit":
             became = self.session.set_limit(message.get("count") or 0, by=guest)
             await outbox.put({"t": "limits", **self.session.limits(),

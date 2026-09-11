@@ -475,6 +475,10 @@ function connect(hello) {
       case "loggedout":     return loggedOut();
       case "granted":       return granted(message);
       case "limits":        return limitsFrom(message);
+      // Both shapes land here: the reply to this page's own ask, and the
+      // notice sent to everybody when some other admin changed it.
+      case "stream":        return paintStream(message);
+      case "streamresult":  return streamApplied(message);
       case "reshared":      return reshared(message);
       case "desk":          return deskFrom(message);
       case "people":        return peopleFrom(message);
@@ -3772,8 +3776,36 @@ function wireLogin() {
 /* ---- the owner's panel --------------------------------------------------- */
 
 function paintSession() {
-  const panel = el("tab-session");
-  if (!panel || panel.hidden) return;
+  // Which tab is open decides how much of this is worth doing, but not
+  // whether the Admin tab exists: an account that gains a power has to grow
+  // somewhere to use it, and that decision cannot wait for somebody to open
+  // the panel it would be drawn in.
+  //
+  // The two panels are painted independently now that they are two panels.
+  // Guarding all of this on the Account tab was right when every admin
+  // control lived inside it; once they moved, it meant opening Admin painted
+  // nothing at all and the tab came up blank.
+  const admin = ["slots", "lock", "reshare", "kick", "grant", "desk", "stream"]
+    .some((what) => may(what));
+  const pick = el("tab-admin-pick");
+  if (pick) pick.hidden = !admin;
+  const adminPanel = el("tab-admin");
+  // An account narrowed while somebody is standing in the panel: put them
+  // somewhere that still exists rather than leaving them on a blank one.
+  if (!admin && adminPanel && !adminPanel.hidden) showTab("session");
+
+  show("session-limit", may("slots"));
+  show("session-lock", may("lock"));
+  show("session-reshare", may("reshare"));
+  show("session-kick", may("kick"));
+  show("session-grant", may("grant"));
+  show("session-desk", may("desk"));
+  show("session-stream", may("stream"));
+
+  const account = el("tab-session");
+  const showing = (account && !account.hidden)
+                  || (adminPanel && !adminPanel.hidden);
+  if (!showing) return;
   paintLogin();
   const who = el("session-who");
   if (who) who.textContent = peopleHere();
@@ -6687,8 +6719,136 @@ function showToast(what, footnote) {
 /* Which tab is showing. Two things live in this panel and they are not the
    same thing: how your own controller behaves, and what the television is
    doing. */
+/* The picture, as dials. What is on screen and what the host last said. */
+let streamNow = null;
+
+function streamFields() {
+  return {
+    height: Number(el("stream-size").value) || 0,
+    fps: Number(el("stream-fps").value) || 0,
+    bitrate_kbps: Number(el("stream-bitrate").value) || 0,
+    jitter_ms: Number(el("stream-jitter").value),
+    queue_ms: Number(el("stream-queue").value),
+    cpb_ms: Number(el("stream-cpb").value),
+    codec: el("stream-codec").value,
+  };
+}
+
+function paintStreamValues() {
+  const say = (id, text) => { const n = el(id); if (n) n.textContent = text; };
+  say("stream-bitrate-value", el("stream-bitrate").value + " kb/s");
+  say("stream-jitter-value", el("stream-jitter").value + " ms");
+  say("stream-queue-value", el("stream-queue").value + " ms");
+  say("stream-cpb-value", el("stream-cpb").value + " ms");
+  // Whether Apply would do anything, said before it is pressed rather than
+  // after: every one of these costs the room a second of picture.
+  const apply = el("stream-apply");
+  if (apply && streamNow) {
+    const same = ["fps", "bitrate_kbps", "jitter_ms", "queue_ms", "cpb_ms"]
+      .every((k) => Number(streamFields()[k]) === Number(streamNow[k]))
+      && streamFields().height === streamNow.height
+      && streamFields().codec === streamNow.codec;
+    apply.disabled = same;
+    apply.textContent = same ? "Nothing to apply" : "Apply";
+  }
+}
+
+function paintStream(state) {
+  streamNow = state;
+  const size = el("stream-size");
+  if (size && Array.isArray(state.sizes)) {
+    size.innerHTML = "";
+    for (const h of state.sizes) {
+      const opt = document.createElement("option");
+      opt.value = String(h);
+      opt.textContent = h + "p";
+      size.appendChild(opt);
+    }
+  }
+  if (size) size.value = String(state.height);
+
+  // The host owns the bounds. They are in the markup too, so the controls are
+  // sane before the first reply arrives, but the moment the host says what it
+  // will accept those win -- otherwise the page can offer a number the host
+  // will clamp, and a slider that springs back when you let go is a slider
+  // that looks broken.
+  const bounds = state.limits || {};
+  for (const [key, id] of [["bitrate_kbps", "stream-bitrate"],
+                           ["jitter_ms", "stream-jitter"],
+                           ["queue_ms", "stream-queue"],
+                           ["cpb_ms", "stream-cpb"]]) {
+    const pair = bounds[key];
+    const node = el(id);
+    if (node && Array.isArray(pair) && pair.length === 2) {
+      node.min = String(pair[0]);
+      node.max = String(pair[1]);
+    }
+  }
+  const fps = bounds.fps;
+  if (Array.isArray(fps) && fps.length === 2) {
+    for (const opt of el("stream-fps").options) {
+      opt.hidden = Number(opt.value) < fps[0] || Number(opt.value) > fps[1];
+    }
+  }
+
+  el("stream-fps").value = String(state.fps);
+  el("stream-bitrate").value = String(state.bitrate_kbps);
+  el("stream-jitter").value = String(state.jitter_ms);
+  el("stream-queue").value = String(state.queue_ms);
+  el("stream-cpb").value = String(state.cpb_ms);
+  el("stream-codec").value = state.codec || "auto";
+
+  // What is actually going out, which is not always what was asked for: a
+  // software encoder is capped however tall the setting says.
+  const bits = [];
+  if (state.sending) bits.push(state.sending + " at " + state.fps + " fps");
+  if (state.bitrate_kbps) bits.push(state.bitrate_kbps + " kb/s");
+  if (state.encoder) {
+    bits.push(state.encoder + (state.hardware ? " (on the card)"
+                                              : " (on the processor)"));
+  }
+  if (state.playing) bits.push(state.playing.toUpperCase());
+  const now = el("stream-now");
+  if (now) now.textContent = bits.join(" \u00b7 ") || "\u2014";
+  paintStreamValues();
+}
+
+function wireStream() {
+  const live = ["stream-bitrate", "stream-jitter", "stream-queue", "stream-cpb"];
+  for (const id of live) {
+    const node = el(id);
+    if (node) node.addEventListener("input", paintStreamValues);
+  }
+  for (const id of ["stream-size", "stream-fps", "stream-codec"]) {
+    const node = el(id);
+    if (node) node.addEventListener("change", paintStreamValues);
+  }
+  const apply = el("stream-apply");
+  if (apply) {
+    apply.addEventListener("click", () => {
+      apply.disabled = true;
+      apply.textContent = "Applying\u2026";
+      send({ t: "stream", settings: streamFields() });
+    });
+  }
+  const back = el("stream-reset");
+  if (back) {
+    back.addEventListener("click", () => {
+      if (streamNow) paintStream(streamNow);
+    });
+  }
+}
+
+function streamApplied(message) {
+  paintStream(message);
+  const changed = Array.isArray(message.changed) ? message.changed : [];
+  if (changed.length) {
+    showToast("Picture changed: " + changed.join(", ").replace(/_/g, " "));
+  }
+}
+
 function showTab(which) {
-  for (const name of ["controls", "game", "session"]) {
+  for (const name of ["controls", "game", "session", "admin"]) {
     const panel = el("tab-" + name);
     const pick = el("tab-" + name + "-pick");
     const on = name === which;
@@ -6700,6 +6860,13 @@ function showTab(which) {
   }
   if (which === "game") paintEndGame();
   if (which === "session") { paintLogin(); paintSession(); }
+  if (which === "admin") {
+    paintSession();
+    // Ask for the settings rather than remember them: another admin may have
+    // changed the picture since this page last looked, and a panel showing
+    // stale numbers is a panel that quietly puts them back.
+    if (may("stream")) send({ t: "stream" });
+  }
 }
 
 function paintEndGame() {
@@ -7144,10 +7311,11 @@ if (el("continuegame")) {
   });
 }
 
-for (const name of ["controls", "game", "session"]) {
+for (const name of ["controls", "game", "session", "admin"]) {
   const pick = el("tab-" + name + "-pick");
   if (pick) pick.addEventListener("click", () => showTab(name));
 }
+wireStream();
 wireSession();
 wireLogin();
 

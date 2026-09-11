@@ -455,7 +455,21 @@ second factor can authorise, so there is no way to do it from the browser --
 the same reason `admin add` is not there either.
 
 What can be given: `steam` (and `steam:<appid>` for one game), `stop`, `kick`,
-`reshare`, `slots`, `lock`, `grant`, `desk`.
+`reshare`, `slots`, `lock`, `grant`, `desk`, `stream`.
+
+Everything except your own name and password lives under an **Admin** tab,
+which appears only for an account that has been given something to do in it —
+and each section inside it appears on its own capability, so an account given
+only `kick` sees only the removing. It used to sit under Account, which made
+Account a drawer: your own login beside six controls that govern the whole
+room.
+
+`stream` is the picture itself — size, frame rate, quality, and how long a
+browser holds video before drawing it. Every one of those is fixed when the
+pipeline is built, so applying any of them rebuilds it: about a second of held
+picture for everybody, which is why the panel has an Apply button rather than
+live sliders. The host bounds every value, and the page takes its limits from
+the host rather than carrying its own copy.
 
 The **first account made is given `grant`** and later ones start with nothing.
 That first account is the primary admin: it holds every capability there is,

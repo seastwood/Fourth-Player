@@ -66,7 +66,7 @@ DEVICE_BYTES = 32                # 256 bits
 # console command is refused rather than stored and silently never matched.
 # A per-game grant is written "steam:274190" and is checked separately.
 CAPABILITIES = ("steam", "stop", "kick", "reshare", "slots", "lock", "grant",
-                "desk")
+                "desk", "stream")
 
 # The ones that reach past the screen. These ask for an authenticator code at
 # the moment they are used, even from a device that is remembered -- a
@@ -77,6 +77,12 @@ CAPABILITIES = ("steam", "stop", "kick", "reshare", "slots", "lock", "grant",
 # powerful of the lot: it lands on the machine itself, as a keyboard and a
 # mouse, which is the signed-in Steam account and a browser and somebody's
 # files. If any of these is worth six digits it is that one.
+#
+# `stream` is deliberately not among them, and it is the one that looks like it
+# should be. It changes how the picture is sent, so it interrupts the room for
+# about a second -- but it cannot lock anybody out, take anybody's controller,
+# or reach the machine. It is a dial, and a dial that asks for six digits every
+# time is a dial nobody turns. `slots` sits outside for the same reason.
 NEEDS_CODE = ("kick", "reshare", "lock", "grant", "desk")
 
 
