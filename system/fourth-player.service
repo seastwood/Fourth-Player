@@ -33,6 +33,27 @@ RestartSec=3
 MemoryHigh=1500M
 MemoryMax=2G
 
+# A bigger share of the processor, but only when there is a fight for it.
+#
+# This is the one process on the machine whose lateness everybody sees. A game
+# that stutters for 200ms is a game that stuttered; this stalling for 200ms
+# freezes the picture, cuts the sound and drops the controller at the same
+# moment, for every guest at once -- because all three ride the same process
+# and the same transport, so when it is descheduled all three stop together.
+#
+# Measured on the console during a Proton game: a run queue of 6.8 on six
+# cores, with the game at 139%, Steam's helpers at 27%, Kodi still up behind
+# it at 24% and X at 22%. Nothing was lost and nothing was dropped -- the
+# guest's browser reported zero of each through every freeze -- because
+# nothing was sent to lose. The sender simply was not run.
+#
+# Weight rather than priority: it changes nothing while the machine is idle,
+# and under contention it asks for twice the share of an ordinary task instead
+# of taking a fixed slice. A user service cannot lower its own niceness
+# without privileges, and would not want to -- starving the game to feed the
+# stream of it is not an improvement.
+CPUWeight=200
+
 # The server needs three things from the system and nothing else: the X display
 # to capture, /dev/uinput to create pads on, and the render node to encode with.
 # Everything below removes something it has no business touching, so that a
