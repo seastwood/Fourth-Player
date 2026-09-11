@@ -227,6 +227,22 @@ class Config:
     default_duration_minutes: int = 120
     max_duration_minutes: int = 480
 
+    # How long an authenticator code goes on proving somebody is there.
+    #
+    # The capabilities in NEEDS_CODE ask for six digits at the moment they are
+    # used, because a remembered device says who somebody is and not that they
+    # are the one holding it. Asking once is the point. Asking every time is a
+    # different thing, and it is what the desk turned into: a socket drops --
+    # a stalled encoder, a browser refusing the video, a phone changing
+    # network -- and the code was demanded again, over and over, for a cursor
+    # somebody was in the middle of using.
+    #
+    # So the moment lasts, the way sudo's does, and any use of it puts it
+    # forward. Somebody working at the desk is never asked twice; somebody who
+    # wandered off half an hour ago is asked again. Zero restores the old
+    # behaviour of asking every single time.
+    code_grace_minutes: int = 30
+
     # -- server --
     host: str = "0.0.0.0"
     port: int = 8443

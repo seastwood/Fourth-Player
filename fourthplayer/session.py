@@ -725,6 +725,36 @@ class LiveSession:
         self.tell_hold(guest)
         return guest.capabilities
 
+    def presence_ok(self, guest, now=None):
+        """Whether this connection's authenticator code is still standing.
+
+        A code proves somebody is *there*. That fact does not evaporate the
+        instant a socket drops, and treating it as though it did is what made
+        the desk unusable: every reconnect asked for six more digits, in the
+        middle of driving a cursor.
+
+        So it lasts code_grace_minutes, and touch_presence puts it forward on
+        every use -- so somebody working is never asked twice, and somebody
+        who left half an hour ago is asked again. The scope is this
+        connection, not this account: the guest token that survives a dropped
+        socket is what says it is still the same person, and a remembered
+        device on somebody else's phone gets nothing from it.
+        """
+        if not guest.logged_in_at:
+            return False
+        grace = getattr(self.cfg, "code_grace_minutes", 30) or 0
+        if grace <= 0:
+            # Asking every time, which is what this used to do. Kept because
+            # somebody running this somewhere less friendly may want it.
+            return False
+        now = self._now() if now is None else now
+        return (now - guest.logged_in_at) <= grace * 60
+
+    def touch_presence(self, guest, now=None):
+        """Being at the desk is evidence of being at the desk."""
+        if guest.logged_in_at:
+            guest.logged_in_at = self._now() if now is None else now
+
     def logout(self, guest):
         guest.account = None
         guest.capabilities = ()
@@ -1008,9 +1038,12 @@ class LiveSession:
             # on a remembered device. And the welcome says who they are, which
             # is what stops the page and the host disagreeing again.
             if existing.account:
-                existing.logged_in_at = 0.0
-                log.info("%s came back on their token, still %s (a code will "
-                         "be asked for again)", existing.label, existing.account)
+                # The moment of the code is kept, and presence_ok decides
+                # whether it is still worth anything. Zeroing it here meant a
+                # phone that changed network mid-session was asked for six
+                # digits to carry on using the cursor it was already holding.
+                log.info("%s came back on their token, still %s",
+                         existing.label, existing.account)
             return existing
         # The name they gave when they first joined is on the invite's record,
         # so coming back does not turn them into "Player 3" again. A name sent

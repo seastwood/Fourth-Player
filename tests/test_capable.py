@@ -651,8 +651,16 @@ same = session.resume("their-token", object(), "")
 check(same is back_in, "a resume puts them back in the same seat")
 check(not session.holding(same)[0],
       "and the game is still theirs to play: %r" % (session.holding(same),))
-check(same.logged_in_at == 0.0,
-      "though the authenticator code is not still fresh")
+# The moment of the code is kept across the resume now, and presence_ok is
+# what decides whether it is still worth anything. It used to be thrown away
+# here, which meant a phone changing network was asked for six digits to carry
+# on using the cursor it was already holding.
+check(same.logged_in_at == back_in.logged_in_at,
+      "and the moment of the authenticator code came back with the seat")
+check(session.presence_ok(same),
+      "so a code given a moment ago still counts after a dropped socket")
+check(not session.presence_ok(same, now=same.logged_in_at + 31 * 60),
+      "but not half an hour later, when whoever gave it may be long gone")
 
 print("\none missed poll does not mean the game has gone")
 # It was logged as "the Steam game has gone" and back again four seconds later

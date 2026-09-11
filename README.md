@@ -468,6 +468,18 @@ the moment they are used, **even from a remembered device**. A remembered
 device says who somebody is; it does not stand in for their being there. A
 device stays remembered for a fortnight.
 
+That code then stands for **30 minutes**, and every use of it puts the clock
+forward — so somebody working at the desk is never asked twice, and somebody
+who wandered off half an hour ago is asked again. `code_grace_minutes` in the
+config changes it; `0` asks every single time.
+
+The window belongs to the connection, not to the account. A dropped socket
+keeps it, which is the point — sockets drop constantly, and the desk is held
+for long stretches, so proving presence per-socket meant being asked for six
+digits over and over to go on using a cursor already in your hand. Another
+device logged into the same account gets nothing from it, however recently the
+first one proved anything.
+
 ## The desk
 
 An account with `desk` can drive the console itself — a real keyboard and a

@@ -394,13 +394,19 @@ class Server:
             await outbox.put({"t": "error", "reason": "denied",
                               "message": "You have not been given that."})
             return
-        if capability in accounts.NEEDS_CODE and not guest.logged_in_at:
+        if capability in accounts.NEEDS_CODE:
             # A remembered device says who somebody is. It does not stand in
             # for being there, and these are the ones that land on other
-            # people.
-            await outbox.put({"t": "error", "reason": "code",
-                              "message": "Enter your authenticator code first."})
-            return
+            # people. But a code that was given a minute ago still proves it,
+            # so presence_ok decides rather than "was one given on exactly
+            # this socket" -- see the comment there for what that cost.
+            if not self.session.presence_ok(guest):
+                await outbox.put({
+                    "t": "error", "reason": "code",
+                    "message": "Enter your authenticator code first."})
+                return
+            # Using it is being there, so the clock starts again.
+            self.session.touch_presence(guest)
 
         if kind == "limit":
             became = self.session.set_limit(message.get("count") or 0, by=guest)
@@ -518,7 +524,7 @@ class Server:
             self._send_one(changed, {"t": "loggedin", "name": changed.account,
                                      "can": list(changed.capabilities),
                                      "primary": bool(changed.primary),
-                                     "fresh": bool(changed.logged_in_at)})
+                                     "fresh": self.session.presence_ok(changed)})
         await outbox.put({"t": "granted", "name": target["name"],
                           "can": sorted(set(wanted))})
 
@@ -813,7 +819,7 @@ class Server:
             # the whole fault this replaced was the two of them disagreeing.
             signed_in = {"name": guest.account, "can": list(guest.capabilities),
                          "primary": bool(guest.primary),
-                         "fresh": bool(guest.logged_in_at)}
+                         "fresh": self.session.presence_ok(guest)}
 
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,

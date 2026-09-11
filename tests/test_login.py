@@ -266,8 +266,17 @@ check(back is guest, "resume gives the same connection back")
 check(back.account == "seth" and back.capabilities,
       "and who they are comes back with the seat: %r %r"
       % (back.account, back.capabilities))
-check(back.logged_in_at == 0.0,
-      "but the moment of the code does not, so kick and lock ask again")
+# It used to be thrown away here, so every dropped socket asked for six more
+# digits. Sockets drop constantly -- a stalled encoder, a browser refusing the
+# video, a phone changing network -- and the desk is held for long stretches,
+# so that arrived as being asked for a code over and over to use a cursor that
+# was already in someone's hand.
+check(back.logged_in_at == guest.logged_in_at,
+      "and so does the moment of the code, so a dropped socket does not ask "
+      "for six more digits")
+check(session.presence_ok(back), "which is what the gate reads")
+check(not session.presence_ok(back, now=back.logged_in_at + 31 * 60),
+      "and it does lapse, so somebody who wandered off is asked again")
 
 print("\nand a remembered device is how it comes back")
 srv, session, loop = make_server()
