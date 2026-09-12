@@ -26,11 +26,30 @@ RestartSec=3
 # one service is a far better outcome than losing the machine, and the log
 # says plainly which it was.
 #
-# MemoryHigh throttles first, which is the polite warning, and MemoryMax is
-# the hard stop. Both are enormous next to the numbers above, so nothing
-# legitimate should ever reach them; a run that does is a bug, and it is
-# supposed to be noticed.
-MemoryHigh=1500M
+# MemoryHigh throttles first and MemoryMax is the hard stop. Both are enormous
+# next to the numbers above, so nothing legitimate should ever reach them; a run
+# that does is a bug, and it is supposed to be noticed.
+#
+# The gap between them used to be 500 MB, and on 2026-09-12 that gap was where
+# the service spent twenty hours. A leak in the peer teardown took it to 1.8 GB
+# -- above MemoryHigh, below MemoryMax -- and MemoryHigh does not kill, it
+# throttles: the kernel held every thread in the cgroup in reclaim for 77% of
+# the time and left the unit "active (running)" throughout. Nothing was killed,
+# so nothing was restarted and nothing was logged. The picture froze every few
+# seconds and guests typing the PIN were told the host did not answer, for the
+# whole day, because a service too slow to answer is indistinguishable from a
+# healthy one to everything except the people using it.
+#
+# So the throttle window is now 100 MB wide: wide enough to absorb a spike,
+# far too narrow to live in. A leak crosses it and meets MemoryMax, the kernel
+# kills the process, Restart=on-failure brings it back in three seconds, and
+# the journal says plainly that it was killed for memory. Three seconds of
+# "reconnecting" that mends itself beats a day of a host that will not answer.
+#
+# The early warning that was missing is in the program now: see
+# _watch_memory in server.py, which says so at 600 MB and again whenever the
+# kernel reports it has been stalled on memory at all.
+MemoryHigh=1900M
 MemoryMax=2G
 
 # A bigger share of the processor, but only when there is a fight for it.
