@@ -3278,6 +3278,67 @@ function startPadLoop() {
   });
 }
 
+/* Which attached pad this panel is setting up; null means this page's own.
+ *
+ * Everything in here -- the grid, "Fix my buttons", swap sticks, the stick
+ * tuning -- reads livePad() and writes under the name in `padName`, so
+ * pointing both at another pad is all it takes to set that one up instead.
+ * Safe while the panel is open because tick() stops sending this page's own
+ * frames then; extra seats carry on, and they read their corrections from
+ * storage by their own name rather than from padName, so nothing they send is
+ * disturbed by this. */
+let fixingIndex = null;
+let ownPadName = "";
+
+/* Point the panel at one of the attached controllers. */
+function fixPad(index) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  if (index === null || !pads[index] || !pads[index].connected) {
+    fixingIndex = null;
+    padName = ownPadName || padName;
+  } else {
+    fixingIndex = index;
+    padName = shortPadName(pads[index].id || "");
+  }
+  loadPadMap();                     // the map and tuning for whoever that is
+  buildPadsGrid();
+  paintPicker();
+  paintPads();
+  paintFixTarget();
+}
+
+/* The chooser itself: every controller attached, this page's own included.
+ *
+ * Named by what they are rather than by seat, because a pad that has not been
+ * seated yet still has buttons worth correcting -- somebody sorting out a
+ * controller before handing it over should not have to join first. */
+function paintFixTarget() {
+  const pick = el("pads-which");
+  if (!pick) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const found = [];
+  for (const pad of pads) {
+    if (pad && pad.connected) found.push(pad);
+  }
+  if (found.length < 2) {
+    pick.hidden = true;
+    if (fixingIndex !== null) fixPad(null);
+    return;
+  }
+  pick.hidden = false;
+  pick.innerHTML = "";
+  for (const pad of found) {
+    const opt = document.createElement("option");
+    opt.value = String(pad.index);
+    const extra = extras.get(pad.index);
+    opt.textContent = shortPadName(pad.id)
+      + (pad.index === padIndex ? " (yours)"
+         : extra ? " (" + extra.seatName() + ")" : "");
+    pick.appendChild(opt);
+  }
+  pick.value = String(fixingIndex === null ? padIndex : fixingIndex);
+}
+
 function describePad(pad) {
   /* Name the controller in the chip. This function was called from two places
      and defined in none, so every call threw and padName stayed empty: on a
@@ -3285,6 +3346,9 @@ function describePad(pad) {
      detection, and on a phone that prompt is never shown in the first place,
      so a connected controller produced no sign of itself anywhere. */
   padName = shortPadName((pad && pad.id) || "");
+  // Remembered, so the panel can point at another controller and find its way
+  // back to this one.
+  ownPadName = padName;
   loadPadMap();
   paintPicker();
 }
@@ -5475,8 +5539,11 @@ class ExtraPlayer {
   send() {
     if (!this.input || this.input.readyState !== "open") return;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads[this.index];
-    if (!pad || !pad.connected) return;
+    const raw = pads[this.index];
+    if (!raw || !raw.connected) return;
+    // Corrected the same way this page's own pad is, but by *this* pad's
+    // name: two people on one machine may hold different controllers.
+    const pad = correctedPad(raw, this.name);
     const state = FPFrame.padState(pad);
     if (this.input.bufferedAmount > BACKLOG_LIMIT) return;
     try {
@@ -6139,6 +6206,60 @@ function sticksKey() {
   return "fp-sticks:" + (padName || "pad");
 }
 
+/* The stored corrections for any controller, by name.
+ *
+ * "Fix my buttons" writes its result under the pad's name, so a second
+ * controller of the same model has always had a map waiting for it -- and
+ * never used it. ExtraPlayer.send built its frame from the raw pad, so the
+ * seats that are hardest to reach from the sofa were the only ones that could
+ * not be corrected at all: a guest whose second pad reported its buttons in a
+ * strange order had no way to say so.
+ *
+ * Read on every seat rather than cached, because the panel can rewrite it
+ * while the seat is playing and the next frame should be the corrected one.
+ */
+function mapForPad(name) {
+  const key = "fp-padmap:" + (name || "pad");
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function sticksSwappedFor(name) {
+  try {
+    return localStorage.getItem("fp-sticks:" + (name || "pad")) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+/* One pad, corrected, without touching this page's own map.
+ *
+ * Deliberately not `remapped()`: that one reads the module-level padMap and
+ * the tuning that belongs to this page's seat, which is exactly what an extra
+ * seat must not use -- two people on one machine holding different
+ * controllers need different corrections. */
+function correctedPad(pad, name) {
+  if (!pad) return pad;
+  const map = mapForPad(name);
+  const swap = sticksSwappedFor(name);
+  if (!map && !swap) return pad;
+  const buttons = !map ? pad.buttons : STANDARD_KEYS.map((_n, i) => {
+    const from = map[i];
+    return (from == null || !pad.buttons[from])
+      ? { pressed: false, value: 0 } : pad.buttons[from];
+  });
+  const axes = swap
+    ? [pad.axes[2], pad.axes[3], pad.axes[0], pad.axes[1],
+       pad.axes[4], pad.axes[5]]
+    : pad.axes;
+  return { buttons, axes, connected: pad.connected, index: pad.index,
+           id: pad.id, mapping: pad.mapping };
+}
+
 function loadPadMap() {
   try {
     const raw = localStorage.getItem(mapKey());
@@ -6437,6 +6558,7 @@ function openPads() {
   paintBuzz();
   paintStrength();
   paintControllers();
+  paintFixTarget();
   paintFaceSwap();
   paintOrient();
   paintPads();
@@ -6444,6 +6566,9 @@ function openPads() {
 
 function closePads() {
   cancelLearn();
+  // Back to this page's own controller, so the next thing opened is about the
+  // pad in this person's hands rather than whoever was being fixed last.
+  if (fixingIndex !== null) fixPad(null);
   padsOpen = false;
   remapStep = -1;
   el("pads").hidden = true;
@@ -6494,6 +6619,12 @@ function buildPadsGrid() {
  * Anything that lets one page drive two seats has to start here. */
 function livePad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  // While the panel is pointed at another controller, everything in it -- the
+  // grid, the learning walk, the stick tuning -- is about that one.
+  if (fixingIndex !== null) {
+    const chosen = pads[fixingIndex];
+    if (chosen && chosen.connected) return chosen;
+  }
   let pad = padIndex !== null ? pads[padIndex] : null;
   if (pad && !pad.connected) pad = null;
   return pad || firstFreePad(pads);
@@ -6946,6 +7077,66 @@ function paintStreamValues() {
   }
 }
 
+/* Combinations that hold together, rather than four dials and good luck.
+ *
+ * The bits are shared out across every pixel of every frame, so these are not
+ * independent settings: 1080p carries 2.25 times the pixels of 720p, and at
+ * the same bitrate each one gets 44% of what it had. Somebody who raises the
+ * size expecting a sharper picture gets a softer one, which is exactly what
+ * was reported -- "I increased the resolution to 1080p and the quality
+ * remained kind of poor", with the host faithfully sending every kilobit it
+ * had been asked for.
+ *
+ * `kbps` here is chosen to keep roughly the same bits per pixel across the
+ * list, so moving between them trades size against motion rather than quietly
+ * trading either against sharpness. The numbers are in the region game
+ * streaming actually uses: about 0.15 bits per pixel per frame, where 1080p30
+ * at 4500 -- the setting that prompted this -- is 0.07.
+ */
+const STREAM_PRESETS = [
+  { label: "Sharpest", height: 1080, fps: 60, kbps: 16000, jitter: 50,
+    why: "a wired link on this network" },
+  { label: "Sharp", height: 1080, fps: 30, kbps: 9000, jitter: 60,
+    why: "1080p that is actually sharp" },
+  { label: "Smooth", height: 720, fps: 60, kbps: 8000, jitter: 60,
+    why: "motion first -- best for anything fast" },
+  { label: "Balanced", height: 720, fps: 30, kbps: 4500, jitter: 70,
+    why: "a good default over the internet" },
+  { label: "Modest link", height: 540, fps: 30, kbps: 2500, jitter: 100,
+    why: "mobile data, or a weak uplink" },
+];
+
+/* Only the sizes this host actually offers, and only when it has said what
+   they are: a preset that sets a size the select has no option for would
+   silently leave the old one and apply a combination nobody chose. */
+function buildStreamPresets(sizes) {
+  const box = el("stream-presets");
+  if (!box) return;
+  box.innerHTML = "";
+  const have = new Set((sizes || []).map(Number));
+  for (const preset of STREAM_PRESETS) {
+    if (have.size && !have.has(preset.height)) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip stream-preset";
+    button.textContent = preset.label;
+    button.title = `${preset.height}p${preset.fps}, ${preset.kbps} kb/s \u2014 ${preset.why}`;
+    button.addEventListener("click", () => {
+      el("stream-size").value = String(preset.height);
+      el("stream-fps").value = String(preset.fps);
+      el("stream-bitrate").value = String(preset.kbps);
+      el("stream-jitter").value = String(preset.jitter);
+      const note = el("stream-preset-note");
+      if (note) {
+        note.textContent = `${preset.label}: ${preset.height}p${preset.fps} at `
+          + `${preset.kbps} kb/s \u2014 ${preset.why}. Press Apply to use it.`;
+      }
+      paintStreamValues();
+    });
+    box.appendChild(button);
+  }
+}
+
 function paintStream(state) {
   streamNow = state;
   const size = el("stream-size");
@@ -6959,6 +7150,7 @@ function paintStream(state) {
     }
   }
   if (size) size.value = String(state.height);
+  buildStreamPresets(state.sizes);
 
   // The host owns the bounds. They are in the markup too, so the controls are
   // sane before the first reply arrives, but the moment the host says what it
@@ -7011,6 +7203,13 @@ function wireStream() {
   for (const id of live) {
     const node = el(id);
     if (node) node.addEventListener("input", paintStreamValues);
+  }
+  const which = el("pads-which");
+  if (which) {
+    which.addEventListener("change", () => {
+      const value = Number(which.value);
+      fixPad(Number.isFinite(value) && value !== padIndex ? value : null);
+    });
   }
   for (const id of ["stream-size", "stream-fps", "stream-codec"]) {
     const node = el(id);

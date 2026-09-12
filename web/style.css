@@ -2270,6 +2270,18 @@ input.name {
 }
 .acct-row .choice,
 .acct-row .ghost { flex: 0 0 auto; }
+
+/* The picture presets. They wrap rather than scroll: there are five of them,
+   the panel is narrow in portrait, and a row that scrolls sideways hides the
+   options at the end from somebody who does not know they are there. */
+.stream-presets {
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.stream-preset {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
 #limit-count {
   width: 4.5rem;
   min-height: 2.6rem;

@@ -332,6 +332,14 @@
   <div id="pads" class="pads" hidden>
     <div class="browser-bar">
       <span id="pads-name" class="chip ok">no controller</span>
+      <!-- Which controller everything below is about. Hidden while there is
+           only one, because a choice of one is not a choice. It exists because
+           the second and third pads on a machine could not be corrected at
+           all: everything in this panel spoke to whichever pad this page had
+           taken for itself, so the person holding the other one had no way to
+           say their buttons were in a strange order. -->
+      <select id="pads-which" class="chip pad-only" hidden
+              aria-label="Which controller to set up"></select>
       <button id="pads-remap" type="button" class="ghost pad-only">Fix my
         buttons</button>
       <!-- Some games put the camera on the left stick and the character on the
@@ -709,6 +717,16 @@
       <section class="acct-block" id="session-stream" hidden>
         <h3 class="acct-title">The picture</h3>
         <p class="acct-state" id="stream-now">&mdash;</p>
+
+        <!-- Somewhere to start, because these dials are not independent and
+             the arithmetic that ties them together is not obvious. Raising the
+             size without raising the quality spreads the same bits over more
+             pixels and makes the picture softer, which is the opposite of what
+             anybody reaching for "bigger" expects. Each of these is a
+             combination that holds together. -->
+        <div class="acct-row stream-presets" id="stream-presets"></div>
+        <p class="footnote" id="stream-preset-note">A preset fills in the dials
+           below; nothing changes until you press Apply.</p>
 
         <div class="acct-row">
           <label class="tune-label" for="stream-size">Size</label>
