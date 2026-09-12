@@ -40,6 +40,12 @@ log = logging.getLogger("fourthplayer.video")
 # genuinely broken pipeline is reported rather than hung on.
 START_TIMEOUT = 10 * Gst.SECOND if hasattr(Gst, "SECOND") else 10_000_000_000
 
+# How long to hold a detached peer pipeline while it finds its way to NULL.
+# Generous on purpose: nothing is waiting on it (see Peer.detach), and
+# the only thing a short wait would buy is giving up on a teardown that was
+# about to finish and calling it a leak.
+TEARDOWN_TIMEOUT = 10 * Gst.SECOND if hasattr(Gst, "SECOND") else 10_000_000_000
+
 _initialised = False
 
 
@@ -1252,21 +1258,69 @@ class Peer:
             self.stage.loop.call_soon_threadsafe(self.on_broken, err.message)
 
     def detach(self):
+        """Take this guest's pipeline out of service and see it to NULL.
+
+        The waiting is done on a thread of this pipeline's own, for two
+        reasons that pull the same way.
+
+        NULL is asynchronous on a pipeline holding live ICE and DTLS
+        transports: set_state returns ASYNC and the rest happens later on
+        GStreamer's own threads. Nothing here used to wait for it, so Python
+        dropped its last reference while the state change was still in flight
+        -- and a pipeline mid-transition is kept alive by those threads, which
+        then never end. The process was left holding the whole thing. Measured
+        on the console after a day: four `peer_slot0` pipelines still running
+        with their appsrcs, nice agents and RTP sessions, for guests who had
+        long since left, and 1.8 GB of anonymous memory with nobody connected
+        at all -- against 87 MB for a capture with no guests.
+
+        What made that a broken host rather than a big one: past MemoryHigh the
+        kernel throttles the cgroup instead of killing it, so the service never
+        fell over. It went slow -- memory.pressure full at 77%, three million
+        throttle events -- until an attach could no longer finish inside
+        PIPELINE_TIMEOUT, and everybody who typed the PIN after that was told
+        the host did not answer.
+
+        And the wait cannot happen where detach is called from: that is
+        `stage.mutations`, the single worker that also serves every add_peer.
+        A teardown measured at 7.8s would hold the next guest's attach up for
+        7.8s, which is the starvation reset_worker exists to paper over. So the
+        reference goes to a thread whose only job is to hold it until NULL
+        lands, and the worker goes straight back to its queue.
+        """
         if self.pipeline is None:
             return
-        started = time.monotonic()
         self._disconnect_all()
         self.on_dead = self.on_broken = self.on_input = self.on_desk = None
         pipeline, self.pipeline = self.pipeline, None
         self.webrtc = self.channel = self.desk_channel = None
         self._sources = {}
-        try:
-            pipeline.set_state(Gst.State.NULL)
-        except Exception as exc:
-            log.warning("peer %s did not stop cleanly: %s", self.id, exc)
-        took = time.monotonic() - started
-        if took > 1.0:
-            log.warning("peer %s took %.1fs to detach", self.id, took)
+        who = self.id
+
+        def see_it_to_null():
+            started = time.monotonic()
+            try:
+                pipeline.set_state(Gst.State.NULL)
+                # This frame holds the last reference until the state change
+                # has actually finished, which is the entire point of the
+                # thread. Do not be tempted to drop it and return early.
+                _, state, _ = pipeline.get_state(TEARDOWN_TIMEOUT)
+            except Exception as exc:
+                log.warning("peer %s did not stop cleanly: %s", who, exc)
+                return
+            took = time.monotonic() - started
+            if state != Gst.State.NULL:
+                # The leak, said out loud. It is the one thing that used to
+                # happen in complete silence, and a day of it is a host that
+                # stops answering the PIN.
+                log.warning("peer %s did not reach NULL in %.1fs (stuck at "
+                            "%s); its threads and memory are still held",
+                            who, took, state)
+            elif took > 1.0:
+                log.warning("peer %s took %.1fs to stop", who, took)
+
+        threading.Thread(target=see_it_to_null, name=f"teardown-{who}",
+                         daemon=True).start()
 
     def _connect(self, obj, signal, handler):
         self._handlers.append((obj, obj.connect(signal, handler)))
