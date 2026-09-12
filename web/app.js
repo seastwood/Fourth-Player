@@ -531,22 +531,62 @@ function clearRejoinTimer() {
 // has to be long enough for a couple of backoff steps on a slow network.
 const REJOIN_LIMIT_MS = 20000;
 
+/* How many unanswered resumes before the PIN screen goes back up.
+ *
+ * More than one, because a single unanswered resume says nothing about the
+ * credential. The host re-offers to every guest whenever the picture or the
+ * codec changes -- which a repick does, since closing the game changes the
+ * screen -- and a resume landing in the middle of that rebuild can easily
+ * outlast one deadline on a host that is busy. */
+const REJOIN_MAX_TRIES = 3;
+let rejoinTries = 0;
+
 function armRejoinTimer() {
   clearRejoinTimer();
   rejoinTimer = setTimeout(() => {
     rejoinTimer = null;
+    if (ended) return;
+    // A resume that was not answered is not evidence that the credential is
+    // bad, and this used to treat it as proof: one quiet twenty seconds and
+    // askForPin threw the guest token away -- the only thing that could have
+    // got them back in, since reconnectSoon does nothing without one. The
+    // host had refused nothing. Somebody watching the television press
+    // "Repick player slots" was put back to the PIN screen by it, because
+    // closing the game changes the screen, every guest is re-offered, and a
+    // resume arriving during that rebuild can outlast one deadline.
+    //
+    // So try again, and keep the credential either way. Only the host saying
+    // no is a reason to stop believing in it.
+    if (rejoinTries < REJOIN_MAX_TRIES) {
+      rejoinTries += 1;
+      setLink("warn", "still getting you back in\u2026");
+      // Straight away rather than on the backoff: the deadline has already
+      // been the wait.
+      retries = 0;
+      reconnectSoon();
+      armRejoinTimer();
+      return;
+    }
+    rejoinTries = 0;
     // Whichever screen they are on. This used to be `if (!gate.hidden)` --
     // only when the join screen was already showing, which is the one case
     // where nobody needs to be sent to it. Somebody who was playing, and is
     // the person this was written for, got nothing. A resume that lands
     // clears the timer, so there is no need to ask again whether it did.
-    if (!ended) askForPin("That did not get you back in.");
+    askForPin("That did not get you back in.", false);
   }, REJOIN_LIMIT_MS);
 }
 
-function askForPin(why) {
-  guestToken = null;
-  try { localStorage.removeItem(credKey()); } catch (_) {}
+function askForPin(why, forget = true) {
+  // `forget` false keeps the stored credential while still showing the PIN
+  // screen. The two used to be one action, so every route to this screen --
+  // including a resume that was merely slow -- destroyed a credential that
+  // may well have still been good. Only a refusal from the host is evidence
+  // about the credential; a silence is evidence about the network.
+  if (forget) {
+    guestToken = null;
+    try { localStorage.removeItem(credKey()); } catch (_) {}
+  }
   clearRejoinTimer();
   backToGate();
   el("pin").placeholder = "000000";
@@ -695,6 +735,9 @@ function joined(message) {
   if (linkKey) rememberKey(linkKey);
   clearTimeout(joinTimer);
   clearRejoinTimer();
+  // Back in, so the run of unanswered resumes is over. Without this the
+  // allowance would be spent once per session rather than once per outage.
+  rejoinTries = 0;
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
