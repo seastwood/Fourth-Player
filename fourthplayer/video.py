@@ -1106,8 +1106,7 @@ class Peer:
         if self.channel is None:
             raise RuntimeError("webrtcbin would not create the input channel")
         self._connect(self.channel, "on-message-data", self._on_channel_data)
-        self._connect(self.channel, "on-open",
-                      lambda _c: log.info("peer %s: input open", self.id))
+        self._connect(self.channel, "on-open", self._on_input_open)
         self._connect(self.channel, "on-close",
                       lambda _c: log.info("peer %s: input closed", self.id))
 
@@ -1505,6 +1504,24 @@ class Peer:
         fields[typ + 1] = "srflx"
         fields = fields[:typ + 2] + ["raddr", address, "rport", port]
         return " ".join(fields)
+
+    def _on_input_open(self, _channel):
+        """The pad channel is up, which means the path is.
+
+        `ice_ok` is set here as well as from ice-connection-state, because for
+        a peer with no media that state never arrives. webrtcbin derives it
+        from its RTP transceivers, and an input-only guest -- somebody sitting
+        next to the person who has the picture -- has none, so it stays at
+        `new` and notifies nobody. The seat was then judged absent by
+        GuestConnection.has_media and swept twenty-five seconds after it was
+        made, however busily its controller was being used: a second player
+        who joined, worked, and vanished just as a game got going.
+
+        An open SCTP channel is a stronger statement than any ICE state
+        anyway. Nothing opens one without a path.
+        """
+        self.ice_ok = True
+        log.info("peer %s: input open", self.id)
 
     def _on_ice_state(self, element, _param):
         if self.webrtc is None:

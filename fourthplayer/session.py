@@ -292,7 +292,14 @@ class GuestConnection:
         channel is gone whatever else claims. An open signalling socket counts
         too, for the moment between joining and the first frame.
         """
-        if self.peer is None or not getattr(self.peer, "ice_ok", False):
+        if self.peer is None:
+            return False
+        # ICE state is evidence only for a peer that carries media. An
+        # input-only seat has no transceivers for webrtcbin to derive it from,
+        # so requiring it here swept exactly the guests this feature exists
+        # for. What is left for them is the same thing the docstring above
+        # describes: hearing from them.
+        if not self.input_only and not getattr(self.peer, "ice_ok", False):
             return False
         stamp = now if now is not None else time.monotonic()
         if self.last_input and stamp - self.last_input < SILENCE_SECONDS:
