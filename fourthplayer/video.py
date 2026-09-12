@@ -713,10 +713,48 @@ class Stage:
                     element.set_state(Gst.State.NULL)
                 except Exception:
                     pass
-        try:
-            self.pipeline.set_state(Gst.State.NULL)
-        except Exception as exc:
-            log.warning("could not stop the pipeline cleanly: %s", exc)
+        # Then the pipeline itself -- and somebody has to hold it until that
+        # finishes, for the same reason Peer.detach does.
+        #
+        # This is where the capture leaked. NULL on a pipeline this size is
+        # asynchronous, nothing waited for it, and `_recapture` drops its
+        # reference to the whole Stage the moment stop() returns. The
+        # transition was left in flight with no owner, so GStreamer's threads
+        # kept the pipeline alive for ever -- and this pipeline holds
+        # `vah264enc`, the hardware encoder, whose VA context brings a set of
+        # Mesa driver threads with it. Measured on 2026-09-12: threads went
+        # 25 at startup, 48, then 96, with 64 MB malloc arenas behind them, and
+        # the process put on well over a gigabyte in nineteen minutes across
+        # four recaptures. The `gst_object_unref: assertion ref_count > 0`
+        # lines in the journal sit exactly on "encoding with vah264enc",
+        # which is the previous encoder still being alive as the next one is
+        # built.
+        #
+        # A recapture happens whenever the picture or the codec changes -- a
+        # second guest arriving and forcing H.264 does it -- so this was the
+        # expensive leak, not the per-guest one.
+        #
+        # Sources are already silenced above, so the GPU cost has stopped
+        # whatever this thread goes on to find. Nothing waits on it.
+        pipeline = self.pipeline
+        def see_it_to_null():
+            started = time.monotonic()
+            try:
+                pipeline.set_state(Gst.State.NULL)
+                _, state, _ = pipeline.get_state(TEARDOWN_TIMEOUT)
+            except Exception as exc:
+                log.warning("could not stop the pipeline cleanly: %s", exc)
+                return
+            took = time.monotonic() - started
+            if state != Gst.State.NULL:
+                log.warning("the capture pipeline did not reach NULL in "
+                            "%.1fs (stuck at %s); its encoder and driver "
+                            "threads are still held", took, state)
+            elif took > 1.0:
+                log.info("the capture pipeline took %.1fs to stop", took)
+
+        threading.Thread(target=see_it_to_null, name="teardown-capture",
+                         daemon=True).start()
         for peer_id in list(self.peers):
             peer = self.peers.pop(peer_id, None)
             if peer is not None:
