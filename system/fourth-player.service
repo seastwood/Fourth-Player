@@ -40,16 +40,31 @@ RestartSec=3
 # whole day, because a service too slow to answer is indistinguishable from a
 # healthy one to everything except the people using it.
 #
-# So the throttle window is now 100 MB wide: wide enough to absorb a spike,
-# far too narrow to live in. A leak crosses it and meets MemoryMax, the kernel
-# kills the process, Restart=on-failure brings it back in three seconds, and
-# the journal says plainly that it was killed for memory. Three seconds of
-# "reconnecting" that mends itself beats a day of a host that will not answer.
+# Narrowing that window was tried first and does not work. With MemoryHigh at
+# 1900M and MemoryMax at 2G the service simply ground away inside the 100 MB
+# gap instead: memory.current sat at 1973 MiB, memory.events said "high 40272,
+# max 0, oom_kill 0", full pressure was ~49%, and NRestarts stayed 0 while the
+# picture stuttered for everybody. Measured 2026-09-12, an hour after the
+# 500 MB version of the same mistake.
 #
-# The early warning that was missing is in the program now: see
-# _watch_memory in server.py, which says so at 600 MB and again whenever the
-# kernel reports it has been stalled on memory at all.
-MemoryHigh=1900M
+# The reason is that throttling is self-limiting: the closer the cgroup gets to
+# MemoryMax the harder the kernel holds it back, so it approaches the ceiling
+# asymptotically and never touches it. Any gap between high and max is
+# somewhere a leak can live indefinitely, and the width of the gap only changes
+# how long it takes to settle there. MemoryHigh cannot give the behaviour this
+# service wants at any value.
+#
+# So there is deliberately no MemoryHigh. MemoryMax is the only limit, and it
+# is a wall rather than a brake: allocation runs at full speed until it, then
+# reclaim fails, the kernel kills the process, and Restart=on-failure has it
+# back in three seconds with the journal saying plainly that it was killed for
+# memory. Guests reconnect on their own tokens -- one was seen reclaiming its
+# slot that way -- so three seconds of "reconnecting" that mends itself beats
+# any length of a host that is alive and too slow to answer.
+#
+# The early warning is in the program: see _watch_memory in server.py, which
+# says so at 600 MB and again whenever the kernel reports it has been stalled
+# on memory at all.
 MemoryMax=2G
 
 # A bigger share of the processor, but only when there is a fight for it.

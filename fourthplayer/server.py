@@ -91,7 +91,7 @@ LOGIN_REFUSED = "That did not work."
 # ceiling nobody finds out about until somebody is standing at the door.
 #
 # 600 MB is seven times what a capture with no guests needs and well under
-# MemoryHigh, so crossing it is early, quiet, and always worth a look.
+# MemoryMax, so crossing it is early, quiet, and always worth a look.
 MEMORY_WATCH_INTERVAL = 60.0
 MEMORY_WARN_MB = 600
 
@@ -1395,9 +1395,10 @@ class Server:
                         "this process is holding %d MB. A capture with no "
                         "guests needs about 87 MB, so this is worth a look: "
                         "see whether any peer pipeline failed to reach NULL "
-                        "(the warning names the peer), and remember that the "
-                        "unit file throttles at MemoryHigh long before it "
-                        "kills anything", rss_mb)
+                        "(the warning names the peer). The unit kills this "
+                        "service at MemoryMax and systemd restarts it, so "
+                        "this is a warning, not a countdown to a hang",
+                        rss_mb)
 
                 if pressure is None:
                     continue
@@ -1416,7 +1417,9 @@ class Server:
                         "memory. Nothing here is fast enough to be relied on "
                         "in that state: the picture will hold still and a "
                         "guest typing the PIN may be told the host did not "
-                        "answer. Holding %d MB against the unit's MemoryHigh",
+                        "answer. Holding %d MB. If this persists the leak is "
+                        "outrunning reclaim and the kernel has not yet reached "
+                        "MemoryMax, where it would kill and restart instead",
                         full, rss_mb)
                 elif full < 1.0:
                     said_throttled = False
