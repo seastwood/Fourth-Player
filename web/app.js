@@ -3191,6 +3191,10 @@ function startPadLoop() {
     // nobody can use in the meantime.
     if (event && event.gamepad && extras.has(event.gamepad.index)) {
       dropExtra(event.gamepad.index);
+      // Unplugged rather than put down. dropExtra remembers a pad that was
+      // removed on purpose, and this was not that, so let the next press
+      // seat it again.
+      declined.delete(event.gamepad.index);
       return;
     }
     // Only this page's own controller going is a reason to offer the glass
@@ -3317,6 +3321,9 @@ function tick() {
   } else if (!pad && padIndex !== null) {
     forgetPad();                       // gone without an event, which iOS does
   }
+  // After the above and not before: the first pad to be pressed belongs to
+  // this page's own player, and only the ones after it are extra seats.
+  seatPressedPads(pads);
 
   if (!input || input.readyState !== "open") return;
   // While somebody is teaching this page which button is which, their presses
@@ -5392,6 +5399,7 @@ class ExtraPlayer {
 
 function addExtra(index) {
   if (extras.has(index) || index === padIndex) return;
+  declined.delete(index);
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const pad = pads[index];
   if (!pad || !pad.connected) return;
@@ -5402,11 +5410,62 @@ function addExtra(index) {
   report("seating a second controller: " + player.name);
 }
 
+/* Controllers taken out of the game by hand.
+ *
+ * Auto-seating would otherwise undo the Remove button on the next press, so a
+ * pad put down deliberately stays down. Pressing "Add player" clears it again,
+ * and so does unplugging: both are somebody saying what they want, and the
+ * whole point of this list is to remember that a person decided. */
+const declined = new Set();
+
+/* Seat any controller somebody is actually holding.
+ *
+ * The panel's "Add player" button still works and is still the explicit way
+ * in, but nobody should have to find it. A guest's sister plugs in a second
+ * pad for her daughter, presses A, and is a player.
+ *
+ * Presses, not presence. The comment on #pad-seats in index.html is right that
+ * a machine with three pads plugged in is usually one person and two spares --
+ * so seating everything connected would claim slots nobody asked for, out of a
+ * pool of four shared with the rest of the house. A pad nobody touches is a
+ * spare; a pad somebody presses a button on is a pad somebody is holding. That
+ * also lines up with how the browser behaves: a gamepad stays hidden until a
+ * button on it is pressed, so the reveal and the press are usually the same
+ * moment anyway.
+ *
+ * Buttons only, never axes: a stick resting off centre would seat a controller
+ * lying on the sofa, which is the failure this is meant to avoid.
+ */
+function seatPressedPads(pads) {
+  if (ended || !gate.hidden) return;   // nothing joined yet to sit beside
+  for (const pad of pads) {
+    if (!pad || !pad.connected) continue;
+    if (pad.index === padIndex) continue;       // this page's own player
+    // Already seated, or already tried and refused -- "every player slot is
+    // taken" is an answer, and asking again every frame is not.
+    if (extras.has(pad.index)) continue;
+    if (declined.has(pad.index)) continue;
+    if (!padIsPressed(pad)) continue;
+    addExtra(pad.index);
+  }
+}
+
+function padIsPressed(pad) {
+  for (const button of pad.buttons || []) {
+    // `value` as well as `pressed`: a trigger reports an analogue value on
+    // some pads and never sets the flag.
+    if (button && (button.pressed || button.value > 0.5)) return true;
+  }
+  return false;
+}
+
 function dropExtra(index) {
   const player = extras.get(index);
   if (!player) return;
   player.close();
   extras.delete(index);
+  // Said out loud, so the next press does not put them straight back.
+  declined.add(index);
   paintControllers();
 }
 
