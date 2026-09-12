@@ -868,6 +868,35 @@ class Server:
                                   "message": "The host could not start your "
                                              "video. Try again in a moment."})
                 return None
+            except Exception:
+                # Anything else the attach can raise, for the same reason and
+                # with the same remedy: say so and give the slot back.
+                #
+                # Catching only TimeoutError was still too narrow. A guest
+                # reclaiming their slot *during a recapture* met
+                # `self.stage is None` -- `_recapture` clears it while it swaps
+                # one capture for the next -- and got
+                # "AttributeError: 'NoneType' object has no attribute
+                # 'add_peer'" out of `_attach_peer`. That escaped to the
+                # websockets handler, killed the connection with nothing sent,
+                # and is the same twelve seconds of silence and the same
+                # "The host did not answer" as the timeout, arrived at by a
+                # different road. Seen at 11:44:18 on 2026-09-12, on the
+                # restart that deployed the timeout fix.
+                #
+                # A guest at the door is owed an answer whatever went wrong
+                # behind it, so this boundary refuses to let anything through
+                # unsaid. The traceback still goes to the log, because a bare
+                # message to the guest is not a diagnosis.
+                log.exception("could not attach a peer for %s; freeing the slot",
+                              getattr(guest, "label", "a guest"))
+                if guest is not None and self.session is not None:
+                    self.session.drop(guest.slot,
+                                      reason="could not be given video")
+                await outbox.put({"t": "error", "reason": "video",
+                                  "message": "The host could not start your "
+                                             "video. Try again in a moment."})
+                return None
 
         # They proved who they were at the door, so the connection carries it
         # from its first moment. Done before the welcome goes out, so what the
