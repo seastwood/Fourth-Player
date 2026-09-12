@@ -1634,7 +1634,7 @@ class LiveSession:
         if self.pads is None:
             return
         taken = {g.pad_index for g in self.guests.values()}
-        for index, _pad in list(self.pads.live()):
+        for index, pad in list(self.pads.live()):
             if index in taken:
                 continue
             if self.pads.release(index):
@@ -1650,12 +1650,17 @@ class LiveSession:
                 # visible in the rate.
                 self._orphan_unplugs = getattr(self, "_orphan_unplugs", 0) + 1
                 if self._orphan_unplugs == self.ORPHAN_ALARM:
+                    # Naming who made it, because that is the whole question
+                    # and it was not answerable before: the fight stops the
+                    # moment anybody restarts the service to look at it, so
+                    # the evidence has to be collected while it is happening.
                     log.warning(
                         "controller %d has been unplugged %d times for having "
                         "nobody on it, and something keeps making it again -- "
                         "to a game this looks like a controller connecting and "
-                        "disconnecting over and over",
-                        index, self._orphan_unplugs)
+                        "disconnecting over and over. Last made by: %s",
+                        index, self._orphan_unplugs,
+                        getattr(pad, "made_by", "") or "(unrecorded)")
                 log.info("unplugged %s: nobody is sitting on it",
                          self.pads.name_for(index))
 

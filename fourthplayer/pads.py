@@ -356,6 +356,23 @@ class PadSet:
             # re-enumerates when one does and may hand a running game to it.
             # A pad appearing repeatedly while nobody is playing means
             # somebody is reconnecting in a loop, which is worth seeing.
+            # Where it came from, kept on the pad itself.
+            #
+            # Making a device is rare by design, so the cost is nothing, and
+            # the one fault this class keeps having -- a pad made and unmade
+            # once a second, which RetroArch and Steam read as a controller
+            # connecting and disconnecting forever -- is invisible without it.
+            # The janitor can say who it is fighting instead of only that it
+            # is fighting. Seen again on 2026-09-12 and not caught, because
+            # restarting to look stopped it.
+            try:
+                import traceback
+                pad.made_by = " <- ".join(
+                    "%s:%s:%s" % (f.filename.rsplit("/", 1)[-1], f.lineno,
+                                  f.name)
+                    for f in traceback.extract_stack()[-5:-1])
+            except Exception:
+                pad.made_by = ""
             log.info("plugged in %s (seat %d)", self.names[index], index)
         return pad
 

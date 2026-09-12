@@ -378,16 +378,37 @@ def player_ports():
     return ports_from_paths(paths, len(seen))
 
 
+# What this last complained about, so an unchanging answer is said once
+# rather than on every poll. Keyed by the thing being complained about, not by
+# time: the point is to say it when it changes and then be quiet.
+_said_unreadable = {}
+
+
 def ports_from_paths(paths, emulators=0):
-    """The first config among these that says which pad is which player."""
+    """The first config among these that says which pad is which player.
+
+    Said once per distinct answer rather than on every call. This is polled
+    every shell_poll_ms -- twice a second in practice -- and a game started
+    from outside the picker, or with a config this cannot parse, is a standing
+    condition rather than an event. It was filling the journal with the same
+    two lines forever: thousands of identical entries saying nothing had
+    changed, which buries the entries that mean something.
+    """
     for path in paths:
         ports = ports_from_config(path)
         if ports:
+            # It reads now, so the next failure is news again.
+            _said_unreadable.pop(path, None)
+            _said_unreadable.pop("emulators", None)
             return ports
-        log.info("nothing about players could be read from %s", path)
-    if emulators:
+        if _said_unreadable.get(path) is None:
+            _said_unreadable[path] = True
+            log.info("nothing about players could be read from %s "
+                     "(said once until it changes)", path)
+    if emulators and _said_unreadable.get("emulators") != emulators:
+        _said_unreadable["emulators"] = emulators
         log.info("%d emulator process(es) running and none named a config "
-                 "this can read", emulators)
+                 "this can read (said once until it changes)", emulators)
     return {}
 
 
