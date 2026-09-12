@@ -5285,6 +5285,54 @@ class ExtraPlayer {
     this.state = "joining";
     this.error = "";
     this.closed = false;
+    // The host said no, for a reason trying again will not change. Distinct
+    // from `closed`, which means this page shut the seat down on purpose.
+    this.refused = false;
+    this.tries = 0;                     // reconnects attempted for this seat
+    this.retryTimer = null;
+  }
+
+  /* Bring this seat back without anybody being asked to do anything.
+   *
+   * A seat whose socket or pad channel dropped used to sit in the list saying
+   * "disconnected" for ever, and the only way back was Remove followed by Add
+   * player -- and Remove declines the pad, so even pressing a button on it did
+   * nothing. Somebody holding a working controller had to go and operate a
+   * menu with it to get it back, which is exactly the thing this feature is
+   * supposed to spare them.
+   *
+   * The page's own seat has had this all along in reconnectSoon; this is the
+   * same courtesy for the second, third and fourth. The backoff is the same
+   * shape and capped, and a seat that will not come back after
+   * EXTRA_MAX_TRIES is dropped out of the list entirely rather than left as a
+   * dead row: the pad is in somebody's hands, so the next button they press
+   * seats it again through the ordinary path.
+   */
+  retrySoon() {
+    if (this.closed || this.refused || this.retryTimer) return;
+    if (this.tries >= EXTRA_MAX_TRIES) {
+      // Out of the list, but NOT declined: declining is what a person does by
+      // pressing Remove, and nobody pressed anything here.
+      const index = this.index;
+      this.close();
+      extras.delete(index);
+      paintControllers();
+      return;
+    }
+    const wait = Math.min(8000, 500 * Math.pow(2, this.tries));
+    this.tries += 1;
+    this.state = "joining";
+    this.error = "";
+    paintControllers();
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (this.closed) return;
+      try { if (this.pc) this.pc.close(); } catch (_) {}
+      try { if (this.socket) this.socket.close(); } catch (_) {}
+      this.pc = this.input = this.socket = null;
+      this.seq = 0;                     // a new sender starts counting again
+      this.open();
+    }, wait);
   }
 
   seatName() {
@@ -5331,6 +5379,7 @@ class ExtraPlayer {
       this.state = "failed";
       this.error = "disconnected";
       paintControllers();
+      this.retrySoon();
     });
     this.socket.addEventListener("error", () => {
       if (this.closed) return;
@@ -5351,6 +5400,12 @@ class ExtraPlayer {
     }
     if (message.t === "error") {
       this.state = "failed";
+      // A full session is a queue, not a refusal: somebody leaving makes room,
+      // and the pad is still in somebody's hand. Anything else the host says
+      // no to -- a dead credential, a locked session -- is answered by not
+      // asking again.
+      if (message.reason === "full") this.retrySoon();
+      else this.refused = true;
       // The host's own words. "Every player slot is taken" is the answer
       // somebody needs, and inventing a friendlier one would lose it.
       this.error = message.message || "refused";
@@ -5377,6 +5432,10 @@ class ExtraPlayer {
       this.input.binaryType = "arraybuffer";
       this.input.addEventListener("open", () => {
         this.state = "playing";
+        this.error = "";
+        // Back in, so the allowance is spent per outage rather than once for
+        // the life of the seat.
+        this.tries = 0;
         paintControllers();
       });
       this.input.addEventListener("close", () => {
@@ -5384,6 +5443,7 @@ class ExtraPlayer {
         this.state = "failed";
         this.error = "controller offline";
         paintControllers();
+        this.retrySoon();
       });
     });
     this.pc.addEventListener("icecandidate", (event) => {
@@ -5461,6 +5521,12 @@ function addExtra(index) {
  * whole point of this list is to remember that a person decided. */
 const declined = new Set();
 
+/* How many times a dropped extra seat lets itself back in before giving up
+ * and leaving the list. Generous, because the cost of trying is one websocket
+ * and the cost of not trying is somebody holding a controller that does
+ * nothing. */
+const EXTRA_MAX_TRIES = 6;
+
 /* Seat any controller somebody is actually holding.
  *
  * The panel's "Add player" button still works and is still the explicit way
@@ -5505,6 +5571,7 @@ function padIsPressed(pad) {
 function dropExtra(index) {
   const player = extras.get(index);
   if (!player) return;
+  if (player.retryTimer) { clearTimeout(player.retryTimer); player.retryTimer = null; }
   player.close();
   extras.delete(index);
   // Said out loud, so the next press does not put them straight back.
