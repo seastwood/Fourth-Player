@@ -95,6 +95,10 @@ LOGIN_REFUSED = "That did not work."
 MEMORY_WATCH_INTERVAL = 60.0
 MEMORY_WARN_MB = 600
 
+# How much reclaimed heap is worth a line in the log. Small amounts are the
+# ordinary churn of a running capture; a large one says the arenas had grown.
+MEMORY_TRIM_NOTE_MB = 50
+
 
 class Server:
     def __init__(self, cfg: Config):
@@ -1403,6 +1407,25 @@ class Server:
         and an attach is already at risk of missing PIPELINE_TIMEOUT, whatever
         else looks healthy.
         """
+        # Handing free heap back to the kernel, which glibc will not do on
+        # its own. free() returns memory to an arena, not to the system, so a
+        # burst of allocation leaves the resident size high for ever after --
+        # and the arena cap in the unit file limits how many arenas there are,
+        # not how much each one holds. malloc_trim releases what is genuinely
+        # unused at the top of each one.
+        #
+        # It also proves the diagnosis every time it runs: if this reclaims
+        # hundreds of megabytes then the memory was free heap rather than
+        # anything leaked, which is precisely the distinction that took all
+        # day to establish.
+        trim = None
+        try:
+            import ctypes
+            trim = ctypes.CDLL("libc.so.6").malloc_trim
+            trim.argtypes = [ctypes.c_size_t]
+        except Exception:
+            pass                     # not glibc: the arena cap still applies
+
         pressure = None
         try:
             with open("/proc/self/cgroup") as handle:
@@ -1436,6 +1459,20 @@ class Server:
                         "service at MemoryMax and systemd restarts it, so "
                         "this is a warning, not a countdown to a hang",
                         rss_mb)
+
+                if trim is not None:
+                    before = rss_mb
+                    trim(0)
+                    with open("/proc/self/status") as handle:
+                        for line in handle:
+                            if line.startswith("VmRSS:"):
+                                rss_mb = int(line.split()[1]) // 1024
+                                break
+                    if before - rss_mb >= MEMORY_TRIM_NOTE_MB:
+                        log.info("gave %d MB of free heap back to the system "
+                                 "(now %d MB). That much sitting in glibc's "
+                                 "arenas is ordinary for this workload and is "
+                                 "not a leak", before - rss_mb, rss_mb)
 
                 if pressure is None:
                     continue

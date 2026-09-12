@@ -67,6 +67,26 @@ RestartSec=3
 # on memory at all.
 MemoryMax=2G
 
+# Two arenas, not forty-eight.
+#
+# glibc gives each thread that contends for the heap its own 64 MB arena, up
+# to eight per core. This machine has six cores, so the ceiling is 48 arenas
+# and 3 GB of address space that malloc may hold on to without ever returning
+# it -- more than MemoryMax, so the service can be killed for memory without
+# leaking a single object.
+#
+# That is what was happening. Measured 2026-09-12 with guests connected:
+# 1.4 GB of anonymous memory sitting in twenty ~64 MB mappings, while live
+# GstBuffers stayed flat at ~533, threads flat, file descriptors flat and no
+# pipeline failing to reach NULL. Nothing was leaking; the heap simply grew a
+# new arena per thread and kept the freed space. It never showed up in testing
+# because a synthetic guest runs at 21-50 threads where a real session runs at
+# 90-110, and the arenas only appear under that contention.
+#
+# Two arenas costs a little lock contention on a service that is not
+# malloc-bound, and takes the ceiling from 3 GB to 128 MB.
+Environment=MALLOC_ARENA_MAX=2
+
 # A bigger share of the processor, but only when there is a fight for it.
 #
 # This is the one process on the machine whose lateness everybody sees. A game
