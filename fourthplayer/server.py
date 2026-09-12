@@ -69,13 +69,31 @@ REFUSED = "That link or PIN is not valid."
 # used to treat all of them alike and could not tell "your link is stale"
 # from "come back in a minute".
 ERROR_REASONS = ("credential", "closed", "full", "locked", "request",
-                 "login", "shut", "denied", "code")
+                 "login", "shut", "denied", "code", "video")
 
 # One line for a name that does not exist, a wrong password and a wrong code
 # alike. Saying which half was wrong tells somebody guessing which half to
 # keep working on, and the person who mistyped their own code does not need
 # telling -- they know.
 LOGIN_REFUSED = "That did not work."
+
+# How often to look at how much memory this process is using, and the point at
+# which it is worth saying so.
+#
+# Not a limit -- the unit file has those. This is the early warning the limits
+# could not give, and it exists because of the way the service failed on
+# 2026-09-12: a leak took it to 1.8 GB, it crossed MemoryHigh, and the kernel
+# throttled the cgroup rather than killing it. Nothing was logged, nothing
+# crashed, and the service stayed "active (running)" for twenty hours while
+# being too slow to answer anybody -- guests who typed the PIN were told the
+# host did not answer, and the only trace was a stall warning every few
+# seconds blaming the video. A ceiling that is only enforced silently is a
+# ceiling nobody finds out about until somebody is standing at the door.
+#
+# 600 MB is seven times what a capture with no guests needs and well under
+# MemoryHigh, so crossing it is early, quiet, and always worth a look.
+MEMORY_WATCH_INTERVAL = 60.0
+MEMORY_WARN_MB = 600
 
 
 class Server:
@@ -785,19 +803,6 @@ class Server:
             await outbox.put({"t": "error", "message": REFUSED,
                               "reason": "credential"})
             return None
-        except asyncio.TimeoutError:
-            # The pipeline worker is wedged behind a teardown that will not
-            # finish. Saying so beats leaving them on "rejoining" forever --
-            # and the slot has to go back, or a few timeouts fill the session
-            # with people who never got a picture.
-            log.error("timed out attaching a peer for %s; freeing the slot",
-                      getattr(guest, "label", "a guest"))
-            if guest is not None and self.session is not None:
-                self.session.drop(guest.slot, reason="could not be given video")
-            await outbox.put({"t": "error",
-                              "message": "The host could not start your video. "
-                                         "Try again in a moment."})
-            return None
 
         # Route through whatever socket the guest currently holds, rather than
         # capturing this one: they may reconnect their signalling several times
@@ -836,7 +841,33 @@ class Server:
             guest.peer._on_signal = on_signal
             log.info("%s: signalling restored, stream untouched", guest.label)
         else:
-            await self.session.attach_peer(guest, on_signal)
+            try:
+                await self.session.attach_peer(guest, on_signal)
+            except asyncio.TimeoutError:
+                # The pipeline worker is wedged behind a teardown that will not
+                # finish. Saying so beats leaving them on "rejoining" forever --
+                # and the slot has to go back, or a few timeouts fill the
+                # session with people who never got a picture.
+                #
+                # This block was written for exactly this and guarded the wrong
+                # statement: it sat on the `try` that claims a slot, which calls
+                # `admit` and `resume` -- both synchronous, neither able to raise
+                # asyncio.TimeoutError -- while the one await that does raise it
+                # was left bare. So it was unreachable, the error came out
+                # through `_guest` and killed the connection handler with
+                # nothing sent, and the guest sat looking at a silent socket
+                # until their own 12s deadline said "The host did not answer."
+                # Every word of the message below was already right; it had
+                # simply never once been delivered.
+                log.error("timed out attaching a peer for %s; freeing the slot",
+                          getattr(guest, "label", "a guest"))
+                if guest is not None and self.session is not None:
+                    self.session.drop(guest.slot,
+                                      reason="could not be given video")
+                await outbox.put({"t": "error", "reason": "video",
+                                  "message": "The host could not start your "
+                                             "video. Try again in a moment."})
+                return None
 
         # They proved who they were at the door, so the connection carries it
         # from its first moment. Done before the welcome goes out, so what the
@@ -1316,6 +1347,82 @@ class Server:
 
     # -- running ------------------------------------------------------------
 
+    async def _watch_memory(self):
+        """Say when this process is growing, and when it is being throttled.
+
+        Two separate things, and the second is the one that actually bit.
+
+        Growth is read from VmRSS: reported once when it first passes
+        MEMORY_WARN_MB and then only when it passes each further multiple of
+        it, so a genuine leak leaves a rising trail in the journal instead of
+        one line an hour for ever.
+
+        Throttling is read from the cgroup's own memory.pressure. `full`
+        counts the share of time in which *every* task in the cgroup was
+        stalled waiting on memory -- so it is not a guess about what a number
+        of megabytes might mean, it is the kernel saying this service was not
+        running. It sat at 77% for twenty hours with nobody the wiser. Anything
+        sustained above a few percent means the picture is already stuttering
+        and an attach is already at risk of missing PIPELINE_TIMEOUT, whatever
+        else looks healthy.
+        """
+        pressure = None
+        try:
+            with open("/proc/self/cgroup") as handle:
+                # "0::/user.slice/.../fourth-player.service"
+                where = handle.read().strip().split("::")[-1]
+            candidate = "/sys/fs/cgroup" + where + "/memory.pressure"
+            if os.path.exists(candidate):
+                pressure = candidate
+        except OSError:
+            pass            # cgroup v1, or a container: RSS still works
+
+        said_at = 0
+        said_throttled = False
+        while True:
+            await asyncio.sleep(MEMORY_WATCH_INTERVAL)
+            try:
+                rss_mb = 0
+                with open("/proc/self/status") as handle:
+                    for line in handle:
+                        if line.startswith("VmRSS:"):
+                            rss_mb = int(line.split()[1]) // 1024
+                            break
+                step = rss_mb // MEMORY_WARN_MB
+                if step > said_at:
+                    said_at = step
+                    log.warning(
+                        "this process is holding %d MB. A capture with no "
+                        "guests needs about 87 MB, so this is worth a look: "
+                        "see whether any peer pipeline failed to reach NULL "
+                        "(the warning names the peer), and remember that the "
+                        "unit file throttles at MemoryHigh long before it "
+                        "kills anything", rss_mb)
+
+                if pressure is None:
+                    continue
+                full = 0.0
+                with open(pressure) as handle:
+                    for line in handle:
+                        if line.startswith("full "):
+                            for field in line.split():
+                                if field.startswith("avg300="):
+                                    full = float(field.split("=")[1])
+                if full >= 5.0 and not said_throttled:
+                    said_throttled = True
+                    log.error(
+                        "the kernel has stalled every thread in this service "
+                        "for %.0f%% of the last five minutes, waiting on "
+                        "memory. Nothing here is fast enough to be relied on "
+                        "in that state: the picture will hold still and a "
+                        "guest typing the PIN may be told the host did not "
+                        "answer. Holding %d MB against the unit's MemoryHigh",
+                        full, rss_mb)
+                elif full < 1.0:
+                    said_throttled = False
+            except (OSError, ValueError):
+                pass                 # never let a diagnostic end the service
+
     async def run(self):
         self.loop = asyncio.get_running_loop()
         context = None
@@ -1363,9 +1470,13 @@ class Server:
 
         self._restore_session()
 
+        # Started last, so it never delays anything a guest is waiting for.
+        watchdog = self.loop.create_task(self._watch_memory())
+
         try:
             await asyncio.Future()
         finally:
+            watchdog.cancel()
             if self.session:
                 self.session.stop(reason="server shutting down")   # sync: loop is going
             for server in self._sockets:

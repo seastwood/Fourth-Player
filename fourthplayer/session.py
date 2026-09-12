@@ -123,7 +123,16 @@ STATE_PATH = os.path.expanduser("~/.local/state/fourth-player/session.json")
 # Tearing down a peer whose network vanished is exactly that slow case, and a
 # guest reconnecting is exactly who is behind it -- so the wait is bounded and
 # the guest is told, rather than left watching "rejoining" forever.
-PIPELINE_TIMEOUT = 12.0
+#
+# Five and not twelve, and the number is not arbitrary: the browser gives up on
+# an unanswered join after 12s (`joinTimer` in web/app.js). At 12.0 here, one
+# attempt used the browser's whole patience, so the retry below it -- which
+# exists precisely to save the guest who tripped the reset -- could not start
+# until after they had already been told the host did not answer. Two attempts
+# at 5s, with the worker reset between them, come to about 10s and land inside
+# it. A healthy attach is far quicker than either number, so nothing that works
+# today waits longer for it.
+PIPELINE_TIMEOUT = 5.0
 
 # How long a guest may hold a slot with no working media. Short, because losing
 # it costs them nothing: the invite still remembers them, so a guest whose slot
