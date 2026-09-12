@@ -5247,10 +5247,24 @@ class ExtraPlayer {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
     this.socket = new WebSocket(`${scheme}//${location.host}/ws`);
     this.socket.addEventListener("open", () => {
+      // Vouched for by the seat this page already holds, and only falling
+      // back to the PIN when there is no seat yet to vouch for it.
+      //
+      // It used to send the PIN alone, and that could not work for the person
+      // it was written for. `sessionPin` lives in memory and is set only when
+      // somebody types it at the gate, so a page that came back on its saved
+      // guest token -- a home screen icon, a reconnect, this host restarting
+      // underneath it -- had an empty one. Tapping "Add player" then sent no
+      // PIN at all and the host answered "That link or PIN is not valid",
+      // with nothing the guest could do about it from the sofa. The seat they
+      // are sitting in is the better credential anyway: it cannot be stale,
+      // and a guest already admitted gains nothing by being admitted twice.
+      const credential = guestToken
+        ? { beside: guestToken }
+        : { token: linkKey || "", pin: sessionPin };
       this.socket.send(JSON.stringify({
         t: "join",
-        token: linkKey || "",
-        pin: sessionPin,
+        ...credential,
         // Named after the controller rather than the person, because the
         // person is already in the list under their own name and two rows
         // called the same thing help nobody.

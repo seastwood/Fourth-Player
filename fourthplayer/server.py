@@ -770,6 +770,14 @@ class Server:
                 guest = self.session.resume(message.get("guest", ""), socket_,
                                             message.get("name", ""))
                 guest_token = message.get("guest", "")
+            elif message.get("beside"):
+                # A second controller on a machine that already has a seat.
+                # Vouched for by the seat it is sitting next to, because the
+                # PIN is not available to the page after a reconnect and
+                # asking for it again is the failure this replaces.
+                guest, guest_token = self.session.admit_beside(
+                    str(message.get("beside")), socket_, address,
+                    message.get("name", ""))
             else:
                 guest, guest_token = self.session.admit(
                     message.get("token", ""), str(message.get("pin", "")),

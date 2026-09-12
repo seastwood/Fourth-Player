@@ -866,6 +866,29 @@ class LiveSession:
         self.publish_people()
         return guest, guest_token
 
+    def admit_beside(self, guest_token, socket, address, name=""):
+        """Seat a second controller for a guest who is already in.
+
+        Everything `admit` does, with the invite spent against an existing
+        seat rather than the PIN -- see Invite.join_beside for why the PIN
+        cannot be asked for here.
+        """
+        name = clean_name(name)
+        slot, token = self.invite.join_beside(
+            guest_token, now=self._now(), address=address, label=name)
+        guest = GuestConnection(self, slot, socket, name)
+        self.guests[slot] = guest
+        self.plug_in(guest)
+        self.save()
+        log.info("%s joined beside an existing seat from %s",
+                 guest.label, address or "unknown")
+        self.warn_about_joining(guest)
+        self.publish_pad_names()
+        self.notify({"t": "arrived", "label": guest.label,
+                     "guests": len(self.guests), "slots": self.slots})
+        self.publish_people()
+        return guest, token
+
     async def agree_codec(self, guest, guest_codecs):
         """Settle on an encoding everybody watching can decode.
 

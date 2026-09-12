@@ -22,6 +22,7 @@ milliseconds instead of hours.
 import base64
 import hashlib
 import hmac
+import logging
 import math
 import secrets
 import time
@@ -33,6 +34,8 @@ PIN_DIGITS = 6
 # Ten wrong PINs destroy the invite outright. A leaked link then costs a
 # re-share and nothing more, which is a far better failure than an attacker
 # with unlimited guesses at a six-digit number.
+log = logging.getLogger("fourthplayer.invites")
+
 MAX_PIN_ATTEMPTS = 10
 
 # How long a guest who has left may come back on their own token alone. Their
@@ -255,6 +258,17 @@ class Session:
             raise InviteExpired("this invite has run out")
 
     def destroy(self):
+        """End the invite outright. Everybody in it is out.
+
+        Logged, because it used to happen in total silence. A session that
+        vanished under its guests left nothing in the journal to say it had
+        been destroyed rather than expired, crashed, or never opened -- and
+        the host, locked out alongside everybody else, had no way to tell
+        which. Whatever the reason, it is worth a line.
+        """
+        log.warning("the invite has been destroyed after %d bad PIN "
+                    "attempt(s); every guest is out and a new session must be "
+                    "opened", self.pin_attempts)
         self.destroyed = True
         self.guests.clear()
         self.forget_clear()
@@ -298,8 +312,24 @@ class Session:
             self._fail(address, now, counts=False)
             raise BadPin("that link is not for this session")
         if not _matches(pin, self.pin_digest):
-            self._fail(address, now)
-            raise BadPin("wrong PIN")
+            # An empty PIN is a malformed request, not a guess, and must not
+            # count against the tally that destroys the invite.
+            #
+            # It counted, and on 2026-09-12 it ended a session full of people.
+            # The page's second-controller seat used to join with `sessionPin`,
+            # which is empty after any reconnect, so each tap of "Add player"
+            # arrived here as a wrong PIN. Ten taps reached MAX_PIN_ATTEMPTS,
+            # `destroy()` ran, and the session died for everybody -- including
+            # the host -- while the only thing on screen was "That link or PIN
+            # is not valid". The guest was trying to seat a controller, not
+            # guess anything.
+            #
+            # It is also a denial of service on its own: anybody who can reach
+            # the page could end a session with ten empty strings, without
+            # ever knowing a single digit of the PIN. A value that carries no
+            # information cannot be evidence of guessing.
+            self._fail(address, now, counts=bool(pin))
+            raise BadPin("no PIN given" if not pin else "wrong PIN")
 
         slot = self.free_slot()
         if slot is None:
@@ -311,6 +341,40 @@ class Session:
                                   joined_at=now, label=label or f"Guest {slot + 1}",
                                   address=address)
         return slot, guest_token
+
+    def join_beside(self, guest_token, now, address="", label=""):
+        """Another slot for a machine that already holds one.
+
+        Two people on one sofa share a browser page, and the second controller
+        needs a seat of its own. It used to claim that seat the same way the
+        first one did -- with the PIN -- and that quietly could not work. The
+        PIN is held in memory only, deliberately, and set solely when it is
+        typed at the gate; a page that came back on its saved guest token never
+        had it. So the second controller sent an empty PIN, got "That link or
+        PIN is not valid", and there was no way forward from the sofa at all.
+
+        The credential here is the seat they already hold. That gives away
+        nothing: a guest who is already admitted cannot gain anything by being
+        admitted again, and `guest_for` refuses a token that was never issued,
+        belongs to another session, or has been burned by a kick. The slot
+        limit still applies, so this cannot conjure a seat that does not exist.
+
+        No PIN attempt is counted and the limiter is not consulted, for the
+        same reason `guest_for` does neither: there is no short secret being
+        guessed here, only a 43-character token that either resolves or does
+        not.
+        """
+        self.check_alive(now)
+        self.guest_for(guest_token, now)     # raises unless they really are in
+        slot = self.free_slot()
+        if slot is None:
+            raise SessionFull("every slot is taken")
+        token = new_token()
+        self.guests[slot] = Guest(slot=slot, token_digest=_digest(token),
+                                  joined_at=now,
+                                  label=label or f"Guest {slot + 1}",
+                                  address=address)
+        return slot, token
 
     def _fail(self, address, now, counts=True):
         self.limiter.record_failure(address, now)
