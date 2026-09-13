@@ -847,14 +847,55 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .tbtn-start.live { background: var(--dim); color: var(--bg); }
 
 @media (orientation: portrait) {
-  .stage { display: flex; flex-direction: column; background: #000; }
+  /* The picture fills the stage and the controls float on it, which is what
+     landscape has always done -- see the .touch rule in the landscape block.
+     Upright used to be a flex column instead: the video took the space left
+     over after the pad, so the pad sat on the stage's own black rather than on
+     the game, and that black is what shows up behind the controller and behind
+     the chip row. Zoomed in, the picture now reaches under both of them
+     instead of stopping short.
+
+     The concern the column was built around -- that a picture claiming a fixed
+     share pushes the last row of buttons off the bottom -- is answered by
+     anchoring the pad to the bottom rather than by giving it its own strip:
+     rows added to it grow upwards over the picture, and nothing can be pushed
+     past the edge it is pinned to. */
+  .stage { background: #000; }
   /* The controller takes the height it needs and the picture gets whatever is
      left, rather than the picture claiming a fixed share and pushing the last
      row of buttons off the bottom of the phone. Nothing scrolls: a control you
      have to scroll to reach is not a control. */
-  video { flex: 1 1 auto; min-height: 0; max-height: none; }
+  video {
+    /* The whole stage, with the pad and the chips drawn over it. */
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Explicit, not `inset: 0` with auto sizes. A video is a replaced element,
+       and `auto` on one of those means its intrinsic size -- the insets are
+       then over-constrained and simply ignored, which collapses the picture to
+       whatever the stream happens to be. So the size is stated, and the banner
+       below subtracts from it. */
+    width: 100%;
+    height: 100%;
+  }
+  /* Except while a banner is up, which is the one thing that still takes room
+     from the picture rather than lying over it.
+     It used to happen by accident: a banner leaves the stripped-back view,
+     leaving the view showed the pad, and the pad took its share of a flex
+     column. With the pad floating there is no such side effect, so the picture
+     is inset by hand -- by the measured height of the banner, written into
+     --banner-space when it is shown. A message that has to be read should not
+     be sitting on the game it is about. */
+  .stage.has-banner video {
+    top: var(--banner-space, 0px);
+    /* Both, for the same reason the size is stated at all: moving the top of a
+       replaced element down does not shorten it. */
+    height: calc(100% - var(--banner-space, 0px));
+  }
   .touch {
-    flex: 0 0 auto;
+    /* Over the picture, pinned to the bottom, exactly as in landscape. */
+    position: absolute;
+    inset: auto 0 0 0;
     /* Select and start angled between the bumpers, the way the pad this is
        drawn from puts them. Upright the picture sits above the pad, so height
        the pad takes is width the picture cannot have -- the video keeps its
@@ -878,7 +919,18 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     align-content: center;
     row-gap: .7rem;
     padding: .8rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    /* The container lets taps through; only the clusters take them. Required
+       now that the pad lies over the picture rather than in a strip beneath
+       it -- without this the empty space between the thumbs would swallow
+       every drag, and panning a zoomed picture would stop working across the
+       whole lower half of the screen. Landscape has always done this. */
+    pointer-events: none;
   }
+  /* Every cluster that holds a control, the shoulders included -- a child that
+     does not take pointer events never reaches the parent that turns taps into
+     buttons. */
+  .touch-left, .touch-right, .touch-mid,
+  .shoulders { pointer-events: auto; }
   /* Upright there is room below the picture, so the clusters give up less --
      but they still give up something, because two rows of controls where
      there was one has to come from somewhere and the strip is not allowed to
