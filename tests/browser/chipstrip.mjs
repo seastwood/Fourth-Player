@@ -71,6 +71,35 @@ try {
 
   check(/rgba\(0, 0, 0, 0\)|transparent/.test(seen.bg),
         `the strip paints nothing behind the chips: ${seen.bg}`);
+
+  /* And again with the keyboard and mouse picked up.
+   *
+   * Driving is a second arrangement, not a variation on the first: the strip
+   * floats back over the picture so that a message arriving cannot resize the
+   * video element underneath the pointer's arithmetic. It has its own rule,
+   * and that rule painted the panel back on -- so the fill returned the moment
+   * somebody started driving, which is when the picture underneath matters
+   * most. Checked separately because fixing one rule plainly does not fix the
+   * other. */
+  const driving = await page.evaluate(() => {
+    const stage = document.getElementById("stage");
+    stage.classList.add("driving");
+    const hud = document.getElementById("hud");
+    const style = getComputedStyle(hud);
+    const out = { bg: style.backgroundColor, pos: style.position,
+                  chips: [...hud.children].filter(
+                    (c) => getComputedStyle(c).display !== "none"
+                           && c.getBoundingClientRect().width > 0).length };
+    stage.classList.remove("driving");
+    return out;
+  });
+  check(/rgba\(0, 0, 0, 0\)|transparent/.test(driving.bg),
+        `and paints nothing while driving either: ${driving.bg}`);
+  check(driving.pos === "absolute",
+        "while still floating over the picture, which is what driving needs:"
+        + ` ${driving.pos}`);
+  check(driving.chips > 2,
+        `with the row still laid out while driving: ${driving.chips}`);
   check(seen.border === "0px",
         `and draws no rule under itself: ${seen.border}`);
   check(seen.chips > 2,

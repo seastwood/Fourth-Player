@@ -1116,7 +1116,12 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     position: absolute;
     order: 0;
     padding-top: .5rem;
-    background: rgba(16, 14, 40, .82);
+    /* And still no fill. Floating it back over the picture brought the panel
+       with it -- the strip was made transparent in the rule above, and this
+       one painted it again the moment the keyboard and mouse were picked up,
+       which is exactly when the picture underneath matters most. The chips
+       carry their own backgrounds either way. */
+    background: transparent;
   }
   .stage.driving .notice {
     position: absolute;
