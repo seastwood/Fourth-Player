@@ -182,8 +182,14 @@ check(cols and cols.group(1).strip() == "1fr 1fr",
       "upright: two equal halves, so the clusters keep the width they had "
       "before the pair was put up there: %r"
       % (cols.group(1).strip() if cols else None))
-check("position: relative" in upright,
-      "and the pad is the thing the floating pair is positioned against")
+# Positioned, rather than `relative` specifically. What .touch-mid needs from
+# the pad is a containing block, and `absolute` establishes one exactly as
+# `relative` does -- the pad is absolute now, so that it can lie over the
+# picture instead of taking a strip of its own beneath it. Naming the value
+# here failed that change while the thing it protects was still true.
+check(re.search(r"position:\s*(relative|absolute)", upright) is not None,
+      "and the pad is positioned, so it is the thing the floating pair is "
+      "measured against")
 
 block = css[css.index('"lsh  rsh"'):]
 block = block[:block.index("@media (orientation: landscape)")]

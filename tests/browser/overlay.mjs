@@ -89,6 +89,39 @@ for (const [name, block] of [["upright", portrait], ["landscape", landscape]]) {
         `${name}, but every cluster of controls still takes them`);
 }
 
+// -- the two mistakes that broke this the first time ----------------------
+//
+// Both were invisible to every other assertion here, because both are about
+// what a rule says *twice* rather than what it says.
+for (const [name, block] of [["upright", portrait], ["landscape", landscape]]) {
+  const rule = touchRule(block);
+  const positions = (rule.match(/^\s*position\s*:/gm) || []).length;
+  check(positions === 1,
+        `${name}, the pad declares position exactly once (found ${positions})`
+        + " -- a second one later in the block silently wins, which left the"
+        + " pad in flow at the top of the screen over the chips");
+  check(/position:\s*absolute/.test(rule),
+        `${name}, and that one declaration is the absolute one`);
+}
+
+// A bare `.touch { background: ... }` is the panel that was being seen behind
+// the controller. Only rules for the element itself: the buttons inside it
+// have their own fills and must keep them.
+for (const [name, block] of [["upright", portrait], ["landscape", landscape]]) {
+  let painted = false, from = 0;
+  for (;;) {
+    const at = block.indexOf(".touch {", from);
+    if (at < 0) break;
+    if (/^\s*background\s*:/m.test(block.slice(at, block.indexOf("}", at)))) {
+      painted = true;
+    }
+    from = at + 1;
+  }
+  check(!painted,
+        `${name}, the pad paints no panel behind itself -- the buttons sit on`
+        + " the game");
+}
+
 console.log("");
 if (fails) { console.log(`overlay: ${fails} FAILED`); process.exit(1); }
 console.log("overlay: all ok");
