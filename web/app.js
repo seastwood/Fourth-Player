@@ -4622,13 +4622,52 @@ function deskSettleButton() {
    and no way to tell a typed letter from an autocorrect rewriting a word. */
 /* The field is a contenteditable, so it has text rather than a value. Both
    of these exist so nothing else has to know that. */
+/* One zero-width space, kept in the capture field at all times.
+ *
+ * Backspace did nothing on iOS, and this is why: the field was always left
+ * empty, and Safari raises no `beforeinput` at all for a deletion with
+ * nothing to delete. No event, nothing to map to a Backspace, so the key was
+ * silently dead -- on a phone only. A desktop never noticed because the
+ * global keydown listener catches Backspace there, and a phone keyboard
+ * produces no keydown worth reading.
+ *
+ * So there is always exactly one character behind the caret for the keyboard
+ * to delete. Zero-width because the field is visible enough to hold a caret:
+ * anything with a shape would be seen. It is stripped from everything read
+ * out of the field, so nothing downstream knows it is there. */
+const DESK_SENTINEL = "\u200b";
+
 function deskFieldText(field) {
-  return (field && field.textContent || "").replace(/[\r\n]/g, "");
+  return (field && field.textContent || "")
+    .split(DESK_SENTINEL).join("")
+    .replace(/[\r\n]/g, "");
+}
+
+/* Put the field back to just the sentinel, with the caret after it.
+ *
+ * The caret matters as much as the character: a sentinel with the caret in
+ * front of it has nothing *behind* the cursor, which is the same dead
+ * Backspace by a subtler route. */
+function deskArmField(field) {
+  if (!field) return;
+  if (field.textContent !== DESK_SENTINEL) field.textContent = DESK_SENTINEL;
+  if (document.activeElement !== field) return;   // do not steal the caret
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false);                        // to the end
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch (_) { /* an old browser: typing still works, backspace may not */ }
 }
 
 function deskFieldClear(field) {
   if (!field) return;
-  if (field.textContent !== "") field.textContent = "";
+  // "Clear" now means "back to one deletable character", because empty is the
+  // state in which a phone cannot report a backspace at all. Text still must
+  // not survive here -- what is left becomes context for the next autocorrect.
+  deskArmField(field);
 }
 
 /* Characters, in batches under deskwire's limit -- so pasting a password is
@@ -4655,6 +4694,12 @@ function deskTyped(event) {
   }
   if (how.indexOf("delete") === 0) {
     deskTapKey(how.indexOf("Forward") > 0 ? "Delete" : "Backspace");
+    // Put the sentinel back for the next one. After the event rather than
+    // during it: rewriting the field inside its own beforeinput is how a
+    // keyboard gets confused about where the caret is, and this one is
+    // already preventDefault-ed so nothing else is pending.
+    const field = event.target;
+    setTimeout(() => deskArmField(field), 0);
   }
 }
 
@@ -4839,11 +4884,23 @@ function deskListen() {
     // the characters it is. Either way the element ends up empty, because
     // text left in it becomes context for the next autocorrect.
     field.addEventListener("input", () => {
+      // deskFieldText strips the sentinel, so a backspace that ate it lands
+      // here as "" and sends nothing -- the deletion itself has already gone
+      // out as a Backspace from beforeinput.
       const landed = deskFieldText(field);
       if (landed) deskSendText(landed);
       deskFieldClear(field);
     });
-    field.addEventListener("focus", () => { measureLift && measureLift(); deskPaintKeys(); });
+    field.addEventListener("focus", () => {
+      // Arm it here as well as on the way in: deskShowKeyboard clears before
+      // it focuses, and a caret placed by the browser on focus can land in
+      // front of the sentinel rather than after it -- which is a dead
+      // Backspace again, with the character present and nothing behind the
+      // cursor.
+      deskArmField(field);
+      measureLift && measureLift();
+      deskPaintKeys();
+    });
     field.addEventListener("blur", () => {
       // The keyboard closes when it is asked to close, and at no other time.
       // Asking means the keyboard button, or the controller taking the
