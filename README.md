@@ -507,9 +507,25 @@ picture moves the console's pointer instead of panning it, and the picture
 follows the pointer while it has room to.
 
 On a touchscreen: a tap is a left click, two fingers or a press-and-hold is a
-right click, and a tap followed by a tap-and-hold drags. A flick coasts and a
-finger back on the glass stops it. On a desktop, clicking the picture takes a
-pointer lock and the mouse works as a mouse.
+right click, a tap followed by a tap-and-hold drags, and **two fingers dragged
+together scroll the console** — a window in Files, a page in a browser. A flick
+coasts and a finger back on the glass stops it. On a desktop, clicking the
+picture takes a pointer lock and the mouse works as a mouse.
+
+Scrolling is worth a line of its own because it did not exist until somebody
+tried it: the host has always understood a wheel, and the page only ever sent
+one from a real `wheel` event, which a touchscreen never raises. A hundred
+pixels of finger was then far too stiff on glass — a trackpad is a fingertip on
+a small surface and this is a whole hand on a screen — so a notch is 35 pixels
+of travel, which moves the page a little further than the finger goes. That is
+the number to change if it wants tuning; smaller is livelier.
+
+Press-and-hold is a **finger** only. It is how a surface with no buttons asks
+for the right one, and a mouse has a right button already — arming it there
+meant a laptop could not click and hold to drag at all: the button went down,
+nothing moved, and a right click arrived instead. A small bar appears at the
+pointer partway through the wait, so a press that is about to become a right
+click says so rather than looking like a press that is doing nothing.
 
 Two details worth knowing:
 
@@ -521,6 +537,26 @@ Two details worth knowing:
 - Characters typed on a phone are sent **as characters** and matched against
   the console's own keyboard map, because a phone's on-screen keyboard cannot
   say which key was pressed. Keys from a real keyboard are sent as positions.
+
+Three things behave differently once a desktop has taken the pointer lock, all
+of them consequences of the lock itself:
+
+- **The wheel is routed rather than shared.** A plain scroll belongs to the
+  console; a trackpad pinch, which arrives as ctrl-and-wheel, belongs to the
+  picture. They used to happen at once — the listener that forwards a notch
+  calls `preventDefault`, which does not stop the page's own wheel listener
+  zooming with the same event — so one gesture scrolled a window on the console
+  and zoomed the view of it simultaneously.
+- **Zooming aims at the console's pointer**, not at the spot the lock began.
+  A locked pointer stops updating `clientX`/`clientY`, because it is not on
+  this page any more, so the zoom had one fixed target for the life of the
+  capture. The page now adds up the same relative motion it sends to the host
+  as a guess at where that pointer has got to. It is a guess: the host clamps
+  at its own screen edges and may accelerate, so it is reset to the middle at
+  each capture to bound the drift.
+- **The utility buttons fade** while the pointer is captured, because a locked
+  pointer cannot reach them — they are obstruction and nothing else until
+  Escape, which is the same key that gives the pointer back.
 
 ## Letting guests start games
 
@@ -728,6 +764,37 @@ Three shapes, three different answers:
 * **Nothing lost, nothing missing, and the held-back figure near zero.** The
   browser is playing frames the moment they arrive and has nothing in hand
   when one is late. That is what `jitter_ms` is for.
+
+### Picture presets, and why bigger is not sharper
+
+The Admin panel has the picture as dials — size, frame rate, quality,
+smoothing — with an Apply button rather than live sliders, because every one of
+them rebuilds the pipeline and costs the whole room about a second of held
+picture.
+
+Above them are five presets, and they exist because the dials are not
+independent and nothing said so. The bits are shared out across every pixel of
+every frame, so 1080p carries 2.25 times the pixels of 720p and at a fixed
+bitrate each one gets 44% of what it had. Somebody who raises the size
+expecting a sharper picture gets a softer one — which is exactly what happened:
+*"I increased the resolution to 1080p and increased the bitrate to 4500, but
+the quality remained kind of poor."* It was: the host announced 1920x1080 at
+4500 and was measured delivering 4194 kb/s. The softness was arithmetic.
+
+| Preset | Size | Rate | For |
+|---|---|---|---|
+| Sharpest | 1080p60 | 16000 | a wired link on this network |
+| Sharp | 1080p30 | 9000 | 1080p that is actually sharp |
+| Smooth | 720p60 | 8000 | motion first — anything fast |
+| Balanced | 720p30 | 4500 | a good default over the internet |
+| Modest link | 540p30 | 2500 | mobile data, or a weak uplink |
+
+Each sits around 0.13–0.16 bits per pixel per frame, which is the region game
+streaming actually uses; the 1080p30-at-4500 that prompted them is 0.07.
+Picking one fills in the dials and leaves Apply to you.
+`tests/test_presets.py` checks them against that arithmetic — that more pixels
+a second always asks for more bitrate, and that none of them drifts out of the
+band.
 
 ### If it feels laggy
 
@@ -948,6 +1015,41 @@ python3 -m fourthplayer link            # what is it now
 python3 -m fourthplayer link open       # address and PIN
 python3 -m fourthplayer link required   # the default
 ```
+
+### Two people on one machine
+
+A sofa with one phone on it and two controllers plugged into it is the ordinary
+case, not a clever one, and it takes a seat of its own rather than a second
+browser tab: a tab would make the host encode and send the same screen twice
+down the same wire, for one screen. So an extra controller asks for a seat with
+`input: "only"` — a slot, a pad, a name and a row in the list exactly like
+anybody else, and no second picture.
+
+**Press a button on it and it is seated.** Presses rather than presence,
+because a machine with three pads plugged into it is usually one person and two
+spares, and slots come out of a pool of four shared with the rest of the house.
+Buttons only, never sticks: a stick resting off centre would seat a controller
+lying face down on the sofa. The panel still lists every pad with an **Add
+player** button beside it, and **Remove** takes one out and keeps it out until
+somebody says otherwise.
+
+Three things about it are worth knowing, each of which was once a fault:
+
+- **It joins on the seat beside it, not on the PIN.** The PIN is held in memory
+  and set only when somebody types it at the gate, so a page that came back on
+  its saved token — a home screen icon, a reconnect, the host restarting
+  underneath it — had none, and "Add player" answered *"That link or PIN is not
+  valid"* with nothing to be done from the sofa. A guest already admitted gains
+  nothing by being admitted twice, so the seat they hold is the credential.
+- **A seat that drops comes back on its own.** The page's own seat had always
+  reconnected; the second and third had nothing, so a dropped one sat in the
+  list saying "disconnected" for the rest of the session.
+- **Its buttons can be corrected separately.** "Fix my buttons" stores what it
+  learns under the pad's *name*, and the panel has a chooser listing every
+  controller attached, so two people holding different pads on one machine get
+  different corrections. Only the page's own pad could be taught before, which
+  left the seats hardest to reach from the sofa as the only ones that could not
+  be fixed.
 
 ### Sharing one controller
 
@@ -1250,6 +1352,36 @@ it up:
 python3 -m fourthplayer reshare
 ```
 
+### A ceiling on memory, and why it is a wall rather than a brake
+
+The unit sets `MemoryMax=2G` and **no `MemoryHigh` at all**, which is
+deliberate and was arrived at the hard way. `MemoryHigh` does not kill, it
+throttles: past it the kernel holds every thread in the cgroup in reclaim, so
+the service does not fall over — it goes slow enough to be useless while
+systemd still reports it active. A leak once spent twenty hours in that state,
+`memory.pressure` full at 77%, the picture freezing every few seconds, and
+guests typing the PIN into a host too busy to answer. Narrowing the gap between
+`high` and `max` does not help either: throttling is self-limiting, so the
+cgroup approaches the ceiling asymptotically and settles just under it. Any gap
+is somewhere a leak can live.
+
+So there is one limit and it is a wall. The process is killed, `Restart=on-failure`
+has it back in about three seconds, guests return on their own tokens, and the
+journal says plainly that it went for memory. Three seconds that mends itself
+beats any length of a host that is alive and too slow to answer.
+
+`MALLOC_ARENA_MAX=2` is set alongside it. glibc gives each thread that contends
+for the heap its own 64 MB arena, up to eight per core, so a six-core machine
+can hold 3 GB — more than the ceiling — without leaking anything at all.
+
+`_watch_memory` in `server.py` is the early warning none of that provides: it
+reports crossing 600 MB and each multiple after it, reads the cgroup's own
+`memory.pressure` so that being throttled is stated rather than guessed at,
+calls `malloc_trim` once a minute and says what it reclaimed, and prints
+whether Python's own allocator is growing alongside the resident size. Those
+last two exist to answer questions rather than to fix anything, and they have:
+see **Status**.
+
 ## The session
 
 An invite is two factors that travel by different routes: a 256-bit token in the
@@ -1375,9 +1507,29 @@ right — and there was no way to get closer to it.
 about at that zoom. A pinch grows what is between the fingers rather than
 whatever happens to be in the middle, so getting to a corner is one gesture
 instead of a zoom and then a hunt. On a desktop the wheel does the same thing
-around the pointer, and there is a **zoom** button in the chips that expands a
-slider, built like the volume one beside it. Double-click, or drag the slider
-back to 1, and the whole picture is back.
+around the pointer — except while the keyboard and mouse are held, where a
+plain scroll belongs to the console and ctrl-and-wheel is the zoom. There is a
+**zoom** button in the chips that expands a slider, built like the volume one
+beside it. Double-click, or drag the slider back to 1, and the whole picture is
+back.
+
+**Two fingers are asked what they are doing before anything moves.** A pinch
+and a two-finger drag arrive through the same events, and treating every
+two-finger move as a zoom meant the picture could not be moved with two fingers
+without also resizing it — and worse, that a slow careful drag was read as a
+pinch, because finger tremor accumulates while the fingers themselves are not
+changing distance at all. So the gesture is measured from where it began, not
+frame by frame, and decided once:
+
+| the fingers | the gap | the middle | what it is |
+|---|---|---|---|
+| moving apart or together | changes a lot | barely moves | a pinch |
+| one still, one sliding | changes | moves half as much | a drag |
+| sliding together | unchanged | moves | a drag |
+
+Nothing is applied until it is clear which, because a few pixels of zoom
+leaking out before the question is settled is the creep that made two fingers
+unusable for anything else.
 
 Two details that decide whether it feels right rather than approximately
 right:
@@ -1406,7 +1558,19 @@ stylesheet now rather than inherited from the page order, and
 The picture takes its own touch gestures now (`touch-action: none` on the video
 alone), because the browser's page zoom and this one fought: the page zoomed,
 the fixed stage slid out from under the visual viewport, and the chips went
-with it. Safari does not report a pinch as pointer events at all — it
+with it.
+
+**On the video alone, and that word is load-bearing.** The stage said `none`
+for a while too, which is stricter and looks safer and broke every panel in the
+page: `touch-action` is intersected down the ancestor chain, and intersection
+only ever takes gestures away, so a descendant can never re-enable what an
+ancestor forbade. `none` on the stage met the `pan-y` that `.tab-panel`,
+`.shelf`, `.chat-log` and the rest each carefully declared, and won — nothing
+inside the stage could be scrolled with a finger at all. The stage asks for
+`pan-y`, which still refuses a pinch and a double-tap zoom, and leaves the
+panels something to intersect with. `tests/test_pinch.py` now checks both
+halves, because they pull in opposite directions: the stage must not permit a
+pinch, and must not forbid panning either. Safari does not report a pinch as pointer events at all — it
 recognises the gesture itself and cancels the pointers it was made of — so its
 `gesture*` events are handled as well, or iPhones would have got the browser's
 zoom and nobody else would have.
@@ -1453,12 +1617,35 @@ node and no evdev and a machine with evdev and no node will both report
 everything passing while running different halves. If the box runs the service
 but has no node, run the suite on a workstation as well before believing it.
 
+Some suites need more than node. The ones that lay the page out drive a real
+Chrome through `puppeteer-core` and **skip without either**, which is most
+machines — but they are the only things here that check where anything actually
+lands rather than what the stylesheet says, and that distinction has mattered:
+a layout change once passed every rule-level check and shipped visibly broken.
+
+```sh
+cd tests/browser && npm install puppeteer-core    # once, to enable those
+```
+
 Two tools need real hardware and a running session:
 
 ```sh
 python3 tools/loopback.py --seconds 10   # a guest with no browser
 python3 tools/padwatch.py --seconds 12   # what the kernel actually received
 ```
+
+`tests/live/leakprobe.py` is a third, and is not in `run.sh` because it takes a
+real slot for as long as it runs:
+
+```sh
+python3 tests/live/leakprobe.py <pin> 120
+```
+
+It joins a running host the way a browser does — the real websocket protocol, a
+real `webrtcbin`, video into a fakesink, pad frames every 50 ms — so the host
+cannot tell it from a guest. It exists because a leak that only appeared with
+real people connected could not be worked on without taking somebody's game
+away, and it has ruled several things out by elimination.
 
 `loopback.py` stands in for a browser using a second `webrtcbin` — it proves
 signalling, ICE, DTLS, SRTP, the video decoding into real H.264, the data
@@ -1479,6 +1666,25 @@ Not yet done:
 - **one session at a time**, which is the whole point, but it is a hard limit
   rather than a queue.
 - glass-to-glass latency has not been measured with a camera.
+- **A memory leak, unfound.** With guests connected the service grows to the
+  2 GB ceiling and is killed and restarted — about every fifteen minutes on the
+  console during a busy session. It is self-healing, and the cost is real: each
+  restart re-binds the virtual pads, so a game that was running holds the old
+  ones and has to be started again through the picker.
+
+  What it is *not*, each ruled out by measurement rather than argument:
+  `emit("push-buffer")` (120,000 buffers leaked 0.7 MB in isolation), churn
+  (a window with zero recaptures still went 231 MB to 2128 MB), leaked dmabufs
+  (flat at 77 while the resident size grew 450 MB), pipeline teardown (no
+  pipeline has failed to reach NULL since that was fixed), and glibc arena
+  bloat (`malloc_trim` has never reclaimed anything worth logging while the
+  process tripled). It also does not reproduce under `leakprobe.py`, which
+  narrows it to what a browser does that the probe does not: periodic stats
+  reports, the desk channel, RTCP keyframe requests, renegotiation.
+
+  The watchdog now logs whether Python's own allocator is growing alongside the
+  resident size, which decides the remaining question — whether to look in this
+  code at all, or below it in GStreamer and the driver.
 
 ## Licence
 
