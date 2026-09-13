@@ -2567,6 +2567,42 @@ function zoomAbout(next, clientX, clientY) {
 const held = new Map();
 let pinchGap = 0, pinchAt = null;
 
+/* Telling a pinch from a two-finger drag.
+ *
+ * Every two-finger move used to zoom by the ratio of the finger gap, and pan
+ * by the middle, at the same time. So there was no way to move a zoomed
+ * picture with two fingers without also resizing it: holding one finger still
+ * and sliding the other -- which is how a lot of people scroll -- changes the
+ * gap by the whole distance travelled and zoomed hard. Reported as "I have no
+ * way to scroll with a mobile touchscreen device".
+ *
+ * So the gesture is asked what it is, once, and then believed. Both distances
+ * are accumulated until there is enough movement to be sure, and the answer
+ * sticks until the fingers lift -- a gesture that changed its mind halfway
+ * would zoom a little every time a drag wobbled, which is the complaint.
+ *
+ * PINCH_BIAS is what makes the one-finger-still case a drag. Taking `d` as the
+ * distance the moving finger travels:
+ *
+ *   both fingers apart   gap 2d, middle 0     -> a pinch, clearly
+ *   one still, one slides gap d,  middle d/2  -> a drag, with this bias
+ *   both together        gap 0,  middle d     -> a drag, clearly
+ *
+ * At a bias of 2 the middle case falls on the drag side, which is what was
+ * asked for, and a real pinch is nowhere near the line. */
+const TWO_FINGER_SURE = 12;      // px of travel before the question is settled
+const PINCH_BIAS = 2;
+let twoMode = null;              // null until settled, then "zoom" or "drag"
+let twoGapMoved = 0, twoPanMoved = 0;
+
+/* Which it is, or null while it is still too close to call. Pure, so the rule
+   can be tested without a touchscreen. */
+function twoFingerIntent(gapMoved, panMoved, settled) {
+  if (settled) return settled;
+  if (gapMoved + panMoved < TWO_FINGER_SURE) return null;
+  return gapMoved > panMoved * PINCH_BIAS ? "zoom" : "drag";
+}
+
 const gapBetween = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const middleOf = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
@@ -2621,6 +2657,10 @@ video.addEventListener("pointerdown", (event) => {
     const [a, b] = Array.from(held.values());
     pinchGap = gapBetween(a, b);
     pinchAt = middleOf(a, b);
+    // A new two-finger gesture is a new question.
+    twoMode = null;
+    twoGapMoved = 0;
+    twoPanMoved = 0;
   }
   if (held.size === 1) {
     // A new touch is a new question. Without this, a drag that ended without
@@ -2643,11 +2683,25 @@ video.addEventListener("pointermove", (event) => {
     const gap = gapBetween(a, b);
     const at = middleOf(a, b);
     if (pinchGap > 0 && gap > 0) {
-      zoomAbout(zoom * (gap / pinchGap), at.x, at.y);
-      // Two fingers that move together move the picture, which is how
-      // somebody keeps hold of what they were looking at while resizing it.
-      if (pinchAt) { panX += at.x - pinchAt.x; panY += at.y - pinchAt.y; }
-      applyZoom();
+      twoGapMoved += Math.abs(gap - pinchGap);
+      if (pinchAt) {
+        twoPanMoved += Math.hypot(at.x - pinchAt.x, at.y - pinchAt.y);
+      }
+      twoMode = twoFingerIntent(twoGapMoved, twoPanMoved, twoMode);
+      // Nothing at all until it is clear which gesture this is. A few pixels
+      // of zoom applied before the question is settled is exactly the creep
+      // that made two fingers unusable for moving the picture.
+      if (twoMode === "zoom") {
+        zoomAbout(zoom * (gap / pinchGap), at.x, at.y);
+      }
+      // The middle moves the picture either way: during a pinch it is how
+      // somebody keeps hold of what they were looking at while resizing it,
+      // and during a drag it is the whole gesture.
+      if (twoMode && pinchAt) {
+        panX += at.x - pinchAt.x;
+        panY += at.y - pinchAt.y;
+      }
+      if (twoMode) applyZoom();
     }
     if (cursorTwo && pinchAt) {
       cursorTwo.moved += Math.abs(gap - pinchGap)
