@@ -2846,7 +2846,12 @@ video.addEventListener("wheel", (event) => {
   if (!gate.hidden) return;
   event.preventDefault();
   const step = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.002));
-  zoomAbout(zoom * step, event.clientX, event.clientY);
+  // A locked pointer has no client coordinates worth reading -- they stop
+  // moving with it -- so zoom towards where the console's pointer is instead
+  // of towards the spot the lock started at.
+  const at = deskCaptured() ? cursorClientPoint()
+                            : { x: event.clientX, y: event.clientY };
+  zoomAbout(zoom * step, at.x, at.y);
 }, { passive: false });
 
 // Back to the whole picture, by the gesture everything else uses for it.
@@ -4199,7 +4204,38 @@ function deskSoon() {
 function deskMoved(dx, dy) {
   deskPending.dx += dx;
   deskPending.dy += dy;
+  // Keep a guess at where the console's pointer has got to.
+  //
+  // Under a pointer lock the browser stops updating clientX and clientY -- the
+  // pointer is not anywhere on this page any more -- so a zoom that used them
+  // zoomed towards wherever the lock happened to begin, for ever. That is
+  // "zooming with the trackpad zooms into one spot and doesn't follow the
+  // cursor". The relative motion being sent to the host is the only thing
+  // there is to go on, so the same numbers are added up here, in the 0..1 the
+  // touch path already keeps.
+  //
+  // It is an estimate and says so: the host clamps at its own screen edges and
+  // may apply its own acceleration, so this can drift from the real pointer
+  // over a long session. It is reset to the middle whenever a capture starts,
+  // which bounds how far that can go.
+  const pic = pictureBox();
+  if (pic.width && pic.height) {
+    cursorU = Math.max(0, Math.min(1, cursorU + dx / (pic.width * zoom)));
+    cursorV = Math.max(0, Math.min(1, cursorV + dy / (pic.height * zoom)));
+  }
   deskSoon();
+}
+
+/* Where that guess is on the screen, in the coordinates zoomAbout wants.
+   The inverse of cursorFollow: with the picture centred on the cursor this
+   returns the middle of the element, which is what it should. */
+function cursorClientPoint() {
+  const box = video.getBoundingClientRect();
+  const pic = pictureBox();
+  return {
+    x: box.left + box.width / 2 + panX + (cursorU - 0.5) * pic.width * zoom,
+    y: box.top + box.height / 2 + panY + (cursorV - 0.5) * pic.height * zoom,
+  };
 }
 
 /* One notch, whatever unit the browser chose to say it in. deltaMode 0 is
@@ -4942,7 +4978,20 @@ function deskListen() {
   }, true);
   video.addEventListener("wheel", (event) => {
     if (!deskHeld || !deskCaptured()) return;
+    /* A trackpad pinch arrives as a wheel with ctrl held, and means the
+       picture. An ordinary scroll means the host, now that there is something
+       over there to scroll.
+       Both used to happen at once, which is what "scrolling behaves
+       unpredictably, like scrolling and zooming happen at the same time" is:
+       this listener sent the notch to the host and called preventDefault, and
+       preventDefault does not stop the page's own wheel listener further down
+       from zooming the picture with the same event. So one scroll gesture
+       scrolled the window on the console and zoomed the view of it
+       simultaneously. Routed rather than guarded: a pinch is let through to
+       the zoom, and a scroll is claimed outright. */
+    if (event.ctrlKey) return;
     event.preventDefault();
+    event.stopPropagation();
     deskWheeled(event);
   }, { passive: false, capture: true });
   video.addEventListener("contextmenu", (event) => {
@@ -4992,6 +5041,16 @@ function deskListen() {
     // else's computer, and the host's own dead-man switch is the only thing
     // that would ever notice.
     if (!deskCaptured()) deskRelease();
+    // The utility buttons float in a corner over the picture, and while the
+    // pointer is locked they cannot be clicked at all -- the pointer is on the
+    // console, not on them. Shown anyway they are just something sitting on
+    // the game, which is how they were reported: "the extra utility buttons
+    // lay over the video stream". They come straight back on Escape, which is
+    // the same key that gives the pointer back.
+    stage.classList.toggle("locked", deskCaptured());
+    // A fresh capture starts the guess from the middle, so drift cannot
+    // accumulate across a whole evening.
+    if (deskCaptured()) { cursorU = cursorV = 0.5; }
     deskPaint();
   });
   document.addEventListener("visibilitychange", () => {

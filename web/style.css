@@ -2508,6 +2508,20 @@ input.name {
 }
 .desk-dock > * { pointer-events: auto; }
 
+/* Out of the way while the pointer is captured.
+ *
+ * They sit in a corner over the picture, and a locked pointer cannot reach
+ * them: it is on the console. So they are obstruction and nothing else until
+ * the capture ends, which Escape does -- the same key that gives the pointer
+ * back brings them back with it. Faded rather than removed, so the strip does
+ * not jump when it returns, and left unclickable so a stray click through a
+ * ghost of a button cannot happen. */
+.stage.locked .desk-dock {
+  opacity: 0;
+  pointer-events: none;
+}
+.stage.locked .desk-dock > * { pointer-events: none; }
+
 /* With the keys up, the strip is a bar across the screen and the padding that
    floats the buttons in a corner would be a gap in it. */
 .desk-dock.has-keys {
