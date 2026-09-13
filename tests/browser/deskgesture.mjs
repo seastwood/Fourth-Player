@@ -37,17 +37,24 @@ const out = await p.evaluate(async () => {
       clientY: y, bubbles: true, cancelable: true })); };
   const mark = (name) => sent.push({ mark: name });
 
-  await new Promise((r) => setTimeout(r, 400));
+  /* Far enough apart to be separate gestures. Derived from DOUBLE_MS rather
+     than a flat 400ms: once that window grew to 450 the separators sat inside
+     it, so the first finger of the two-finger tap was read as the second half
+     of the tap before it and committed a left button down. The test was right
+     to complain -- that is exactly what happens to a guest who puts two
+     fingers down just after tapping -- but what it was reporting was its own
+     spacing rather than the gesture it meant to check. */
+  await new Promise((r) => setTimeout(r, DOUBLE_MS + 150));
   mark("single tap");
   at("pointerdown", cx, cy, 1); at("pointerup", cx, cy, 1);
 
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, DOUBLE_MS + 150));
   mark("two-finger tap");
   at("pointerdown", cx - 20, cy, 2); at("pointerdown", cx + 20, cy, 3);
   at("pointerup", cx - 20, cy, 2); at("pointerup", cx + 20, cy, 3);
 
-  await new Promise((r) => setTimeout(r, 400));
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, DOUBLE_MS + 150));
+  await new Promise((r) => setTimeout(r, DOUBLE_MS + 150));
   mark("press and hold");
   at("pointerdown", cx, cy, 8);
   // Past the hold, whatever the hold is. Hardcoding "650, past
@@ -57,7 +64,7 @@ const out = await p.evaluate(async () => {
   await new Promise((r) => setTimeout(r, HOLD_MS + 150));
   at("pointerup", cx, cy, 8);
 
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, DOUBLE_MS + 150));
   mark("hold, but moving");
   at("pointerdown", cx, cy, 9);
   for (let i = 1; i <= 3; i++) at("pointermove", cx + i * 15, cy, 9);

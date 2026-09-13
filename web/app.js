@@ -4399,8 +4399,18 @@ const COAST_STOP = 0.02;
 const COAST_MAX = 3;
 /* A press this short that moved this little was a tap, not a drag. */
 const TAP_MS = 250, TAP_SLOP = 10;
-/* And a second tap starting this soon after the first ended belongs with it. */
-const DOUBLE_MS = 300;
+/* And a second tap starting this soon after the first ended belongs with it.
+ *
+ * 450 rather than 300. Three hundred is a fair figure for a mouse, where the
+ * second click is the same finger barely moving, and too quick for the gesture
+ * this is actually for: tap, then tap and *stay down* to pick something up.
+ * That second press is a deliberate act with a hold on the end of it, and a
+ * hand takes longer over it than over a double click. Missing the window is
+ * not a near miss either -- the press becomes an ordinary tap, so the drag
+ * never starts and what reaches the console is two clicks. Reported from a
+ * phone as "the double tap-hold-drag doesn't seem to work very well, this just
+ * causes a double click". */
+const DOUBLE_MS = 450;
 /* A finger that stays still this long has stopped being a tap and become a
    press. Long enough not to fire while somebody is deciding where to put
    their finger, short enough to be worth waiting for. */
@@ -4420,13 +4430,25 @@ let cursorLastTap = 0;
 let cursorDragging = false;
 /* Two fingers down: a pinch until it turns out to have been a tap. */
 let cursorTwo = null;
+/* How long a press is allowed to be before the countdown is drawn at all.
+ *
+ * The bar used to appear the instant a finger landed, so every tap and every
+ * drag flashed one -- a clock shown for something that was never going to
+ * become a right click. Reported as "the loading bar appears too early, it
+ * should wait a little before appearing". Waiting this long means an ordinary
+ * tap never sees it, and a press that is going somewhere is announced with
+ * enough of the wait left to be worth announcing. */
+const HOLD_HINT_AFTER = 280;
+
 /* One finger, staying put: on its way to being a right click. */
 let cursorHoldTimer = 0;
+let cursorHintTimer = 0;
 let cursorPressed = false;
 
 function cursorForgetHold() {
   if (cursorHoldTimer) clearTimeout(cursorHoldTimer);
-  cursorHoldTimer = 0;
+  if (cursorHintTimer) clearTimeout(cursorHintTimer);
+  cursorHoldTimer = cursorHintTimer = 0;
   holdHint(false);
 }
 
@@ -4449,7 +4471,9 @@ function holdHint(on) {
   const at = cursorClientPoint();
   hint.style.left = Math.round(at.x - box.left) + "px";
   hint.style.top = Math.round(at.y - box.top) + "px";
-  hint.style.setProperty("--hold-ms", HOLD_MS + "ms");
+  // Only the part of the wait that is left once the bar is drawn, so the
+  // sweep finishes at the moment of the click rather than before it.
+  hint.style.setProperty("--hold-ms", (HOLD_MS - HOLD_HINT_AFTER) + "ms");
   hint.hidden = false;
   // Restart the sweep: the element is reused, and an animation that is already
   // finished does not play again just because it was shown.
@@ -4464,7 +4488,11 @@ function holdHint(on) {
 function cursorWatchForHold() {
   cursorForgetHold();
   cursorPressed = false;
-  holdHint(true);
+  cursorHintTimer = setTimeout(() => {
+    cursorHintTimer = 0;
+    // Still down and still going nowhere, or there is nothing to announce.
+    if (cursorHoldTimer) holdHint(true);
+  }, HOLD_HINT_AFTER);
   cursorHoldTimer = setTimeout(() => {
     cursorHoldTimer = 0;
     holdHint(false);

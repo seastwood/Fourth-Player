@@ -24,18 +24,28 @@ check(!/pointerType/.test(arm),
       "the decision is made once at the press rather than inside the timer");
 
 // -- the countdown is shown, and taken away again -------------------------
-check(/holdHint\(true\);\s*\n\s*cursorHoldTimer = setTimeout/.test(app),
-      "the bar appears when the press starts being counted");
+// The bar waits before it is drawn, so an ordinary tap never sees one.
+const AFTER = Number(/const HOLD_HINT_AFTER = (\d+)/.exec(app)[1]);
+const HOLD = Number(/const HOLD_MS = (\d+)/.exec(app)[1]);
+check(/cursorHintTimer = setTimeout\(\(\) => \{[\s\S]{0,160}holdHint\(true\)/.test(app),
+      `the bar is drawn only after ${AFTER}ms of pressing, not on contact`);
+check(AFTER > 0 && AFTER < HOLD,
+      `and that wait is inside the hold: ${AFTER} of ${HOLD}ms`);
+check(/if \(cursorHoldTimer\) holdHint\(true\)/.test(app),
+      "and only while the press is still being counted");
 check(/function cursorForgetHold\(\)[^}]*holdHint\(false\)/s.test(app),
       "and goes when the press is abandoned -- a move, or letting go");
+check(/cursorHoldTimer = cursorHintTimer = 0;/.test(app),
+      "with both timers cleared, so a bar cannot appear after the press ended");
 const fire = app.slice(app.indexOf("cursorHoldTimer = setTimeout"),
                        app.indexOf("}, HOLD_MS);"));
 check(fire.indexOf("holdHint(false)") < fire.indexOf("return"),
       "and when it fires, before the early return that decides not to click");
 
 // -- the bar must agree with the timer ------------------------------------
-check(/hint\.style\.setProperty\("--hold-ms", HOLD_MS \+ "ms"\)/.test(app),
-      "the sweep is timed from HOLD_MS itself, not a number copied into the CSS");
+check(/setProperty\("--hold-ms", \(HOLD_MS - HOLD_HINT_AFTER\) \+ "ms"\)/.test(app),
+      `the sweep covers what is left of the wait -- ${HOLD - AFTER}ms -- so it`
+      + " finishes at the click rather than before it");
 check(/animation: hold-fill var\(--hold-ms/.test(css),
       "which the stylesheet reads rather than hardcoding");
 check(/\.hold-hint \{[^}]*pointer-events: none/s.test(css),
