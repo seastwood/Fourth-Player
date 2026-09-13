@@ -2827,12 +2827,41 @@ el("hudbtn").addEventListener("click", (event) => {
   toggleHud();
 });
 
+/* How much of the top of the picture a banner is standing on.
+ *
+ * The picture fills the stage now and everything else floats over it, which is
+ * right for controls and wrong for a message somebody has to read: a banner
+ * over the game is a banner being read off the game. This gives it room by
+ * insetting the picture, measured rather than guessed, because a notice is one
+ * line or five depending on what it has to say.
+ *
+ * It used to fall out of the layout by itself -- a banner left the
+ * stripped-back view, leaving it showed the pad, and the pad took its share of
+ * a flex column. With the pad floating, nothing happens unless it is asked
+ * for. */
+function measureBanner() {
+  const stage = el("stage"), box = el("notice");
+  if (!stage || !box) return;
+  if (box.hidden) {
+    stage.classList.remove("has-banner");
+    stage.style.removeProperty("--banner-space");
+    return;
+  }
+  const top = box.offsetTop + box.offsetHeight;
+  stage.style.setProperty("--banner-space", Math.round(top) + "px");
+  stage.classList.add("has-banner");
+}
+
 function showNotice(html, sticky) {
   lastNotice = html;
   const box = el("notice");
   box.innerHTML = html;
   box.hidden = false;
   showHud();
+  // After it is in the page and has a height: measuring a hidden box or one
+  // that has not been laid out yet gives zero, and zero is the bug this
+  // replaces rather than a fix for it.
+  measureBanner();
   if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
   if (!sticky) noticeTimer = setTimeout(hideNotice, 9000);
 }
@@ -2840,6 +2869,7 @@ function showNotice(html, sticky) {
 function hideNotice() {
   if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
   el("notice").hidden = true;
+  measureBanner();
   hideHud();
 }
 
