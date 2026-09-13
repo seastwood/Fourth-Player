@@ -4208,10 +4208,20 @@ function deskMoved(dx, dy) {
    counts up as positive. */
 /* Finger travel per wheel notch.
  *
- * The same hundred pixels the wheel path treats as a notch for a pixel-mode
- * event, so a drag of a given distance scrolls the host about as far as the
- * same drag on a trackpad would. */
-const DESK_TOUCH_NOTCH = 100;
+ * Started at 100, to match what the wheel path treats as a notch for a
+ * pixel-mode event, and that was far too stiff on glass: "it takes a lot of
+ * movement to scroll very little". The trackpad figure is the wrong thing to
+ * copy, because a trackpad is a small surface worked by a fingertip and this
+ * is a phone screen worked by a whole hand.
+ *
+ * 35 instead. A notch is about three lines, call it 50 pixels of content, so
+ * 35 pixels of finger moves the page a little further than the finger went --
+ * which is roughly how a touchscreen behaves when it scrolls itself, and the
+ * thing a thumb is expecting. At 100 the content moved half as fast as the
+ * hand, which is what made it feel like wading.
+ *
+ * This is the one number to change if it wants tuning: smaller is livelier. */
+const DESK_TOUCH_NOTCH = 35;
 
 /* Two fingers dragged on the glass, sent to the host as its mouse wheel.
  *

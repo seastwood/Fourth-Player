@@ -61,6 +61,15 @@ check(Math.abs(h.pending.wdy - 1) < 1e-9,
       `ten tenths of a notch add up to one: ${h.pending.wdy.toFixed(3)}`);
 check(h.flushed() === 10, "and every one of them asks to be sent");
 
+// -- and it is in a range that feels like scrolling ----------------------
+//
+// A notch is about three lines, call it 50px of content. Much above that and
+// the content crawls behind the hand, which is what 100 did and what was
+// reported; much below and a thumb twitch throws the page across.
+check(NOTCH >= 20 && NOTCH <= 60,
+      `a notch is ${NOTCH}px of finger, which moves content about `
+      + `${(50 / NOTCH).toFixed(1)}x as fast as the hand`);
+
 // -- it must not touch the pointer ----------------------------------------
 check(h.pending.dx === 0 && h.pending.dy === 0,
       "scrolling moves no pointer, so the cursor stays where it was put");
