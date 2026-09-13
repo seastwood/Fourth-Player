@@ -268,11 +268,19 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
    * for next time, which is why the page sometimes *opens* zoomed, with the
    * chips too big and the pad hanging off the right.
    *
-   * Nothing is lost by refusing it: this element never scrolls, and the pad
-   * inside it already said `none` for the same reason. The panels that do
-   * scroll ask for the one gesture they need, because touch-action is
-   * intersected down the ancestor chain. */
-  touch-action: none;
+   * `pan-y` and not `none`, which is the difference between refusing a pinch
+   * and refusing everything. touch-action is intersected down the ancestor
+   * chain, so a descendant can never re-enable a gesture an ancestor has
+   * forbidden: `none` here met `pan-y` on .tab-panel, .shelf and .chat-log and
+   * won, and not one panel inside the stage could be scrolled by touch. It was
+   * reported as "currently I have no way to scroll with a mobile touchscreen
+   * device", and the comment that used to sit here had the rule exactly the
+   * wrong way round.
+   *
+   * pan-y still excludes pinch-zoom and double-tap zoom, which is the whole of
+   * what this was for. The picture and the pad say `none` themselves and are
+   * unaffected -- an ancestor allowing more does not loosen them. */
+  touch-action: pan-y;
   overflow: hidden;             /* nothing here is ever reached by scrolling */
 }
 

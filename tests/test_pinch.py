@@ -13,12 +13,21 @@ held in two hands with thumbs on glass, so a stray pinch is not a rare
 accident -- and Safari remembers the zoom for that site, which is why it comes
 back on the next visit rather than at the moment of the accident.
 
-The stage refuses gestures now. That is safe because it never scrolls, but
-touch-action is intersected down the ancestor chain, so every panel that does
-scroll has to ask for the gesture it needs -- and a panel that scrolls without
-saying so is a panel that silently stops scrolling on a phone. That has
-happened here before, in landscape, and it is the reason this test lists them
-rather than trusting the change.
+The stage refuses the pinch, and only the pinch. It said `none` for a while,
+which was wrong in a way this test used to enforce: touch-action is intersected
+down the ancestor chain, and intersection only ever takes gestures away. A
+descendant cannot re-enable what an ancestor forbade, so `none` on the stage
+met `pan-y` on all eight panels below it and won -- not one of them could be
+scrolled by a finger. It was reported as "I have no way to scroll with a mobile
+touchscreen device", and the paragraph that used to be here had the rule
+backwards.
+
+`pan-y` is what the stage wants: it excludes pinch-zoom and double-tap zoom,
+which is the whole of what this is for, while leaving the panels something to
+intersect with. So there are two things to check and they pull in opposite
+directions -- the stage must not permit a pinch, and it must not forbid
+everything either. A panel that scrolls without saying which gesture it needs
+is still a panel that silently stops scrolling, so those are listed too.
 """
 import os
 import re
@@ -57,12 +66,23 @@ def rule(selector):
 
 print("the picture refuses a pinch")
 stage = rule(".stage")
-check("touch-action: none" in stage,
-      "the stage takes no gestures at all, so two fingers on the game cannot "
-      "zoom the page")
+said = re.search(r"touch-action:\s*([\w -]+)", stage)
+value = said.group(1).strip() if said else ""
+check(bool(value), "the stage says what gestures it takes")
+check("pinch-zoom" not in value and value not in ("auto", "manipulation"),
+      "and refuses the pinch, so two fingers on the game cannot zoom the page; "
+      "got %r" % value)
 check("manipulation" not in stage,
       "and not `manipulation`, which reads like it refuses zooming and only "
       "refuses the double-tap kind")
+# The other half of the same property, and the reason this test now asks for
+# two things rather than one. `none` here is not a stricter version of the
+# line above: it is what silently stopped every panel inside the stage from
+# scrolling, because intersection down the chain only ever removes gestures.
+check(value != "none",
+      "but does not forbid panning outright, which would take scrolling away "
+      "from every panel inside it -- a descendant cannot re-enable what an "
+      "ancestor refused")
 
 print("\nand every panel that scrolls still says how")
 # Read out of the stylesheet rather than listed here, so a scroller added
