@@ -19,6 +19,7 @@ import mimetypes
 import os
 import re
 import socket
+import sys
 import ssl
 import urllib.parse
 from http import HTTPStatus
@@ -98,6 +99,14 @@ MEMORY_WARN_MB = 600
 # How much reclaimed heap is worth a line in the log. Small amounts are the
 # ordinary churn of a running capture; a large one says the arenas had grown.
 MEMORY_TRIM_NOTE_MB = 50
+
+# How much growth is worth splitting into "Python" and "not Python", and how
+# many CPython blocks count as Python actually accumulating. The block figure
+# is deliberately generous: a busy server moves tens of thousands of blocks
+# around without leaking any of them, and what is being looked for here is the
+# difference between flat and a million.
+MEMORY_SPLIT_NOTE_MB = 250
+MEMORY_SPLIT_BLOCKS = 200000
 
 
 class Server:
@@ -1439,6 +1448,22 @@ class Server:
 
         said_at = 0
         said_throttled = False
+        # Python's own allocator, to be read next to the resident size.
+        #
+        # sys.getallocatedblocks() is the number of blocks CPython is holding,
+        # so it moves if and only if Python objects are accumulating. Flat
+        # while the resident size climbs means the growth is *below* Python --
+        # GStreamer, the VA driver, something holding C memory -- and no amount
+        # of reading this code will find it. Climbing together means it is
+        # Python, and gc can be asked what of.
+        #
+        # Here because guessing has a poor record on this leak: four theories
+        # have been wrong so far -- emit("push-buffer"), churn, leaked dmabufs,
+        # and glibc arenas, that last disproved by the trim below never
+        # reclaiming anything worth logging while the process grew to two
+        # gigabytes. This is the question those four did not ask.
+        blocks_first = None
+        rss_first = 0
         while True:
             await asyncio.sleep(MEMORY_WATCH_INTERVAL)
             try:
@@ -1473,6 +1498,25 @@ class Server:
                                  "(now %d MB). That much sitting in glibc's "
                                  "arenas is ordinary for this workload and is "
                                  "not a leak", before - rss_mb, rss_mb)
+
+                # Which side of the language the growth is on.
+                blocks = sys.getallocatedblocks()
+                if blocks_first is None:
+                    blocks_first, rss_first = blocks, rss_mb
+                grown = rss_mb - rss_first
+                if grown >= MEMORY_SPLIT_NOTE_MB:
+                    since = blocks - blocks_first
+                    log.warning(
+                        "up %d MB since this process started (now %d MB), "
+                        "with Python holding %+d blocks over the same stretch "
+                        "(%d now). %s",
+                        grown, rss_mb, since, blocks,
+                        "Python objects are accumulating, so gc can name them"
+                        if since > MEMORY_SPLIT_BLOCKS else
+                        "Python is flat, so the memory is being held below it "
+                        "-- GStreamer, the driver, something in C -- and not "
+                        "by anything in this file")
+                    blocks_first, rss_first = blocks, rss_mb
 
                 if pressure is None:
                     continue
