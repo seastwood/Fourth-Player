@@ -68,11 +68,82 @@ const marginal = { gap: 30, pan: 30 / PINCH_BIAS };
 check(twoFingerIntent(marginal.gap, marginal.pan, null) === "drag",
       "exactly on the line counts as a drag, not a zoom");
 
+// -- a real thumb is not steady -------------------------------------------
+//
+// The first version of this added up |gap - lastGap| frame by frame, which
+// sounds equivalent to measuring from the start and is not: a finger resting
+// on glass tremors, so that sum climbs even when the fingers never actually
+// change their distance apart.
+//
+// It fails on *slow* gestures specifically, which is why the first round of
+// tests here missed it -- they all moved briskly. Measured over these frames:
+// 60px in 30 frames accumulates 51 against 60 and is called a drag correctly,
+// but 20px in 40 frames accumulates 92 against 20 and is called a pinch. A
+// careful scroll is exactly the slow case, and it was reported back as "it is
+// still just doing pinch zoom".
+//
+// Both models are run over the same frames, so the difference is measured
+// here rather than asserted.
+function dragFrames({ travel = 60, frames = 30, tremor = 2 }) {
+  const out = [];
+  let seed = 7;
+  const noise = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;   // repeatable
+    return ((seed / 0x7fffffff) * 2 - 1) * tremor;
+  };
+  const startGap = 140;
+  for (let i = 1; i <= frames; i++) {
+    out.push({
+      gap: startGap + noise(),              // never actually spreads
+      at: { x: 0, y: (travel * i) / frames }, // moves steadily
+    });
+  }
+  return { startGap, startAt: { x: 0, y: 0 }, frames: out };
+}
+
+// Slow and deliberate, which is how somebody scrolls when they mean it.
+const run = dragFrames({ travel: 20, frames: 40, tremor: 3 });
+
+// How it is done now: measured from where the gesture began.
+let net = null;
+for (const f of run.frames) {
+  net = twoFingerIntent(Math.abs(f.gap - run.startGap),
+                        Math.hypot(f.at.x - run.startAt.x,
+                                   f.at.y - run.startAt.y), net);
+}
+check(net === "drag",
+      "a slow, tremory two-finger drag is still a drag, measured from where"
+      + " it started");
+
+// And the brisk case both models always agreed on, so the slow one above is
+// shown to be the difference rather than the whole story.
+const brisk = dragFrames({ travel: 60, frames: 30, tremor: 2 });
+let fast = null;
+for (const f of brisk.frames) {
+  fast = twoFingerIntent(Math.abs(f.gap - brisk.startGap),
+                         Math.hypot(f.at.x - brisk.startAt.x,
+                                    f.at.y - brisk.startAt.y), fast);
+}
+check(fast === "drag", "so is a brisk one, which never was the problem");
+
+// How it was done before: accumulated frame by frame.
+let acc = null, gapSum = 0, panSum = 0, lastGap = run.startGap,
+    lastAt = run.startAt;
+for (const f of run.frames) {
+  gapSum += Math.abs(f.gap - lastGap);
+  panSum += Math.hypot(f.at.x - lastAt.x, f.at.y - lastAt.y);
+  lastGap = f.gap; lastAt = f.at;
+  acc = twoFingerIntent(gapSum, panSum, acc);
+}
+check(acc === "zoom",
+      "while the accumulating version calls that same slow drag a pinch,"
+      + " which is why it is not done that way");
+
 // -- the wiring it depends on --------------------------------------------
 check(/if \(twoMode === "zoom"\) \{\s*\n\s*zoomAbout/.test(app),
       "only a settled pinch is allowed to zoom");
-check(/twoMode = null;\s*\n\s*twoGapMoved = 0;/.test(app),
-      "and every new two-finger gesture is asked afresh");
+check(/twoMode = null;\s*\n\s*twoStartGap = pinchGap;/.test(app),
+      "and every new two-finger gesture is measured from its own start");
 check(/if \(twoMode\) applyZoom\(\);/.test(app),
       "nothing is applied at all while the answer is still in doubt");
 

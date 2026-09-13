@@ -2576,10 +2576,18 @@ let pinchGap = 0, pinchAt = null;
  * gap by the whole distance travelled and zoomed hard. Reported as "I have no
  * way to scroll with a mobile touchscreen device".
  *
- * So the gesture is asked what it is, once, and then believed. Both distances
- * are accumulated until there is enough movement to be sure, and the answer
- * sticks until the fingers lift -- a gesture that changed its mind halfway
- * would zoom a little every time a drag wobbled, which is the complaint.
+ * So the gesture is asked what it is, once, and then believed until the
+ * fingers lift -- one that changed its mind halfway would zoom a little every
+ * time a drag wobbled, which is the complaint.
+ *
+ * Measured from where the gesture *started*, not accumulated frame by frame.
+ * Adding up |gap - lastGap| sounds equivalent and is not: a finger resting on
+ * glass tremors, so that sum climbs on a gesture whose fingers never actually
+ * changed their distance apart. On a slow scroll the tremor outgrew the real
+ * movement and the whole thing was called a pinch -- which is the first
+ * attempt at this, reported back as "it is still just doing pinch zoom".
+ * Net displacement has no such drift: noise cancels against itself and only
+ * the part that went somewhere counts.
  *
  * PINCH_BIAS is what makes the one-finger-still case a drag. Taking `d` as the
  * distance the moving finger travels:
@@ -2593,13 +2601,15 @@ let pinchGap = 0, pinchAt = null;
 const TWO_FINGER_SURE = 12;      // px of travel before the question is settled
 const PINCH_BIAS = 2;
 let twoMode = null;              // null until settled, then "zoom" or "drag"
-let twoGapMoved = 0, twoPanMoved = 0;
+let twoStartGap = 0, twoStartAt = null;
 
 /* Which it is, or null while it is still too close to call. Pure, so the rule
    can be tested without a touchscreen. */
 function twoFingerIntent(gapMoved, panMoved, settled) {
   if (settled) return settled;
-  if (gapMoved + panMoved < TWO_FINGER_SURE) return null;
+  // The larger of the two, not their sum: a gesture that is clearly one thing
+  // should not have to wait for the other to contribute before it counts.
+  if (Math.max(gapMoved, panMoved) < TWO_FINGER_SURE) return null;
   return gapMoved > panMoved * PINCH_BIAS ? "zoom" : "drag";
 }
 
@@ -2657,10 +2667,10 @@ video.addEventListener("pointerdown", (event) => {
     const [a, b] = Array.from(held.values());
     pinchGap = gapBetween(a, b);
     pinchAt = middleOf(a, b);
-    // A new two-finger gesture is a new question.
+    // A new two-finger gesture is a new question, measured from here.
     twoMode = null;
-    twoGapMoved = 0;
-    twoPanMoved = 0;
+    twoStartGap = pinchGap;
+    twoStartAt = pinchAt;
   }
   if (held.size === 1) {
     // A new touch is a new question. Without this, a drag that ended without
@@ -2683,11 +2693,12 @@ video.addEventListener("pointermove", (event) => {
     const gap = gapBetween(a, b);
     const at = middleOf(a, b);
     if (pinchGap > 0 && gap > 0) {
-      twoGapMoved += Math.abs(gap - pinchGap);
-      if (pinchAt) {
-        twoPanMoved += Math.hypot(at.x - pinchAt.x, at.y - pinchAt.y);
-      }
-      twoMode = twoFingerIntent(twoGapMoved, twoPanMoved, twoMode);
+      // How far this gesture has got from where it began, which is the whole
+      // of the question. Not how far it has wandered getting there.
+      const gapMoved = Math.abs(gap - twoStartGap);
+      const panMoved = twoStartAt
+        ? Math.hypot(at.x - twoStartAt.x, at.y - twoStartAt.y) : 0;
+      twoMode = twoFingerIntent(gapMoved, panMoved, twoMode);
       // Nothing at all until it is clear which gesture this is. A few pixels
       // of zoom applied before the question is settled is exactly the creep
       // that made two fingers unusable for moving the picture.
