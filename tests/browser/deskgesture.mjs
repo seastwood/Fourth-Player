@@ -50,14 +50,18 @@ const out = await p.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 400));
   mark("press and hold");
   at("pointerdown", cx, cy, 8);
-  await new Promise((r) => setTimeout(r, 650));   // past HOLD_MS
+  // Past the hold, whatever the hold is. Hardcoding "650, past
+  // HOLD_MS" meant the test broke the moment HOLD_MS grew to 700 --
+  // it stopped waiting long enough and reported a right click that
+  // had not failed to happen.
+  await new Promise((r) => setTimeout(r, HOLD_MS + 150));
   at("pointerup", cx, cy, 8);
 
   await new Promise((r) => setTimeout(r, 400));
   mark("hold, but moving");
   at("pointerdown", cx, cy, 9);
   for (let i = 1; i <= 3; i++) at("pointermove", cx + i * 15, cy, 9);
-  await new Promise((r) => setTimeout(r, 650));
+  await new Promise((r) => setTimeout(r, HOLD_MS + 150));
   at("pointerup", cx + 45, cy, 9);
 
   mark("double tap and drag");

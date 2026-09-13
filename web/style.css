@@ -2517,8 +2517,11 @@ input.name {
 .hold-hint {
   position: absolute;
   z-index: 40;
-  width: 2.2rem;
-  height: .3rem;
+  /* Small: it sits just above whatever is being pressed, and a wide bar covers
+     the thing the press is about. Its job is to say a clock is running, not to
+     be read. */
+  width: 1.4rem;
+  height: .22rem;
   margin: 0;
   padding: 0;
   transform: translate(-50%, -160%);

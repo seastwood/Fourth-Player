@@ -4237,11 +4237,18 @@ function deskMoved(dx, dy) {
    The inverse of cursorFollow: with the picture centred on the cursor this
    returns the middle of the element, which is what it should. */
 function cursorClientPoint() {
+  // getBoundingClientRect gives the box *after* the transform, so the pan is
+  // already in it -- the same trap pictureBox warns about. Adding panX again
+  // put the mark out by exactly the pan, which is nothing at all when the
+  // picture is whole and grows as it is zoomed and dragged: "not appearing
+  // above the cursor when zoomed in ... does appear when completely zoomed
+  // out". Only the scale has to be applied by hand, because the fractions are
+  // of the picture rather than of the box on screen.
   const box = video.getBoundingClientRect();
   const pic = pictureBox();
   return {
-    x: box.left + box.width / 2 + panX + (cursorU - 0.5) * pic.width * zoom,
-    y: box.top + box.height / 2 + panY + (cursorV - 0.5) * pic.height * zoom,
+    x: box.left + box.width / 2 + (cursorU - 0.5) * pic.width * zoom,
+    y: box.top + box.height / 2 + (cursorV - 0.5) * pic.height * zoom,
   };
 }
 
@@ -4397,7 +4404,13 @@ const DOUBLE_MS = 300;
 /* A finger that stays still this long has stopped being a tap and become a
    press. Long enough not to fire while somebody is deciding where to put
    their finger, short enough to be worth waiting for. */
-const HOLD_MS = 500;
+/* Long enough that a press meant as a drag is not read as a right click.
+ *
+ * 500 is the usual figure for a long press and is too quick here: this hand is
+ * driving a pointer on another machine, through a stream, so the moment of
+ * deciding to move is later than it would be on a local screen. 700 leaves
+ * room for that without being a wait. */
+const HOLD_MS = 700;
 
 /* When the last single-finger tap let go, so the next one can tell whether it
    is the second half of something. */
