@@ -139,6 +139,63 @@ check(acc === "zoom",
       "while the accumulating version calls that same slow drag a pinch,"
       + " which is why it is not done that way");
 
+// -- the path an iPhone actually takes -------------------------------------
+//
+// Safari does not deliver pointer events for a two-finger gesture. It
+// recognises the gesture itself, cancels the pointers it was made of, and
+// reports `gesturechange` with a `scale` and a centre. So everything above
+// runs on desktops and never once on the phone this was reported from -- the
+// gesture handler zoomed by `event.scale` whatever the fingers were doing,
+// which is "it just pinch zooms no matter what".
+//
+// The same rule is asked there, after putting a ratio and a distance into the
+// same units. These replay what Safari sends for each gesture.
+const PINCH_SPAN = Number(/const PINCH_SPAN = (\d+)/.exec(app)[1]);
+const spreadOf = (scale) => Math.abs(scale - 1) * PINCH_SPAN;
+
+function safari(frames) {
+  let mode = null;
+  for (const f of frames) {
+    mode = twoFingerIntent(spreadOf(f.scale),
+                           Math.hypot(f.x || 0, f.y || 0), mode);
+  }
+  return mode;
+}
+
+// Fingers spreading, hand still: scale climbs, the centre stays put.
+check(safari([{ scale: 1.08, y: 1 }, { scale: 1.2, y: 2 }, { scale: 1.35, y: 2 }])
+      === "zoom",
+      "iOS: fingers spreading with the hand still is a pinch");
+check(safari([{ scale: 0.92, y: 1 }, { scale: 0.8, y: 1 }, { scale: 0.7, y: 2 }])
+      === "zoom",
+      "iOS: and fingers closing is a pinch too");
+
+// Two fingers sliding: scale hovers at 1, the centre travels.
+check(safari([{ scale: 1.01, y: 8 }, { scale: 0.99, y: 18 }, { scale: 1.02, y: 30 }])
+      === "drag",
+      "iOS: two fingers sliding with the gap unchanged is a drag");
+
+// The slow, careful scroll the report was about.
+check(safari([{ scale: 1.0, y: 4 }, { scale: 1.01, y: 9 }, { scale: 0.99, y: 14 },
+              { scale: 1.0, y: 20 }]) === "drag",
+      "iOS: a slow careful two-finger scroll is a drag, not a pinch");
+
+// Nothing is decided from a resting hand.
+check(safari([{ scale: 1.0, y: 1 }, { scale: 1.005, y: 2 }]) === null,
+      "iOS: a hand resting still decides nothing either way");
+
+// The scale has to be worth something before it counts as a pinch: a 1%
+// wobble while sliding must not tip it.
+check(spreadOf(1.01) < 12,
+      `a 1% scale wobble is under the threshold: ${spreadOf(1.01).toFixed(1)}px`);
+check(spreadOf(1.3) > 12,
+      `a real pinch is well over it: ${spreadOf(1.3).toFixed(1)}px`);
+
+check(/gestureMode = twoFingerIntent\(spread, moved, gestureMode\)/.test(app),
+      "and the gesture handler really does ask, rather than always zooming");
+check(/if \(gestureMode === "zoom"\) \{\s*\n\s*zoomAbout/.test(app),
+      "only deciding on a pinch lets it zoom");
+
 // -- the wiring it depends on --------------------------------------------
 check(/if \(twoMode === "zoom"\) \{\s*\n\s*zoomAbout/.test(app),
       "only a settled pinch is allowed to zoom");

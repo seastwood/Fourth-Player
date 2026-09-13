@@ -2849,18 +2849,58 @@ video.addEventListener("dblclick", () => {
    the pointers it was made of. Left alone that means iPhones -- most of the
    guests this is for -- get the browser's own zoom of the whole page instead
    of this one. */
-let gestureFrom = 0;
+/* A scale of 1.0 is no pinch at all, and a finger span to measure it against.
+ *
+ * Safari reports a pinch as a ratio and a drag as a moving centre, in the same
+ * event, so the two have to be compared in the same units before the rule
+ * above can be asked which this is. A scale of 1.1 with fingers about a hand's
+ * width apart is roughly sixteen pixels of spread, which is what this
+ * converts it to. The exact span does not matter much -- it sets how hard you
+ * have to pinch before it counts as pinching, and anything in this region
+ * feels the same. */
+const PINCH_SPAN = 160;
+
+let gestureFrom = 0, gestureAt = null, gestureLast = null, gestureMode = null;
 video.addEventListener("gesturestart", (event) => {
   event.preventDefault();
   gestureFrom = zoom;
+  gestureAt = gestureLast = { x: event.clientX, y: event.clientY };
+  gestureMode = null;
 });
 video.addEventListener("gesturechange", (event) => {
   event.preventDefault();
-  if (gestureFrom) zoomAbout(gestureFrom * event.scale, event.clientX, event.clientY);
+  if (!gestureFrom) return;
+  /* The same question the pointer path asks, on the only path an iPhone
+     takes. Everything done for this in `pointermove` is dead code on iOS:
+     Safari cancels the pointers a gesture was made of, so two fingers never
+     reach it and this handler zoomed by `event.scale` whatever the fingers
+     were doing. That is the whole of "it just pinch zooms no matter what". */
+  const spread = Math.abs(event.scale - 1) * PINCH_SPAN;
+  const moved = gestureAt
+    ? Math.hypot(event.clientX - gestureAt.x, event.clientY - gestureAt.y) : 0;
+  gestureMode = twoFingerIntent(spread, moved, gestureMode);
+  if (!gestureMode) {
+    // Still too close to call: move nothing, but keep up with the fingers so
+    // the first applied step is not a jump from where the gesture began.
+    gestureLast = { x: event.clientX, y: event.clientY };
+    return;
+  }
+  if (gestureMode === "zoom") {
+    zoomAbout(gestureFrom * event.scale, event.clientX, event.clientY);
+  }
+  // The centre moves the picture either way, as it does for pointers.
+  if (gestureLast) {
+    panX += event.clientX - gestureLast.x;
+    panY += event.clientY - gestureLast.y;
+  }
+  gestureLast = { x: event.clientX, y: event.clientY };
+  applyZoom();
 });
 video.addEventListener("gestureend", (event) => {
   event.preventDefault();
   gestureFrom = 0;
+  gestureAt = gestureLast = null;
+  gestureMode = null;
 });
 
 // Guarded, like the reconnect button: a browser holding an older page would
