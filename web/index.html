@@ -932,6 +932,13 @@
        aria-label="Type to the console"></div>
 
 
+  <!-- The half second between pressing and holding and the right click that
+       comes of it. Nothing said it was counting, so a press that was going to
+       become a right click looked exactly like a press that was doing nothing,
+       until it suddenly was not. Drawn at the pointer rather than in a corner,
+       because that is where the eye already is. -->
+  <div id="hold-hint" class="hold-hint" hidden aria-hidden="true"><i></i></div>
+
   <div id="touch" class="touch" hidden aria-label="On-screen controller">
     <div class="shoulders shoulders-left" id="shoulders-left"></div>
     <div class="shoulders shoulders-right" id="shoulders-right"></div>

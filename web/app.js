@@ -2649,8 +2649,15 @@ video.addEventListener("pointerdown", (event) => {
       deskSettleButton();
       cursorDragging = true;
       deskSend([{ t: "b", b: 0, d: 1 }]);
-    } else if (!held.size) {
+    } else if (!held.size && event.pointerType !== "mouse") {
       // A first finger, going nowhere in particular yet.
+      //
+      // A finger only. Press-and-hold is how a surface with no buttons asks
+      // for the right one, and a mouse is not that surface -- it has a right
+      // button already. Arming it for one meant a laptop could not click and
+      // hold to drag: the button went down, nothing moved for half a second,
+      // and a right click arrived instead. Reported as "the cursor just sticks
+      // there then does a right click".
       cursorWatchForHold();
     }
     cursorFrom = { x: event.clientX, y: event.clientY,
@@ -4407,6 +4414,34 @@ let cursorPressed = false;
 function cursorForgetHold() {
   if (cursorHoldTimer) clearTimeout(cursorHoldTimer);
   cursorHoldTimer = 0;
+  holdHint(false);
+}
+
+/* Show or hide the countdown, at the pointer.
+ *
+ * Positioned from cursorClientPoint, which is where the console's pointer is
+ * believed to be -- the same guess the zoom aims at. The stage is the
+ * containing block, so the client point is offset by its own rect.
+ *
+ * The duration is written in from HOLD_MS rather than repeated in the
+ * stylesheet: a bar that finishes before the click, or after it, is worse than
+ * no bar, because it teaches the wrong moment. */
+function holdHint(on) {
+  const hint = el("hold-hint");
+  if (!hint) return;
+  if (!on) { hint.hidden = true; return; }
+  const stage = el("stage");
+  if (!stage) return;
+  const box = stage.getBoundingClientRect();
+  const at = cursorClientPoint();
+  hint.style.left = Math.round(at.x - box.left) + "px";
+  hint.style.top = Math.round(at.y - box.top) + "px";
+  hint.style.setProperty("--hold-ms", HOLD_MS + "ms");
+  hint.hidden = false;
+  // Restart the sweep: the element is reused, and an animation that is already
+  // finished does not play again just because it was shown.
+  const bar = hint.firstElementChild;
+  if (bar) { bar.style.animation = "none"; void bar.offsetWidth; bar.style.animation = ""; }
 }
 
 /* Press and hold, which is the other way a surface with no buttons asks for
@@ -4416,8 +4451,10 @@ function cursorForgetHold() {
 function cursorWatchForHold() {
   cursorForgetHold();
   cursorPressed = false;
+  holdHint(true);
   cursorHoldTimer = setTimeout(() => {
     cursorHoldTimer = 0;
+    holdHint(false);
     // Only if the finger is still down and has not wandered. A drag that
     // happens to pause is not a press.
     if (!cursorFrom || cursorFrom.moved >= TAP_SLOP || !cursorDriving()) return;
