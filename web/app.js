@@ -2699,6 +2699,16 @@ video.addEventListener("pointermove", (event) => {
       const panMoved = twoStartAt
         ? Math.hypot(at.x - twoStartAt.x, at.y - twoStartAt.y) : 0;
       twoMode = twoFingerIntent(gapMoved, panMoved, twoMode);
+      // Driving the host's pointer, and this is a drag rather than a pinch:
+      // the fingers are asking the *host* to scroll, not the picture to move.
+      if (twoMode === "drag" && cursorDriving()) {
+        if (pinchAt) deskScrollBy(at.x - pinchAt.x, at.y - pinchAt.y);
+        pinchGap = gap;
+        pinchAt = at;
+        dragged = true;
+        event.preventDefault();
+        return;
+      }
       // Nothing at all until it is clear which gesture this is. A few pixels
       // of zoom applied before the question is settled is exactly the creep
       // that made two fingers unusable for moving the picture.
@@ -2882,6 +2892,14 @@ video.addEventListener("gesturechange", (event) => {
   if (!gestureMode) {
     // Still too close to call: move nothing, but keep up with the fingers so
     // the first applied step is not a jump from where the gesture began.
+    gestureLast = { x: event.clientX, y: event.clientY };
+    return;
+  }
+  if (gestureMode === "drag" && cursorDriving()) {
+    // As above, for the path Safari actually delivers.
+    if (gestureLast) {
+      deskScrollBy(event.clientX - gestureLast.x, event.clientY - gestureLast.y);
+    }
     gestureLast = { x: event.clientX, y: event.clientY };
     return;
   }
@@ -4188,6 +4206,31 @@ function deskMoved(dx, dy) {
    pixels (about a hundred to a notch), 1 is lines (about three), 2 is pages.
    The sign flips because a browser counts down as positive and a wheel
    counts up as positive. */
+/* Finger travel per wheel notch.
+ *
+ * The same hundred pixels the wheel path treats as a notch for a pixel-mode
+ * event, so a drag of a given distance scrolls the host about as far as the
+ * same drag on a trackpad would. */
+const DESK_TOUCH_NOTCH = 100;
+
+/* Two fingers dragged on the glass, sent to the host as its mouse wheel.
+ *
+ * A touchscreen raises no `wheel` event at all, so until now there was no way
+ * to scroll anything on the host from a phone: the keyboard and mouse could
+ * move the pointer, click and type, and a window that needed scrolling simply
+ * could not be scrolled. Reported as being unable to scroll in Files or the
+ * browser on the console while driving from a phone.
+ *
+ * Signs follow the finger, which is what a touchscreen has taught everybody to
+ * expect: dragging up moves the content up, the same as scrolling down. That
+ * is the opposite sense to the wheel's own deltas, which is why this adds
+ * where deskWheeled subtracts. */
+function deskScrollBy(dx, dy) {
+  deskPending.wdy += dy / DESK_TOUCH_NOTCH;
+  deskPending.wdx -= dx / DESK_TOUCH_NOTCH;
+  deskSoon();
+}
+
 function deskWheeled(event) {
   const per = event.deltaMode === 1 ? 3 : event.deltaMode === 2 ? 1 : 100;
   deskPending.wdy -= event.deltaY / per;
