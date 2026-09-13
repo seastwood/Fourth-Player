@@ -1063,12 +1063,19 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     order: -1;                    /* the video comes first in the markup */
     opacity: 1;
     pointer-events: auto;
-    background: var(--bg);
-    border-bottom: 2px solid var(--bg2);
+    /* No fill and no rule under it.
+       The strip used to be painted in --bg with a line along the bottom, which
+       upright reads as a solid bar across the top of the screen -- and the
+       chips are already legible without it, being 90% opaque themselves
+       against the hudbtn's 55%. So the strip shows whatever is behind it and
+       the chips float on that, which is what was asked for: "the black
+       background along the top where the top chip buttons go should be
+       transparent".
+       The rule went with the fill rather than surviving it: a 2px line drawn
+       across nothing, separating a transparent strip from the picture, is a
+       stray mark rather than a separator. */
+    background: transparent;
     transition: none;
-    /* The rule belongs to the strip of chips: it is what separates them from
-       the picture. Put away, there are no chips -- just the hamburger that
-       brings them back -- and the line was underlining nothing. */
     /* Static, so the `top` the floating version uses to clear the status bar
        does nothing here -- and this is the orientation in which the status bar
        is actually shown. The strip is the first thing on the screen, so it
@@ -1077,7 +1084,6 @@ select.chip option { background: var(--bg2); color: var(--ink); }
        only place the page is drawn under the bar at all. */
     padding-top: calc(.5rem + var(--top-safe));
   }
-  .hud:not(.show) { border-bottom: 0; }
 
   /* Messages join the flow as well, directly under the chips. Left floating
      they would sit on top of that strip, which is the problem this whole
