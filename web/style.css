@@ -893,6 +893,9 @@ select.chip option { background: var(--bg2); color: var(--ink); }
     height: calc(100% - var(--banner-space, 0px));
   }
   .touch {
+    /* Over the picture, pinned to the bottom, exactly as in landscape. */
+    position: absolute;
+    inset: auto 0 0 0;
     /* Select and start angled between the bumpers, the way the pad this is
        drawn from puts them. Upright the picture sits above the pad, so height
        the pad takes is width the picture cannot have -- the video keeps its
@@ -908,16 +911,7 @@ select.chip option { background: var(--bg2); color: var(--ink); }
        apart into the middle of it. Floated over the gap between the shoulders
        instead, it costs the grid nothing and the clusters keep every pixel
        they had. */
-    /* Over the picture and pinned to the bottom, exactly as landscape does it.
-       This declaration and not a second one added higher up the block: there
-       was already a `position` here, so an `absolute` written above it was
-       simply overridden by this line and the pad stayed in flow -- which, with
-       the stage no longer a flex column, floated it to the top of the screen
-       over the chips with the picture behind it. One property, declared once.
-       Absolute rather than relative also keeps the containing block that
-       .touch-mid below is positioned against. */
-    position: absolute;
-    inset: auto 0 0 0;
+    position: relative;
     grid-template-areas:
       "lsh  rsh"
       "left right";
@@ -946,16 +940,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch.has-sticks .stick { width: min(27vw, 135px); }
   .touch.has-sticks .touch-left,
   .touch.has-sticks .touch-right { gap: .5rem; }
-  /* No rule along the top, and no fill either.
-     The pad and the picture do not need a line drawn between them -- the
-     picture stops and the buttons start, which is already the whole of it --
-     and a bright pink one across the bottom of the screen pulls the eye off
-     the game it is edging.
-     The fill went with it. This rule is what was actually being seen as "a
-     background behind the controller": upright the pad painted itself an
-     opaque panel, which landscape never did. With the picture now reaching the
-     bottom of the stage, the buttons sit on the game and nothing is painted
-     between them. */
+  /* No rule along the top. The pad and the picture do not need a line drawn
+     between them -- the picture stops and the buttons start, which is already
+     the whole of it -- and a bright pink one across the bottom of the screen
+     pulls the eye off the game it is edging. */
+  .touch {
+    background: var(--bg);
+  }
   /* The same size as each other, and bigger than either was. The d-pad had
      been the smaller of the two for no reason worth keeping -- on the pad
      this copies they are a matched pair, and matching them is also what puts
