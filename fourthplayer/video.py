@@ -1370,11 +1370,40 @@ class Peer:
         self._disconnect_all()
         self.on_dead = self.on_broken = self.on_input = self.on_desk = None
         pipeline, self.pipeline = self.pipeline, None
+        # Handed to the thread rather than dropped here, and that is not
+        # tidiness -- see the note on `held` below.
+        held = [self.webrtc, self.channel, self.desk_channel, self._sources]
         self.webrtc = self.channel = self.desk_channel = None
         self._sources = {}
         who = self.id
 
         def see_it_to_null():
+            # `held` keeps this guest's webrtcbin, its data channels and its
+            # appsrcs alive for exactly as long as the pipeline they belong
+            # to, and it is here because letting go of them early crashed the
+            # process.
+            #
+            # Four core dumps on the console say the same thing, the oldest
+            # from 2026-09-10: SIGSEGV in
+            # g_type_check_instance_is_fundamentally_a, reached through
+            # g_object_unref from libgstwebrtc's dispose under gst_bin_remove,
+            # and on top of the stack PyObject_SetAttr on a worker thread.
+            # That attribute assignment is the `self.webrtc = ... = None`
+            # above: Python letting go of a wrapper while the pipeline
+            # underneath it was still mid-teardown, and the unref landing on
+            # an object webrtcbin had already finished with.
+            #
+            # It is a use-after-free, and the reason it matters far beyond one
+            # crash is what a use-after-free does to glibc's heap. Corrupt the
+            # free lists and malloc stops being able to reuse anything: the
+            # arena grows without bound, `malloc_trim` reclaims nothing, and
+            # no object tracker sees a thing because at the object level
+            # nothing is leaking -- it is being freed, twice. Every symptom
+            # this project has been chasing has that shape. See the leak entry
+            # in the README.
+            #
+            # So nothing this pipeline owns is released until the pipeline has
+            # actually reached NULL, and then all of it goes together.
             started = time.monotonic()
             try:
                 pipeline.set_state(Gst.State.NULL)
@@ -1385,6 +1414,11 @@ class Peer:
             except Exception as exc:
                 log.warning("peer %s did not stop cleanly: %s", who, exc)
                 return
+            finally:
+                # After NULL, and after the failure paths too: a pipeline that
+                # would not stop is the last thing to go on holding wrappers
+                # into whatever it is still doing.
+                held.clear()
             took = time.monotonic() - started
             if state != Gst.State.NULL:
                 # The leak, said out loud. It is the one thing that used to
