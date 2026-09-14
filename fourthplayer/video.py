@@ -667,7 +667,15 @@ class Stage:
             # with. Stage.show_pointer turns it on for as long as somebody
             # holds the desk -- see there for why it cannot simply be left on.
             f"{source_line.format(display=cfg.display)} "
-            f"! video/x-raw,framerate={cfg.fps}/1 "
+            # (ANY) matters and is not decoration. This filter exists to pin
+            # the frame rate and nothing else, but `video/x-raw` on its own
+            # also says "in system memory" -- which is true of ximagesrc and
+            # false of d3d11screencapturesrc, whose frames are already on the
+            # GPU. Without (ANY) the capture cannot link to the converter at
+            # all: "d3d11convert0 can't handle caps video/x-raw,
+            # framerate=(fraction)30/1". Saying (ANY) leaves the memory alone
+            # and constrains only what this line is for.
+            f"! video/x-raw(ANY),framerate={cfg.fps}/1 "
             f"! {convert} "
             f"! {encoder} "
             f"{profile}"
