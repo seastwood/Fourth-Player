@@ -775,6 +775,8 @@ function joined(message) {
   // this page remembered from before it was put away.
   if (message.desk) {
     deskHeld = !!message.desk.on;
+    if (deskHeld) deskWasMine = true;
+    else retakeDeskIfItWasOurs(message.desk);
     if (!deskHeld) {
       cursorOn = false;
       cursorStopCoasting();
@@ -4247,6 +4249,17 @@ function act(message) {
 
 let deskChannel = null;        // the reliable channel, when it arrives
 let deskHeld = false;          // the host says these are ours
+/* Whether this page held the keyboard and mouse before whatever just
+   happened, so it can ask for them back.
+
+   The case this is for: minimising the window. A browser may freeze a
+   backgrounded tab outright, the signalling socket closes, and eight seconds
+   later the host frees the slot -- which releases the desk, correctly, since
+   somebody who has gone should not keep it. The token puts the guest back in
+   the same slot when they return, but the desk is not part of a slot, so they
+   came back to a cursor they could not move and no explanation. */
+let deskWasMine = false;
+let deskRetaking = false;
 let deskAsking = false;        // we asked and have not heard back
 const deskPending = { dx: 0, dy: 0, wdx: 0, wdy: 0 };
 let deskFrame = 0;
@@ -5459,10 +5472,28 @@ deskListen();
    a reply to something this page asked, which carries no slot, and a notice
    to everybody, which does. The slot is what makes "somebody took it" and
    "you took it" different messages rather than a guess. */
+/* Ask for the desk back after a reconnect, and only when it is free.
+
+   `who` is the label of whoever holds it, so an empty one means nobody does.
+   Checking it is the whole safety of this: somebody else may have taken the
+   desk in the seconds we were gone, and taking it back out from under them
+   would be far worse than asking them for it. */
+function retakeDeskIfItWasOurs(desk) {
+  if (deskHeld || !deskWasMine || deskRetaking) return;
+  if (desk && desk.who) return;            // somebody else has it now
+  deskRetaking = true;
+  // Cleared either way when the answer arrives, so a refusal does not leave
+  // this asking on every state message for the rest of the session.
+  setTimeout(() => { deskRetaking = false; }, 4000);
+  act({ t: "desk", take: true });
+}
+
+
 function deskFrom(message) {
   const mine = typeof message.slot !== "number" || message.slot === mySlot;
   if (mine) {
     deskHeld = !!message.on;
+    if (deskHeld) deskWasMine = true;
     deskAsking = false;
     // A "controls paused" banner that was already up is about a controller
     // they have just stopped using. See holdInput.
@@ -7884,6 +7915,8 @@ function stateFrom(message) {
   if (message.hold) holdInput(message.hold);
   if (message.desk) {
     deskHeld = !!message.desk.on;
+    if (deskHeld) deskWasMine = true;
+    else retakeDeskIfItWasOurs(message.desk);
     deskPaintKeys();
   }
 }
