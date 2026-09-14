@@ -1101,6 +1101,42 @@ Three things about it are worth knowing, each of which was once a fault:
   left the seats hardest to reach from the sofa as the only ones that could not
   be fixed.
 
+### Buttons that latch
+
+Some buttons want holding for a long time -- run for a whole level, an
+accelerator down a straight, a trigger somebody cannot comfortably keep
+pressed. **Toggle buttons** in the Controls panel turns the button grid into a
+way of choosing which ones latch: click a button to mark it, click it again to
+unmark it, and Done to go back. A marked button is pressed once to hold it
+down and pressed again to let it go.
+
+**Chosen one at a time, not switched on for the whole pad.** The mark sits on
+each button and is stored as a list of exactly the buttons somebody picked, so
+a pad can latch RT alone and leave everything else behaving normally --
+latching the d-pad and the face buttons is the opposite of what anybody wants.
+Marked buttons carry a bar down their left edge in the grid, and colour is left
+alone because the grid already uses it for "pressed right now" -- which a
+latched button very often is at the same time, and that is the moment the
+difference matters most.
+
+Entirely the guest's own business. The frame leaving the page already says
+which buttons are down, so a latched button is simply one the page keeps
+saying is down: the host, the protocol and the game are unchanged and cannot
+tell the difference. Nothing has to support it, and nothing on the television
+needs to know.
+
+Stored per controller by name, beside the button map and for the same reason:
+two people on one machine hold different controllers, and each seat carries
+its own latch -- a shared one would have each of them lifting the other's
+button. The list is applied *after* the button map, so somebody who has taught
+this page where their buttons are latches the button whose name they can see,
+not whichever physical switch reports as number seven.
+
+Anything latched is released when the page goes away, when a seat closes, when
+the button is unmarked, and by **Use defaults** -- which clears the latching
+along with the map and the sticks, because a button left held down with
+nothing able to lift it is the one bad ending this has.
+
 ### Sharing one controller
 
 Some games were built to be played by passing a pad round a sofa -- Advance

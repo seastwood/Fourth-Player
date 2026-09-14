@@ -347,6 +347,12 @@
            with it. This is that, without asking the game. -->
       <button id="pads-sticks" type="button" class="ghost pad-only"
               aria-pressed="false">Swap sticks</button>
+      <!-- Pressed once to hold a button down, pressed again to let it go. A
+           mode rather than a control of its own, because the thing it needs
+           to be told is *which* button, and the grid below already knows how
+           to ask that. -->
+      <button id="pads-toggles" type="button" class="ghost pad-only"
+              aria-pressed="false">Toggle buttons</button>
       <button id="pads-reset" type="button" class="ghost" hidden>Use defaults</button>
       <button id="pads-close" type="button" class="ghost" title="Back to the game">&times;</button>
     </div>
@@ -393,6 +399,12 @@
          says so -- a machine with three pads plugged in is usually one person
          and two spares. -->
     <div id="pad-seats" class="pad-seats pad-only"></div>
+    <!-- Only while the mode is on, because the grid means something different
+         then and a grid that has changed its mind should say so. -->
+    <p id="pads-toggle-note" class="browse-note" hidden>
+      Click a button to make it latch: pressed once to hold it down, pressed
+      again to let go. Marked buttons latch.
+    </p>
     <!-- Glass has no click to it, and this is the switch for the buzz that
          stands in for one. Its own line rather than another button in the bar
          at the top: that bar already carried four, and in portrait they

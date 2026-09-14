@@ -1636,6 +1636,22 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
   .key.on { background: #3a3320; }
 }
+
+/* A button that latches: pressed once to hold it down, pressed again to let
+   go. Marked on its left edge rather than by colouring the cell, because the
+   cell already uses colour for "this is pressed right now" -- and a latched
+   button is very often both at once, which is the moment the difference
+   matters most. */
+.key.is-toggle {
+  border-left-color: var(--accent);
+  border-left-width: 5px;
+  padding-left: calc(.45rem - 3px);
+}
+/* While the grid is being used to choose them, it is answering a different
+   question and says so by the pointer it offers. */
+.pads-grid.choosing-toggles .key {
+  cursor: copy;
+}
 .key-name {
   font-family: var(--pixel);
   font-size: .45rem;

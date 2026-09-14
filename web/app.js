@@ -3405,7 +3405,9 @@ function startPadLoop() {
   ticker = setInterval(tick, Math.round(1000 / SEND_HZ));
 
   // Leaving must not leave a button held down on someone else's television.
-  const letGo = () => { keyButtons = 0; sendFrame(null, true); };
+  // Including anything latched: a toggled button is only held because this
+  // page keeps saying so, and a page that is going away must stop saying it.
+  const letGo = () => { keyButtons = 0; clearLatch(ownLatch); sendFrame(null, true); };
   window.addEventListener("pagehide", letGo);
   window.addEventListener("beforeunload", letGo);
   document.addEventListener("visibilitychange", () => {
@@ -3533,7 +3535,7 @@ function hasGamepad() {
  * heartbeat and the physical pad, neither of which knows when it changed. */
 function sendNow() {
   if (padsOpen) return;
-  sendFrame(remapped(livePad()), false);
+  sendFrame(toggled(remapped(livePad()), padName, ownLatch, true), false);
 }
 
 /* The extra seats, on the page's own clock. Deliberately not on sendNow():
@@ -3576,8 +3578,9 @@ function tick() {
   // mirror: somebody finding out what their buttons are called should not be
   // starting a game by doing it, which is how a game got started too soon.
   if (padsOpen) return;
-  // Otherwise: whatever the guest told us their buttons really are.
-  sendFrame(remapped(pad), false);
+  // Otherwise: whatever the guest told us their buttons really are, with
+  // anything they asked to latch held down for them.
+  sendFrame(toggled(remapped(pad), padName, ownLatch, true), false);
 }
 
 let lastSent = null, lastSentAt = 0;
@@ -5696,6 +5699,9 @@ class ExtraPlayer {
     this.pc = null;
     this.input = null;
     this.seq = 0;
+    // Its own latch. Two people on one machine toggle their own buttons, and
+    // a shared one would have each of them lifting the other's.
+    this.latch = newLatch();
     this.slot = null;
     this.label = "";
     this.state = "joining";
@@ -5895,7 +5901,8 @@ class ExtraPlayer {
     if (!raw || !raw.connected) return;
     // Corrected the same way this page's own pad is, but by *this* pad's
     // name: two people on one machine may hold different controllers.
-    const pad = correctedPad(raw, this.name);
+    const pad = toggled(correctedPad(raw, this.name), this.name,
+                        this.latch, true);
     const state = FPFrame.padState(pad);
     if (this.input.bufferedAmount > BACKLOG_LIMIT) return;
     try {
@@ -5907,6 +5914,8 @@ class ExtraPlayer {
 
   close() {
     this.closed = true;
+    // Nothing stays latched past the seat that was holding it.
+    clearLatch(this.latch);
     // Everything down, in the order that leaves nothing behind: the pad first,
     // so the host hears the release rather than inferring it from silence.
     try {
@@ -6612,6 +6621,108 @@ function correctedPad(pad, name) {
            id: pad.id, mapping: pad.mapping };
 }
 
+/* ---- buttons that latch ------------------------------------------------
+ *
+ * A toggled button is pressed once to hold it down and pressed again to let
+ * it go. Asked for as "the ability for the client to make certain buttons
+ * toggle" -- a run button held for a whole level, a trigger somebody cannot
+ * comfortably keep down, an accelerator on a long straight.
+ *
+ * Entirely this page's business. The frame that leaves here already says
+ * which buttons are down, so a latched button is simply one this page keeps
+ * saying is down; the host, the protocol and the game are unchanged and
+ * cannot tell the difference. That is the point -- a game cannot be asked to
+ * support this, and does not have to be.
+ *
+ * Stored by controller name beside the button map, for the reason that map is:
+ * two people on one machine hold different controllers, and the pad that wants
+ * a latched trigger is not necessarily the one this page is sitting on.
+ */
+function togglesKey(name) {
+  return "fp-padtoggle:" + (name || "pad");
+}
+
+function togglesFor(name) {
+  try {
+    const raw = localStorage.getItem(togglesKey(name));
+    const list = raw ? JSON.parse(raw) : null;
+    // Filtered, not trusted: this comes back from storage that a previous
+    // version of this page wrote, and an index off the end of the button list
+    // would quietly latch nothing for ever.
+    return Array.isArray(list)
+      ? list.filter((i) => Number.isInteger(i) && i >= 0 && i < STANDARD_KEYS.length)
+      : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveToggles(name, list) {
+  try {
+    if (list && list.length) {
+      localStorage.setItem(togglesKey(name), JSON.stringify(list));
+    } else {
+      localStorage.removeItem(togglesKey(name));
+    }
+  } catch (_) { /* private browsing; the setting just will not be remembered */ }
+}
+
+/* One seat's latch: which toggled buttons are down, and what the controller
+   was doing when it was last read. */
+function newLatch() {
+  return { on: {}, was: {} };
+}
+
+function clearLatch(latch) {
+  if (!latch) return;
+  latch.on = {};
+  latch.was = {};
+}
+
+/* A pad with its toggled buttons latched.
+ *
+ * `advance` is the whole reason this is a step of its own rather than part of
+ * remapped(). A latch moves on the *edge* of a press, so the state may be
+ * advanced exactly once per frame -- and the panel paints the same pad it
+ * sends. Count the painting as a press too and every toggle flips twice,
+ * which reads as the feature simply not working.
+ *
+ * Note which pad this reads. The toggles are looked up by name and applied
+ * after the button map, so somebody who has taught this page where their
+ * buttons are toggles the button they can see the name of -- "hold RT" -- and
+ * not whichever physical switch happens to report as number seven.
+ */
+function toggled(pad, name, latch, advance) {
+  if (!pad || !latch) return pad;
+  const which = togglesFor(name);
+  if (!which.length) {
+    // Nothing latches here. Let go of anything that was held rather than
+    // keeping it: turning the setting off has to release what it was holding,
+    // or a button stays down on the television with nothing left to lift it.
+    if (advance) clearLatch(latch);
+    return pad;
+  }
+  const buttons = pad.buttons.slice();
+  for (const i of which) {
+    const button = pad.buttons[i];
+    const down = !!(button && button.pressed);
+    if (advance) {
+      // The rising edge alone. Holding it is one press, not a stream of them.
+      if (down && !latch.was[i]) latch.on[i] = !latch.on[i];
+      latch.was[i] = down;
+    }
+    // Full value, not the analogue reading: a latched trigger is held all the
+    // way, which is what somebody who cannot hold it down is asking for.
+    buttons[i] = latch.on[i]
+      ? { pressed: true, value: 1 } : { pressed: false, value: 0 };
+  }
+  return { buttons, axes: pad.axes, connected: pad.connected,
+           index: pad.index, id: pad.id, mapping: pad.mapping };
+}
+
+/* This page's own seat. Extra seats each carry their own -- see ExtraPlayer. */
+let ownLatch = newLatch();
+
 function loadPadMap() {
   try {
     const raw = localStorage.getItem(mapKey());
@@ -6627,8 +6738,11 @@ function loadPadMap() {
     ? tune.sensitivity : 1.0;
   paintSticks();
   paintTune();
+  // The toggles belong to whichever controller this is now about.
+  paintToggleMarks();
   const reset = el("pads-reset");
-  if (reset) reset.hidden = !padMap && !sticksSwapped;
+  if (reset) reset.hidden = !padMap && !sticksSwapped
+                            && !togglesFor(padName).length;
 }
 
 function paintSticks() {
@@ -6931,6 +7045,50 @@ function closePads() {
   if (padsFrame) { cancelAnimationFrame(padsFrame); padsFrame = null; }
 }
 
+/* Whether clicking a button in the grid picks it as a toggle rather than
+   starting to learn it. One mode switch and one grid: the alternative was a
+   second grid saying the same seventeen names again. */
+let choosingToggles = false;
+
+function paintTogglesMode() {
+  const button = el("pads-toggles");
+  if (!button) return;
+  button.textContent = choosingToggles ? "Done" : "Toggle buttons";
+  button.setAttribute("aria-pressed", choosingToggles ? "true" : "false");
+  button.classList.toggle("on", choosingToggles);
+  const grid = el("pads-grid");
+  if (grid) grid.classList.toggle("choosing-toggles", choosingToggles);
+  const note = el("pads-toggle-note");
+  if (note) note.hidden = !choosingToggles;
+  paintToggleMarks();
+}
+
+/* Which buttons are marked, on the grid itself. Read from storage every time
+   rather than remembered, for the same reason the button map is: the panel
+   can be pointed at another controller between two paints. */
+function paintToggleMarks() {
+  const which = new Set(togglesFor(padName));
+  STANDARD_KEYS.forEach((_key, i) => {
+    const cell = el("key" + i);
+    if (cell) cell.classList.toggle("is-toggle", which.has(i));
+  });
+}
+
+function flipToggle(index) {
+  const which = togglesFor(padName);
+  const at = which.indexOf(index);
+  if (at >= 0) which.splice(at, 1);
+  else which.push(index);
+  which.sort((a, b) => a - b);
+  saveToggles(padName, which);
+  // Let go of whatever it was holding. Taking a button out of the list while
+  // it is latched down would leave it down with nothing able to lift it.
+  clearLatch(ownLatch);
+  paintToggleMarks();
+  const reset = el("pads-reset");
+  if (reset && which.length) reset.hidden = false;
+}
+
 function buildPadsGrid() {
   const grid = el("pads-grid");
   grid.innerHTML = "";
@@ -6941,9 +7099,13 @@ function buildPadsGrid() {
     cell.innerHTML = '<span class="key-name">' + name + "</span>"
                    + '<span class="key-note">' + note + "</span>"
                    + '<span class="key-bind" id="bind' + i + '"></span>';
-    cell.addEventListener("click", () => startLearn(i));
+    cell.addEventListener("click", () => {
+      if (choosingToggles) flipToggle(i);
+      else startLearn(i);
+    });
     grid.appendChild(cell);
   });
+  paintToggleMarks();
   const axes = el("pads-axes");
   axes.innerHTML = "";
   AXIS_NAMES.forEach((name, i) => {
@@ -6996,7 +7158,8 @@ function firstFreePad(pads) {
 function paintPads() {
   if (!padsOpen) return;
   const raw = livePad();
-  const pad = remapped(raw);
+  // advance:false -- painting is not pressing. See toggled().
+  const pad = toggled(remapped(raw), padName, ownLatch, false);
   setChip("pads-name",
           keyboardOn ? "keyboard" : (padName || (raw ? "controller" : "no controller")),
           (raw || keyboardOn) ? "ok" : "warn");
@@ -7257,6 +7420,22 @@ el("pads-sticks").addEventListener("click", () => {
   report(sticksSwapped ? "swapped the sticks" : "unswapped the sticks");
 });
 
+el("pads-toggles").addEventListener("click", () => {
+  choosingToggles = !choosingToggles;
+  // Leaving the mode while a button was waiting to be learnt would leave that
+  // question open with no way to see it was still being asked.
+  if (choosingToggles && learnTarget >= 0) cancelLearn();
+  paintTogglesMode();
+  el("pads-hint").textContent = choosingToggles
+    ? "Click the buttons you want to latch. A latched button is pressed once "
+      + "to hold it down and pressed again to let go."
+    : (togglesFor(padName).length
+       ? "Those buttons now latch. Press one in the game to hold it down."
+       : "No buttons latch on this controller.");
+  report(choosingToggles ? "is choosing buttons to latch"
+                         : "finished choosing buttons to latch");
+});
+
 el("pads-orient").addEventListener("change", (event) => {
   const pick = ORIENTATIONS.indexOf(event.target.value) > 0
     ? event.target.value : "any";
@@ -7321,6 +7500,15 @@ el("pads-reset").addEventListener("click", () => {
     localStorage.removeItem(mapKey());
     localStorage.removeItem(sticksKey());
   } catch (_) {}
+  // And the latching buttons, for the same reason the sticks go: this is the
+  // button that means "undo whatever I did to this controller", and one that
+  // left a button still latching would be the button that undoes most of it.
+  // Released as well as forgotten -- a latched button that is still held has
+  // nothing left to lift it once the list it came from is gone.
+  saveToggles(padName, []);
+  clearLatch(ownLatch);
+  choosingToggles = false;
+  paintTogglesMode();
   paintSticks();
   paintTune();
   el("pads-reset").hidden = true;
