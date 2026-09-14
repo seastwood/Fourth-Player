@@ -1765,14 +1765,34 @@ Not yet done:
 
   Which leaves 449 MB sitting in `[heap]` — ordinary main-arena `malloc` —
   arriving in bursts (250 MB to 419 MB inside fifteen seconds) with nothing in
-  the journal during them. That shape fits an allocation made below both
-  tracers, and the prime suspect is the VA-API stack: libva and the mesa driver
-  allocate where neither Python nor GStreamer can account for it.
+  the journal during them.
 
-  Two ways on from here, neither yet taken: run a session on software
-  `x264enc` (`--software`), which takes the VA driver out of the picture
-  entirely and settles the theory in one sitting; or install `heaptrack` and
-  get the calling stack directly, which needs root on the box.
+  **2026-09-13: that is not a leak at all, and `coredumpctl` had been saying so
+  for three days.** The console holds four SIGSEGV cores of the service, the
+  oldest from 2026-09-10. Every one crashes in
+  `g_type_check_instance_is_fundamentally_a` — a GObject whose type header is
+  already garbage. Two arrive through `g_object_unref` from libgstwebrtc's
+  dispose under `gst_bin_remove`; two through `g_object_get_qdata` from
+  PyGObject. All on non-main threads, and one with `PyObject_SetAttr` up the
+  stack, which is `Peer.detach()` letting go of the pipeline's contents while
+  the teardown it had just started was still running. Another core has a second
+  thread stopped inside `malloc_consolidate` — glibc walking a corrupted free
+  list.
+
+  A use-after-free explains every measurement above, and nothing else tried
+  does. Corrupt glibc's free lists and malloc can no longer reuse what it
+  frees: the arena grows without bound, `malloc_trim` reclaims nothing, and no
+  object tracker reports a thing, because at the object level nothing is
+  leaking — it is being freed twice. It also explains why `leakprobe.py` never
+  reproduced it, since the probe does not tear a peer down the same way.
+
+  Fixed by keeping the webrtcbin, both data channels and the appsrcs in the
+  teardown closure and releasing them once the pipeline has reached NULL.
+  **This entry stays open until a soak with real guests says it is closed** —
+  the diagnosis is strong and the bug was certainly real, but "the crashes
+  stopped" and "the memory is flat" are two different claims and only the
+  first has been made. `coredumpctl list | grep python3` should stop growing,
+  and the 54 oom-kills in 24 hours should go to none.
 
 ## Licence
 
