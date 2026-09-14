@@ -2418,7 +2418,15 @@ class LiveSession:
         # from a named size, so there is no way to ask for 1920x480.
         "height": (480, 1080),
         "fps": (15, 60),
-        "bitrate_kbps": (500, 20000),
+        # A hundred megabits. The ceiling is not about what the encoder can
+        # do -- NVENC takes two gigabits and the picture stops improving long
+        # before either -- it is about what leaves the machine. Every guest is
+        # sent their own copy, so this number is per guest: four of them at
+        # the top of this range is 400 Mb/s off one network card, which wired
+        # gigabit will carry and nothing else here will. Somebody on ethernet
+        # asking for far more than 20 Mb/s is a reasonable thing to want, and
+        # was simply not allowed before.
+        "bitrate_kbps": (500, 100000),
         # The buffer the *browser* holds before it draws. The floor is not
         # zero: a little is what absorbs a burst arriving late, and a guest on
         # mobile data wants more of it than somebody on a cable.

@@ -216,6 +216,19 @@ function fillPicture(stream, policies) {
       .map((h) => `<option value="${h}">${h}p</option>`).join("");
     size.dataset.built = String(stream.sizes);
   }
+  // The host publishes what it will accept, so the boxes are bounded by that
+  // rather than by numbers typed in here. A page carrying its own copy of a
+  // limit is a page that disagrees with the host the moment one of them
+  // changes -- and it already offered a size the host had never had.
+  // Only the number boxes: fps is a select, and a select is bounded by the
+  // options it is built from rather than by min and max.
+  const limits = stream.limits || {};
+  for (const [field, id] of [["bitrate_kbps", "set-bitrate"]]) {
+    const box = el(id), bound = limits[field];
+    if (!box || !bound || bound.length !== 2) continue;
+    box.min = bound[0];
+    box.max = bound[1];
+  }
   set("set-size", stream.height);
   set("set-fps", stream.fps);
   set("set-bitrate", stream.bitrate_kbps);
