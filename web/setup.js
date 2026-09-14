@@ -206,12 +206,15 @@ function fillPicture(stream, policies) {
     policy.dataset.built = "1";
   }
   const size = el("set-size");
-  if (size && !size.dataset.built) {
-    // Height carries width: the two are set together from a named size, so
-    // there is no way to ask the host for 1920x480.
-    size.innerHTML = [[1920, 1080], [1600, 900], [1280, 720], [960, 540], [854, 480]]
-      .map(([w, h]) => `<option value="${h}">${w}x${h}</option>`).join("");
-    size.dataset.built = "1";
+  // The sizes the host offers, not a list invented here. Height carries width
+  // -- they are set together from a named size, so there is no asking for
+  // 1920x480 -- and the first version of this page offered 1600x900, which
+  // the host has never had. Choosing it could only ever be refused.
+  if (size && stream.sizes && stream.sizes.length
+      && size.dataset.built !== String(stream.sizes)) {
+    size.innerHTML = stream.sizes
+      .map((h) => `<option value="${h}">${h}p</option>`).join("");
+    size.dataset.built = String(stream.sizes);
   }
   set("set-size", stream.height);
   set("set-fps", stream.fps);
@@ -222,6 +225,14 @@ function fillPicture(stream, policies) {
     codec.dataset.built = "1";
   }
   set("set-codec", stream.codec);
+  const note = el("picture-now");
+  if (note) {
+    note.textContent = stream.sending
+      ? `sending ${stream.sending}${stream.encoder ? " with " + stream.encoder : ""}`
+        + `${stream.hardware ? " (hardware)" : ""}`
+        + `${stream.playing ? ", " + stream.playing : ""}`
+      : "";
+  }
   const apply = document.querySelector('[data-do="apply-stream"]');
   if (apply) {
     apply.disabled = !stream.can_apply;

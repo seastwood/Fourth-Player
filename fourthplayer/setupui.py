@@ -662,20 +662,39 @@ class SetupUI:
             return {"ok": False, "error": str(exc)}
 
     def _stream_now(self):
-        """What the picture is set to, and what it may be set to."""
-        cfg = self.server.cfg
-        out = {
-            "height": getattr(cfg, "height", None),
-            "width": getattr(cfg, "width", None),
-            "fps": getattr(cfg, "fps", None),
-            "bitrate_kbps": getattr(cfg, "bitrate_kbps", None),
-            "codec": getattr(cfg, "codec", None),
-        }
+        """What the picture is set to, and what it may be set to.
+
+        From the session's own stream_settings where there is one. It already
+        answers this exact question for the guest page -- current values, the
+        sizes on offer, the bounds, and what is *actually* being sent as
+        opposed to what was asked for -- and a second copy here is a second
+        thing to keep in agreement.
+
+        Which is not hypothetical: the first version of this page built its own
+        size list and put 1600x900 in it. The host offers 1080, 720, 540 and
+        480, so choosing that one could only ever be refused.
+        """
         session = self.server.session
+        if session is not None:
+            try:
+                out = dict(session.stream_settings())
+                out["can_apply"] = bool(session.open)
+                return out
+            except Exception as exc:
+                log.warning("could not read the stream settings: %s", exc)
+        # No session: show what the next one will start with, from the config,
+        # and the sizes from the class rather than from an instance there is
+        # none of.
+        cfg = self.server.cfg
+        out = {k: getattr(cfg, k, None) for k in
+               ("width", "height", "fps", "bitrate_kbps", "codec",
+                "jitter_ms", "queue_ms", "cpb_ms")}
         try:
             from .session import LiveSession
-            out["limits"] = {k: list(v) for k, v in LiveSession.STREAM_LIMITS.items()}
+            out["sizes"] = sorted(LiveSession.STREAM_SIZES, reverse=True)
+            out["limits"] = {k: list(v)
+                             for k, v in LiveSession.STREAM_LIMITS.items()}
         except Exception:
-            out["limits"] = {}
-        out["can_apply"] = bool(session and session.open)
+            out["sizes"], out["limits"] = [], {}
+        out["can_apply"] = False
         return out
