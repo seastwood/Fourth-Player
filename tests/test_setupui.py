@@ -170,27 +170,31 @@ async def main():
         check(status == 403, "but not without the token: %d" % status)
 
         print("\na wrong sign-in says nothing useful")
-        status, _h, body = await ask(
-            "/api/signin",
-            json.dumps({"name": OWNER, "password": "not-the-password",
-                        "code": "000000"}).encode(),
-            "fp_setup=" + page.token)
-        answer = json.loads(body)
-        check(not answer.get("ok"), "the wrong password is refused")
-        check("name, password or code" in (answer.get("error") or ""),
-              "with one answer for all three: %r" % answer.get("error"))
-        check(page.bad_signins == 1, "and it is counted: %d" % page.bad_signins)
+        for who, secret in ((OWNER, "not-the-password"),
+                            ("nobody-at-all", PASSWORD)):
+            status, _h, body = await ask(
+                "/api/signin",
+                json.dumps({"name": who, "password": secret}).encode(),
+                "fp_setup=" + page.token)
+            answer = json.loads(body)
+            check(not answer.get("ok"), "%s is refused" % who)
+            check("name or password" in (answer.get("error") or ""),
+                  "with one answer for both: %r" % answer.get("error"))
+        check(page.bad_signins == 2, "and they are counted: %d" % page.bad_signins)
 
-        print("\nand the right one is let in")
-        code = accounts.code_at(made["secret"], int(time.time()) // 30)
+        print("\nand the right one is let in, with no authenticator code")
+        # Deliberately none. Opening this page already proves where you are --
+        # loopback, behind a token only this user can read -- and a page you
+        # cannot open without an authenticator is no use on the day you have
+        # lost the phone, which is the day you need the page that issues a new
+        # secret.
         status, headers, body = await ask(
             "/api/signin",
-            json.dumps({"name": OWNER, "password": PASSWORD,
-                        "code": code}).encode(),
+            json.dumps({"name": OWNER, "password": PASSWORD}).encode(),
             "fp_setup=" + page.token)
         answer = json.loads(body)
         check(answer.get("ok") and answer.get("who") == OWNER,
-              "name, password and the six digits: %s" % answer.get("error"))
+              "name and password are enough here: %s" % answer.get("error"))
         signin = ""
         for part in (headers.get("set-cookie") or "").split(";"):
             if part.strip().startswith("fp_signin="):
@@ -202,18 +206,15 @@ async def main():
         check(status == 200 and json.loads(body).get("ok"),
               "and now the page answers: %d" % status)
 
-        print("\nthe same code cannot be used twice")
-        # accounts.verify writes down the step a code was accepted for, which
-        # is the reason it takes the whole account rather than a password
-        # checker: a verification that records nothing is one an attacker may
-        # repeat.
-        status, _h, body = await ask(
-            "/api/signin",
-            json.dumps({"name": OWNER, "password": PASSWORD,
-                        "code": code}).encode(),
-            "fp_setup=" + page.token)
-        check(not json.loads(body).get("ok"),
-              "the code that just worked is refused the second time")
+        print("\nand the guest page still wants the code")
+        # Dropping it here must not have dropped it anywhere else: the guest
+        # page is reached across a network by somebody who could be anywhere,
+        # and that is what six digits are for.
+        code = accounts.code_at(made["secret"], int(time.time()) // 30)
+        check(accounts.verify(OWNER, PASSWORD, code) is not None,
+              "the account still verifies with its code, for the guest page")
+        check(accounts.verify(OWNER, PASSWORD, "000000") is None,
+              "and a wrong code there is still refused")
 
         print("\nand it is not on the network")
         addresses = {s.getsockname()[0] for s in server.sockets}

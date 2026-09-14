@@ -317,22 +317,48 @@ class SetupUI:
                          (json.dumps(answer) + "\n").encode(), extra)
 
     def _signin(self, body):
-        """Name, password and the six digits, checked the way the guest page
-        checks them -- accounts.verify, which also writes down the step a code
-        was used for so the same code cannot be presented twice."""
+        """Name and password. Deliberately no authenticator code.
+
+        The guest page asks for six digits because it is reached across a
+        network by somebody who could be anywhere. This page is not: it is on
+        the loopback, behind a token written where only this user can read it.
+        Being able to ask at all is already the strongest claim of presence
+        this program has -- it is the same claim `admin add` at a terminal
+        makes, and that does not ask for a code either.
+
+        So the two proofs here are *where* (the token) and *who* (the
+        password), and a third would buy very little: anybody who can read the
+        token file can read the accounts file beside it, and is already this
+        user.
+
+        Against that it would cost a great deal. This is the page that issues
+        a new authenticator secret, and a page you cannot open without an
+        authenticator is no use whatsoever on the day you have lost the phone
+        -- which is the day you need it. Somebody would be sent to the command
+        line to fix the thing the setup page exists to fix.
+
+        The code still guards what it should: signing in to the *guest* page,
+        and `kick`, `reshare`, `lock`, `grant` and `desk` at the moment they
+        are used, wherever they are used from.
+        """
         if not self.needs_signin():
             return {"ok": True, "who": None, "bootstrap": True}, []
         name = (body.get("name") or "").strip()
-        account = accounts.verify(name, body.get("password") or "",
-                                  body.get("code") or "")
+        account = accounts.find(name)
+        if account is not None and not accounts.check_password(
+                body.get("password") or "", account.get("password") or {}):
+            account = None
         if account is None:
+            # Spend the time anyway when the name is unknown, so answering
+            # instantly does not tell somebody which names exist.
+            accounts.hash_password(body.get("password") or "")
             self.bad_signins += 1
             log.warning("a sign-in to the setup page was refused (%d so far)",
                         self.bad_signins)
-            # One answer for a wrong name, a wrong password and a wrong code,
-            # so guessing tells the guesser nothing about which was wrong.
+            # One answer for a wrong name and a wrong password, so guessing
+            # tells the guesser nothing about which was wrong.
             return {"ok": False,
-                    "error": "That name, password or code is not right."}, []
+                    "error": "That name or password is not right."}, []
         cookie = secrets.token_urlsafe(32)
         self.signins[cookie] = (account["name"],
                                 time.time() + self.SIGNIN_HOURS * 3600)

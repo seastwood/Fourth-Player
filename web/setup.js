@@ -214,8 +214,9 @@ async function gate() {
   el("everything").hidden = need;
   if (need) {
     el("signin-why").textContent =
-      "This page can create accounts and issue authenticator secrets, so it "
-      + "asks who you are as well as where you are.";
+      "Opening this page already proves where you are — it is on the loopback, "
+      + "behind a token only this machine can read. This asks who you are. No "
+      + "authenticator code: it is what issues them.";
   }
   return !need;
 }
@@ -321,11 +322,10 @@ const ACTIONS = {
     const answer = await post("/api/signin", {
       name: el("in-name").value,
       password: el("in-password").value,
-      code: el("in-code").value,
     });
     // Cleared whether or not it worked: a password left in a field is a
     // password on the screen of a machine somebody walks away from.
-    el("in-password").value = el("in-code").value = "";
+    el("in-password").value = "";
     if (heard(answer, "signed in")) await load();
   },
   async "secret-done"() {
