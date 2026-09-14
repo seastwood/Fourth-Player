@@ -51,3 +51,16 @@ code { background:#0d0f12; padding:.1rem .3rem; border-radius:.2rem;
        background:#0d0f12; border:1px solid var(--line); border-radius:.4rem;
        padding:.5rem .9rem; max-width:40rem; }
 .say.bad { border-color:var(--bad); color:#ffb3b3; }
+
+/* The share card. The one thing on this page somebody points a phone at, so
+   it gets the room it needs rather than sitting in a table. */
+.share { display:flex; gap:1.2rem; flex-wrap:wrap; align-items:flex-start; }
+.share-qr img { width:208px; height:208px; image-rendering:pixelated;
+                background:#fff; padding:.4rem; border-radius:.3rem; }
+.share-qr pre { background:#fff; color:#000; font-size:.55rem; line-height:.6;
+                padding:.4rem; margin:0; }
+.share-words { flex:1 1 18rem; min-width:16rem; }
+.share-pin { font-size:1rem; color:var(--dim); margin:.1rem 0 .4rem; }
+.share-pin strong { font-size:2.1rem; letter-spacing:.18em; color:var(--edge);
+                    font-variant-numeric:tabular-nums; }
+.share-url code { font-size:.82rem; }

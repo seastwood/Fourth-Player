@@ -69,6 +69,33 @@
       </div>
     </div>
 
+    <div class="card" id="share" hidden>
+      <h2>Give this to a guest</h2>
+      <div class="share">
+        <div class="share-qr"><img id="share-qr" alt="" hidden><pre id="share-art" hidden></pre></div>
+        <div class="share-words">
+          <p class="share-pin">PIN <strong id="share-pin">—</strong></p>
+          <p class="share-url"><code id="share-url">—</code></p>
+          <p class="hint" id="share-note"></p>
+          <div class="row">
+            <button data-do="copy-url">Copy the link</button>
+            <button data-do="copy-both">Copy link and PIN</button>
+            <button data-do="reshare">New link and PIN</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="share-gone" hidden>
+      <h2>Give this to a guest</h2>
+      <p class="hint">The link and PIN for this session cannot be shown again.
+         Only their digests are kept, so nothing here can read them back — that
+         is deliberate, and it is why a stolen copy of this machine's state is
+         not a way in. Re-share to get a new pair; everybody already connected
+         stays connected.</p>
+      <div class="row"><button class="go" data-do="reshare">New link and PIN</button></div>
+    </div>
+
     <div class="card">
       <h2>How guests get in</h2>
       <div class="row">

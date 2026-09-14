@@ -57,6 +57,44 @@ function rows(into, pairs) {
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
   (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 
+/* The link and PIN, drawn to be pointed a phone at.
+
+   Only ever redrawn when they change. The QR is a round trip to the host and
+   the page reloads every few seconds; redrawing it each time would replace the
+   image under somebody's camera while they were reading it. */
+let shownFor = null;
+
+async function drawShare(s) {
+  const open = s && s.open;
+  const have = open && (s.url || s.pin);
+  el("share").hidden = !have;
+  // Only say "cannot be shown again" about a session that is actually open.
+  el("share-gone").hidden = !(open && !have);
+  if (!have) { shownFor = null; return; }
+
+  el("share-pin").textContent = s.pin || "not set";
+  el("share-url").textContent = s.url || "—";
+  el("share-note").textContent = s.require_link
+    ? "The guest needs both: open the link, then type the PIN."
+    : "The link is not required — the address and the PIN are enough, so this "
+      + "can be read out loud.";
+
+  const key = (s.url || "") + "|" + (s.pin || "");
+  if (key === shownFor) return;
+  shownFor = key;
+  const target = s.url || s.base_url;
+  if (!target) return;
+  const answer = await post("/api/qr", {text: target});
+  const image = el("share-qr"), art = el("share-art");
+  if (answer.ok && answer.png) {
+    image.src = answer.png; image.hidden = false; art.hidden = true;
+  } else if (answer.ok && answer.art) {
+    art.textContent = answer.art; art.hidden = false; image.hidden = true;
+  } else {
+    image.hidden = art.hidden = true;
+  }
+}
+
 function drawSession(s) {
   const open = s && s.open;
   el("session-closed").hidden = !!open;
@@ -228,6 +266,7 @@ async function load() {
   el("trouble").hidden = !state.trouble;
   if (state.trouble) el("trouble").textContent = state.trouble;
   drawSession(state.session);
+  await drawShare(state.session);
   drawGuests(state.session);
   drawAccounts(state);
   drawMachine(state);
@@ -247,7 +286,22 @@ const ACTIONS = {
     heard(await control("extend", {minutes: Number(el("extend-minutes").value) || 30}),
           "time added");
   },
-  async reshare() { heard(await control("reshare"), "a new link and PIN"); },
+  async reshare() {
+    // The old pair stops working, so say so before doing it rather than after
+    // somebody has already sent it to four people.
+    if (!confirm("Make a new link and PIN?\n\nThe current ones stop working. "
+                 + "Anybody already connected stays connected.")) return;
+    shownFor = null;                       // the QR has to be redrawn
+    heard(await control("reshare"), "a new link and PIN");
+  },
+  async "copy-url"() { await clip(STATE.session && STATE.session.url, "the link"); },
+  async "copy-both"() {
+    const s = STATE.session || {};
+    const words = s.require_link
+      ? `${s.url}\nPIN: ${s.pin}`
+      : `${s.base_url || s.url}\nPIN: ${s.pin}`;
+    await clip(words, "the link and PIN");
+  },
   async stop() {
     const guests = ((STATE.session || {}).guests || []).length;
     if (!confirm(guests ? `End the session? ${guests} guest(s) are connected.`
@@ -334,6 +388,28 @@ const ACTIONS = {
     await load();                         // which now asks for a sign-in
   },
 };
+
+/* Copy, with a fallback. navigator.clipboard is refused on a page that is not
+   a secure context, and this one is plain http on the loopback -- which most
+   browsers do treat as secure, and not all of them. */
+async function clip(text, what) {
+  if (!text) { say("there is nothing to copy", true); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    say(what + " is on the clipboard");
+    return;
+  } catch (_) { /* fall through */ }
+  const box = document.createElement("textarea");
+  box.value = text;
+  box.style.position = "fixed";
+  box.style.opacity = "0";
+  document.body.appendChild(box);
+  box.select();
+  const worked = document.execCommand && document.execCommand("copy");
+  box.remove();
+  say(worked ? what + " is on the clipboard"
+             : "this browser would not copy it — select it by hand", !worked);
+}
 
 function showSecret(answer) {
   el("secret-body").innerHTML =

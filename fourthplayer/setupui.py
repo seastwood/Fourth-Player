@@ -574,11 +574,30 @@ class SetupUI:
             import qrcode
         except ImportError:
             return {"ok": False, "error": "python3-qrcode is not installed"}
-        drawn = qrcode.QRCode(border=2)
+        drawn = qrcode.QRCode(border=2, box_size=8)
         drawn.add_data(text)
         out = io.StringIO()
         drawn.print_ascii(out=out, invert=True)
-        return {"ok": True, "art": out.getvalue()}
+        answer = {"ok": True, "art": out.getvalue()}
+        # And as a picture, for the case this is really for: somebody holding
+        # a phone up to a screen. The characters are fine in a terminal and a
+        # poor thing to ask a camera to read off a browser's line spacing.
+        #
+        # Inlined as a data URI rather than served from a second address:
+        # this page is opened once to set a machine up, and a URL that has to
+        # stay valid long enough for an <img> to fetch it is a second piece of
+        # state for no gain.
+        try:
+            import base64
+            buffer = io.BytesIO()
+            drawn.make_image(fill_color="black", back_color="white").save(
+                buffer, format="PNG")
+            answer["png"] = ("data:image/png;base64,"
+                             + base64.b64encode(buffer.getvalue()).decode())
+        except Exception as exc:
+            # Pillow missing, most likely. The characters still work.
+            log.info("no QR picture (%s); the text version still draws", exc)
+        return answer
 
     async def _api_diagnostics(self, _body):
         return {"ok": True, **self._diagnostics()}
