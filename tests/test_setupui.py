@@ -29,10 +29,23 @@ def check(cond, msg):
 
 
 try:
-    from fourthplayer import setupui
+    from fourthplayer import accounts, setupui
 except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
     sys.exit(0)
+
+# An accounts file of this test's own.
+#
+# The same lesson test_control.py learned: a test that reads the machine's real
+# state passes on a workstation and fails on a host that is actually being
+# used. This one asks "is there an account yet", and on a host where somebody
+# has made one the answer is yes -- so the bootstrap checks below failed on
+# ultra while passing here. Worse, a test of account handling that wrote to the
+# real file would be editing somebody's logins.
+import tempfile
+
+_own = tempfile.mkdtemp(prefix="fp-setup-test-")
+accounts.STORE = os.path.join(_own, "accounts.json")
 
 
 class StubServer:
@@ -208,6 +221,9 @@ async def main():
         await server.wait_closed()
 
 asyncio.run(main())
+
+import shutil
+shutil.rmtree(_own, ignore_errors=True)
 
 print()
 if fails:
