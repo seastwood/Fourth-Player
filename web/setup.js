@@ -59,9 +59,20 @@ function drawSession(s) {
     return;
   }
   const bits = [];
-  if (s.join_url) bits.push(`link <code>${esc(s.join_url)}</code>`);
+  // `url` and `pin` are null once a session has been restored across a
+  // restart: only digests are kept, so the host cannot show them again. Say
+  // that rather than drawing an empty box.
+  if (s.url) bits.push(`link <code>${esc(s.url)}</code>`);
   if (s.pin) bits.push(`PIN <code>${esc(s.pin)}</code>`);
-  bits.push(s.minutes_left ? `${s.minutes_left} minutes left` : "no time limit");
+  if (!s.url && !s.pin) {
+    bits.push('<span class="none">the link and PIN cannot be shown again — ' +
+              'only their digests are kept. Re-share for new ones.</span>');
+  }
+  // `remaining` is seconds, and null when there is no deadline: JSON has no
+  // infinity and a browser will not parse one.
+  bits.push(s.unlimited || s.remaining == null
+    ? "no time limit"
+    : `${Math.max(0, Math.round(s.remaining / 60))} minutes left`);
   bits.push(`${(s.guests || []).length} of ${s.slots || "?"} slots`);
   el("session-now").innerHTML = bits.join(" &middot; ");
 }
@@ -133,20 +144,31 @@ function fillControls(s) {
   set("set-limit", s.limit);
   set("set-url", s.public_url || "");
   set("set-share", s.share_pads ? "on" : "off");
+  // "" rather than "off" when nothing is locked, which is what the host says.
   set("set-lock", s.locked || "off");
+  set("set-policy", (s.launch || {}).policy);
+}
+
+/* The picture, which comes from this page's own endpoint rather than from
+   status -- `stream` is not a control-channel command, it arrives over the
+   guest socket, so the settings are not in the session summary at all. */
+function fillPicture(stream, policies) {
+  if (!stream) return;
+  const set = (id, v) => { const n = el(id); if (n && document.activeElement !== n && v != null) n.value = v; };
   const policy = el("set-policy");
-  if (policy && !policy.dataset.built && s.policies) {
-    policy.innerHTML = s.policies.map((p) => `<option value="${p}">${p}</option>`).join("");
+  if (policy && !policy.dataset.built && policies && policies.length) {
+    policy.innerHTML = policies.map((p) => `<option value="${p}">${p}</option>`).join("");
     policy.dataset.built = "1";
   }
-  set("set-policy", s.policy);
-  const stream = s.stream || {};
   const size = el("set-size");
-  if (size && !size.dataset.built && stream.sizes) {
-    size.innerHTML = stream.sizes.map((x) => `<option value="${x}">${x}</option>`).join("");
+  if (size && !size.dataset.built) {
+    // Height carries width: the two are set together from a named size, so
+    // there is no way to ask the host for 1920x480.
+    size.innerHTML = [[1920, 1080], [1600, 900], [1280, 720], [960, 540], [854, 480]]
+      .map(([w, h]) => `<option value="${h}">${w}x${h}</option>`).join("");
     size.dataset.built = "1";
   }
-  set("set-size", stream.size);
+  set("set-size", stream.height);
   set("set-fps", stream.fps);
   set("set-bitrate", stream.bitrate_kbps);
   const codec = el("set-codec");
@@ -155,6 +177,11 @@ function fillControls(s) {
     codec.dataset.built = "1";
   }
   set("set-codec", stream.codec);
+  const apply = document.querySelector('[data-do="apply-stream"]');
+  if (apply) {
+    apply.disabled = !stream.can_apply;
+    apply.title = stream.can_apply ? "" : "there is no session to rebuild";
+  }
 }
 
 /* ---- loading ---- */
@@ -169,6 +196,7 @@ async function load() {
   drawAccounts(state);
   drawMachine(state);
   fillControls(state.session);
+  fillPicture(state.stream, state.policies);
 }
 
 /* ---- doing ---- */
@@ -212,12 +240,12 @@ const ACTIONS = {
     heard(await control("lock", {set: el("set-lock").value}), "applied");
   },
   async "apply-stream"() {
-    heard(await control("stream", {
-      size: el("set-size").value,
+    heard(await post("/api/stream", {settings: {
+      height: Number(el("set-size").value),
       fps: Number(el("set-fps").value),
       bitrate_kbps: Number(el("set-bitrate").value),
       codec: el("set-codec").value,
-    }), "the picture is being rebuilt");
+    }}), "the picture is being rebuilt — about a second of held picture");
   },
   async "account-add"() {
     const can = Array.from(el("add-can").querySelectorAll("input:checked"))

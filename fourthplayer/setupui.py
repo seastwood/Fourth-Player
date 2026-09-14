@@ -36,6 +36,14 @@ from . import accounts
 
 log = logging.getLogger("fourthplayer.setup")
 
+
+def _launch_policies():
+    try:
+        from .session import LAUNCH_POLICIES
+        return LAUNCH_POLICIES
+    except Exception:
+        return ()
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 WEB = os.path.join(os.path.dirname(HERE), "web")
 
@@ -272,6 +280,10 @@ class SetupUI:
             "picked": picked,
             "refused": self.refused,
             "diagnostics": self._diagnostics(),
+            "stream": self._stream_now(),
+            # The page offers these rather than inventing its own list, so a
+            # policy added to the host appears here without a second edit.
+            "policies": list(_launch_policies()),
         }
 
     # -- accounts ----------------------------------------------------------
@@ -441,4 +453,46 @@ class SetupUI:
         server = self.server
         out["bad_pins"] = getattr(server, "refused_pins", None)
         out["bad_logins"] = getattr(server, "refused_logins", None)
+        return out
+
+    # -- the picture -------------------------------------------------------
+
+    async def _api_stream(self, body):
+        """Change how the picture is sent.
+
+        Not through /api/control, because `stream` is not a control-channel
+        command at all -- it arrives over the guest socket from an account
+        holding the `stream` capability. This calls the same session method
+        that handler does, so the bounds, the "only what changed" rule and the
+        recapture are one implementation rather than two.
+
+        `by=None`: the capability check belongs to the socket, where the
+        question is which account is asking. Here the question is already
+        answered by being able to reach this page at all.
+        """
+        session = self.server.session
+        if session is None or not session.open:
+            return {"ok": False, "error": "no session is open"}
+        try:
+            return await session.set_stream(body.get("settings") or {}, by=None)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _stream_now(self):
+        """What the picture is set to, and what it may be set to."""
+        cfg = self.server.cfg
+        out = {
+            "height": getattr(cfg, "height", None),
+            "width": getattr(cfg, "width", None),
+            "fps": getattr(cfg, "fps", None),
+            "bitrate_kbps": getattr(cfg, "bitrate_kbps", None),
+            "codec": getattr(cfg, "codec", None),
+        }
+        session = self.server.session
+        try:
+            from .session import LiveSession
+            out["limits"] = {k: list(v) for k, v in LiveSession.STREAM_LIMITS.items()}
+        except Exception:
+            out["limits"] = {}
+        out["can_apply"] = bool(session and session.open)
         return out
