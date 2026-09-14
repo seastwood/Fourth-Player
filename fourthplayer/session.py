@@ -273,6 +273,10 @@ class GuestConnection:
         # counts its own: "nothing I typed happened" needs an answer.
         self.stray_desk = 0
         self.bad_desk = 0
+        # Pad frames from a connection the session has already let go of. See
+        # feed(): these used to build a controller back the instant the
+        # janitor took it away.
+        self.stray_frames = 0
 
     @property
     def pad(self):
@@ -331,6 +335,37 @@ class GuestConnection:
         # while the controller works, or the reverse.
         if self.session is not None and self.session.holding(self)[0]:
             self.held_frames += 1
+            return
+        # Only the guest the session currently seats in this slot may reach
+        # the pad, and this is the line that stops a controller plugging and
+        # unplugging for ever.
+        #
+        # `self.pad` is a property that *indexes* Pads, and Pads.__getitem__
+        # makes the device on first use -- so sending a frame is enough to
+        # create a controller. drop() takes a guest out of self.guests and
+        # releases their pad, but it cannot take away their data channel:
+        # their page goes on sending pad state every 50 ms, and every one of
+        # those frames built the pad straight back. _unplug_orphans then
+        # removed it again, because no guest in self.guests sits on that seat.
+        # Neither side was wrong on its own; together they are a fight, at
+        # about four a second, and to RetroArch or Steam that is a controller
+        # connecting and disconnecting without end.
+        #
+        # Seen 2026-09-14 after the dead-man switch freed a slot for 25s of
+        # missing video -- which is what a guest opening the controls panel
+        # and staying there looks like from here -- and the page then rejoined
+        # while the old connection carried on feeding.
+        #
+        # Checked by identity, not by slot number: the seat may since have
+        # been given to somebody else, and the stale connection must not be
+        # able to drive them either.
+        if self.session is None or self.session.guests.get(self.slot) is not self:
+            self.stray_frames += 1
+            if self.stray_frames in (1, 100):
+                log.warning("%s: pad input from a connection the session has "
+                            "let go of (%d so far); ignoring it rather than "
+                            "making a controller nobody is sitting on",
+                            self.label, self.stray_frames)
             return
         # Named, so a shared pad can tell its senders' frames apart
         # and merge them rather than treating each as the other's stale one.
