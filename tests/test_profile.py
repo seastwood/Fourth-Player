@@ -1,6 +1,6 @@
 """Saying so when a guest cannot decode the H.264 profile being offered.
 
-The codec is negotiated: the host picks the best of H.264, H.265 and AV1 that
+The codec is negotiated: the host picks the best of H.264 and H.265 that
 every guest can manage. The profile inside H.264 is not, and cannot be -- the
 encoder encodes once for everybody, so it is one setting for the whole session.
 

@@ -167,7 +167,7 @@ let joinTimer = null;
 /* Which H.264 profiles this browser says it can decode, as the four-character
    profile-idc-and-constraints prefix of each profile-level-id it lists.
 
-   The codec is negotiated -- the host picks the best of H.264, H.265 and AV1
+   The codec is negotiated -- the host picks the best of H.264 and H.265
    that every guest can manage -- and the profile inside H.264 never was. It is
    pinned on the encoder, which encodes once for everybody, so a host set to
    Main offers Main to a browser that only takes Constrained Baseline, the

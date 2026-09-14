@@ -158,6 +158,17 @@ _VA_SYS = ("videoscale ! videoconvert ! video/x-raw,format=NV12,"
            "width={w},height={h}")
 _SW = ("videoscale ! videoconvert ! video/x-raw,format=I420,"
        "width={w},height={h}")
+# The same idea as _VA, for NVENC. cudaupload puts the frame in CUDA memory
+# and cudaconvertscale does the format and the resize there, so it is uploaded
+# once and never comes back; without them every frame is downloaded, converted
+# on the CPU and re-uploaded, which is the bus crossed twice per frame to no
+# purpose. NV12 because that is what NVENC wants from CUDA memory.
+_CUDA = ("cudaupload ! cudaconvertscale ! "
+         "video/x-raw(memory:CUDAMemory),format=NV12,width={w},height={h}")
+# Before GStreamer 1.22 the convert and the scale are two elements.
+_CUDA_SPLIT = ("cudaupload ! cudaconvert ! cudascale ! "
+               "video/x-raw(memory:CUDAMemory),format=NV12,"
+               "width={w},height={h}")
 
 ENCODERS = {
     "h264": (
@@ -167,7 +178,7 @@ ENCODERS = {
         ("vah264lpenc", "hardware", _VA,
          "{el} name=enc target-usage={usage} bitrate={kbps} "
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
-        ("nvh264enc", "hardware", _SW,
+        ("nvh264enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
          "rc-mode=cbr"),
         ("v4l2h264enc", "hardware", _SW,
@@ -186,7 +197,7 @@ ENCODERS = {
         ("vah265lpenc", "hardware", _VA,
          "{el} name=enc target-usage={usage} bitrate={kbps} "
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
-        ("nvh265enc", "hardware", _SW,
+        ("nvh265enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
          "rc-mode=cbr"),
         ("x265enc", "software", _SW,
@@ -196,14 +207,41 @@ ENCODERS = {
 }
 
 
+def _cuda_converter():
+    """How to feed an NVENC encoder on this machine.
+
+    nvcodec registers nvh264enc from the driver alone, so the encoder can be
+    there when the CUDA filter elements are not -- they are a separate build
+    option, and cudaconvertscale is one element since 1.22 and two before it.
+    Where none of them are present, fall back to system-memory frames and let
+    the encoder upload them itself: exactly the concession _VA_SYS makes for
+    VA, and for the same reason -- slower than staying on the card, still far
+    cheaper than encoding on the CPU.
+    """
+    if not Gst.ElementFactory.find("cudaupload"):
+        return _SW
+    if Gst.ElementFactory.find("cudaconvertscale"):
+        return _CUDA
+    if (Gst.ElementFactory.find("cudaconvert")
+            and Gst.ElementFactory.find("cudascale")):
+        return _CUDA_SPLIT
+    return _SW
+
+
 def pick_encoder(codec, allow_hardware=True):
     """The best encoder for this codec on this machine, or None.
 
     Returns (element, kind, converter, settings). Presence of the factory is
     the test: the VA plugin registers vah264enc only where a device can do it,
     and the nvidia plugin registers nvh264enc only where NVENC answers, so a
-    factory that exists is a strong claim. Anything that still fails at
-    build time falls through to the next one -- see Stage._describe.
+    factory that exists is a strong claim.
+
+    It is only a claim, though, and nothing here rescues it if it turns out
+    to be wrong: an encoder that registers and then refuses to start takes
+    the session with it. Audio falls back -- see Stage.start -- and the
+    encoder does not. Everything that can be checked without building a
+    pipeline is therefore checked here, which is what the converter
+    substitutions below are doing.
     """
     for element, kind, converter, settings in ENCODERS.get(codec, ()):
         if kind == "hardware" and not allow_hardware:
@@ -220,6 +258,8 @@ def pick_encoder(codec, allow_hardware=True):
         # cheaper than encoding on the CPU.
         if converter is _VA and not Gst.ElementFactory.find("vapostproc"):
             converter = _VA_SYS
+        if converter is _CUDA:
+            converter = _cuda_converter()
         return element, kind, converter, settings
     return None
 

@@ -2590,8 +2590,8 @@ class LiveSession:
     async def check_profile(self, guest, profiles):
         """Offer an H.264 profile the arriving guest can actually decode.
 
-        The codec is negotiated -- agree_codec picks the best of H.264, H.265
-        and AV1 that every guest can manage. The profile inside H.264 is
+        The codec is negotiated -- agree_codec picks the best of H.264 and
+        H.265 that every guest can manage. The profile inside H.264 is
         pinned on the encoder, which encodes once for everybody, so it cannot
         be chosen per guest: changing it means recapturing for the room.
 
@@ -2614,7 +2614,7 @@ class LiveSession:
         It read as a network fault for hours.
         """
         # Only H.264 has profiles worth checking here, and only when that is
-        # what is going out: "auto" that settled on H.265 or AV1 is a different
+        # what is going out: "auto" that settled on H.265 is a different
         # question and not this one.
         playing = getattr(self.stage, "codec", None) or self.codec
         if not profiles or str(playing).lower() not in ("h264", "auto", ""):

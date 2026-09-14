@@ -57,14 +57,91 @@ for codec, entries in video.ENCODERS.items():
         check("{" not in line and "{" not in rendered,
               "%s leaves nothing unfilled" % element)
 
-print("\nthe three ways into an encoder")
+print("\nthe ways into an encoder")
 check(video._VA.startswith("vapostproc"),
       "with vapostproc, a VA encoder takes frames the card already holds")
 check("videoconvert" in video._VA_SYS and "NV12" in video._VA_SYS,
       "without it, the same encoder takes system-memory frames as NV12 -- "
       "the one format its sink pad offers for them")
+check(video._CUDA.startswith("cudaupload") and "CUDAMemory" in video._CUDA,
+      "with the CUDA filters, NVENC is fed frames that never leave the card")
+check(video._CUDA_SPLIT.startswith("cudaupload")
+      and "cudaconvert ! cudascale" in video._CUDA_SPLIT,
+      "and before GStreamer 1.22, by the same route in two elements")
+check("NV12" in video._CUDA and "NV12" in video._CUDA_SPLIT,
+      "both as NV12, which is what NVENC wants from CUDA memory")
 check("videoconvert" in video._SW and "I420" in video._SW,
       "and a software encoder takes I420 from the CPU")
+
+
+print("\nwhich way in NVENC gets, on a machine that is not this one")
+# No card here has CUDA, so the choice is exercised against made-up element
+# sets rather than the real registry. What is being tested is the decision,
+# and the decision is all presence checks -- there is no fallback from a
+# hardware encoder that starts and then fails, so getting this wrong costs
+# the session rather than some frames.
+import types
+
+
+class _Registry:
+    """Gst.ElementFactory, if this machine had exactly these elements."""
+
+    def __init__(self, have):
+        self.have = set(have)
+
+    def find(self, name):
+        return object() if name in self.have else None
+
+
+def with_elements(have, fn):
+    real = video.Gst
+    video.Gst = types.SimpleNamespace(ElementFactory=_Registry(have))
+    try:
+        return fn()
+    finally:
+        video.Gst = real
+
+
+cuda_cases = [
+    ((), video._SW, "no CUDA elements at all"),
+    (("cudaupload",), video._SW, "cudaupload but nothing to convert with"),
+    (("cudaupload", "cudaconvert"), video._SW, "convert without scale"),
+    (("cudaupload", "cudaconvertscale"), video._CUDA, "GStreamer 1.22 and up"),
+    (("cudaupload", "cudaconvert", "cudascale"), video._CUDA_SPLIT,
+     "the two-element build"),
+    (("cudaupload", "cudaconvertscale", "cudaconvert", "cudascale"),
+     video._CUDA, "both available, one element preferred"),
+]
+names = {id(video._SW): "_SW", id(video._CUDA): "_CUDA",
+         id(video._CUDA_SPLIT): "_CUDA_SPLIT"}
+for have, want, why in cuda_cases:
+    got = with_elements(have, video._cuda_converter)
+    check(got is want, "%s -> %s (%s)"
+          % (why, names.get(id(got), "?"), names.get(id(want), "?")))
+
+# The regression that matters most: nvcodec can register an encoder on a build
+# with no CUDA filters, and a machine like that must still encode on its card.
+# Reaching x264enc there would be 1080p at a load average of fifty.
+got = with_elements(("nvh264enc",), lambda: video.pick_encoder("h264"))
+check(got is not None and got[0] == "nvh264enc" and got[1] == "hardware",
+      "an nvidia machine with no CUDA filters still uses NVENC (got %s)"
+      % (got[0] if got else None))
+check(got is not None and got[2] is video._SW,
+      "fed from system memory, the concession _VA_SYS makes for VA")
+
+got = with_elements(("nvh264enc", "cudaupload", "cudaconvertscale"),
+                    lambda: video.pick_encoder("h264"))
+check(got is not None and got[2] is video._CUDA,
+      "and with the filters present it keeps the frames on the card")
+
+# VA is listed above NVENC, so a hybrid machine takes the integrated GPU.
+# Stated here because it is a real choice rather than an accident, and the
+# README promises it.
+got = with_elements(("vah264enc", "vapostproc", "nvh264enc", "cudaupload",
+                     "cudaconvertscale"), lambda: video.pick_encoder("h264"))
+check(got is not None and got[0] == "vah264enc",
+      "a hybrid machine takes the VA encoder, not NVENC (got %s)"
+      % (got[0] if got else None))
 
 print("\nwhat this machine picks")
 best = video.pick_encoder("h264")

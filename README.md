@@ -865,6 +865,56 @@ python3 -m fourthplayer serve --codec h265
 Worth pinning if every guest is on an iPhone; otherwise leave `codec` on
 `auto` and it will be chosen when it can be.
 
+### Which encoder, and whether your GPU gets used
+
+Nothing has to be configured for this. At startup the host takes the first
+encoder it can actually find, best first:
+
+| | H.264 | H.265 | covers |
+|---|---|---|---|
+| 1 | `vah264enc`, `vah264lpenc` | `vah265enc`, `vah265lpenc` | Intel and AMD, through mesa |
+| 2 | `nvh264enc` | `nvh265enc` | nvidia, through NVENC |
+| 3 | `v4l2h264enc` | -- | ARM boards |
+| 4 | `x264enc`, `openh264enc` | `x265enc` | anything, on the CPU |
+
+Presence is the test, and it is a fair one: the VA plugin registers
+`vah264enc` only where a device can really do it, and nvcodec registers
+`nvh264enc` only where NVENC answers. The log says which one won:
+
+```
+encoding with vah264enc (hardware)
+```
+
+and if it had to encode on the CPU it says so much louder, because that is
+the difference between 15% of a core and 2.4 of them.
+
+**nvidia needs the proprietary driver.** nvcodec opens `libnvidia-encode.so.1`
+at run time, and that ships with nvidia's driver, not with nouveau. On nouveau
+the factory never registers, nothing warns you that a perfectly good card is
+sitting idle, and the host quietly encodes in software. `gstreamer1.0-plugins-bad`
+is what supplies the plugin and it is already in `install/packages.txt`, so on
+a machine with the driver there is nothing to install.
+
+**A hybrid machine takes the integrated GPU.** VA sits above NVENC in that
+table, so an Intel-plus-nvidia laptop encodes on the Intel side. That is
+usually the right answer -- the iGPU's encoder is right there and the frames
+never leave it -- but it is not what somebody who bought a large card
+expects, and there is no switch that says "use the nvidia one". `--software`
+is the only override, and it goes the other way.
+
+**Frames stay on the card either way.** VA gets `vapostproc` and NVENC gets
+`cudaupload ! cudaconvertscale`, so the format conversion and the downscale
+happen where the frame already is. Where those filters are missing -- Skylake
+registers `vah264lpenc` and no `vapostproc`, and nvcodec can register an
+encoder on a build with no CUDA filters -- the host hands over ordinary
+system-memory frames and lets the encoder upload them itself. Slower than
+staying on the card, still far cheaper than encoding on the CPU.
+
+One thing to know: an encoder that registers and then refuses to start takes
+the session with it. There is no fallback from hardware to software at run
+time -- audio falls back, video does not. If a host dies at startup with a
+GPU message, `--software` gets it running while you work out why.
+
 ### If the picture lags
 
 Frame rate costs more than resolution here. The defaults are 720p30 at 6 Mb/s
