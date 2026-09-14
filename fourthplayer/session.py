@@ -619,6 +619,16 @@ class LiveSession:
         """The on-screen card, in its own process so it cannot take us with it."""
         if not self.cfg.overlay:
             return
+        if sys.platform == "win32":
+            # The card is drawn with GTK, which a Windows host has no reason to
+            # have. It is a convenience for a television with a Kodi front end
+            # rather than part of hosting, so its absence is a note and not a
+            # warning -- and the process it would start dies on
+            # `gi.require_version("Gtk", "3.0")` with a traceback in the log
+            # that looks far more serious than "no QR code on the screen".
+            log.info("no on-screen card: it needs GTK, which this host has not")
+            self._overlay = None
+            return
         environment = dict(os.environ)
         environment.setdefault("DISPLAY", self.cfg.display)
         try:
