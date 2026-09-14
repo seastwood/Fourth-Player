@@ -20,7 +20,8 @@ verified on the target machine before any of it was written.
 import logging
 import time
 
-from evdev import UInput, AbsInfo, ecodes as e
+from .codes import ecodes as e
+from .virtual import UInput, AbsInfo
 
 log = logging.getLogger("fourthplayer.pads")
 

@@ -24,7 +24,8 @@ written against that; a keyboard is a keyboard, and X will take it as one.
 import logging
 import time
 
-from evdev import AbsInfo, UInput, ecodes as e
+from .codes import ecodes as e
+from .virtual import UInput, AbsInfo
 
 from . import deskwire, keymap
 
