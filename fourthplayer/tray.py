@@ -435,13 +435,18 @@ def _run_pystray(tray):
     def watch():
         import time
         while True:
-            tray.poll()
+            # The whole body, not just the drawing. tray.poll() restarts a
+            # host that has died, and an exception anywhere in it used to end
+            # this thread outright -- leaving the icon frozen on whatever it
+            # last said and nothing watching the host at all. A watchdog that
+            # can die quietly is worse than none, because it looks like one.
             try:
+                tray.poll()
                 icon.icon = _image(tray.open)
                 icon.title = tray.title()
                 icon.update_menu()
             except Exception:
-                return
+                log.exception("the tray watch stumbled; carrying on")
             time.sleep(3)
 
     threading.Thread(target=watch, name="tray-watch", daemon=True).start()
@@ -539,8 +544,11 @@ def _run_appindicator(tray):
     def watch():
         import time
         while True:
-            tray.poll()
-            GLib.idle_add(refresh)
+            try:
+                tray.poll()
+                GLib.idle_add(refresh)
+            except Exception:
+                log.exception("the tray watch stumbled; carrying on")
             time.sleep(3)
 
     threading.Thread(target=watch, name="tray-watch", daemon=True).start()
@@ -577,10 +585,32 @@ def run(launch=True):
     return 1
 
 
+def _log_to_file():
+    """The icon's own log, beside the host's.
+
+    It runs under pythonw with no console, so anything it says otherwise goes
+    nowhere -- which is how a watchdog that stopped watching went unnoticed.
+    """
+    try:
+        base = (os.environ.get("LOCALAPPDATA")
+                or os.path.join(os.path.expanduser("~"), ".local", "state"))
+        path = os.path.join(base, "fourth-player", "tray.log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > 2 * 1024 * 1024:
+            os.replace(path, path + ".1")
+        logging.basicConfig(
+            level=logging.INFO, filename=path, filemode="a",
+            format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+        return path
+    except OSError:
+        logging.basicConfig(level=logging.INFO)
+        return None
+
+
 if __name__ == "__main__":
     import argparse
 
-    logging.basicConfig(level=logging.INFO)
+    _log_to_file()
     parser = argparse.ArgumentParser(
         prog="fourthplayer.tray", description=__doc__.splitlines()[0])
     parser.add_argument("--no-launch", action="store_true",

@@ -486,6 +486,10 @@ def make_ice_agent(cfg):
     then a crash at negotiation). Returns None if any of that fails, which
     costs the port range and nothing else.
     """
+    if not getattr(cfg, "bounded_ice_ports", True):
+        log.info("letting webrtcbin make its own ICE agent; ports will be "
+                 "ephemeral and cannot be forwarded")
+        return None
     gtype = _nice_type()
     if gtype is None:
         log.warning("could not reach the ICE agent's type; ports will be "

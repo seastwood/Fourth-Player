@@ -180,6 +180,17 @@ class Config:
     ice_tcp: bool = True
     # Bounded so the router rule can be written once. Five ports is comfortable
     # for three guests sharing one bundled connection each.
+    # Whether to hand webrtcbin an ICE agent of our own so its UDP ports fall
+    # in the range below.
+    #
+    # On by default because it is what makes this reachable from outside at
+    # all -- see make_ice_agent. Off is for finding out whether that agent is
+    # behind a crash: the object is built with GObject.new rather than by
+    # webrtcbin, it is documented as fragile (reading its properties corrupts
+    # it), and a client changing network mid-stream drives it hard. With this
+    # off webrtcbin makes its own and the ports are ephemeral, which costs
+    # port forwarding and nothing else on a LAN or a VPN.
+    bounded_ice_ports: bool = True
     rtp_port_min: int = 40000
     rtp_port_max: int = 40100
     # The guest's buffer: how much video the browser holds back before
