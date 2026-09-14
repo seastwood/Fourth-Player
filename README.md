@@ -1404,7 +1404,7 @@ python3 -m fourthplayer reshare
 
 ### A ceiling on memory, and why it is a wall rather than a brake
 
-The unit sets `MemoryMax=2G` and **no `MemoryHigh` at all**, which is
+The unit sets `MemoryMax=6G` and **no `MemoryHigh` at all**, which is
 deliberate and was arrived at the hard way. `MemoryHigh` does not kill, it
 throttles: past it the kernel holds every thread in the cgroup in reclaim, so
 the service does not fall over — it goes slow enough to be useless while
@@ -1420,9 +1420,24 @@ has it back in about three seconds, guests return on their own tokens, and the
 journal says plainly that it went for memory. Three seconds that mends itself
 beats any length of a host that is alive and too slow to answer.
 
+The ceiling was 2G until 2026-09-13, and it was raised for a reason worth
+stating plainly: not because 2G was too small for anything legitimate — a
+capture with no guests is 87 MB — but because the unfound leak below it had
+turned the wall into a metronome. 54 kills in 24 hours on the console, a
+restart every fourteen minutes, at about 130 MB a minute. Each one is three
+seconds of frozen picture for everybody watching, and that is how it was
+reported. 6G buys about forty-five minutes instead of fourteen on a machine
+with 15 GB, and buys nothing else: it is time to find the leak in, not a fix,
+and raising it again in place of finding it would be the wrong move.
+
+One clue in passing, since it is the sort of thing that goes unnoticed: the
+rate scales with picture size. The console at 1080p30 took those 54 kills; the
+second host at 720p60 took 6 the same day. That fits the current suspect.
+
 `MALLOC_ARENA_MAX=2` is set alongside it. glibc gives each thread that contends
 for the heap its own 64 MB arena, up to eight per core, so a six-core machine
-can hold 3 GB — more than the ceiling — without leaking anything at all.
+can hold 3 GB — half the ceiling now, and more than all of it before the
+change — without leaking anything at all.
 
 `_watch_memory` in `server.py` is the early warning none of that provides: it
 reports crossing 600 MB and each multiple after it, reads the cgroup's own
@@ -1717,10 +1732,12 @@ Not yet done:
   rather than a queue.
 - glass-to-glass latency has not been measured with a camera.
 - **A memory leak, unfound.** With guests connected the service grows to the
-  2 GB ceiling and is killed and restarted — about every fifteen minutes on the
-  console during a busy session. It is self-healing, and the cost is real: each
-  restart re-binds the virtual pads, so a game that was running holds the old
-  ones and has to be started again through the picker.
+  ceiling and is killed and restarted — 54 times in 24 hours on the console
+  while that ceiling was 2 GB, which is what raised it to 6 GB. It is
+  self-healing, and the cost is real: each restart re-binds the virtual pads,
+  so a game that was running holds the old ones and has to be started again
+  through the picker, and every guest watching gets three seconds of frozen
+  picture.
 
   What it is *not*, each ruled out by measurement rather than argument:
   `emit("push-buffer")` (120,000 buffers leaked 0.7 MB in isolation), churn

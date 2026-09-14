@@ -26,9 +26,10 @@ RestartSec=3
 # one service is a far better outcome than losing the machine, and the log
 # says plainly which it was.
 #
-# MemoryHigh throttles first and MemoryMax is the hard stop. Both are enormous
-# next to the numbers above, so nothing legitimate should ever reach them; a run
-# that does is a bug, and it is supposed to be noticed.
+# MemoryMax is the only limit here, and it is enormous next to the numbers
+# above, so nothing legitimate should ever reach it; a run that does is a bug,
+# and it is supposed to be noticed. Why there is no MemoryHigh beside it is
+# the rest of this comment, and it was learnt the hard way.
 #
 # The gap between them used to be 500 MB, and on 2026-09-12 that gap was where
 # the service spent twenty hours. A leak in the peer teardown took it to 1.8 GB
@@ -65,14 +66,36 @@ RestartSec=3
 # The early warning is in the program: see _watch_memory in server.py, which
 # says so at 600 MB and again whenever the kernel reports it has been stalled
 # on memory at all.
-MemoryMax=2G
+#
+# 6G rather than 2G since 2026-09-13, and the reason is not that 2G was too
+# small for anything legitimate. It is not: a capture with no guests is 87 MB.
+# It is that the unfound leak below it turned the wall into a metronome.
+# Measured on the console that day: 54 oom-kills in 24 hours, one restart
+# every fourteen minutes or so, at a leak rate around 130 MB a minute. Every
+# one of those is three seconds of frozen picture for everybody watching, and
+# it was reported exactly that way -- "video freezes which it recovers from
+# quickly but it is very disrupting".
+#
+# So the ceiling buys time until the leak is found: at the same rate, 6G is
+# about forty-five minutes between restarts instead of fourteen. Both machines
+# this runs on have 15 GB, which leaves 9 GB free at the ceiling, and the
+# behaviour at the wall is unchanged -- it is still a wall, still a kill, still
+# three seconds and a reconnect, still plain in the journal. Nothing here is a
+# fix, and raising it again in place of finding the leak would be.
+#
+# Worth knowing while hunting it: the rate scales with picture size. The
+# console at 1080p30 took 54 kills that day; the other host at 720p60 took 6.
+# That is a point in favour of the current suspect, which is libva and mesa
+# allocating where neither the Python nor the GStreamer tracer can see it.
+MemoryMax=6G
 
 # Two arenas, not forty-eight.
 #
 # glibc gives each thread that contends for the heap its own 64 MB arena, up
 # to eight per core. This machine has six cores, so the ceiling is 48 arenas
 # and 3 GB of address space that malloc may hold on to without ever returning
-# it -- more than MemoryMax, so the service can be killed for memory without
+# it -- half the ceiling above, and it was more than all of it when that
+# ceiling was 2G. Either way the service can be killed for memory without
 # leaking a single object.
 #
 # That is what was happening. Measured 2026-09-12 with guests connected:
