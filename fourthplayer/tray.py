@@ -365,22 +365,30 @@ def _run_pystray(tray):
     return 0
 
 
-def _icon_files():
-    """The two icons, written once where AppIndicator can find them.
+# What the two icons are called, without the .png. AppIndicator takes an icon
+# *name* and looks it up in a theme directory -- handing it a full path looks
+# like it should work, produces no error, and the indicator then never
+# registers at all: Gtk.main() runs, nothing appears, and nothing is logged.
+# That cost an hour, so: a directory, and names.
+ICON_NAMES = {False: "fourth-player-idle", True: "fourth-player-open"}
 
-    It wants a path or a themed name rather than an image in memory, and it
-    reloads when the path changes -- so two files rather than one rewritten,
-    which it would not notice.
+
+def _icon_files():
+    """Write the two icons somewhere AppIndicator can look them up.
+
+    Two files rather than one rewritten, because it reloads on the name
+    changing and would not notice the same name with new bytes.
+
+    Returns the directory to hand to set_icon_theme_path.
     """
     import tempfile
-    where = os.path.join(tempfile.gettempdir(), "fourth-player-tray")
+    where = os.path.join(tempfile.gettempdir(),
+                         "fourth-player-tray-%d" % os.getuid()
+                         if hasattr(os, "getuid") else "fourth-player-tray")
     os.makedirs(where, exist_ok=True)
-    paths = {}
-    for lit, name in ((False, "idle"), (True, "open")):
-        path = os.path.join(where, "fp-%s.png" % name)
-        _image(lit).save(path)
-        paths[lit] = path
-    return paths
+    for lit, name in ICON_NAMES.items():
+        _image(lit).save(os.path.join(where, name + ".png"))
+    return where
 
 
 def _run_appindicator(tray):
@@ -395,10 +403,12 @@ def _run_appindicator(tray):
     gi.require_version("AyatanaAppIndicator3", "0.1")
     from gi.repository import Gtk, GLib, AyatanaAppIndicator3 as AppIndicator
 
-    icons = _icon_files()
+    where = _icon_files()
     indicator = AppIndicator.Indicator.new(
-        "fourth-player", icons[False],
+        "fourth-player", ICON_NAMES[False],
         AppIndicator.IndicatorCategory.APPLICATION_STATUS)
+    # Before set_status, so the first icon it looks for is already findable.
+    indicator.set_icon_theme_path(where)
     indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
 
     items = {}
@@ -436,7 +446,7 @@ def _run_appindicator(tray):
     def refresh():
         """On the GTK thread, because everything here touches widgets."""
         items["title"].set_label(tray.title())
-        indicator.set_icon_full(icons[tray.open], "Fourth Player")
+        indicator.set_icon_full(ICON_NAMES[tray.open], "Fourth Player")
         for key, want in (("guest", tray.reachable), ("restart", tray.reachable),
                           ("stop", tray.reachable), ("start", not tray.reachable)):
             items[key].set_visible(want)
