@@ -857,7 +857,29 @@ async function answer(message) {
       stalledSince = 0;
       mediaFresh = false;
       startWatchdog();
-      setTimeout(() => report("video playing"), 5000);
+      // Five seconds after connecting, say what is actually on screen.
+      //
+      // This used to report "video playing" on a timer, without looking at
+      // anything -- so it said that while an H.265 stream was arriving at a
+      // decoder that could not configure itself for it and drawing nothing.
+      // The one line in the host log that spoke about the picture was the one
+      // line that had not checked. Frames decoded is the claim worth making.
+      setTimeout(async () => {
+        if (!pc || !pc.getStats) return;
+        let video = null;
+        try {
+          (await pc.getStats()).forEach((r) => {
+            if (r.type === "inbound-rtp"
+                && (r.kind === "video" || r.mediaType === "video")) video = r;
+          });
+        } catch (_) { return; }
+        if (!video) return report("no video stream at all after 5s");
+        const decoded = video.framesDecoded || 0;
+        report(decoded > 0
+          ? "video playing, " + decoded + " frames decoded"
+          : "VIDEO NOT DECODING: " + (video.bytesReceived || 0)
+            + " bytes arrived and no frame was decoded");
+      }, 5000);
     }
     // "disconnected" often mends itself in a second or two, so give it that
     // long. "failed" never does: the addresses it was using are gone.
