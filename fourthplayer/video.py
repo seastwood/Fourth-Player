@@ -435,6 +435,33 @@ def _nice_type():
         return None
 
 
+# Every ICE agent this process has made, kept for ever on purpose.
+#
+# `ice-agent` is construct-only and webrtcbin does not take a reference of its
+# own: the one Python holds *is* the agent's only reference, and webrtcbin
+# frees the agent when it is disposed. That was worked out from two crashes
+# that contradict each other unless it is true --
+#
+#   released before the pipeline was disposed -> the dispose crashed, because
+#     webrtcbin still needed an agent that had just been freed
+#   released after the pipeline was disposed  -> the release crashed, because
+#     the dispose had already freed it
+#
+# -- and both were an access violation in gobject at the same address, on
+# Windows, where faulthandler names the line. So there is no moment at which
+# unreffing it from Python is safe, and the only safe thing is not to.
+#
+# The cost is honest and small: one NiceAgent per peer that ever existed, for
+# the life of the process. The cost of the alternative is the host dying every
+# time a guest leaves, which it did, three times, in an afternoon.
+#
+# The proper fix is upstream of here -- webrtcbin should take a reference for
+# a property it keeps -- or a way to hand the object over without Python
+# retaining one. Until then this is a leak that is written down rather than a
+# crash that is not.
+_PARKED_AGENTS = []
+
+
 def make_ice_agent(cfg):
     """An ICE agent whose UDP ports fall in a range a router can forward.
 
@@ -1493,14 +1520,18 @@ class Peer:
         # fix rather than a tidiness.
         extras = [self.webrtc, self.channel, self.desk_channel,
                   self._sources, self._caps]
-        agent, self.ice = self.ice, None
+        # The ICE agent is handed to the parking lot rather than released.
+        # See _PARKED_AGENTS for why it must never be unreffed from here.
+        if self.ice is not None:
+            _PARKED_AGENTS.append(self.ice)
+            self.ice = None
         self.webrtc = self.channel = self.desk_channel = None
         self._sources = {}
         self._caps = {}
         who = self.id
 
         def see_it_to_null():
-            nonlocal pipeline, agent
+            nonlocal pipeline
             # `held` keeps this guest's webrtcbin, its data channels and its
             # appsrcs alive for exactly as long as the pipeline they belong
             # to, and it is here because letting go of them early crashed the
@@ -1555,15 +1586,11 @@ class Peer:
                 #   2. the pipeline, whose last reference this is. Dropping it
                 #      disposes the bin, and that is when webrtcbin tears
                 #      itself down and reaches for its ICE agent.
-                #   3. the agent, last, precisely because of that. `self.ice`
-                #      has always carried the comment "held so webrtcbin's
-                #      agent outlives it", and my previous attempt released it
-                #      in step 1 -- ahead of the dispose that needs it. That
-                #      was worse than the bug it was meant to fix, and it is
-                #      why the crash survived the last change.
+                #
+                # The ICE agent is not in either step. It is never released
+                # from here at all -- see _PARKED_AGENTS.
                 extras.clear()
                 pipeline = None
-                agent = None
             took = time.monotonic() - started
             if state != Gst.State.NULL:
                 # The leak, said out loud. It is the one thing that used to
