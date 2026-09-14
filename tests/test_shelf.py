@@ -124,7 +124,20 @@ global.escapeText = (t) => String(t);
 global.askFor = () => {};
 global.IntersectionObserver = function (fn, opts) {
   this.seen = [];
-  this.observe = (el) => { this.seen.push(el); };
+  this.observes = 0;
+  this.unobserves = 0;
+  this.observe = (el) => {
+    this.observes++;
+    if (!this.seen.includes(el)) this.seen.push(el);
+  };
+  // A real observer delivers the target's current state afresh when it is
+  // observed again, which is the only way to get a callback out of it when
+  // nothing has crossed anything. Counted here, because dropping the
+  // unobserve is exactly the regression this guards.
+  this.unobserve = (el) => {
+    this.unobserves++;
+    this.seen = this.seen.filter((x) => x !== el);
+  };
   this.disconnect = () => { this.seen = []; };
   global.lastObserver = this;
 };
@@ -152,6 +165,10 @@ out.noteHidden = note.hidden;
 drawMore();
 out.second = cards();
 out.markerStillLast = shelf.children[shelf.children.length - 1].className;
+// Per chunk, not once for the list.
+out.observes = lastObserver.observes;
+out.unobserves = lastObserver.unobserves;
+out.watching = lastObserver.seen.length;
 
 // Everything, one chunk at a time.
 let guard = 0;
@@ -198,6 +215,24 @@ check(out["second"] == size * 2, "the next chunk is appended, got %d" % out["sec
 check(out["markerStillLast"] == "shelf-end",
       "and the marker moves down to the end again rather than being buried "
       "in the middle of the cards it was inserted before")
+# An observer reports crossings, not states. A chunk shorter than the 600px
+# margin leaves the marker exactly where it was as far as the observer is
+# concerned -- still intersecting, nothing crossed -- and no further callback
+# ever comes. Dropping it and picking it up again is what forces one. Without
+# this the list stops dead on a wide monitor; see test_shelfmore.py, which
+# measures it in a real browser.
+check(out["unobserves"] >= 2,
+      "the marker is dropped and picked up again for every chunk, so a fresh "
+      "notification is delivered even though nothing crossed anything; got %d"
+      % out["unobserves"])
+check(out["observes"] == out["unobserves"],
+      "each drop is paired with a pick-up, so the end of the list never ends "
+      "up unwatched; %d observed, %d unobserved"
+      % (out["observes"], out["unobserves"]))
+check(out["watching"] == 1,
+      "and exactly one marker is watched at a time, rather than a pile of "
+      "detached ones the observer holds for the life of the page; got %d"
+      % out["watching"])
 check(out["all"] == 1000, "eventually every game is reachable, got %d" % out["all"])
 check(out["markerHiddenAtEnd"] is True,
       "and the marker takes itself away at the bottom, rather than saying "

@@ -7910,6 +7910,10 @@ function watchShelfEnd(marker) {
         }
       });
     }
+    // A list too short to scroll raises no scroll event, so without this the
+    // first chunk is the last one. Same hole as the observer's below, and it
+    // closes the same way: ask again rather than wait to be told.
+    if (shelf.scrollHeight <= shelf.clientHeight) requestAnimationFrame(drawMore);
     return;
   }
   if (!shelfWatcher) {
@@ -7920,6 +7924,38 @@ function watchShelfEnd(marker) {
       if (entries.some((entry) => entry.isIntersecting)) drawMore();
     }, { root: el("shelf"), rootMargin: "600px" });
   }
+  // Observed afresh for every chunk, and this is the whole point of the
+  // function rather than a tidy-up.
+  //
+  // An observer reports *crossings*, not states. The marker is already
+  // intersecting when it asks for a chunk, and drawing that chunk pushes it
+  // down -- but only by the height of the chunk. Where that is less than the
+  // 600px margin the marker is still inside the observer's reach afterwards,
+  // nothing has crossed anything, and no further callback is ever delivered.
+  // The list stops with "Loading more..." showing and stays there, and
+  // scrolling cannot rescue it: the marker is the last thing in the list, so
+  // there is nothing below it to scroll towards and no crossing left to
+  // cause.
+  //
+  // Which machines see this is the opposite way round from the guess. The
+  // grid is auto-fill, so a *wider* window gets more columns, fewer rows per
+  // chunk, and a shorter chunk. Measured, 300 games, scrolling to the bottom
+  // ten times:
+  //
+  //     3840x1000   25 columns   2 rows    462px   stuck at 96, for ever
+  //     2560x900    16 columns   3 rows    716px   reaches 300
+  //     1920x1080   12 columns   4 rows    950px   reaches 300
+  //     1440x900     9 columns   6 rows   1420px   reaches 300
+  //
+  // So it is the big desktop monitors that break and the phone that always
+  // looked fine, which is why it was reported from a desktop.
+  //
+  // Re-observing delivers the target's current state on the next frame
+  // whether or not anything moved, so a marker still in view asks again, and
+  // the chunks keep coming until it is genuinely out of reach or the list is
+  // finished. It also takes the narrow windows off one-chunk-per-scroll,
+  // which is what they were doing.
+  shelfWatcher.unobserve(marker);
   shelfWatcher.observe(marker);
 }
 
