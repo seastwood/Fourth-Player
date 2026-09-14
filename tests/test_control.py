@@ -24,6 +24,23 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+# A channel of this test's own, before control.py is imported and works out
+# where the real one lives.
+#
+# Not tidiness. The first version of this ran against the machine's actual
+# address, which is fine on a workstation and wrong everywhere it matters: on
+# a host that is *running* fourth-player the channel is already in use, so the
+# test failed -- and one branch of in_use() unlinks an address it finds
+# unreachable, which on a busy machine is a running server's control socket
+# being deleted by its own test suite. Caught by the suite failing on ultra
+# while passing alone, which is exactly the shape of a test that reaches
+# outside itself.
+import tempfile
+
+_own = tempfile.mkdtemp(prefix="fp-control-test-")
+os.environ["XDG_RUNTIME_DIR"] = _own        # Linux: where the socket goes
+os.environ["LOCALAPPDATA"] = _own           # Windows: where the token file goes
+
 fails = []
 
 
@@ -141,6 +158,9 @@ async def main():
     check(not control.in_use(), "and it is gone once the server stops")
 
 asyncio.run(main())
+
+import shutil
+shutil.rmtree(_own, ignore_errors=True)
 
 print()
 if fails:
