@@ -183,6 +183,15 @@ ENCODERS = {
         ("vah264lpenc", "hardware", _VA,
          "{el} name=enc target-usage={usage} bitrate={kbps} "
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        # vbv-buffer-size is the CPB, and it is the difference between a
+        # bitrate that is a target and one that is a limit. Without it NVENC
+        # picks its own window and spreads a forced keyframe over so long that
+        # the stream simply runs above its budget: a Windows host asked for
+        # 5 Mb/s sent 9.3 Mb/s steadily for twenty minutes, because every
+        # guest that lost the picture cost an IDR and nothing made the encoder
+        # pay for it. The VA encoders have had cpb-size from the start, which
+        # is why this only ever went wrong on Windows.
+        #
         # Windows, and ahead of nvh264enc on purpose. Both are NVENC; this
         # one takes frames in D3D11 memory, which is where the desktop
         # capture already has them, while nvh264enc is the CUDA-mode encoder
@@ -191,10 +200,10 @@ ENCODERS = {
         # so the CUDA path is not merely slower there, it is unavailable.
         ("nvd3d11h264enc", "hardware", _D3D11,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
-         "rc-mode=cbr"),
+         "rc-mode=cbr vbv-buffer-size={cpb}"),
         ("nvh264enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
-         "rc-mode=cbr"),
+         "rc-mode=cbr vbv-buffer-size={cpb}"),
         # Media Foundation: every Windows machine with any hardware encoder
         # at all, whoever made the GPU. Last of the hardware ones because it
         # is the most general and the least tunable.
@@ -218,10 +227,10 @@ ENCODERS = {
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
         ("nvd3d11h265enc", "hardware", _D3D11,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
-         "rc-mode=cbr"),
+         "rc-mode=cbr vbv-buffer-size={cpb}"),
         ("nvh265enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
-         "rc-mode=cbr"),
+         "rc-mode=cbr vbv-buffer-size={cpb}"),
         ("mfh265enc", "hardware", _SW,
          "{el} name=enc bitrate={kbps}"),
         ("x265enc", "software", _SW,
@@ -357,7 +366,20 @@ _host_codecs = None
 
 
 # The shortest gap between keyframes forced by guests asking for one.
-KEYFRAME_MIN_GAP = 0.5
+#
+# This was 0.5s, which sounds modest and is not. A keyframe costs something
+# like fifteen ordinary frames, so at 30fps two of them a second is most of a
+# second of the bitrate spent on recovery -- and because the encoder is
+# shared, one guest's request is paid for by everybody. Two guests on a
+# Windows host settled into exactly that: each asking about once a second,
+# the limiter granting every one, and a stream asked for 5 Mb/s running at
+# 9.3 Mb/s for twenty minutes. The extra traffic made frames late, late frames
+# were dropped, and a dropped frame is another request. It sustains itself.
+#
+# Any natural keyframe is at most keyframe_interval away (two seconds by
+# default), so refusing costs a guest a moment of stale picture, once. The
+# storm cost everybody the whole session.
+KEYFRAME_MIN_GAP = 1.5
 
 # Video is the first feed a guest is given, so it is the first transceiver.
 VIDEO_TRANSCEIVER = 0
@@ -695,6 +717,7 @@ class Stage:
         # time while a live peer was dismantled.
         self.worker = PipelineWorker()
         self._last_keyframe = 0.0
+        self._keyframes_refused = 0
         self._last_sample = {}
         self._stalls = {}
         self._said_stall = {}
@@ -1163,9 +1186,21 @@ class Stage:
         """
         now = time.monotonic()
         if now - self._last_keyframe < KEYFRAME_MIN_GAP:
+            # Refused, and counted. A storm used to be invisible from here:
+            # the log only ever recorded the requests that were granted, so a
+            # host spending half its bitrate on recovery looked like a host
+            # handing out the occasional keyframe.
+            self._keyframes_refused += 1
             return
+        if self._keyframes_refused:
+            log.info("peer %s asked for a keyframe after losing the picture "
+                     "(and %d request(s) were refused since the last one; "
+                     "guests are losing the picture faster than sending "
+                     "keyframes can fix)", who, self._keyframes_refused)
+            self._keyframes_refused = 0
+        else:
+            log.info("peer %s asked for a keyframe after losing the picture", who)
         self._last_keyframe = now
-        log.info("peer %s asked for a keyframe after losing the picture", who)
         self.worker.submit(self.force_keyframe)
 
     def force_keyframe(self):
