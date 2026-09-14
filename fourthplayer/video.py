@@ -1487,9 +1487,25 @@ class Peer:
         pipeline, self.pipeline = self.pipeline, None
         # Handed to the thread rather than dropped here, and that is not
         # tidiness -- see the note on `held` below.
-        held = [self.webrtc, self.channel, self.desk_channel, self._sources]
-        self.webrtc = self.channel = self.desk_channel = None
+        # Everything this peer owns that GStreamer or GLib is still holding,
+        # handed to the thread rather than dropped here.
+        #
+        # `self.ice` is the one that mattered and the one that was missing.
+        # Its own comment says it is "held so webrtcbin's agent outlives it",
+        # and nothing made that true: detach neither kept it nor cleared it,
+        # so the agent was released whenever the *Peer object* was collected
+        # -- after detach returned, with the pipeline possibly still tearing
+        # down on its own thread. An ICE agent freed underneath the webrtcbin
+        # still using it is an access violation in gobject, and that is
+        # exactly what the host did: two crashes on this Windows machine, both
+        # 0xc0000005 in gobject-2.0-0.dll at the same offset, both at the
+        # instant a guest left. The same signature as the SIGSEGVs on the
+        # console.
+        held = [self.webrtc, self.channel, self.desk_channel, self._sources,
+                self.ice, self._caps]
+        self.webrtc = self.channel = self.desk_channel = self.ice = None
         self._sources = {}
+        self._caps = {}
         who = self.id
 
         def see_it_to_null():
