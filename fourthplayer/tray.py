@@ -89,6 +89,11 @@ class Host:
         self.may_launch = launch
         self.child = None
         self.unit = self._systemd_unit()
+        self._log = None
+        # Set by Stop and Quit, so a host somebody deliberately stopped is not
+        # started again by the watchdog two seconds later.
+        self.wanted = True
+        self.failures = 0
 
     @staticmethod
     def _systemd_unit():
@@ -118,6 +123,34 @@ class Host:
             return Host.UNIT
         return None
 
+    LOG_LIMIT = 4 * 1024 * 1024
+
+    def log_path(self):
+        base = (os.environ.get("LOCALAPPDATA")
+                or os.path.join(os.path.expanduser("~"), ".local", "state"))
+        return os.path.join(base, "fourth-player", "host.log")
+
+    def _open_log(self):
+        """Where the host's own output goes, so a crash leaves a trace.
+
+        Started fresh once it is big enough to be unhelpful: this is for
+        reading after something went wrong, and scrolling through four
+        megabytes to find the end is its own obstacle.
+        """
+        path = self.log_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if os.path.exists(path) and os.path.getsize(path) > self.LOG_LIMIT:
+                os.replace(path, path + ".1")
+            return open(path, "ab", buffering=0)
+        except OSError as exc:
+            log.warning("no host log (%s); its output will be discarded", exc)
+            return None
+
+    def gone(self):
+        """Whether a host we started has exited on its own."""
+        return self.child is not None and self.child.poll() is not None
+
     def _systemctl(self, *what):
         import subprocess
         try:
@@ -139,6 +172,8 @@ class Host:
 
     def start(self):
         """Start one, if there is not already one answering."""
+        self.wanted = True
+        self.failures = 0
         if self.reachable():
             return True, "already running"
         if self.unit:
@@ -148,9 +183,15 @@ class Host:
             return False, "this icon was told not to start the host"
         import subprocess
         try:
+            # Not DEVNULL. The host crashed twice on this machine and its
+            # output went nowhere, so there was nothing to read afterwards but
+            # a Windows event log entry. A supervisor that discards what it
+            # supervises is no supervisor.
+            self._log = self._open_log()
             self.child = subprocess.Popen(
                 [sys.executable, "-m", "fourthplayer", "serve"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stdout=self._log or subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if self._log else subprocess.DEVNULL)
         except OSError as exc:
             return False, str(exc)
         # Long enough for it to bind and answer, short enough that a menu
@@ -170,6 +211,7 @@ class Host:
         leak that took a day to find; the orderly path releases both.
         """
         import time
+        self.wanted = False              # do not undo this a moment later
         if self.unit:
             # Through systemd, so it stays stopped rather than being brought
             # straight back by the restart policy.
@@ -242,6 +284,47 @@ class Tray:
         answer = _ask({"cmd": "status"})
         self.reachable = bool(answer.get("ok"))
         self.open = bool(answer.get("open"))
+        self._revive()
+
+    # How long to wait before trying again, by how many times it has failed.
+    # A host that dies on startup -- a missing plugin, a port already taken --
+    # would otherwise be restarted several times a second for ever, filling a
+    # disk with the same traceback.
+    BACKOFF = (2, 5, 15, 60, 300)
+
+    def _revive(self):
+        """Start the host again if it died on its own.
+
+        Only a host this icon started, and only one nobody asked to stop. The
+        gap this fills: the host crashed, the icon went grey, and nothing
+        brought it back -- the page simply stopped loading, with the tray
+        sitting there saying "not running" as though that were a report rather
+        than a problem.
+        """
+        if self.reachable or not self.host.wanted or not self.host.may_launch:
+            return
+        if self.host.unit or self.host.child is None:
+            # systemd has its own opinion about restarting, and a host this
+            # icon never started is not this icon's to resurrect.
+            return
+        if not self.host.gone():
+            return                      # still alive, just not answering yet
+        import time
+        wait = self.host.BACKOFF[min(self.host.failures,
+                                     len(self.host.BACKOFF) - 1)]
+        if time.monotonic() - getattr(self, "_last_try", 0) < wait:
+            return
+        self._last_try = time.monotonic()
+        self.host.failures += 1
+        log.warning("the host is gone; starting it again (attempt %d, its "
+                    "output is in %s)", self.host.failures, self.host.log_path())
+        self.busy = "restarting after a crash..."
+        started, why = self.host.start()
+        self.busy = ""
+        if started:
+            self.host.failures = 0
+        else:
+            log.warning("could not start it: %s", why)
 
     def guests_now(self):
         answer = _ask({"cmd": "status"})
@@ -270,6 +353,7 @@ class Tray:
             log.warning("could not restart: %s", why)
 
     def enable(self):
+        self._last_try = 0
         self.busy = "starting..."
         ok, why = self.host.start()
         self.busy = ""
