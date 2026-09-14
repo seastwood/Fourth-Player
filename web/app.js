@@ -3318,6 +3318,8 @@ function noteFreezes(now) {
  * arriving in pieces -- the two sound quite different and read the same in a
  * complaint. */
 let soundTold = false;
+let soundAgain = false;
+let soundFirst = null;
 
 async function tellAboutSound() {
   if (soundTold || !pc || !pc.getStats) return;
@@ -3336,15 +3338,43 @@ async function tellAboutSound() {
   // A second of sound, give or take: before that the concealment figure is
   // mostly the connection starting up and says nothing about the sound.
   if (!sound || (sound.totalSamplesReceived || 0) < 48000) return;
+  // ...but one second is still mostly the connection starting up, and this
+  // was the only sound figure there was: every report in the log was taken in
+  // the first second and then never again, so "the sound is poor after a
+  // while" had nothing to be measured against. The first one is kept, because
+  // a stream that starts badly is worth knowing about, and a second is taken
+  // a minute in against the first -- concealment *since* then, rather than
+  // including the startup that dominates it.
+  // Only on the way through the first time. Without the soundAgain guard the
+  // follow-up would take a fresh baseline and schedule another of itself, and
+  // the log would fill with a sound report every minute for ever.
+  if (!soundTold && !soundAgain) {
+    soundFirst = {
+      samples: sound.totalSamplesReceived || 0,
+      concealed: sound.concealedSamples || 0,
+      lost: sound.packetsLost || 0,
+    };
+    setTimeout(() => { soundTold = false; soundAgain = true; }, 60000);
+  }
   soundTold = true;
-  const total = sound.totalSamplesReceived || 1;
-  const invented = (sound.concealedSamples || 0) / total * 100;
+  let total = sound.totalSamplesReceived || 1;
+  let concealed = sound.concealedSamples || 0;
+  let lost = sound.packetsLost || 0;
+  let since = "";
+  if (soundAgain && soundFirst) {
+    // Against the first report rather than against the whole connection.
+    total = Math.max(1, total - soundFirst.samples);
+    concealed = Math.max(0, concealed - soundFirst.concealed);
+    lost = Math.max(0, lost - soundFirst.lost);
+    since = " (the last minute, not the start)";
+  }
+  const invented = concealed / total * 100;
   report("sound: "
     + (codec ? (codec.channels || "?") + " channels at "
                + Math.round((codec.clockRate || 0) / 1000) + " kHz" : "codec unknown")
-    + ", " + (sound.packetsLost || 0) + " packets lost, "
+    + ", " + lost + " packets lost, "
     + invented.toFixed(2) + "% of samples invented, jitter "
-    + Math.round((sound.jitter || 0) * 1000) + " ms"
+    + Math.round((sound.jitter || 0) * 1000) + " ms" + since
     + (codec && codec.sdpFmtpLine ? " [" + codec.sdpFmtpLine + "]" : ""));
 }
 

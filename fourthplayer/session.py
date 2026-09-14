@@ -2443,7 +2443,22 @@ class LiveSession:
         "queue_ms": (10, 500),
         # The encoder's own buffer, in milliseconds of bitrate.
         "cpb_ms": (20, 1000),
+        # Sound. Opus tops out at 512 kb/s for two channels and is already
+        # transparent for game audio long before that; the floor is where
+        # speech is still intelligible, for somebody on a bad link who would
+        # rather hear the game than the music.
+        "audio_bitrate_kbps": (24, 512),
+        # How much sound may pile up before the oldest is dropped. Straight
+        # delay when it fills, and dropped samples when it does not keep up --
+        # which is heard as warble rather than as silence, because the decoder
+        # invents its way across the hole.
+        "audio_queue_ms": (20, 500),
     }
+
+    # audio_frame_ms is deliberately not here. Opus takes 2.5, 5, 10, 20, 40
+    # or 60 milliseconds and nothing between, so a slider over a range would
+    # produce numbers that make opusenc refuse to build -- a silent session
+    # rather than a slightly different one.
 
     # The sizes offered by name, widest first. 4:3 is not here: the capture is
     # whatever shape the television is, and these only say how much of it to
@@ -2487,6 +2502,11 @@ class LiveSession:
             "bitrate_kbps": cfg.bitrate_kbps, "jitter_ms": cfg.jitter_ms,
             "queue_ms": cfg.queue_ms, "cpb_ms": cfg.cpb_ms,
             "codec": cfg.codec,
+            "audio": bool(cfg.audio),
+            "audio_bitrate_kbps": cfg.audio_bitrate_kbps,
+            "audio_queue_ms": cfg.audio_queue_ms,
+            "sounding": bool(getattr(stage, "has_audio", False)),
+            "sound_source": getattr(stage, "source_sound_name", "") or "",
             "sending": "%dx%d" % (sent_w, sent_h),
             "playing": getattr(stage, "codec", "") or "",
             "encoder": getattr(stage, "encoder_name", "") or "",
@@ -2531,6 +2551,18 @@ class LiveSession:
         codec = str(asked.get("codec") or "").lower()
         if codec in ("auto", "h264", "h265") and codec != self.cfg.codec:
             changes["codec"] = codec
+
+        # Sound on or off. A bool rather than a number, and read the same way
+        # the link and share settings are -- which had to be fixed once
+        # already, because bool("off") is True and a string sent from a page
+        # therefore turned everything on.
+        if "audio" in asked:
+            want_audio = asked["audio"]
+            if isinstance(want_audio, str):
+                want_audio = want_audio.strip().lower() in ("1", "true", "on", "yes")
+            want_audio = bool(want_audio)
+            if want_audio != bool(self.cfg.audio):
+                changes["audio"] = want_audio
 
         if not changes:
             return {"ok": True, "changed": [], **self.stream_settings()}

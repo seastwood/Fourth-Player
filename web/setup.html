@@ -186,8 +186,16 @@
         <label>Bitrate <input id="set-bitrate" type="number" min="500" max="100000" step="500" style="width:7rem"> kb/s</label>
         <label>Codec <select id="set-codec"></select></label>
       </div>
+      <div class="row">
+        <label><input id="set-audio" type="checkbox"> Send the game's sound</label>
+        <label>Sound quality <input id="set-audio-bitrate" type="number"
+               min="24" max="512" step="8" style="width:5rem"> kb/s</label>
+        <label>Sound buffer <input id="set-audio-queue" type="number"
+               min="20" max="500" step="10" style="width:5rem"> ms</label>
+      </div>
       <div class="row"><button class="go" data-do="apply-stream">Apply</button>
         <span class="hint" id="picture-now"></span></div>
+      <div class="row"><span class="hint" id="sound-now"></span></div>
     </div>
   </section>
 

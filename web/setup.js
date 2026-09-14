@@ -223,7 +223,9 @@ function fillPicture(stream, policies) {
   // Only the number boxes: fps is a select, and a select is bounded by the
   // options it is built from rather than by min and max.
   const limits = stream.limits || {};
-  for (const [field, id] of [["bitrate_kbps", "set-bitrate"]]) {
+  for (const [field, id] of [["bitrate_kbps", "set-bitrate"],
+                            ["audio_bitrate_kbps", "set-audio-bitrate"],
+                            ["audio_queue_ms", "set-audio-queue"]]) {
     const box = el(id), bound = limits[field];
     if (!box || !bound || bound.length !== 2) continue;
     box.min = bound[0];
@@ -238,6 +240,23 @@ function fillPicture(stream, policies) {
     codec.dataset.built = "1";
   }
   set("set-codec", stream.codec);
+  set("set-audio-bitrate", stream.audio_bitrate_kbps);
+  set("set-audio-queue", stream.audio_queue_ms);
+  const sound = el("set-audio");
+  if (sound) sound.checked = Boolean(stream.audio);
+  const soundNote = el("sound-now");
+  if (soundNote) {
+    // What the sound is actually doing, which is not always what was asked
+    // for: a machine with no loopback capture has none however the switch is
+    // set, and that is worth saying where the switch is rather than only in
+    // the log.
+    soundNote.textContent = !stream.audio
+      ? "sound is off"
+      : stream.sounding
+        ? `sending sound with ${stream.sound_source || "this machine's capture"}`
+        : "sound is on, but this machine has no way to record what it plays";
+    soundNote.classList.toggle("warn", Boolean(stream.audio) && !stream.sounding);
+  }
   const note = el("picture-now");
   if (note) {
     // What the host's own screen is, and whether the picture asked for is
@@ -406,6 +425,11 @@ const ACTIONS = {
       height: Number(el("set-size").value),
       fps: Number(el("set-fps").value),
       bitrate_kbps: Number(el("set-bitrate").value),
+      // A real boolean. Sending the string "off" once turned a setting on,
+      // because bool("off") is true at the other end.
+      audio: Boolean(el("set-audio") && el("set-audio").checked),
+      audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
+      audio_queue_ms: Number(el("set-audio-queue").value),
       codec: el("set-codec").value,
     }}), "the picture is being rebuilt — about a second of held picture");
   },

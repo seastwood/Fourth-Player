@@ -704,6 +704,7 @@ class Stage:
         self._glib_loop = None
         self._thread = None
         self.has_audio = False
+        self.source_sound_name = ""
         # Where this machine is reachable from outside, discovered once. Only
         # the address is used; see fourthplayer/net.py for why not the port.
         self.public_ip = cfg.public_ip
@@ -866,6 +867,10 @@ class Stage:
                         ", ".join(name for name, _line in SOUNDS))
             return ""
         sound_element, sound_line = sound
+        # Kept so the setup page can say which of them is being used. On a
+        # machine with several it is the first thing worth knowing when the
+        # sound is wrong, and it was only ever in the log.
+        self.source_sound_name = sound_element
         log.info("recording the sound with %s", sound_element)
         return (
             f" {sound_line.format(device=cfg.audio_device)} "
