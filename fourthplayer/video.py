@@ -376,10 +376,18 @@ _host_codecs = None
 # 9.3 Mb/s for twenty minutes. The extra traffic made frames late, late frames
 # were dropped, and a dropped frame is another request. It sustains itself.
 #
-# Any natural keyframe is at most keyframe_interval away (two seconds by
-# default), so refusing costs a guest a moment of stale picture, once. The
-# storm cost everybody the whole session.
+# So this is a bucket rather than a gap, because one gap cannot serve both
+# cases honestly. A single guest who drops a frame should get a keyframe at
+# once -- that is the common case, and making them wait is the two seconds of
+# black this limiter was written to avoid. What must be refused is the
+# *sustained* demand of several guests asking for ever.
+#
+# KEYFRAME_MIN_GAP is therefore the refill interval -- the long-run rate, one
+# keyframe per this many seconds -- and KEYFRAME_BURST is how many may be
+# spent at once by a room that has been quiet. An isolated blip finds a full
+# bucket and is served immediately; a storm drains it and gets the refill rate.
 KEYFRAME_MIN_GAP = 1.5
+KEYFRAME_BURST = 2
 
 # Video is the first feed a guest is given, so it is the first transceiver.
 VIDEO_TRANSCEIVER = 0
@@ -716,8 +724,7 @@ class Stage:
         # loop, which is what stopped the server freezing for seconds at a
         # time while a live peer was dismantled.
         self.worker = PipelineWorker()
-        self._last_keyframe = 0.0
-        self._keyframes_refused = 0
+        self._reset_keyframe_limit()
         self._last_sample = {}
         self._stalls = {}
         self._said_stall = {}
@@ -1175,17 +1182,43 @@ class Stage:
             peer.detach()
         return peer is not None
 
-    def request_keyframe(self, who=""):
+    def _reset_keyframe_limit(self):
+        """The state request_keyframe needs, in one place.
+
+        One method rather than two assignments in __init__ because the fake
+        Stage in the tests borrows request_keyframe and used to set this state
+        by hand: adding a counter here broke that test, which is the polite
+        version of what happens when a stand-in is built from an assumption
+        about what the real object holds. Now there is one initialiser and
+        anything that borrows the method can call it.
+        """
+        self._keyframe_tokens = float(KEYFRAME_BURST)
+        self._keyframe_filled = time.monotonic()
+        self._keyframes_refused = 0
+
+    def request_keyframe(self, who="", now=None):
         """A guest has lost the picture and wants a fresh start.
 
         Rate-limited, because the encoder is shared: four guests on a bad
         connection all asking at once would otherwise turn the stream into
         keyframes, which is the one thing guaranteed to make a struggling link
-        worse. One every half second is enough to recover in a blink and not
-        enough to matter to the bitrate.
+        worse. Two guests did exactly that -- see KEYFRAME_MIN_GAP.
+
+        A bucket rather than a gap, so that an isolated request is answered at
+        once and only sustained demand is refused. Waiting is what this was
+        written to avoid; spending the whole bitrate on recovery is what it
+        turned into.
         """
-        now = time.monotonic()
-        if now - self._last_keyframe < KEYFRAME_MIN_GAP:
+        # The clock is an argument so a test can drive it. Rate limiters are
+        # exactly the code where "sleep and hope" makes a slow, flaky test
+        # that proves less than it appears to.
+        now = time.monotonic() if now is None else now
+        self._keyframe_tokens = min(
+            float(KEYFRAME_BURST),
+            self._keyframe_tokens
+            + (now - self._keyframe_filled) / KEYFRAME_MIN_GAP)
+        self._keyframe_filled = now
+        if self._keyframe_tokens < 1.0:
             # Refused, and counted. A storm used to be invisible from here:
             # the log only ever recorded the requests that were granted, so a
             # host spending half its bitrate on recovery looked like a host
@@ -1200,7 +1233,7 @@ class Stage:
             self._keyframes_refused = 0
         else:
             log.info("peer %s asked for a keyframe after losing the picture", who)
-        self._last_keyframe = now
+        self._keyframe_tokens -= 1.0
         self.worker.submit(self.force_keyframe)
 
     def force_keyframe(self):

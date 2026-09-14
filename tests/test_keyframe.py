@@ -46,13 +46,19 @@ class FakeStage:
 
     def __init__(self):
         self.worker = FakeWorker()
-        self._last_keyframe = 0.0
         self.forced = 0
+        # Borrowed from the real Stage rather than written out here. Setting
+        # this state by hand meant the fake carried one version of what
+        # request_keyframe needs while the method moved on, and the test broke
+        # the moment a counter was added -- for no reason to do with what it
+        # was testing.
+        video.Stage._reset_keyframe_limit(self)
 
     def force_keyframe(self):
         self.forced += 1
 
     request_keyframe = video.Stage.request_keyframe
+    _reset_keyframe_limit = video.Stage._reset_keyframe_limit
 
 
 print("a request reaches the encoder")
@@ -66,16 +72,58 @@ print("but a room full of guests cannot turn the stream into keyframes")
 stage = FakeStage()
 for i in range(20):
     stage.request_keyframe("slot%d" % i)
-check(len(stage.worker.jobs) == 1,
-      "twenty at once is still one: %d" % len(stage.worker.jobs))
+check(len(stage.worker.jobs) == video.KEYFRAME_BURST,
+      "twenty at once is the burst and no more: %d" % len(stage.worker.jobs))
 
 print("and asking again later works")
-stage._last_keyframe -= (video.KEYFRAME_MIN_GAP + 0.01)
+spent = len(stage.worker.jobs)
+stage._keyframe_filled -= (video.KEYFRAME_MIN_GAP + 0.01)
 stage.request_keyframe("slot0")
-check(len(stage.worker.jobs) == 2, "once the gap has passed")
-check(video.KEYFRAME_MIN_GAP <= 1.0,
-      "the gap is short enough to recover in a blink: %.2fs"
-      % video.KEYFRAME_MIN_GAP)
+check(len(stage.worker.jobs) == spent + 1, "once the bucket has refilled")
+
+# This used to assert that KEYFRAME_MIN_GAP was small, as a stand-in for "a
+# guest recovers in a blink". It is the behaviour that matters, and a single
+# number could not give it: short enough to answer a blip at once is also
+# short enough for several guests to spend the whole bitrate on keyframes,
+# which is what two guests on a Windows host did. The bucket separates the
+# two, so the thing worth asserting is the behaviour itself.
+print("one guest's blip is answered at once, however long the sustained gap is")
+stage = FakeStage()
+stage.request_keyframe("slot0")
+check(len(stage.worker.jobs) == 1, "the first request is not made to wait")
+stage.request_keyframe("slot0")
+check(len(stage.worker.jobs) == 2,
+      "and a second, moments later, is still served from the burst -- a "
+      "dropped frame twice in a row is one blip, not a storm")
+
+print("but sustained demand settles to the refill rate, not the burst")
+stage = FakeStage()
+for _ in range(50):
+    stage.request_keyframe("slot0")
+check(len(stage.worker.jobs) == video.KEYFRAME_BURST,
+      "fifty requests with no time passing spend the burst and no more: %d"
+      % len(stage.worker.jobs))
+check(stage._keyframes_refused == 50 - video.KEYFRAME_BURST,
+      "and the refusals are counted so the log can say so: %d"
+      % stage._keyframes_refused)
+# Ten seconds of a guest asking as fast as it can, with the clock driven
+# rather than slept through. The first version of this poked the bucket once
+# and looped with no time passing, so it measured the burst and called it the
+# sustained rate -- it would have passed at any refill interval at all.
+stage = FakeStage()
+clock = 1000.0
+stage._keyframe_filled = clock
+for step in range(1000):                       # 10s in hundredths
+    clock += 0.01
+    stage.request_keyframe("slot0", now=clock)
+allowed = len(stage.worker.jobs)
+expected = 10.0 / video.KEYFRAME_MIN_GAP
+check(abs(allowed - (expected + video.KEYFRAME_BURST)) <= 1.5,
+      "ten seconds of constant asking buys about %.0f keyframes, not 300: "
+      "got %d" % (expected + video.KEYFRAME_BURST, allowed))
+check(allowed * 15.0 / (10.0 * 30.0) <= 0.40,
+      "which is at most 40%% of the frame budget at 30fps: %.0f%%"
+      % (allowed * 15.0 / (10.0 * 30.0) * 100))
 
 print("the event a browser's request arrives as is the one being watched for")
 # Built the same way webrtcbin builds it, so a rename upstream fails here
