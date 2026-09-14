@@ -20,7 +20,7 @@ because we declare the same capability set.
 import logging
 import os
 
-from evdev import ecodes
+from .codes import ecodes
 
 from . import pads as padlib
 

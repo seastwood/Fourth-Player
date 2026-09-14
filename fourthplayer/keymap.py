@@ -16,7 +16,7 @@ Nothing in this module touches the kernel, so it can be read and tested
 anywhere.
 """
 
-from evdev import ecodes as e
+from .codes import ecodes as e
 
 # Built rather than typed out: twenty-six lines of KeyA -> KEY_A is twenty-six
 # chances to typo one of them, and a loop cannot get the alphabet wrong.
