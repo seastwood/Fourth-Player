@@ -1728,13 +1728,34 @@ Not yet done:
   (flat at 77 while the resident size grew 450 MB), pipeline teardown (no
   pipeline has failed to reach NULL since that was fixed), and glibc arena
   bloat (`malloc_trim` has never reclaimed anything worth logging while the
-  process tripled). It also does not reproduce under `leakprobe.py`, which
-  narrows it to what a browser does that the probe does not: periodic stats
-  reports, the desk channel, RTCP keyframe requests, renegotiation.
+  process tripled), and sheer volume (450 MB streamed with the resident size
+  flat at 144 MB, so it does not track bytes sent). It also does not reproduce
+  under `leakprobe.py`, which narrows it to what a browser does that the probe
+  does not: periodic stats reports, the desk channel, RTCP keyframe requests,
+  renegotiation.
 
-  The watchdog now logs whether Python's own allocator is growing alongside the
-  resident size, which decides the remaining question — whether to look in this
-  code at all, or below it in GStreamer and the driver.
+  Two tracers have since answered the question the watchdog was added to
+  settle, and both said the same thing: not this code, and not anything either
+  of them can see.
+
+  - **Python's own allocator is flat.** `sys.getallocatedblocks()` grew by 638
+    blocks across four readings while the resident size grew 717 MB. Whatever
+    is being held is not a Python object.
+  - **GStreamer's object count is flat too.** The leaks tracer counted 3307
+    live objects during a burst against 3309 at rest — no leaked `GstBuffer`,
+    `GstMemory` or `GstPad`. A healthy baseline, for comparison: 1543
+    `GstMemory`, 1035 `GstBuffer`, 178 `GstPad`.
+
+  Which leaves 449 MB sitting in `[heap]` — ordinary main-arena `malloc` —
+  arriving in bursts (250 MB to 419 MB inside fifteen seconds) with nothing in
+  the journal during them. That shape fits an allocation made below both
+  tracers, and the prime suspect is the VA-API stack: libva and the mesa driver
+  allocate where neither Python nor GStreamer can account for it.
+
+  Two ways on from here, neither yet taken: run a session on software
+  `x264enc` (`--software`), which takes the VA driver out of the picture
+  entirely and settles the theory in one sitting; or install `heaptrack` and
+  get the calling stack directly, which needs root on the box.
 
 ## Licence
 

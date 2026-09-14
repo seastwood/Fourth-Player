@@ -486,9 +486,22 @@ video {
   -webkit-appearance: none;
   appearance: none;
   border: 0;
-  background: transparent;
+  /* Solid, despite the opacity above and despite nothing here being visible.
+     The popup is drawn by the browser as a widget rather than as part of the
+     page, so the opacity does not reach it -- but its colours are taken from
+     this element, and from `transparent` a desktop drew the list white on
+     white. Only the row under the pointer could be read, because only that
+     one gets a background of its own. Changed in place rather than added
+     below: a second `background` further down this block would win, and that
+     trap has been walked into here before. */
+  background-color: var(--bg2);
+  color: var(--ink);
   cursor: pointer;
 }
+/* And the rows themselves, which inherit none of the above on Firefox. The
+   same pairing select.chip option gets; this select is not a chip, which is
+   the whole reason it was missed. */
+.padpick-select option { background: var(--bg2); color: var(--ink); }
 
 /* The connection chip carries a lit pip instead of the word "connected".
    Square, because nothing else on this screen is round, and it reads as an
