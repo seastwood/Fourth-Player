@@ -44,6 +44,7 @@ import qrcode  # noqa: E402
 
 from .approve import Shoulders  # noqa: E402
 from .chatkey import ChatKey  # noqa: E402
+from . import control as control_channel
 
 CONTROL_SOCKET = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
@@ -87,9 +88,7 @@ CARD_PAD = 18
 
 def ask(request):
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(3)
-            sock.connect(CONTROL_SOCKET)
+        with control_channel.connect(timeout=3) as sock:
             sock.sendall((json.dumps(request) + "\n").encode())
             data = b""
             while not data.endswith(b"\n"):

@@ -14,6 +14,7 @@ from . import accounts
 from .config import Config, CONFIG_PATH, PRESETS
 from .session import LAUNCH_POLICIES
 from .server import Server, CONTROL_SOCKET
+from . import control as control_channel
 
 
 def _control(request, wait=0.0):
@@ -37,9 +38,7 @@ def _control(request, wait=0.0):
 
 def _control_once(request):
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(10)
-            sock.connect(CONTROL_SOCKET)
+        with control_channel.connect(timeout=10) as sock:
             sock.sendall((json.dumps(request) + "\n").encode())
             data = b""
             while not data.endswith(b"\n"):

@@ -30,6 +30,7 @@ from . import invites
 from .config import Config
 from .session import LAUNCH_POLICIES, LiveSession
 from .tls import ensure_certificate
+from . import control as control_channel
 
 log = logging.getLogger("fourthplayer.server")
 
@@ -55,8 +56,9 @@ def _lan_address():
 # signalling: the WebSocket has to be same-origin.
 WEB_ROOT = os.environ.get("FP_WEB_ROOT") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
-CONTROL_SOCKET = os.path.join(
-    os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "fourth-player.sock")
+# Kept as a name because other modules import it, and it is still what the
+# channel is on Linux. control.py is what decides.
+CONTROL_SOCKET = control_channel.UNIX_PATH
 
 # A guest is told what went wrong in the same words for every kind of failure
 # that could be probing: a wrong PIN, an unknown link and an expired one all
@@ -1566,28 +1568,19 @@ class Server:
                  "trusting X-Forwarded-For" if self.cfg.behind_proxy
                  else "peer address")
 
-        if os.path.exists(CONTROL_SOCKET):
-            # Only a leftover may be removed. A live one belongs to another
-            # server, and taking it makes that server unreachable without
-            # either of them noticing -- its own `status` then answers "no
-            # server is running" while it happily keeps streaming.
-            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            probe.settimeout(2)
-            try:
-                probe.connect(CONTROL_SOCKET)
-            except OSError:
-                os.unlink(CONTROL_SOCKET)
-            else:
-                raise SystemExit(
-                    f"another fourth-player is already using {CONTROL_SOCKET}.\n"
-                    f"Stop it first, or set XDG_RUNTIME_DIR to give this one its "
-                    f"own.")
-            finally:
-                probe.close()
-        control = await asyncio.start_unix_server(self._control, path=CONTROL_SOCKET)
-        os.chmod(CONTROL_SOCKET, 0o600)
+        # Only a leftover may be taken. A live address belongs to another
+        # server, and stealing it makes that server unreachable without either
+        # of them noticing -- its own `status` then answers "no server is
+        # running" while it happily keeps streaming. in_use() clears a stale
+        # one and reports a live one.
+        if control_channel.in_use():
+            raise SystemExit(
+                f"another fourth-player is already using "
+                f"{control_channel.address()}.\nStop it first, or set "
+                f"XDG_RUNTIME_DIR to give this one its own.")
+        control = await control_channel.serve(self._control)
         self._sockets.append(control)
-        log.info("control socket at %s", CONTROL_SOCKET)
+        log.info("control channel at %s", control_channel.address())
 
         self._restore_session()
 
@@ -1602,8 +1595,7 @@ class Server:
                 self.session.stop(reason="server shutting down")   # sync: loop is going
             for server in self._sockets:
                 server.close()
-            if os.path.exists(CONTROL_SOCKET):
-                os.unlink(CONTROL_SOCKET)
+            control_channel.cleanup()
 
     async def _listen(self, context):
         return await websockets.serve(
