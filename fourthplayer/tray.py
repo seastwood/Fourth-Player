@@ -30,6 +30,7 @@ Quit ask first. Restart does not -- it comes back on its own, and a guest's
 page reconnects by itself, which is a blip rather than an ending.
 """
 import logging
+import os
 import sys
 import threading
 import webbrowser
@@ -210,147 +211,276 @@ class Host:
         return self.start()
 
 
-def run(launch=True):
-    """Show the icon until it is told to go away. Blocks."""
-    try:
-        import pystray
-    except ImportError:
-        print("pystray is missing, so there is no tray icon "
-              "(py -m pip install pystray)", file=sys.stderr)
-        return 1
+class Tray:
+    """The icon's behaviour, with no opinion about who draws it.
 
-    host = Host(launch=launch)
-    state = {"open": False, "reachable": False, "busy": ""}
+    Two backends draw it, and which one is available decides. pystray on
+    Windows; GTK's AppIndicator on Linux, where PyGObject and
+    AyatanaAppIndicator3 are already installed for GStreamer and the on-screen
+    card -- so a Linux host needs nothing new at all, which is worth more than
+    one library serving both.
+    """
 
-    def status_line(_item=None):
-        if state["busy"]:
-            return "Fourth Player - " + state["busy"]
-        if not state["reachable"]:
+    def __init__(self, launch=True):
+        self.host = Host(launch=launch)
+        self.open = False
+        self.reachable = False
+        self.busy = ""
+        self.stopping = False
+
+    # -- what it says ------------------------------------------------------
+
+    def title(self):
+        if self.busy:
+            return "Fourth Player - " + self.busy
+        if not self.reachable:
             return "Fourth Player - not running"
-        return ("Fourth Player - session open" if state["open"]
+        return ("Fourth Player - session open" if self.open
                 else "Fourth Player - idle, no session")
 
-    def confirm(question):
-        """Ask before something that ends everybody's evening.
+    def poll(self):
+        answer = _ask({"cmd": "status"})
+        self.reachable = bool(answer.get("ok"))
+        self.open = bool(answer.get("open"))
 
-        The menu is reachable by anyone walking past an unlocked machine, and
-        Disable and Quit both drop every guest. tkinter because it is in the
-        standard library -- a confirmation box is not worth a dependency, and
-        a machine without it still gets the action, just without the question.
-        """
-        try:
-            import tkinter
-            from tkinter import messagebox
-            root = tkinter.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            answer = messagebox.askyesno("Fourth Player", question, parent=root)
-            root.destroy()
-            return answer
-        except Exception:
-            return True
-
-    def guests_now():
+    def guests_now(self):
         answer = _ask({"cmd": "status"})
         return len(answer.get("guests") or []) if answer.get("ok") else 0
 
-    # -- the menu ----------------------------------------------------------
+    # -- what it does ------------------------------------------------------
 
-    def open_setup(_icon=None, _item=None):
+    def open_setup(self):
         answer = _ask({"cmd": "setup"})
         if answer.get("ok"):
             webbrowser.open(answer["url"])
         else:
             log.warning("could not open the setup page: %s", answer.get("error"))
 
-    def open_guest(_icon=None, _item=None):
+    def open_guest(self):
         answer = _ask({"cmd": "status"})
-        url = answer.get("join_url") or answer.get("example_url")
+        url = answer.get("url") or answer.get("example_url")
         if url:
             webbrowser.open(url)
 
-    def do_restart(icon, _item):
-        state["busy"] = "restarting..."
-        icon.title = status_line()
-        ok, why = host.restart()
-        state["busy"] = ""
+    def restart(self):
+        self.busy = "restarting..."
+        ok, why = self.host.restart()
+        self.busy = ""
         if not ok:
             log.warning("could not restart: %s", why)
 
-    def do_enable(icon, _item):
-        state["busy"] = "starting..."
-        icon.title = status_line()
-        ok, why = host.start()
-        state["busy"] = ""
+    def enable(self):
+        self.busy = "starting..."
+        ok, why = self.host.start()
+        self.busy = ""
         if not ok:
             log.warning("could not start: %s", why)
 
-    def do_disable(icon, _item):
-        playing = guests_now()
-        question = ("Stop Fourth Player?\n\n%s\n\nThe icon stays, so you can "
-                    "start it again from here."
-                    % ("%d guest%s will be disconnected."
-                       % (playing, "" if playing == 1 else "s")
-                       if playing else "Nobody is connected."))
-        if not confirm(question):
+    def disable(self, confirm):
+        if not confirm(self._ending("The icon stays, so you can start it "
+                                    "again from here.")):
             return
-        state["busy"] = "stopping..."
-        icon.title = status_line()
-        host.stop()
-        state["busy"] = ""
+        self.busy = "stopping..."
+        self.host.stop()
+        self.busy = ""
 
-    def do_quit(icon, _item):
-        playing = guests_now()
-        question = ("Quit Fourth Player entirely?\n\n%s\n\nThe host stops and "
-                    "this icon goes away."
-                    % ("%d guest%s will be disconnected."
-                       % (playing, "" if playing == 1 else "s")
-                       if playing else "Nobody is connected."))
-        if not confirm(question):
-            return
-        host.stop()
-        icon.stop()
+    def quit(self, confirm):
+        if not confirm(self._ending("The host stops and this icon goes away.")):
+            return False
+        self.host.stop()
+        self.stopping = True
+        return True
+
+    def _ending(self, tail):
+        playing = self.guests_now()
+        return ("Stop Fourth Player?\n\n%s\n\n%s"
+                % ("%d guest%s will be disconnected."
+                   % (playing, "" if playing == 1 else "s")
+                   if playing else "Nobody is connected.", tail))
+
+
+def _confirm(question):
+    """Ask before something that ends everybody's evening.
+
+    The menu is reachable by anyone walking past an unlocked machine, and Stop
+    and Quit both drop every guest. tkinter because it is in the standard
+    library -- a confirmation box is not worth a dependency, and a machine
+    without it still gets the action, just without the question.
+    """
+    try:
+        import tkinter
+        from tkinter import messagebox
+        root = tkinter.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        answer = messagebox.askyesno("Fourth Player", question, parent=root)
+        root.destroy()
+        return answer
+    except Exception:
+        return True
+
+
+def _run_pystray(tray):
+    import pystray
 
     icon = pystray.Icon(
         "fourth-player", _image(False), "Fourth Player",
         menu=pystray.Menu(
-            pystray.MenuItem(status_line, None, enabled=False),
+            pystray.MenuItem(lambda _i: tray.title(), None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Set up this machine...", open_setup, default=True),
-            pystray.MenuItem("Open the guest page...", open_guest,
-                             visible=lambda _i: state["reachable"]),
+            pystray.MenuItem("Set up this machine...",
+                             lambda _i, _m: tray.open_setup(), default=True),
+            pystray.MenuItem("Open the guest page...",
+                             lambda _i, _m: tray.open_guest(),
+                             visible=lambda _i: tray.reachable),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Restart Fourth Player", do_restart,
-                             visible=lambda _i: state["reachable"]),
-            pystray.MenuItem("Stop Fourth Player", do_disable,
-                             visible=lambda _i: state["reachable"]),
-            pystray.MenuItem("Start Fourth Player", do_enable,
-                             visible=lambda _i: not state["reachable"]),
+            pystray.MenuItem("Restart Fourth Player",
+                             lambda _i, _m: tray.restart(),
+                             visible=lambda _i: tray.reachable),
+            pystray.MenuItem("Stop Fourth Player",
+                             lambda _i, _m: tray.disable(_confirm),
+                             visible=lambda _i: tray.reachable),
+            pystray.MenuItem("Start Fourth Player",
+                             lambda _i, _m: tray.enable(),
+                             visible=lambda _i: not tray.reachable),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", do_quit),
+            pystray.MenuItem("Quit",
+                             lambda i, _m: tray.quit(_confirm) and i.stop()),
         ))
 
     def watch():
-        """Follow the session, so the icon means something."""
         import time
         while True:
-            answer = _ask({"cmd": "status"})
-            state["reachable"] = bool(answer.get("ok"))
-            state["open"] = bool(answer.get("open"))
+            tray.poll()
             try:
-                icon.icon = _image(state["open"])
-                icon.title = status_line()
-                icon.update_menu()          # the items that come and go
+                icon.icon = _image(tray.open)
+                icon.title = tray.title()
+                icon.update_menu()
             except Exception:
-                pass                        # the icon has gone away
+                return
             time.sleep(3)
 
     threading.Thread(target=watch, name="tray-watch", daemon=True).start()
-    if launch and not host.reachable():
-        threading.Thread(target=host.start, name="tray-launch",
-                         daemon=True).start()
     icon.run()
     return 0
+
+
+def _icon_files():
+    """The two icons, written once where AppIndicator can find them.
+
+    It wants a path or a themed name rather than an image in memory, and it
+    reloads when the path changes -- so two files rather than one rewritten,
+    which it would not notice.
+    """
+    import tempfile
+    where = os.path.join(tempfile.gettempdir(), "fourth-player-tray")
+    os.makedirs(where, exist_ok=True)
+    paths = {}
+    for lit, name in ((False, "idle"), (True, "open")):
+        path = os.path.join(where, "fp-%s.png" % name)
+        _image(lit).save(path)
+        paths[lit] = path
+    return paths
+
+
+def _run_appindicator(tray):
+    """The Linux icon, on what a Mint or Ubuntu desktop already has.
+
+    No new dependency: PyGObject is here for GStreamer and AyatanaAppIndicator3
+    for the desktop itself, which is why this exists rather than asking for
+    pystray on a machine that may not even have pip -- retro does not.
+    """
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+    from gi.repository import Gtk, GLib, AyatanaAppIndicator3 as AppIndicator
+
+    icons = _icon_files()
+    indicator = AppIndicator.Indicator.new(
+        "fourth-player", icons[False],
+        AppIndicator.IndicatorCategory.APPLICATION_STATUS)
+    indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+
+    items = {}
+
+    def menu():
+        made = Gtk.Menu()
+        items["title"] = Gtk.MenuItem(label=tray.title())
+        items["title"].set_sensitive(False)
+        made.append(items["title"])
+        made.append(Gtk.SeparatorMenuItem())
+
+        def add(key, label, action):
+            item = Gtk.MenuItem(label=label)
+            # Off the GTK thread: stopping a host takes seconds, and doing it
+            # in the click handler freezes the whole desktop's panel.
+            item.connect("activate", lambda _w: threading.Thread(
+                target=action, daemon=True).start())
+            made.append(item)
+            items[key] = item
+            return item
+
+        add("setup", "Set up this machine\u2026", tray.open_setup)
+        add("guest", "Open the guest page\u2026", tray.open_guest)
+        made.append(Gtk.SeparatorMenuItem())
+        add("restart", "Restart Fourth Player", tray.restart)
+        add("stop", "Stop Fourth Player", lambda: tray.disable(_confirm))
+        add("start", "Start Fourth Player", tray.enable)
+        made.append(Gtk.SeparatorMenuItem())
+        add("quit", "Quit", lambda: tray.quit(_confirm) and GLib.idle_add(Gtk.main_quit))
+        made.show_all()
+        return made
+
+    indicator.set_menu(menu())
+
+    def refresh():
+        """On the GTK thread, because everything here touches widgets."""
+        items["title"].set_label(tray.title())
+        indicator.set_icon_full(icons[tray.open], "Fourth Player")
+        for key, want in (("guest", tray.reachable), ("restart", tray.reachable),
+                          ("stop", tray.reachable), ("start", not tray.reachable)):
+            items[key].set_visible(want)
+        return False
+
+    def watch():
+        import time
+        while True:
+            tray.poll()
+            GLib.idle_add(refresh)
+            time.sleep(3)
+
+    threading.Thread(target=watch, name="tray-watch", daemon=True).start()
+    Gtk.main()
+    return 0
+
+
+def run(launch=True):
+    """Show the icon until it is told to go away. Blocks."""
+    tray = Tray(launch=launch)
+
+    backends = []
+    try:
+        import pystray                                       # noqa: F401
+        backends.append(_run_pystray)
+    except ImportError:
+        pass
+    if sys.platform != "win32":
+        backends.append(_run_appindicator)
+
+    if launch and not tray.host.reachable():
+        threading.Thread(target=tray.host.start, name="tray-launch",
+                         daemon=True).start()
+
+    for backend in backends:
+        try:
+            return backend(tray)
+        except Exception as exc:
+            log.warning("%s could not draw the icon: %s",
+                        backend.__name__, exc)
+    print("no way to draw a tray icon here. On Linux this wants PyGObject "
+          "with AyatanaAppIndicator3 (gir1.2-ayatanaappindicator3-0.1); "
+          "on Windows, pystray.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
