@@ -105,6 +105,112 @@ try {
         "\"Use defaults\" undoes the latching too, not most of it");
   check(reset.mode === "false", "and leaves the mode off");
 
+  // ---- the on-screen controller ----------------------------------------
+  //
+  // Asked for directly: "I want this to work for on screen control buttons as
+  // well, and it should show the button as visually pressed if it is
+  // toggled." The glass is where it matters most -- a thumb cannot rest on a
+  // button there while doing anything else.
+  console.log("");
+  const built = await page.evaluate(() => {
+    showTouch(true);
+    closePads();
+    localStorage.setItem("fp-padtoggle:Test Pad", JSON.stringify([0]));
+    ownPadName = "Test Pad";
+    return document.querySelectorAll(".tbtn[data-button]").length;
+  });
+  check(built > 0, `the on-screen pad has buttons to press: ${built}`);
+
+  const tap = (bit, down) => page.evaluate(
+    ([b, d]) => { setBit(b, d); return latchMask(ownLatch); }, [bit, down]);
+
+  let mask = await tap(0, true);
+  let shown = await page.evaluate(() => {
+    const b = document.querySelector('.tbtn[data-button="0"]');
+    return { held: b.classList.contains("held"),
+             pressed: b.getAttribute("aria-pressed") };
+  });
+  check(mask === 1, `tapping a latching button on the glass holds it: mask ${mask}`);
+  check(shown.held, "and the button is drawn pressed");
+  check(shown.pressed === "true", "and says so to a screen reader");
+
+  mask = await tap(0, false);
+  shown = await page.evaluate(() =>
+    document.querySelector('.tbtn[data-button="0"]').classList.contains("held"));
+  check(mask === 1 && shown,
+        "taking the finger off leaves it down, which is the whole point");
+
+  // The frame has to carry it, not just the glass.
+  const inFrame = await page.evaluate(() => ({
+    latch: latchMask(ownLatch),
+    plain: touchButtons,
+  }));
+  check(inFrame.latch === 1,
+        "the latch is what puts it in the frame, so the game is told it is down");
+  check(inFrame.plain === 0,
+        "and the ordinary held-button bit is not set as well, which would be "
+        + "two sources for one button");
+
+  mask = await tap(0, true);
+  await tap(0, false);
+  shown = await page.evaluate(() =>
+    document.querySelector('.tbtn[data-button="0"]').classList.contains("held"));
+  check(mask === 0 && !shown, "tapping it again lets go, and stops drawing it");
+
+  // The d-pad calls setBit on every pointermove while a thumb slides about on
+  // it, so "still held" arrives over and over and only the first is a press.
+  await page.evaluate(() => {
+    localStorage.setItem("fp-padtoggle:Test Pad", JSON.stringify([12]));
+    clearLatch(ownLatch);
+  });
+  let flips = 0, was = 0;
+  for (let frame = 0; frame < 30; frame++) {
+    const now = await tap(12, true);
+    if (now !== was) flips++;
+    was = now;
+  }
+  check(flips === 1,
+        `thirty frames of a thumb held on the d-pad flip it once: ${flips}`);
+  const arm = await page.evaluate(() =>
+    document.querySelector('.dpad-arm[data-dir="up"]').classList.contains("held"));
+  check(arm, "and the d-pad arm is drawn held too, not only the round buttons");
+
+  // A button that does not latch is untouched by any of this.
+  await page.evaluate(() => {
+    localStorage.setItem("fp-padtoggle:Test Pad", JSON.stringify([0]));
+    clearLatch(ownLatch);
+    touchButtons = 0;
+  });
+  const plain = await page.evaluate(() => {
+    setBit(1, true);
+    const down = touchButtons;
+    setBit(1, false);
+    return { down, up: touchButtons, latch: latchMask(ownLatch) };
+  });
+  check(plain.down === 2 && plain.up === 0 && plain.latch === 0,
+        "a button nobody asked to latch is held while touched and let go after");
+
+  // Putting the page away must not leave anything held on the television.
+  await page.evaluate(() => { setBit(0, true); releaseAllTouch(); });
+  const after = await page.evaluate(() => ({
+    latch: latchMask(ownLatch),
+    held: document.querySelectorAll(".tbtn.held, .dpad-arm.held").length,
+  }));
+  check(after.latch === 0 && after.held === 0,
+        "releasing everything lets go of the latch and stops drawing it");
+
+  // The mark has to be visible, not merely in the class list.
+  const look = await page.evaluate(() => {
+    const b = document.querySelector('.tbtn[data-button="0"]');
+    const plainStyle = getComputedStyle(b).boxShadow;
+    b.classList.add("held");
+    const heldStyle = getComputedStyle(b).boxShadow;
+    b.classList.remove("held");
+    return { plainStyle, heldStyle };
+  });
+  check(look.heldStyle !== look.plainStyle && look.heldStyle !== "none",
+        `a latched button is actually drawn differently: ${look.heldStyle}`);
+
   check(errors.length === 0, "no script errors: " + errors.join(" | "));
 } finally {
   await browser.close();

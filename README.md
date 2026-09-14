@@ -1119,6 +1119,21 @@ alone because the grid already uses it for "pressed right now" -- which a
 latched button very often is at the same time, and that is the moment the
 difference matters most.
 
+**The on-screen controller latches too**, and a latched button there is drawn
+pressed for as long as it is held -- which on glass is the only way to know.
+The fill is the one a button under a thumb gets, so it reads as the same state
+at a glance, with a ring around it saying the difference: this one stays down
+after the finger leaves. It is not shrunk the way a touched button is, because
+a button that sat shrunk for a whole level looks like a rendering fault rather
+than a held button; one that is latched *and* being touched still shrinks. The
+d-pad arms are drawn the same way, and a latch moved by a physical controller
+shows on the glass as well -- they are the same buttons, and somebody holding a
+pad can still see the screen.
+
+A latched trigger travels all the way, exactly as a held on-screen one does: a
+game that steers or accelerates on the analogue reading would otherwise get
+nothing at all from it.
+
 Entirely the guest's own business. The frame leaving the page already says
 which buttons are down, so a latched button is simply one the page keeps
 saying is down: the host, the protocol and the game are unchanged and cannot

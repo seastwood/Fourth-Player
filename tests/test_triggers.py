@@ -42,10 +42,25 @@ for j in range(source.index("{", start), len(source)):
             body = source[start:j + 1]
             break
 
+# latchMask is lifted rather than stubbed: sendFrame folds the latched buttons
+# in beside the on-screen and keyboard ones, and a stub that agreed with the
+# real one by accident would be the whole test.
+mask_at = source.index("function latchMask(")
+mask_end = source.index("\n}", mask_at) + 2
+LATCH_MASK = source[mask_at:mask_end]
+
 HARNESS = """
 const FPFrame = require(process.argv[1]);
+const job0 = JSON.parse(require("fs").readFileSync(0, "utf8"));
+""" + LATCH_MASK + """
+// Which buttons this page is holding down for the guest, because they asked
+// for them to latch. See the toggle feature: a latched button is one the page
+// keeps saying is down.
+let ownLatch = { on: job0.latch || {}, was: {} };
+// The glass is not here, so there is nothing to draw.
+function paintLatchedButtons() {}
 """ + body + """
-const job = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const job = job0;
 let touchButtons = job.touch || 0;
 // The keyboard-standing-in-for-a-controller device, which any guest may pick.
 // sendFrame folds its buttons in with the pad's and the on-screen pad's, so it
@@ -103,6 +118,22 @@ print("\nnothing pressed is nothing sent")
 idle = run({})
 check(idle["axes"][AX_LT] == 0 and idle["axes"][AX_RT] == 0,
       "the triggers rest: %r" % idle["axes"][4:])
+
+print("\na latched trigger travels all the way, like a held on-screen one")
+# The comment in sendFrame says so, and a game that steers on the analogue
+# reading would otherwise get nothing at all from a latched trigger --
+# which is the same fault the on-screen ones had before they were fixed.
+latched = run({"latch": {str(RT): True}})
+check(latched["buttons"] & (1 << RT),
+      "the button is reported down while it is latched")
+check(latched["axes"][AX_RT] == 32767,
+      "and the trigger is all the way in: %r" % latched["axes"][AX_RT])
+check(latched["axes"][AX_LT] == 0, "the other one is untouched")
+
+print("\nreleasing everything releases the latch with it")
+gone = run({"latch": {str(RT): True}, "releaseAll": True})
+check(gone["buttons"] == 0 and gone["axes"][AX_RT] == 0,
+      "a release-all frame carries nothing latched: %r" % gone["axes"][AX_RT])
 
 print("\na physical trigger still reports its own travel")
 half = run({"pad": True, "padButtons": [RT], "padValues": {RT: 0.5}})

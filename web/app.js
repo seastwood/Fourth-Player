@@ -1889,11 +1889,83 @@ function paintPicker() {
   mirrorPicker();
 }
 
+/* What the on-screen buttons were doing last time, so a latch can move on the
+   edge here too. It cannot share the physical pad's memory: the d-pad calls
+   setBit on every pointermove while a thumb is sliding around it, so "still
+   held" arrives over and over and only the first of them is a press. */
+let touchWas = 0;
+
 function setBit(bit, down) {
+  // A button the guest asked to latch is not held by the finger on it. It is
+  // flipped by the press and then held by this page until the next one, which
+  // is the whole point -- and it is why the bit is never set here: the latch
+  // is what puts it in the frame. See latchMask().
+  if (latchesHere(bit)) {
+    const was = !!(touchWas & (1 << bit));
+    if (down) touchWas |= (1 << bit);
+    else touchWas &= ~(1 << bit);
+    if (!down || was) return false;          // the rising edge alone
+    ownLatch.on[bit] = !ownLatch.on[bit];
+    paintLatchedButtons();
+    return true;
+  }
   const before = touchButtons;
   if (down) touchButtons |= (1 << bit);
   else touchButtons &= ~(1 << bit);
   return touchButtons !== before;
+}
+
+/* Whether this button latches for the seat this page is sitting in.
+ *
+ * Deliberately the seat's own controller rather than whichever one the panel
+ * happens to be pointed at: somebody setting up a second pad must not change
+ * what their own on-screen buttons do while they do it. */
+function latchesHere(bit) {
+  return togglesFor(seatPadName()).indexOf(bit) >= 0;
+}
+
+function seatPadName() {
+  return ownPadName || padName;
+}
+
+/* The latched buttons as a bitmask, for merging into the frame beside the
+   on-screen and keyboard ones. */
+function latchMask(latch) {
+  let mask = 0;
+  if (!latch) return mask;
+  for (const key of Object.keys(latch.on)) {
+    if (latch.on[key]) mask |= (1 << Number(key));
+  }
+  return mask;
+}
+
+/* A latched on-screen button is drawn pressed, because it is pressed.
+ *
+ * `.live` means a finger is on it this instant and `.held` means this page is
+ * holding it down; a latched button is very often both, and they are wanted
+ * apart -- the finger comes and goes while the button stays down. */
+let paintedLatch = -1;
+
+function paintLatchedButtons(force) {
+  const on = latchMask(ownLatch);
+  // Called from the send path, which runs 125 times a second, so the usual
+  // answer has to be cheap: one integer compare and no DOM at all. `force` is
+  // for a rebuilt pad, where the buttons are new elements and the mask has
+  // not moved.
+  if (!force && on === paintedLatch) return;
+  paintedLatch = on;
+  document.querySelectorAll(".tbtn[data-button]").forEach((button) => {
+    const bit = Number(button.dataset.button);
+    const held = !!(on & (1 << bit));
+    button.classList.toggle("held", held);
+    button.setAttribute("aria-pressed", held ? "true" : "false");
+  });
+  // The d-pad arms are not .tbtn and carry a direction rather than a bit, so
+  // they are painted through the same map that sends them.
+  for (const [dir, bit] of Object.entries(DPAD)) {
+    const arm = document.querySelector('.dpad-arm[data-dir="' + dir + '"]');
+    if (arm) arm.classList.toggle("held", !!(on & (1 << bit)));
+  }
 }
 
 function dpadDirections(event) {
@@ -2059,9 +2131,15 @@ function releaseAllTouch() {
   releaseAllSticks();
   lastSent = null;          // the next frame must go, whatever it says
   touchButtons = 0;
+  touchWas = 0;
+  // Latched buttons go too. This runs when the page stops being in control --
+  // blurred, hidden, put away -- and a button held by a page that is not
+  // watching any more is the one bad ending this feature has.
+  clearLatch(ownLatch);
   pointers.clear();
   clearDpad();
   document.querySelectorAll(".tbtn.live").forEach((b) => b.classList.remove("live"));
+  paintLatchedButtons(true);
 }
 
 function showTouch(on, layout) {
@@ -3407,7 +3485,12 @@ function startPadLoop() {
   // Leaving must not leave a button held down on someone else's television.
   // Including anything latched: a toggled button is only held because this
   // page keeps saying so, and a page that is going away must stop saying it.
-  const letGo = () => { keyButtons = 0; clearLatch(ownLatch); sendFrame(null, true); };
+  const letGo = () => {
+    keyButtons = 0;
+    clearLatch(ownLatch);
+    paintLatchedButtons();
+    sendFrame(null, true);
+  };
   window.addEventListener("pagehide", letGo);
   window.addEventListener("beforeunload", letGo);
   document.addEventListener("visibilitychange", () => {
@@ -3535,7 +3618,7 @@ function hasGamepad() {
  * heartbeat and the physical pad, neither of which knows when it changed. */
 function sendNow() {
   if (padsOpen) return;
-  sendFrame(toggled(remapped(livePad()), padName, ownLatch, true), false);
+  sendFrame(toggled(remapped(livePad()), seatPadName(), ownLatch, true), false);
 }
 
 /* The extra seats, on the page's own clock. Deliberately not on sendNow():
@@ -3580,7 +3663,7 @@ function tick() {
   if (padsOpen) return;
   // Otherwise: whatever the guest told us their buttons really are, with
   // anything they asked to latch held down for them.
-  sendFrame(toggled(remapped(pad), padName, ownLatch, true), false);
+  sendFrame(toggled(remapped(pad), seatPadName(), ownLatch, true), false);
 }
 
 let lastSent = null, lastSentAt = 0;
@@ -3633,7 +3716,11 @@ function sendFrame(pad, releaseAll) {
   const state = FPFrame.padState(releaseAll ? null : pad);
   // The keyboard joins the same merge for the same reason: whichever is being
   // pressed wins by being pressed, and nothing has to be turned off first.
-  const buttons = releaseAll ? 0 : (state.buttons | touchButtons | keyButtons);
+  // The latch joins the merge on the same footing: a button somebody asked to
+  // latch is held by this page rather than by a finger or a thumb, whichever
+  // of the three put it down.
+  const buttons = releaseAll
+    ? 0 : (state.buttons | touchButtons | keyButtons | latchMask(ownLatch));
   // Whichever is being touched wins, exactly as the buttons do: an on-screen
   // stick only overrides the physical one while a thumb is actually on it.
   const axes = releaseAll ? [0, 0, 0, 0, 0, 0] : state.axes.slice();
@@ -3649,9 +3736,20 @@ function sendFrame(pad, releaseAll) {
        did nothing at all: Crazy Taxi would let you drive its menus and not its
        car. Held on screen means held all the way. */
     for (const [bit, axis] of [[6, 4], [7, 5]]) {
-      if ((touchButtons | keyButtons) & (1 << bit)) axes[axis] = FPFrame.TRIGGER_FULL;
+      // A latched trigger counts here too, and for exactly the reason the
+      // on-screen one does: it is held all the way, and a game that steers on
+      // the analogue reading would otherwise get nothing from it.
+      if ((touchButtons | keyButtons | latchMask(ownLatch)) & (1 << bit)) {
+        axes[axis] = FPFrame.TRIGGER_FULL;
+      }
     }
   }
+
+  // A latch moved by the physical controller has to show on the on-screen one
+  // as well: they are the same buttons, and somebody holding a pad can still
+  // see the glass. Guarded on the mask, so this is an integer compare on all
+  // but the frame it actually changes.
+  paintLatchedButtons();
 
   const now = Date.now();
   const due = releaseAll || changed(buttons, axes) ||
@@ -7084,6 +7182,12 @@ function flipToggle(index) {
   // Let go of whatever it was holding. Taking a button out of the list while
   // it is latched down would leave it down with nothing able to lift it.
   clearLatch(ownLatch);
+  // And of the plain press, in case this button was being held on the glass
+  // when it became a latching one: the bit would have stayed set with nothing
+  // left watching for the finger coming off.
+  touchButtons &= ~(1 << index);
+  touchWas &= ~(1 << index);
+  paintLatchedButtons();
   paintToggleMarks();
   const reset = el("pads-reset");
   if (reset && which.length) reset.hidden = false;
