@@ -241,23 +241,33 @@ ENCODERS = {
 # show_pointer.
 #
 # The third field is what that source calls "draw the mouse pointer into the
-# picture", because they disagree: ximagesrc says show-pointer and
-# d3d11screencapturesrc says show-cursor. None means it cannot, and
-# show_pointer answers False rather than guessing.
+# picture", *and only where it can be changed while the pipeline is running*.
+#
+# They disagree about the name -- ximagesrc says show-pointer, d3d11 says
+# show-cursor -- and about whether it may be touched at all. gst-inspect marks
+# a property that is safe to set while PLAYING; d3d11screencapturesrc's
+# show-cursor carries no such mark, and setting it on a running pipeline is an
+# access violation. Two of the Windows crashes sat directly under "the mouse
+# pointer is showing in the picture", which is this call.
+#
+# So None here means "do not touch it", and those sources have the cursor
+# baked into their template instead. On a machine whose whole desktop is being
+# driven by somebody remote that is the right setting anyway: a pointer you
+# cannot see is a pointer you cannot aim.
 SOURCES = (
     ("ximagesrc",
      "ximagesrc name=capture display-name={display} use-damage=0 "
      "show-pointer=false",
      "show-pointer"),
     ("d3d11screencapturesrc",
-     "d3d11screencapturesrc name=capture show-cursor=false",
-     "show-cursor"),
+     "d3d11screencapturesrc name=capture show-cursor=true",
+     None),
     # Deprecated in GStreamer and kept as a fallback anyway: it is what a
     # machine with no working D3D11 path has left, and a soft picture beats
     # none. It warns on every start, which is the reason it is last.
     ("gdiscreencapsrc",
-     "gdiscreencapsrc name=capture cursor=false",
-     "cursor"),
+     "gdiscreencapsrc name=capture cursor=true",
+     None),
 )
 
 
@@ -1189,8 +1199,11 @@ class Stage:
         # that cannot draw the pointer at all says so rather than being asked.
         prop = getattr(self, "_pointer_property", "show-pointer")
         if not prop:
-            log.info("%s cannot draw the pointer into the picture",
-                     getattr(self, "source_name", "this capture"))
+            # Not "cannot draw it" -- it is drawn, always. What it cannot do is
+            # change its mind while running, so there is nothing to do here and
+            # nothing has gone wrong.
+            log.debug("%s draws the pointer always; nothing to switch",
+                      getattr(self, "source_name", "this capture"))
             return False
         try:
             element.set_property(prop, bool(yes))
