@@ -310,8 +310,7 @@ class Tray:
         if not self.host.gone():
             return                      # still alive, just not answering yet
         import time
-        wait = self.host.BACKOFF[min(self.host.failures,
-                                     len(self.host.BACKOFF) - 1)]
+        wait = self.BACKOFF[min(self.host.failures, len(self.BACKOFF) - 1)]
         if time.monotonic() - getattr(self, "_last_try", 0) < wait:
             return
         self._last_try = time.monotonic()
