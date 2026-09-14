@@ -910,8 +910,29 @@ class Stage:
         #
         # Sources are already silenced above, so the GPU cost has stopped
         # whatever this thread goes on to find. Nothing waits on it.
-        pipeline = self.pipeline
+        # Taken off the Stage, not merely borrowed from it.
+        #
+        # This is the other half of the fault Peer.detach had, and the half
+        # that was left. stop() took a local reference to the pipeline and
+        # left self.pipeline, self.encoder, self.vsink and self.asink where
+        # they were -- so when _recapture dropped the Stage, all four were
+        # released by the garbage collector, at whatever moment it next ran,
+        # with the teardown thread possibly still working.
+        #
+        # That is exactly what the third Windows crash showed. faulthandler
+        # printed "Garbage-collecting" above a frame in _on_audio: the
+        # collector had run at an ordinary allocation, found a wrapper whose C
+        # object was already gone, and the process died. It is why the crash
+        # kept appearing somewhere new each time -- the place it lands has
+        # nothing to do with the cause.
+        pipeline, self.pipeline = self.pipeline, None
+        extras = [self.encoder, self.vsink, self.asink]
+        self.encoder = self.vsink = self.asink = None
+        # The caps came off those sinks and outlive them otherwise.
+        self.video_caps = self.audio_caps = None
+
         def see_it_to_null():
+            nonlocal pipeline
             started = time.monotonic()
             try:
                 pipeline.set_state(Gst.State.NULL)
@@ -919,6 +940,11 @@ class Stage:
             except Exception as exc:
                 log.warning("could not stop the pipeline cleanly: %s", exc)
                 return
+            finally:
+                # The elements first, then the pipeline that owns them -- the
+                # same order Peer.detach uses, and for the same reason.
+                extras.clear()
+                pipeline = None
             took = time.monotonic() - started
             if state != Gst.State.NULL:
                 log.warning("the capture pipeline did not reach NULL in "
@@ -949,13 +975,19 @@ class Stage:
         follow the pipeline into PLAYING". The session stayed open and served
         nobody.
         """
-        _change, state, _pending = self.pipeline.get_state(0)
+        # stop() takes the pipeline off this Stage, and this runs on the
+        # worker -- so a recapture can retire the Stage with one of these
+        # already queued behind it. There is nothing to put back.
+        pipeline = self.pipeline
+        if pipeline is None:
+            return False
+        _change, state, _pending = pipeline.get_state(0)
         if state == Gst.State.PLAYING:
             return True
         log.warning("pipeline is %s; putting it back to PLAYING",
                     state.value_nick)
-        self.pipeline.set_state(Gst.State.PLAYING)
-        _change, state, _pending = self.pipeline.get_state(timeout)
+        pipeline.set_state(Gst.State.PLAYING)
+        _change, state, _pending = pipeline.get_state(timeout)
         if state != Gst.State.PLAYING:
             log.error("pipeline would not return to PLAYING (%s)", state.value_nick)
             return False
@@ -1050,7 +1082,13 @@ class Stage:
         self.worker.submit(self.force_keyframe)
 
     def force_keyframe(self):
-        pad = self.encoder.get_static_pad("src")
+        # The encoder is taken off this Stage by stop(), and a keyframe may
+        # already be queued on the worker when that happens -- a guest asking
+        # for one at the moment a recapture begins is not unusual.
+        encoder = self.encoder
+        if encoder is None:
+            return
+        pad = encoder.get_static_pad("src")
         if pad:
             pad.send_event(GstVideo.video_event_new_upstream_force_key_unit(
                 Gst.CLOCK_TIME_NONE, True, 0))
