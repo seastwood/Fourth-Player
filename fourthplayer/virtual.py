@@ -86,18 +86,31 @@ except ImportError:
 
             # Which kind of device this is, asked of what it declares rather
             # than of a flag nobody would remember to pass. A pad has sticks
-            # and face buttons; a keyboard has neither.
+            # and face buttons; a pointer has an absolute position and no face
+            # buttons; a mouse has relative movement; a keyboard has none of
+            # it. The same four things desk.py and pads.py ask for.
+            self._impl = None
             if e.ABS_X in axes and e.BTN_A in keys:
                 self._open_pad()
+                return
+            # Imported here rather than at the top: windesk pulls in
+            # ctypes.wintypes, which does not exist off Windows, and this
+            # module has to import everywhere.
+            from . import windesk
+            if e.ABS_X in axes:
+                # The span the caller declared for its absolute axes, so the
+                # rescale to Windows' 0..65535 uses the protocol's own range
+                # rather than a number copied here that could drift from it.
+                span = 0
+                for code, info in (self._caps.get(e.EV_ABS) or ()):
+                    if code == e.ABS_X:
+                        span = getattr(info, "max", 0) or 0
+                self._impl = windesk.Pointer(name, span)
+            elif self._caps.get(e.EV_REL):
+                self._impl = windesk.Mouse(name)
             else:
-                # desk.py's keyboard, mouse and pointer. They need SendInput
-                # rather than ViGEm and are not done yet -- but this module
-                # still has to *import* on Windows, so the failure waits until
-                # something actually asks for one.
-                raise NotImplementedError(
-                    "only gamepads are emulated on Windows so far; the "
-                    "keyboard and mouse need SendInput and are not written "
-                    "yet (device %r)" % (name,))
+                self._impl = windesk.Keyboard(name)
+            self.device = self._impl.device
 
         def _open_pad(self):
             try:
@@ -108,6 +121,7 @@ except ImportError:
                     "(py -m pip install vgamepad, which installs the ViGEmBus "
                     "driver)") from exc
             self._vg = vgamepad
+            self._impl = None
             self._pad = vgamepad.VX360Gamepad()
             UInput._made += 1
             self.device = _Node("vigem:x360:%d" % UInput._made)
@@ -139,6 +153,9 @@ except ImportError:
         def write(self, etype, code, value):
             """One event, held until syn(). Unknown codes are dropped."""
             from .codes import ecodes as e
+            if self._impl is not None:
+                self._impl.write(etype, code, value)
+                return
             if etype == e.EV_KEY:
                 flag = self._buttons.get(code)
                 if flag is None:
@@ -199,11 +216,17 @@ except ImportError:
 
         def syn(self):
             """Send the frame. Nothing reaches the game until this."""
+            if self._impl is not None:
+                self._impl.syn()
+                return
             if self._dirty:
                 self._pad.update()
                 self._dirty = False
 
         def close(self):
+            if self._impl is not None:
+                self._impl.close()
+                return
             # Everything let go of before the device goes, so a guest leaving
             # cannot leave a button held down in somebody's game -- the same
             # care detach() takes on the Linux side.
