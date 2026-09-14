@@ -726,14 +726,34 @@ def _check(cfg):
     """What a new machine gets wrong, reported before it wastes an evening."""
     problems, notes = [], []
 
-    if not os.path.exists("/dev/uinput"):
-        problems.append("/dev/uinput is missing -- the uinput module is not loaded")
-    elif not os.access("/dev/uinput", os.W_OK):
-        problems.append("/dev/uinput is not writable by this user "
-                        "(a uaccess udev rule or the input group fixes it)")
+    windows = sys.platform == "win32"
 
-    if not os.environ.get("DISPLAY"):
-        notes.append("DISPLAY is unset; the server will use " + cfg.display)
+    # How this machine makes a controller. Two entirely different answers, and
+    # asking the wrong question is worse than not asking: a Windows host was
+    # being told /dev/uinput was missing, which is true and not a problem.
+    if windows:
+        try:
+            import vgamepad                                    # noqa: F401
+            notes.append("controllers come from ViGEmBus")
+        except Exception:
+            problems.append("vgamepad is missing, so no guest can be given a "
+                            "controller (py -m pip install vgamepad, which "
+                            "installs the ViGEmBus driver)")
+        # XInput's ceiling is four and it is shared with whatever is plugged
+        # in, which is not a fault but is the first surprise a Windows host
+        # hands somebody.
+        notes.append("XInput has four slots, so at most four guests can hold "
+                     "a controller here -- and any controller plugged into "
+                     "this machine takes one of them")
+    else:
+        if not os.path.exists("/dev/uinput"):
+            problems.append("/dev/uinput is missing -- the uinput module is not loaded")
+        elif not os.access("/dev/uinput", os.W_OK):
+            problems.append("/dev/uinput is not writable by this user "
+                            "(a uaccess udev rule or the input group fixes it)")
+
+        if not os.environ.get("DISPLAY"):
+            notes.append("DISPLAY is unset; the server will use " + cfg.display)
 
     try:
         import gi
@@ -741,9 +761,23 @@ def _check(cfg):
         gi.require_version("GstWebRTC", "1.0")
         from gi.repository import Gst
         Gst.init([])
-        for element in ("ximagesrc", "webrtcbin", "rtph264pay", "h264parse"):
+        for element in ("webrtcbin", "rtph264pay", "h264parse"):
             if not Gst.ElementFactory.find(element):
                 problems.append(f"the GStreamer element {element} is missing")
+        # Which screen capture, asked of the same table the server will use.
+        # Naming ximagesrc here reported a missing element on a Windows
+        # machine that captures perfectly well with d3d11screencapturesrc.
+        from .video import pick_source, SOURCES
+        source = pick_source()
+        if source is None:
+            problems.append("no way to capture the screen: none of %s"
+                            % ", ".join(n for n, _l, _p in SOURCES))
+        else:
+            notes.append("capturing with %s" % source[0])
+            if windows:
+                notes.append("that needs the interactive session -- started "
+                             "from a service or over ssh it lands in session 0, "
+                             "which has no desktop to capture")
         # Whatever this machine will actually use, named. It used to ask about
         # vah264enc alone, which says "no hardware encoder" on a perfectly
         # good nvidia card and tells somebody looking for the reason their
@@ -782,7 +816,7 @@ def _check(cfg):
         problems.append("PyGObject is missing (python3-gi)")
 
     if cfg.audio:
-        for element in ("pulsesrc", "opusenc", "rtpopuspay"):
+        for element in ("opusenc", "rtpopuspay"):
             try:
                 import gi as _gi  # noqa: F401
                 from gi.repository import Gst as _Gst
@@ -790,14 +824,28 @@ def _check(cfg):
                     notes.append(f"{element} is missing, so sessions will be silent")
             except Exception:
                 break
-        sources = _monitor_sources()
-        if sources:
-            notes.append("sound will come from the default sink's monitor; "
-                         "available monitors: " + ", ".join(sources[:3]))
+        try:
+            from .video import pick_sound
+            heard = pick_sound()
+        except Exception:
+            heard = None
+        if heard is None:
+            notes.append("no loopback capture on this machine, so sessions "
+                         "will be silent")
         else:
-            notes.append("no PulseAudio monitor sources found -- sessions may be silent")
+            notes.append("recording the sound with %s" % heard[0])
+        if not windows:
+            sources = _monitor_sources()
+            if sources:
+                notes.append("sound will come from the default sink's monitor; "
+                             "available monitors: " + ", ".join(sources[:3]))
+            else:
+                notes.append("no PulseAudio monitor sources found -- "
+                             "sessions may be silent")
 
-    for module in ("evdev", "websockets", "cryptography"):
+    wanted = ("websockets", "cryptography") if windows else (
+        "evdev", "websockets", "cryptography")
+    for module in wanted:
         try:
             __import__(module)
         except ImportError:
