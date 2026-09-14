@@ -38,19 +38,44 @@ if ($Uninstall) {
 # tray and the host it supervises both die, with exit code 0xC000013A. That
 # happened, and the person it happened to had no way of knowing what the
 # window was.
-$python = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
-if (-not $python) {
+#
+# Which pythonw is a real question rather than a lookup. `Get-Command
+# pythonw.exe` returns whatever is first on PATH, and on this machine that was
+# Inkscape's bundled interpreter -- a perfectly good Python with none of the
+# things this needs. So: ask the py launcher for its own interpreters, take the
+# windowless one beside each, and keep the first that can actually import the
+# package. A test beats a guess.
+function Find-Pythonw {
+    $tried = @()
     $py = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
     if ($py) {
-        # Ask the launcher where its newest interpreter is, then take the
-        # windowless one beside it.
-        $exe = & $py -3 -c "import sys; print(sys.executable)"
-        $candidate = Join-Path (Split-Path $exe -Parent) "pythonw.exe"
-        if (Test-Path $candidate) { $python = $candidate }
+        foreach ($tag in @("-3.13", "-3.12", "-3.11", "-3")) {
+            try { $exe = & $py $tag -c "import sys; print(sys.executable)" 2>$null }
+            catch { continue }
+            if ($LASTEXITCODE -ne 0 -or -not $exe) { continue }
+            $tried += (Join-Path (Split-Path $exe -Parent) "pythonw.exe")
+        }
     }
+    $tried += (Get-Command pythonw.exe -ErrorAction SilentlyContinue |
+               ForEach-Object { $_.Source })
+    foreach ($candidate in ($tried | Where-Object { $_ -and (Test-Path $_) } |
+                            Select-Object -Unique)) {
+        # The console build beside it, because pythonw writes nothing back --
+        # asking the silent one whether an import worked tells you nothing.
+        $console = Join-Path (Split-Path $candidate -Parent) "python.exe"
+        if (-not (Test-Path $console)) { continue }
+        & $console -c "import fourthplayer" 2>$null
+        if ($LASTEXITCODE -eq 0) { return $candidate }
+    }
+    return $null
 }
+
+Push-Location $Repo
+try { $python = Find-Pythonw } finally { Pop-Location }
 if (-not $python) {
-    throw "pythonw.exe not found. Install Python from python.org or the Store."
+    throw ("No Python here can import fourthplayer. Install its dependencies " +
+           "first: py -m pip install PyGObject==3.50.0 websockets'<'11 " +
+           "cryptography qrcode pillow vgamepad pystray")
 }
 Write-Host "interpreter: $python"
 Write-Host "repository : $Repo"
@@ -58,10 +83,14 @@ Write-Host "repository : $Repo"
 # --- the task --------------------------------------------------------------
 $action = New-ScheduledTaskAction -Execute $python `
     -Argument "-m fourthplayer.tray" -WorkingDirectory $Repo
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+# The computer, not USERDOMAIN: on a workgroup machine that reads "WORKGROUP",
+# which is not an account authority and Register-ScheduledTask refuses it with
+# "No mapping between account names and security IDs was done".
+$who = "$env:COMPUTERNAME\$env:USERNAME"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $who
 # Interactive, so it lands in the session with the desktop in it. Highest
 # because the host wants it for ViGEm; the tray itself does not.
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+$principal = New-ScheduledTaskPrincipal -UserId $who `
     -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
