@@ -320,7 +320,12 @@ const ACTIONS = {
     const steps = [
       ["link", el("set-link").value === "required",
        (s) => s.require_link],
-      ["slots", Number(el("set-slots").value), (s) => s.slots],
+      // `slots` sets what the *next* session opens with -- the status reports
+      // the open one's count, so there is nothing here to compare against
+      // while a session is running. null means "do not check", which is
+      // honest; comparing them said "asked 4, became 3" about a setting that
+      // had applied perfectly well.
+      ["slots", Number(el("set-slots").value), null],
       ["limit", Number(el("set-limit").value), (s) => s.limit],
       ["url", el("set-url").value.trim(), (s) => s.public_url || ""],
       ["share", el("set-share").value === "on", (s) => !!s.share_pads],
@@ -336,6 +341,7 @@ const ACTIONS = {
     for (const [cmd, want, reading] of steps) {
       const answer = await control(cmd, {set: want});
       if (!answer.ok) { wrong.push(`${cmd}: ${answer.error || "refused"}`); continue; }
+      if (reading === null) continue;          // nothing to read it back from
       const got = reading(answer);
       // Numbers come back bounded by the host, which is a real answer rather
       // than a failure -- say what it became instead of calling it an error.
@@ -344,7 +350,10 @@ const ACTIONS = {
       }
     }
     if (wrong.length) say(wrong.join("; "), true);
-    else { say("applied"); el("set-pin").value = ""; }
+    else {
+      say("applied — the slot count takes effect at the next session");
+      el("set-pin").value = "";
+    }
   },
   async "apply-lock"() {
     // "" is what the host calls no lock; "off" is only what the menu says.
