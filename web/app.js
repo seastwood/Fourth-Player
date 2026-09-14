@@ -4563,6 +4563,7 @@ function deskWheeled(event) {
 }
 
 function deskRelease() {
+  deskButtonsAllUp();
   deskSend([{ t: "r" }]);
   // The host lets go of everything on its side; this is the page agreeing,
   // so a latched Ctrl does not stay lit over a keyboard that is not held.
@@ -4587,10 +4588,74 @@ function deskKey(event) {
   deskSend([{ t: "k", c: event.code, d: event.type === "keydown" ? 1 : 0 }]);
 }
 
+/* Which buttons this page currently has held down on the console.
+ *
+ * Kept because mousedown and mouseup cannot be trusted to arrive in pairs.
+ * On macOS Safari a left button held down was arriving as a press and a
+ * release, so holding fire in a shooter fired once -- while a double click
+ * held perfectly, and Chrome on the same machine was flawless throughout.
+ *
+ * Every mouse event carries `buttons`, a bitmask of what is *actually* down
+ * at that instant, and under a pointer lock move events arrive constantly
+ * while somebody is aiming. So rather than trying to work out which browser
+ * drops which event, the page compares what it believes with what the browser
+ * says on every event and sends the difference. A release that never happened
+ * is corrected on the next movement; so is a press that was missed. */
+const deskDown = new Set();
+
+// button number -> the bit for it in `buttons`. Left is 1, right is 2 and
+// middle is 4: not the same order as the button numbers, which is exactly the
+// sort of thing to get backwards once and never notice.
+const BUTTON_BIT = { 0: 1, 1: 4, 2: 2 };
+
+function deskButtonsAre(mask, out) {
+  // What the browser says is down, against what we have told the host.
+  for (const [number, bit] of Object.entries(BUTTON_BIT)) {
+    const button = Number(number);
+    const isDown = (mask & bit) !== 0;
+    const wasDown = deskDown.has(button);
+    if (isDown === wasDown) continue;
+    if (isDown) deskDown.add(button); else deskDown.delete(button);
+    out.push({ t: "b", b: button, d: isDown ? 1 : 0 });
+  }
+}
+
 function deskButton(event) {
   if (!deskHeld || !deskCaptured()) return;
   event.preventDefault();
-  deskSend([{ t: "b", b: event.button, d: event.type === "mousedown" ? 1 : 0 }]);
+  const out = [];
+  // The event's own button first, because `buttons` on a mouseup has already
+  // had that button cleared and on a mousedown already has it set -- so the
+  // reconciliation below agrees with it and this is usually the whole story.
+  // It is here for the case where they disagree, which is the bug.
+  if (typeof event.buttons === "number") {
+    deskButtonsAre(event.buttons, out);
+  } else {
+    const down = event.type === "mousedown";
+    if (down) deskDown.add(event.button); else deskDown.delete(event.button);
+    out.push({ t: "b", b: event.button, d: down ? 1 : 0 });
+  }
+  if (out.length) deskSend(out);
+}
+
+/* Called from every move while the desk is held: if the browser and this page
+   disagree about what is down, the browser is right. */
+function deskButtonsCheck(event) {
+  if (!deskHeld || !deskCaptured()) return;
+  if (typeof event.buttons !== "number") return;
+  const out = [];
+  deskButtonsAre(event.buttons, out);
+  if (out.length) deskSend(out);
+}
+
+/* Nothing may be left held on the console by a mouse this page has stopped
+   hearing from. */
+function deskButtonsAllUp() {
+  if (!deskDown.size) return;
+  const out = [];
+  deskDown.forEach((button) => out.push({ t: "b", b: button, d: 0 }));
+  deskDown.clear();
+  deskSend(out);
 }
 
 function deskCapture() {
@@ -5346,6 +5411,9 @@ function deskListen() {
   video.addEventListener("mouseup", deskButton, true);
   video.addEventListener("mousemove", (event) => {
     if (deskHeld && deskCaptured()) {
+      // Before the movement, so a button the browser says is down is pressed
+      // on the console before the aim moves rather than after it.
+      deskButtonsCheck(event);
       deskMoved(event.movementX || 0, event.movementY || 0);
     }
   }, true);
