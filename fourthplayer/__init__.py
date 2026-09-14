@@ -14,6 +14,31 @@ can be tested without a GPU, a network or a browser:
 __version__ = "0.1.0"
 
 # ---------------------------------------------------------------------------
+# A Python traceback when the process is killed by a fault, rather than only a
+# line in a system log naming a DLL.
+#
+# This host has crashed three times on Windows with an access violation inside
+# gobject-2.0-0.dll, at the same offset each time, and the only record was a
+# Windows event saying which library. That is enough to know it is a GObject
+# being used after it was freed and not enough to know which one -- two
+# theories have already been wrong. faulthandler prints the Python stack of
+# every thread as the process dies, which names the line that reached into C.
+#
+# It costs nothing until something crashes, and the output goes to stderr,
+# which the tray keeps in its host log.
+def _watch_for_faults():
+    try:
+        import faulthandler
+        import sys
+        if not faulthandler.is_enabled():
+            faulthandler.enable(file=sys.stderr, all_threads=True)
+    except Exception:
+        pass                      # instrumentation must never be the fault
+
+
+_watch_for_faults()
+
+# ---------------------------------------------------------------------------
 # Windows needs to be told where GStreamer is before anything imports `gi`,
 # and this is the only place guaranteed to run first.
 #
