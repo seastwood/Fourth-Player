@@ -309,25 +309,51 @@ const ACTIONS = {
     heard(await control("stop"), "session ended");
   },
   async "apply-access"() {
+    // Every one of these settings takes `set`, and the booleans take a real
+    // boolean. Both of those were wrong here and the failure was silent: a
+    // command with no `set` key reads the value instead of writing it and
+    // still answers ok, so the page said "applied" and nothing had changed.
+    // Worse for the two booleans -- bool("off") is true in Python, so
+    // choosing "open" set the link to required, the opposite of what was
+    // asked. Hence `check`, below: what came back is compared with what was
+    // asked for, and a setting that did not take now says so.
     const steps = [
-      ["link", {set: el("set-link").value}],
-      ["slots", {slots: Number(el("set-slots").value)}],
-      ["limit", {limit: Number(el("set-limit").value)}],
-      ["url", {url: el("set-url").value}],
-      ["share", {set: el("set-share").value}],
-      ["policy", {policy: el("set-policy").value}],
+      ["link", el("set-link").value === "required",
+       (s) => s.require_link],
+      ["slots", Number(el("set-slots").value), (s) => s.slots],
+      ["limit", Number(el("set-limit").value), (s) => s.limit],
+      ["url", el("set-url").value.trim(), (s) => s.public_url || ""],
+      ["share", el("set-share").value === "on", (s) => !!s.share_pads],
+      ["policy", el("set-policy").value, (s) => (s.launch || {}).policy],
     ];
     const pin = el("set-pin").value.trim();
-    if (pin) steps.push(["pin", {pin}]);
-    let bad = 0;
-    for (const [cmd, extra] of steps) {
-      const answer = await control(cmd, extra);
-      if (!answer.ok) { bad++; say(`${cmd}: ${answer.error || "refused"}`, true); }
+    // A blank box means "leave it alone", not "clear it" -- clearing is what
+    // the Re-share button is for, and a box somebody never touched should not
+    // change anything.
+    if (pin) steps.push(["pin", pin, (s) => (s.pin_fixed ? pin : "")]);
+
+    const wrong = [];
+    for (const [cmd, want, reading] of steps) {
+      const answer = await control(cmd, {set: want});
+      if (!answer.ok) { wrong.push(`${cmd}: ${answer.error || "refused"}`); continue; }
+      const got = reading(answer);
+      // Numbers come back bounded by the host, which is a real answer rather
+      // than a failure -- say what it became instead of calling it an error.
+      if (String(got) !== String(want)) {
+        wrong.push(`${cmd}: asked ${want}, became ${got}`);
+      }
     }
-    if (!bad) say("applied");
+    if (wrong.length) say(wrong.join("; "), true);
+    else { say("applied"); el("set-pin").value = ""; }
   },
   async "apply-lock"() {
-    heard(await control("lock", {set: el("set-lock").value}), "applied");
+    // "" is what the host calls no lock; "off" is only what the menu says.
+    const want = el("set-lock").value === "off" ? "" : el("set-lock").value;
+    const answer = await control("lock", {set: want});
+    if (!answer.ok) { say(answer.error || "refused", true); return; }
+    say((answer.locked || "") === want ? "applied"
+        : `asked ${want || "off"}, became ${answer.locked || "off"}`,
+        (answer.locked || "") !== want);
   },
   async "apply-stream"() {
     heard(await post("/api/stream", {settings: {
