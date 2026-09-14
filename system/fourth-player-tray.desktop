@@ -3,6 +3,11 @@ Type=Application
 Name=Fourth Player
 Comment=Guests join this machine's games with their own controllers
 Exec=python3 -m fourthplayer.tray --no-launch
+# Where to run it from. `python3 -m fourthplayer.tray` needs the package on the
+# path, and autostart runs from the home directory where it is not -- so
+# without this the icon fails at import, once, at login, silently. install.sh
+# rewrites this the same way it rewrites the systemd unit.
+Path=%h/fourth-player
 Icon=input-gaming
 Terminal=false
 Categories=Game;

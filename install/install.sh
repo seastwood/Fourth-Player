@@ -136,8 +136,9 @@ systemctl --user daemon-reload
 # get one. The service is what runs the host either way -- the icon only
 # drives it.
 mkdir -p "$HOME/.config/autostart"
-if cp "$REPO/system/fourth-player-tray.desktop" \
-      "$HOME/.config/autostart/fourth-player-tray.desktop" 2>/dev/null; then
+if sed "s|%h/fourth-player|$REPO|" \
+       "$REPO/system/fourth-player-tray.desktop" \
+       > "$HOME/.config/autostart/fourth-player-tray.desktop" 2>/dev/null; then
   if python3 -c "import pystray" >/dev/null 2>&1; then
     echo "tray icon: it will appear with your desktop from now on"
   else
