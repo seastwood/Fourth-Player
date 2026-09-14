@@ -18,9 +18,77 @@ plugins. Negotiating with a browser is the next step and needs the host.
     py check_gst.py --run 5    # and actually encode for five seconds
 """
 import argparse
+import os
 import sys
 
 VERDICT = []
+
+# The handles from os.add_dll_directory, kept alive on purpose -- see
+# bootstrap(). Dropping them silently undoes the thing they did.
+_DLL_DIRS = []
+
+
+def find_gstreamer():
+    """Where GStreamer is, by the installer's own account if possible."""
+    # The installer sets this, and it is the only answer that stays right when
+    # somebody installs somewhere else. The fallbacks are the per-user path
+    # (winget's install is per-user, under AppData, which surprised me) and
+    # the machine-wide one.
+    for var in ("GSTREAMER_1_0_ROOT_MSVC_X86_64", "GSTREAMER_1_0_ROOT_X86_64"):
+        root = os.environ.get(var)
+        if root and os.path.isdir(root):
+            return root
+    for guess in (
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\gstreamer\1.0\msvc_x86_64"),
+        r"C:\gstreamer\1.0\msvc_x86_64",
+    ):
+        if os.path.isdir(guess):
+            return guess
+    return None
+
+
+def bootstrap(root):
+    """Make this process able to load GStreamer, which PATH no longer does.
+
+    Both halves are needed, and neither is enough. Measured on the Windows
+    machine this was written against, GStreamer 1.28.6 and PyGObject 3.50:
+
+        add_dll_directory only   -- "Could not locate gst_init"
+        PATH only                -- "DLL load failed while importing _gi"
+        both                     -- works
+
+    They are two different loaders. Python 3.8 stopped searching PATH for the
+    DLLs an extension module needs, so `_gi` itself needs
+    os.add_dll_directory; and GLib's own g_module_open, which is what loads
+    gstreamer-1.0-0.dll on behalf of the typelib, does not consult the
+    directories that adds -- it wants PATH. Doing one and not the other gives
+    two different errors, both of which read like a broken install on a
+    machine where everything is present and correct.
+    """
+    if not root:
+        return False
+    bindir = os.path.join(root, "bin")
+    if os.path.isdir(bindir):
+        # The return value is kept, and that is not tidiness. The handle
+        # *removes* the directory again when it is closed, and it is closed by
+        # being garbage collected -- so `os.add_dll_directory(bindir)` on its
+        # own works for exactly as long as it takes the collector to notice,
+        # which is usually somewhere between here and the first import that
+        # needed it. The failure that follows is "Failed to load shared
+        # library 'gstreamer-1.0-0.dll' referenced by the typelib", from a
+        # machine where that file is plainly present in that directory.
+        _DLL_DIRS.append(os.add_dll_directory(bindir))
+        # And PATH, for GLib. See the docstring: this is not belt and braces,
+        # it is the other half.
+        os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
+    # These two are ordinary environment lookups and PATH's change did not
+    # touch them, but they have to be right before gi is imported rather than
+    # after, so they are set here beside it.
+    os.environ.setdefault("GI_TYPELIB_PATH",
+                          os.path.join(root, "lib", "girepository-1.0"))
+    os.environ.setdefault("GST_PLUGIN_PATH",
+                          os.path.join(root, "lib", "gstreamer-1.0"))
+    return True
 
 
 def say(ok, line):
@@ -39,6 +107,12 @@ def main():
     say(sys.platform == "win32",
         "running on Windows: %s" % sys.platform)
 
+    print("\nwhere GStreamer is")
+    root = find_gstreamer()
+    say(root is not None, "found: %s" % (root or "nowhere this knows to look"))
+    say(bootstrap(root),
+        "DLL directory added -- PATH does not do this since Python 3.8")
+
     print("\nthe bindings")
     try:
         import gi
@@ -51,14 +125,21 @@ def main():
         # They come from the GStreamer installer (both the runtime *and* the
         # development MSI), and PATH/GI_TYPELIB_PATH have to reach them.
         say(False, "PyGObject with Gst and GstWebRTC: %s" % exc)
-        print("\n  This is the one that decides the project. GStreamer's own\n"
-              "  MSIs (runtime AND development) carry the typelibs; pip's\n"
-              "  PyGObject does not. Check that the bin directory is on PATH\n"
-              "  and that GI_TYPELIB_PATH points at lib/girepository-1.0.")
+        print("\n  This is the one that decides the project.\n"
+              "  'DLL load failed while importing _gi' means the bootstrap\n"
+              "  above did not find GStreamer -- PATH is not consulted for\n"
+              "  this since Python 3.8, only os.add_dll_directory.\n"
+              "  A meson error about girepository-2.0 at pip time means a\n"
+              "  PyGObject too new for this GStreamer: 3.50.0 is the last\n"
+              "  that wants girepository-1.0, and it builds here against\n"
+              "  Visual Studio Build Tools.")
         return report()
     say(True, "PyGObject imports, with Gst and GstWebRTC typelibs")
 
-    Gst.init(None)
+    # An empty list rather than None: this PyGObject refuses None here with
+    # "Argument 1 does not allow None as a value", which on first sight looks
+    # like the import having failed rather than argv being wrong.
+    Gst.init([])
     say(True, "GStreamer %s" % Gst.version_string())
 
     print("\nthe pieces a host needs")

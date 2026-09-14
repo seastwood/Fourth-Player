@@ -21,8 +21,41 @@ Then, while it runs, open `joy.cpl` (Set up USB game controllers) and watch.
 For the real answer, open a game and see whether it binds them.
 """
 import argparse
+import ctypes
 import sys
 import time
+
+
+class _PAD(ctypes.Structure):
+    _fields_ = [("wButtons", ctypes.c_ushort), ("bLeftTrigger", ctypes.c_ubyte),
+                ("bRightTrigger", ctypes.c_ubyte), ("sThumbLX", ctypes.c_short),
+                ("sThumbLY", ctypes.c_short), ("sThumbRX", ctypes.c_short),
+                ("sThumbRY", ctypes.c_short)]
+
+
+class _STATE(ctypes.Structure):
+    _fields_ = [("dwPacketNumber", ctypes.c_uint), ("Gamepad", _PAD)]
+
+
+def xinput_slots():
+    """Which of XInput's four slots report a controller, or None if no XInput.
+
+    This is the number that matters and it is not the number of devices.
+    ViGEm will happily create a sixth pad; XInput has four slots and most
+    Windows games use XInput, so the sixth is a device nothing will ever read.
+    """
+    for name in ("xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"):
+        try:
+            lib = ctypes.WinDLL(name)
+        except OSError:
+            continue
+        found = []
+        for i in range(4):
+            state = _STATE()
+            if lib.XInputGetState(i, ctypes.byref(state)) == 0:
+                found.append(i)
+        return found
+    return None
 
 
 def main():
@@ -44,7 +77,16 @@ def main():
               "  installer this project ships will have to carry it.")
         return 1
 
-    print("making %d pad(s)" % args.pads)
+    before = xinput_slots()
+    if before is None:
+        print("no XInput library here, which is odd on Windows 11")
+    else:
+        print("XInput slots busy before we start: %s" % (before or "none"))
+        if before:
+            print("  (a real controller is plugged in, and it is using one of\n"
+                  "   the same four slots a guest would need)")
+
+    print("\nmaking %d pad(s)" % args.pads)
     pads = []
     try:
         for i in range(args.pads):
@@ -61,6 +103,16 @@ def main():
               "  seat -- worth knowing now rather than later.")
         if not pads:
             return 1
+
+    time.sleep(0.5)
+    slots = xinput_slots()
+    if slots is not None:
+        print("\nXInput now reports %d slot(s) in use: %s" % (len(slots), slots))
+        if len(pads) > len(slots):
+            print("  %d device(s) made, %d visible. XInput's ceiling is four,\n"
+                  "  and it is the ceiling on guests this host can seat --\n"
+                  "  shared with every controller physically plugged in."
+                  % (len(pads), len(slots)))
 
     print("\nwiggling them for %.0fs -- open joy.cpl and watch" % args.seconds)
     print("(each pad walks its face buttons and sweeps the left stick)")

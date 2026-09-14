@@ -56,6 +56,89 @@ py check_pad.py --pads 4 --seconds 30
 While `check_pad.py` runs, open **joy.cpl** and watch. Then open a game, which
 is the only test that counts.
 
+## What the spike found, 2026-09-14
+
+Run against a Ryzen 7 5700G with an RTX 4070 Ti, Windows 11 build 26200,
+GStreamer 1.28.6, Python 3.13.5.
+
+**The streaming half works.** `webrtcbin`, `d3d11screencapturesrc`,
+`wasapi2src`, `opusenc`, `appsrc`/`appsink` are all present, and a capture ->
+encode pipeline ran 120 real frames through four different paths. Nothing here
+is a blocker.
+
+Four things cost time and will cost it again on the next machine:
+
+1. **There is no PyGObject wheel for Windows, and the current one will not
+   build.** `pip install PyGObject` fails with a meson error about
+   `girepository-2.0`, which GStreamer 1.28's bundle does not ship -- it has
+   `gobject-introspection-1.0`. **`PyGObject==3.50.0` is the last version that
+   wants the old one**, and it builds in about a minute against the Visual
+   Studio Build Tools. Without a compiler on the machine there is no route at
+   all short of MSYS2.
+
+2. **Loading the DLLs needs two separate things, and neither alone is enough.**
+
+   | | result |
+   |---|---|
+   | `os.add_dll_directory(bin)` only | `Could not locate gst_init` |
+   | `PATH` only | `DLL load failed while importing _gi` |
+   | both | works |
+
+   They are two different loaders: Python 3.8 stopped consulting `PATH` for an
+   extension module's DLLs, so `_gi` needs `add_dll_directory`; and GLib's own
+   `g_module_open`, which loads `gstreamer-1.0-0.dll` on the typelib's behalf,
+   ignores what that adds and wants `PATH`. Each on its own gives a different
+   error, and both read like a broken install on a machine where every file is
+   present.
+
+3. **`Gst.init(None)` raises here.** "Argument 1 does not allow None as a
+   value" -- pass `[]`. It looks like a failed import until you read it.
+
+4. **Capture only works in the interactive session.** Over SSH the process
+   lands in session 0, which has one dummy 1024x768 display and no desktop:
+   `d3d11screencapturesrc` fails with "Failed to prepare capture object". The
+   same pipeline run as a scheduled task with `-LogonType Interactive` in
+   session 1 plays immediately. This is a real constraint on how a Windows host
+   is launched, not a quirk of testing -- the Linux side has the same shape of
+   requirement in needing an X display.
+
+**The encoder to use is `nvd3d11h264enc`**, not `nvh264enc`. This build has no
+`cudaupload`/`cudaconvertscale` at all, so the CUDA path is not available on
+Windows; `nvd3d11h264enc` is NVENC in Direct3D11 mode and takes the capture's
+frames without leaving the GPU. Measured, 120 frames at 1280x720:
+
+| path | fps |
+|---|---|
+| `d3d11screencapturesrc ! nvd3d11h264enc` | 30.3 |
+| `! d3d11convert ! nvautogpuh264enc` | 29.9 |
+| `! d3d11convert ! nvd3d11h264enc` | 29.7 |
+| `! videoconvert ! videoscale ! nvh264enc` | 28.6 |
+| `! videoconvert ! videoscale ! mfh264enc` | 29.1 |
+
+~30 is the capture rate on a static desktop rather than an encoder limit, so
+these say "all of them keep up" rather than ranking them.
+
+**The pad half works, with one hard ceiling.** ViGEmBus drove six virtual
+pads happily -- and **XInput reported four of them**, because XInput has four
+slots and that is that. Most Windows games use XInput, so:
+
+> **A Windows host can seat four guests at most, and every controller
+> physically plugged into it takes one of the same four.**
+
+Linux has no such limit: `uinput` will make as many devices as asked. This has
+to be said in the UI rather than discovered by the fifth person to join.
+
+Two things the pad half does *not* need: the interactive session (ViGEm
+devices created from session 0 are visible system-wide), and any elevation
+beyond installing the driver once.
+
+Still unanswered, and only a person at the machine can answer them: whether a
+*game* binds these pads, and what a game that is already running does when one
+appears. The Linux side has a known fault there -- a service restart re-binds
+the pads and the running game keeps the old ones -- and it would be worth
+knowing whether Windows behaves the same before building the seating model on
+top of it.
+
 ## What the answers decide
 
 | finding | what it means |
