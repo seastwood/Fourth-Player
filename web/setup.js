@@ -16,7 +16,14 @@ async function post(path, body) {
     headers: {"content-type": "application/json"},
     body: JSON.stringify(body || {}),
   });
-  return answer.json();
+  const reply = await answer.json();
+  if (answer.status === 401 || (reply && reply.signin)) {
+    // The sign-in expired, or the host restarted. Back to the form rather
+    // than a page full of empty tables and no explanation.
+    el("signin").hidden = false;
+    el("everything").hidden = true;
+  }
+  return reply;
 }
 
 const control = (cmd, extra) => post("/api/control", Object.assign({cmd}, extra || {}));
@@ -186,7 +193,26 @@ function fillPicture(stream, policies) {
 
 /* ---- loading ---- */
 
+/* Whether this browser may see anything, asked before anything is drawn.
+
+   The token got it to the page; an account gets it past this. Until the first
+   account exists there is nothing to ask for, so the page opens -- and says
+   that is why, rather than looking like it forgot to lock the door. */
+async function gate() {
+  const who = await post("/api/whoami");
+  const need = who.needs_signin && !who.who;
+  el("signin").hidden = !need;
+  el("everything").hidden = need;
+  if (need) {
+    el("signin-why").textContent =
+      "This page can create accounts and issue authenticator secrets, so it "
+      + "asks who you are as well as where you are.";
+  }
+  return !need;
+}
+
 async function load() {
+  if (!(await gate())) return;
   const state = await post("/api/state");
   STATE = state;
   el("trouble").hidden = !state.trouble;
@@ -259,6 +285,17 @@ const ACTIONS = {
     el("add-name").value = el("add-password").value = "";
     el("add-can").querySelectorAll("input:checked").forEach((b) => { b.checked = false; });
     showSecret(answer);
+  },
+  async signin() {
+    const answer = await post("/api/signin", {
+      name: el("in-name").value,
+      password: el("in-password").value,
+      code: el("in-code").value,
+    });
+    // Cleared whether or not it worked: a password left in a field is a
+    // password on the screen of a machine somebody walks away from.
+    el("in-password").value = el("in-code").value = "";
+    if (heard(answer, "signed in")) await load();
   },
   "secret-done"() {
     el("secret").hidden = true;

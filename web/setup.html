@@ -13,6 +13,18 @@
     <div id="trouble" class="warn" hidden></div>
   </header>
 
+  <section id="signin" class="card" hidden>
+    <h2>Sign in</h2>
+    <p class="hint" id="signin-why"></p>
+    <div class="row">
+      <label>Name <input id="in-name" style="width:11rem"></label>
+      <label>Password <input id="in-password" type="password" style="width:13rem"></label>
+      <label>Code <input id="in-code" inputmode="numeric" maxlength="6" style="width:6rem"></label>
+      <button class="go" data-do="signin">Sign in</button>
+    </div>
+  </section>
+
+  <div id="everything">
   <nav id="tabs">
     <button data-tab="session" class="on">Session</button>
     <button data-tab="guests">Guests</button>
@@ -147,6 +159,7 @@
       <table id="diag"></table>
     </div>
   </section>
+  </div>
 </main>
 <div id="say" class="say" hidden></div>
 <script src="setup.js"></script>

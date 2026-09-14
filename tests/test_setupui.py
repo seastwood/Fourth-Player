@@ -144,6 +144,59 @@ async def main():
         else:
             print("  ----   no non-loopback address here to try")
 
+        print("\nthe second lock: an account, once there is one")
+        # The token says where you are; an account says who. Both, once there
+        # is an account to ask for -- and nothing at all until then, because
+        # the first account is made through this page.
+        check(not page.needs_signin(),
+              "with no accounts, nothing to ask for: the token alone opens it")
+        status, _h, body = await loop.run_in_executor(
+            None, request, page.port, "/api/state", b"{}",
+            "fp_setup=" + page.token)
+        check(status == 200 and json.loads(body).get("ok"),
+              "and the page works, which is the bootstrap")
+
+        import types
+        # One account, without touching the real accounts file.
+        page.needs_signin = types.MethodType(lambda _self: True, page)
+        status, _h, body = await loop.run_in_executor(
+            None, request, page.port, "/api/state", b"{}",
+            "fp_setup=" + page.token)
+        answer = json.loads(body)
+        check(status == 401 and answer.get("signin"),
+              "the moment an account exists, the token alone is refused: %d"
+              % status)
+
+        # The form still has to be reachable, or there is no way back in.
+        for open_path in ("/", "/setup.css", "/setup.js"):
+            status, _h, _b = await loop.run_in_executor(
+                None, request, page.port, open_path + "?t=" + page.token)
+            check(status == 200, "%s is still served, so the form can draw: %d"
+                  % (open_path, status))
+        # But only with the token. The login is not an unauthenticated surface.
+        status, _h, _b = await loop.run_in_executor(None, request, page.port, "/")
+        check(status == 403, "and not without the token: %d" % status)
+
+        print("\nand a wrong sign-in says nothing useful")
+        status, _h, body = await loop.run_in_executor(
+            None, request, page.port, "/api/signin",
+            json.dumps({"name": "nobody", "password": "x" * 12,
+                        "code": "000000"}).encode(),
+            "fp_setup=" + page.token)
+        answer = json.loads(body)
+        check(not answer.get("ok"), "a made-up account is refused")
+        check("name, password or code" in (answer.get("error") or ""),
+              "with one answer for all three, so guessing learns nothing: %r"
+              % answer.get("error"))
+        check(page.bad_signins == 1, "and it is counted: %d" % page.bad_signins)
+
+        # Back to the real answer, so what follows tests the file handler
+        # rather than the sign-in gate in front of it. Left patched, the
+        # traversal checks below pass for the wrong reason -- refused at the
+        # door instead of refused by the path check -- which is a test that
+        # would go on passing if the path check were deleted.
+        del page.needs_signin
+
         print("\nand it serves only what is in web/")
         for attempt in ("/../fourthplayer/accounts.py", "/..%2ffourthplayer/accounts.py",
                         "/../../etc/passwd"):

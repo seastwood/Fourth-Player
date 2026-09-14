@@ -15,9 +15,18 @@ to one.
 
 Three things follow from that and are worth stating plainly:
 
-  * There is no login. The token is the credential, and asking for a password
-    as well would be asking somebody to prove twice that they are sitting at
-    their own machine.
+  * The token proves *where* you are; an account proves *who* you are, and
+    both are required once there is an account to ask for. I argued at first
+    that a login here was asking somebody to prove twice they were at their
+    own machine, and that was wrong in a way worth writing down: a token can
+    leak through browser history, a screen share or a terminal somebody
+    scrolled back through, and a machine left unlocked is exactly the case
+    this page should survive. Two different kinds of proof, not the same one
+    twice.
+
+  * Until the first account exists there is nothing to log in with, so the
+    token alone opens it -- and it says so on the page. That is the bootstrap
+    and it closes itself: the moment an account exists, this asks for one.
   * The token is per-run. Restarting the host invalidates every old URL,
     including one left open in a browser tab, which is what should happen.
   * An administrator on the machine can read the token file. So can anything
@@ -65,6 +74,14 @@ class SetupUI:
         # is exactly the sort of thing a troubleshooting page should show.
         self.refused = 0
         self.started = time.time()
+        # Signed-in browsers: cookie -> (account name, when it expires). Kept
+        # in memory only, so restarting the host signs everybody out -- which
+        # is the same thing the per-run token already does.
+        self.signins = {}
+        # Wrong passwords, for the troubleshooting page. Counted rather than
+        # only logged: "it says my password is wrong" and "nothing has reached
+        # the host" look identical from the other side of a screen.
+        self.bad_signins = 0
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -78,6 +95,31 @@ class SetupUI:
 
     def url(self):
         return "http://127.0.0.1:%d/?t=%s" % (self.port or 0, self.token)
+
+    # -- who is asking ------------------------------------------------------
+
+    SIGNIN_HOURS = 12
+
+    def needs_signin(self):
+        """Whether there is an account to ask for yet."""
+        try:
+            return bool(accounts.all_accounts())
+        except Exception:
+            # An unreadable accounts file must not become a way in.
+            return True
+
+    def signed_in(self, headers):
+        for part in (headers.get("cookie") or "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name != "fp_signin" or not value:
+                continue
+            for known, (who, until) in list(self.signins.items()):
+                if time.time() > until:
+                    self.signins.pop(known, None)
+                    continue
+                if secrets.compare_digest(value, known):
+                    return who
+        return None
 
     # -- a small HTTP server ------------------------------------------------
     #
@@ -144,8 +186,26 @@ class SetupUI:
                 return
 
         route = target.split("?", 1)[0]
+
+        # The second lock. The token says this request came from someone who
+        # can read a file only this user can read; an account says who they
+        # are. Both, once there is an account to ask for.
+        #
+        # Three things stay open, and each has to be: the page itself (it
+        # draws the sign-in form), its stylesheet and script (it cannot draw
+        # without them), and /api/signin (it is how you get in). None of them
+        # says anything about the host -- and all of them still need the
+        # token, so this is not an unauthenticated surface, it is the login.
+        public = route in ("/", "", "/" + PAGE, "/setup.css", "/setup.js",
+                           "/api/signin", "/api/whoami")
+        if not public and self.needs_signin() and not self.signed_in(headers):
+            await self._send(writer, 401, "application/json",
+                             b'{"ok": false, "error": "sign in first", '
+                             b'"signin": true}\n')
+            return
+
         if route.startswith("/api/"):
-            await self._api(route, body, writer)
+            await self._api(route, body, writer, headers)
         else:
             await self._file(route, writer)
 
@@ -205,7 +265,7 @@ class SetupUI:
 
     # -- the api -----------------------------------------------------------
 
-    async def _api(self, route, raw, writer):
+    async def _api(self, route, raw, writer, headers=None):
         try:
             body = json.loads(raw) if raw else {}
         except ValueError:
@@ -219,13 +279,55 @@ class SetupUI:
             await self._send(writer, 404, "application/json",
                              b'{"ok": false, "error": "no such endpoint"}\n')
             return
+        extra = []
         try:
-            answer = await handler(body)
+            if route == "/api/signin":
+                answer, extra = self._signin(body)
+            else:
+                answer = await handler(body)
+                if route == "/api/whoami":
+                    answer["who"] = self.signed_in(headers or {})
         except Exception as exc:
             log.exception("setup api %s failed", route)
             answer = {"ok": False, "error": str(exc)}
         await self._send(writer, 200, "application/json",
-                         (json.dumps(answer) + "\n").encode())
+                         (json.dumps(answer) + "\n").encode(), extra)
+
+    def _signin(self, body):
+        """Name, password and the six digits, checked the way the guest page
+        checks them -- accounts.verify, which also writes down the step a code
+        was used for so the same code cannot be presented twice."""
+        if not self.needs_signin():
+            return {"ok": True, "who": None, "bootstrap": True}, []
+        name = (body.get("name") or "").strip()
+        account = accounts.verify(name, body.get("password") or "",
+                                  body.get("code") or "")
+        if account is None:
+            self.bad_signins += 1
+            log.warning("a sign-in to the setup page was refused (%d so far)",
+                        self.bad_signins)
+            # One answer for a wrong name, a wrong password and a wrong code,
+            # so guessing tells the guesser nothing about which was wrong.
+            return {"ok": False,
+                    "error": "That name, password or code is not right."}, []
+        cookie = secrets.token_urlsafe(32)
+        self.signins[cookie] = (account["name"],
+                                time.time() + self.SIGNIN_HOURS * 3600)
+        log.info("%s signed in to the setup page", account["name"])
+        return ({"ok": True, "who": account["name"]},
+                ["set-cookie: fp_signin=%s; Path=/; SameSite=Strict; HttpOnly"
+                 % cookie])
+
+    async def _api_whoami(self, _body):
+        """Whether anybody needs to sign in, and whether this browser has."""
+        return {"ok": True, "needs_signin": self.needs_signin()}
+
+    async def _api_signout(self, _body):
+        return {"ok": True}
+
+    async def _api_signin(self, _body):
+        """Handled in _api, which is where the cookie can be set."""
+        return {"ok": False, "error": "unreachable"}
 
     async def _api_state(self, _body):
         """Everything the page draws, in one request.
@@ -280,6 +382,7 @@ class SetupUI:
             "picked": picked,
             "refused": self.refused,
             "diagnostics": self._diagnostics(),
+            "needs_signin": self.needs_signin(),
             "stream": self._stream_now(),
             # The page offers these rather than inventing its own list, so a
             # policy added to the host appears here without a second edit.
@@ -453,6 +556,7 @@ class SetupUI:
         server = self.server
         out["bad_pins"] = getattr(server, "refused_pins", None)
         out["bad_logins"] = getattr(server, "refused_logins", None)
+        out["bad_setup_signins"] = self.bad_signins
         return out
 
     # -- the picture -------------------------------------------------------
