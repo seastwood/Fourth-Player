@@ -82,9 +82,49 @@ def _ask(request):
 class Host:
     """The server, whether this process started it or merely found it."""
 
+    UNIT = "fourth-player"
+
     def __init__(self, launch=True):
         self.may_launch = launch
         self.child = None
+        self.unit = self._systemd_unit()
+
+    @staticmethod
+    def _systemd_unit():
+        """The user service, if this machine runs one.
+
+        A tray that starts its own copy on a machine where systemd already
+        manages one ends up with two hosts fighting over a port, a control
+        socket and /dev/uinput. So where there is a unit, every button here
+        drives *it* -- which also means Restart means what the machine's
+        owner already means by it, including whatever Restart= is set to.
+        """
+        if sys.platform == "win32":
+            return None
+        import shutil
+        import subprocess
+        if not shutil.which("systemctl"):
+            return None
+        try:
+            done = subprocess.run(
+                ["systemctl", "--user", "is-enabled", Host.UNIT],
+                capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # "disabled" still counts: the unit exists and is the right way to
+        # start it, whether or not it comes up at boot.
+        if done.returncode == 0 or "disabled" in (done.stdout or ""):
+            return Host.UNIT
+        return None
+
+    def _systemctl(self, *what):
+        import subprocess
+        try:
+            done = subprocess.run(["systemctl", "--user", *what, self.unit],
+                                  capture_output=True, text=True, timeout=30)
+            return done.returncode == 0, (done.stderr or done.stdout or "").strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, str(exc)
 
     # -- what is true right now --------------------------------------------
 
@@ -100,6 +140,9 @@ class Host:
         """Start one, if there is not already one answering."""
         if self.reachable():
             return True, "already running"
+        if self.unit:
+            ok, why = self._systemctl("start")
+            return (ok, "started" if ok else why)
         if not self.may_launch:
             return False, "this icon was told not to start the host"
         import subprocess
@@ -126,6 +169,17 @@ class Host:
         leak that took a day to find; the orderly path releases both.
         """
         import time
+        if self.unit:
+            # Through systemd, so it stays stopped rather than being brought
+            # straight back by the restart policy.
+            ok, why = self._systemctl("stop")
+            if not ok:
+                log.warning("systemctl stop said: %s", why)
+            for _ in range(20):
+                time.sleep(0.25)
+                if not self.reachable():
+                    break
+            return not self.reachable()
         answer = _ask({"cmd": "quit"})
         if answer.get("ok"):
             for _ in range(20):
@@ -142,6 +196,16 @@ class Host:
         return not self.reachable()
 
     def restart(self):
+        if self.unit:
+            ok, why = self._systemctl("restart")
+            if not ok:
+                return False, why
+            import time
+            for _ in range(30):
+                time.sleep(0.5)
+                if self.reachable():
+                    return True, "restarted"
+            return False, "it did not answer after restarting"
         self.stop()
         return self.start()
 

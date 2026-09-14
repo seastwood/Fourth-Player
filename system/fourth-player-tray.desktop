@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Fourth Player
+Comment=Guests join this machine's games with their own controllers
+Exec=python3 -m fourthplayer.tray --no-launch
+Icon=input-gaming
+Terminal=false
+Categories=Game;
+# Only where there is a tray to sit in. A headless host has no use for this
+# and starting it there is a process that fails once a session and logs about
+# it for ever.
+OnlyShowIn=GNOME;KDE;XFCE;Cinnamon;MATE;Unity;LXQt;LXDE;
+# --no-launch on purpose: on a machine with the systemd unit, the service is
+# what starts the host. The icon drives that unit rather than starting a
+# second copy -- two hosts would fight over the port, the control socket and
+# /dev/uinput.
+X-GNOME-Autostart-enabled=true

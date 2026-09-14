@@ -126,6 +126,26 @@ mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/fourth-player"
 sed "s|%h/fourth-player|$REPO|" "$REPO/system/fourth-player.service" \
   > "$HOME/.config/systemd/user/fourth-player.service"
 systemctl --user daemon-reload
+
+# The tray icon, for a machine with a desktop to put it in. Copied rather than
+# symlinked because a .desktop file in autostart is read before the repo is
+# necessarily mounted on some setups, and a missing one fails silently.
+#
+# It is not an error to have no desktop: OnlyShowIn keeps it out of the way on
+# a headless host, and a machine with no autostart directory simply does not
+# get one. The service is what runs the host either way -- the icon only
+# drives it.
+mkdir -p "$HOME/.config/autostart"
+if cp "$REPO/system/fourth-player-tray.desktop" \
+      "$HOME/.config/autostart/fourth-player-tray.desktop" 2>/dev/null; then
+  if python3 -c "import pystray" >/dev/null 2>&1; then
+    echo "tray icon: it will appear with your desktop from now on"
+  else
+    echo "tray icon: installed, but python3-pystray is missing so it will not"
+    echo "           draw yet -- pip install pystray, or leave it; the host"
+    echo "           runs without it"
+  fi
+fi
 # Enabled here rather than left as an instruction. "enable it with" is a line
 # somebody reads once, and the first reboot after that is where it is found
 # out -- which is exactly how this console spent a day not starting on its own.
