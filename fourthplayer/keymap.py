@@ -135,6 +135,12 @@ def char_map(display=":0", xauthority=None):
     """
     import os
     import subprocess
+    import sys
+
+    if sys.platform == "win32":
+        # Same question, and Windows will answer it directly rather than
+        # through a subprocess. `display` means nothing here.
+        return _char_map_windows()
 
     env = {"DISPLAY": display, "PATH": "/usr/bin:/bin",
            "XAUTHORITY": xauthority or os.path.expanduser("~/.Xauthority")}
@@ -183,3 +189,53 @@ def switches_terminal(code, held):
     return (code in VT_KEYS
             and bool(held & CTRL_KEYS)
             and bool(held & ALT_KEYS))
+
+
+def _char_map_windows():
+    """The same map, asked of the Windows keyboard layout.
+
+    VkKeyScanW is the exact counterpart of what xmodmap is being read for: it
+    answers "which key, and is shift held, to produce this character on the
+    layout this machine is using". The only work left is getting from its
+    answer to a kernel key code, and that is a table this project already has
+    -- Linux numbered its key codes to match AT scan code set 1, so inverting
+    windesk's SCAN turns a Windows scan code straight back into the evdev code
+    the rest of this package speaks.
+
+    Levels beyond shift are skipped here for the reason the X side skips
+    AltGr: a character that needs ctrl or alt held is not what somebody types
+    into a login box from a phone, and guessing is worse than not offering it.
+    """
+    import ctypes
+
+    try:
+        from .windesk import SCAN, SCAN_E0
+    except Exception:
+        return {}
+
+    user32 = ctypes.windll.user32
+    user32.VkKeyScanW.restype = ctypes.c_short          # it can return -1
+    user32.VkKeyScanW.argtypes = [ctypes.c_wchar]
+    user32.MapVirtualKeyW.restype = ctypes.c_uint
+    user32.MapVirtualKeyW.argtypes = [ctypes.c_uint, ctypes.c_uint]
+    MAPVK_VK_TO_VSC = 0
+
+    # Scan code back to key code. The extended set is deliberately left out:
+    # nothing in it produces a character, and its numbers collide with the
+    # plain set -- 0x47 is both Home and keypad 7 -- so folding them together
+    # would hand back the wrong key for anything that matched.
+    by_scan = {scan: code for code, scan in SCAN.items()}
+
+    found = {}
+    for point in range(0x20, 0x7F):                     # printable ASCII
+        ch = chr(point)
+        answer = user32.VkKeyScanW(ch)
+        if answer == -1:
+            continue                                    # not on this layout
+        vk, state = answer & 0xFF, (answer >> 8) & 0xFF
+        if state & ~1:
+            continue                                    # needs ctrl or alt
+        code = by_scan.get(user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC))
+        if code is not None:
+            found[ch] = (code, bool(state & 1))
+    return found
