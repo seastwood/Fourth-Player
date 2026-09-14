@@ -440,6 +440,25 @@
         <option value="strong">Strong</option>
       </select>
     </p>
+    <!-- How far the console's pointer moves for a given movement here.
+         One number for both hands: a mouse under a pointer lock and a finger
+         dragging the cursor both arrive as the same relative motion, and
+         "the cursor moves too fast" means the same thing either way. It is a
+         client setting rather than a host one because it is about this
+         person's mouse and this person's hand, and two guests on one session
+         will not agree. -->
+    <p class="browse-note pads-feel">
+      <span class="switch-name">Pointer speed</span>
+      <select id="desk-speed" class="chip"
+              aria-label="How fast the console pointer moves">
+        <option value="0.25">Much slower</option>
+        <option value="0.5">Slower</option>
+        <option value="1">Normal</option>
+        <option value="1.5">Faster</option>
+        <option value="2">Much faster</option>
+        <option value="3">Fastest</option>
+      </select>
+    </p>
     <!-- The other half of the same complaint. The pad is drawn as a Nintendo
          diamond and sent as an Xbox pad, so the button printed A arrives as B
          in a game that names its buttons. Two ways out, and which one is

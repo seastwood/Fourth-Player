@@ -4414,7 +4414,35 @@ function deskSoon() {
   if (!deskFrame) deskFrame = requestAnimationFrame(deskFlush);
 }
 
+/* How far the console's pointer moves for a given movement here.
+ *
+ * Applied at this one point on purpose: everything that moves the pointer --
+ * a mouse under a pointer lock, a finger dragging -- arrives here as relative
+ * motion, and the estimate of where the pointer has got to is kept from the
+ * same numbers just below. Scaling anywhere else would move the pointer and
+ * the estimate by different amounts, and the zoom would follow a cursor that
+ * is not there. */
+const SPEED_KEY = "fp:pointer-speed";
+
+function savedSpeed() {
+  let raw = null;
+  try { raw = localStorage.getItem(SPEED_KEY); } catch (_) {}
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 && value <= 8 ? value : 1;
+}
+
+let deskSpeed = savedSpeed();
+
+function setDeskSpeed(value) {
+  const speed = Number(value);
+  if (!Number.isFinite(speed) || speed <= 0 || speed > 8) return;
+  deskSpeed = speed;
+  try { localStorage.setItem(SPEED_KEY, String(speed)); } catch (_) {}
+}
+
 function deskMoved(dx, dy) {
+  dx *= deskSpeed;
+  dy *= deskSpeed;
   deskPending.dx += dx;
   deskPending.dy += dy;
   // Keep a guess at where the console's pointer has got to.
@@ -7690,6 +7718,14 @@ el("pads-buzz").addEventListener("change", (event) => {
   report("turned the buzz " + (hapticsOn ? "on" : "off") + ", via " + feelPath
          + " on " + navigator.userAgent);
 });
+
+if (el("desk-speed")) {
+  el("desk-speed").value = String(deskSpeed);
+  el("desk-speed").addEventListener("change", (event) => {
+    setDeskSpeed(event.target.value);
+    el("desk-speed").value = String(deskSpeed);
+  });
+}
 
 if (el("pads-buzz-strength")) {
   el("pads-buzz-strength").addEventListener("change", (event) => {
