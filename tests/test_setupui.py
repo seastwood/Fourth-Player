@@ -14,6 +14,7 @@ import json
 import os
 import socket
 import sys
+import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -46,6 +47,8 @@ import tempfile
 
 _own = tempfile.mkdtemp(prefix="fp-setup-test-")
 accounts.STORE = os.path.join(_own, "accounts.json")
+OWNER = "owner"
+PASSWORD = "a-long-enough-one"
 
 
 class StubServer:
@@ -102,47 +105,124 @@ def request(port, target, body=None, cookie=None, timeout=5):
 async def main():
     page = setupui.SetupUI(StubServer())
     server = await page.start()
+    loop = asyncio.get_running_loop()
+    ask = lambda *a: loop.run_in_executor(None, request, page.port, *a)
     try:
-        loop = asyncio.get_running_loop()
-
-        print("the door")
-        status, _h, _b = await loop.run_in_executor(None, request, page.port, "/")
+        print("the first lock: a token only this user can read")
+        status, _h, _b = await ask("/")
         check(status == 403, "no token at all is refused: %d" % status)
-        status, _h, _b = await loop.run_in_executor(
-            None, request, page.port, "/?t=nope")
+        status, _h, _b = await ask("/?t=nope")
         check(status == 403, "a wrong token is refused: %d" % status)
-        # Same answer either way, saying nothing about which half was wrong.
-        status, _h, body = await loop.run_in_executor(
-            None, request, page.port, "/?t=" + page.token)
+        # The same answer either way, saying nothing about which half was wrong.
+        status, _h, body = await ask("/?t=" + page.token)
         check(status == 200 and b"Fourth Player" in body,
               "the right one is let in: %d, %d bytes" % (status, len(body)))
         check(page.refused == 2, "and the refusals are counted: %d" % page.refused)
 
         print("\nthe token moves into a cookie")
-        # So it is not in every later address, the title bar, or whatever the
-        # browser syncs.
-        _status, headers, _body = await loop.run_in_executor(
-            None, request, page.port, "/?t=" + page.token)
+        _status, headers, _body = await ask("/?t=" + page.token)
         setcookie = headers.get("set-cookie") or ""
         check("fp_setup=" in setcookie, "a cookie is set: %r" % setcookie[:40])
         check("HttpOnly" in setcookie and "SameSite=Strict" in setcookie,
               "HttpOnly and SameSite=Strict, so no script or other page reaches it")
-        status, _h, body = await loop.run_in_executor(
-            None, request, page.port, "/api/state", b"{}",
+
+        print("\nbefore anybody has an account, only making one answers")
+        # The window this closes: the page used to be fully open until somebody
+        # got round to creating an account. However short that is, it is a
+        # window in which this page will create accounts, issue authenticator
+        # secrets and end sessions for whoever asks.
+        check(page.first_run(), "with no accounts, this is a first run")
+        for shut in ("/api/state", "/api/control", "/api/stream", "/api/qr",
+                     "/api/account/reset2fa", "/api/account/remove"):
+            status, _h, body = await ask(shut, b"{}", "fp_setup=" + page.token)
+            check(status == 403 and json.loads(body).get("first_run"),
+                  "%s is refused until there is an administrator: %d"
+                  % (shut, status))
+
+        status, _h, body = await ask(
+            "/api/account/add",
+            json.dumps({"name": OWNER, "password": PASSWORD}).encode(),
             "fp_setup=" + page.token)
+        made = json.loads(body)
+        check(status == 200 and made.get("ok"),
+              "making the administrator is allowed: %s" % made.get("error"))
+        check(made.get("secret") and made.get("uri"),
+              "and it hands back the authenticator secret, once")
+        # It holds everything, because the next thing that happens is this
+        # account being asked to sign in and then run the machine. `admin add`
+        # on the command line gives the first account only `grant`, which is a
+        # fine default for somebody who left a list out and a trap here.
+        check(set(made.get("can") or []) == set(accounts.CAPABILITIES),
+              "and holds every capability: %s" % " ".join(made.get("can") or []))
+
+        print("\nand once it exists the first run is over")
+        check(not page.first_run(), "this is no longer a first run")
+        status, _h, body = await ask("/api/state", b"{}", "fp_setup=" + page.token)
+        check(status == 401 and json.loads(body).get("signin"),
+              "the token alone no longer opens it: %d" % status)
+        # The form still has to draw, or there is no way back in -- and all of
+        # it still needs the token, so this is the login rather than an
+        # unauthenticated surface.
+        for open_path in ("/", "/setup.css", "/setup.js"):
+            status, _h, _b = await ask(open_path + "?t=" + page.token)
+            check(status == 200, "%s is still served: %d" % (open_path, status))
+        status, _h, _b = await ask("/setup.js")
+        check(status == 403, "but not without the token: %d" % status)
+
+        print("\na wrong sign-in says nothing useful")
+        status, _h, body = await ask(
+            "/api/signin",
+            json.dumps({"name": OWNER, "password": "not-the-password",
+                        "code": "000000"}).encode(),
+            "fp_setup=" + page.token)
+        answer = json.loads(body)
+        check(not answer.get("ok"), "the wrong password is refused")
+        check("name, password or code" in (answer.get("error") or ""),
+              "with one answer for all three: %r" % answer.get("error"))
+        check(page.bad_signins == 1, "and it is counted: %d" % page.bad_signins)
+
+        print("\nand the right one is let in")
+        code = accounts.code_at(made["secret"], int(time.time()) // 30)
+        status, headers, body = await ask(
+            "/api/signin",
+            json.dumps({"name": OWNER, "password": PASSWORD,
+                        "code": code}).encode(),
+            "fp_setup=" + page.token)
+        answer = json.loads(body)
+        check(answer.get("ok") and answer.get("who") == OWNER,
+              "name, password and the six digits: %s" % answer.get("error"))
+        signin = ""
+        for part in (headers.get("set-cookie") or "").split(";"):
+            if part.strip().startswith("fp_signin="):
+                signin = part.strip()
+        check(signin, "and a sign-in cookie comes back")
+        both = "fp_setup=%s; %s" % (page.token, signin)
+
+        status, _h, body = await ask("/api/state", b"{}", both)
         check(status == 200 and json.loads(body).get("ok"),
-              "and the cookie alone works on the api: %d" % status)
+              "and now the page answers: %d" % status)
+
+        print("\nthe same code cannot be used twice")
+        # accounts.verify writes down the step a code was accepted for, which
+        # is the reason it takes the whole account rather than a password
+        # checker: a verification that records nothing is one an attacker may
+        # repeat.
+        status, _h, body = await ask(
+            "/api/signin",
+            json.dumps({"name": OWNER, "password": PASSWORD,
+                        "code": code}).encode(),
+            "fp_setup=" + page.token)
+        check(not json.loads(body).get("ok"),
+              "the code that just worked is refused the second time")
 
         print("\nand it is not on the network")
-        # The one that would matter most. Bound to 127.0.0.1, so the machine's
-        # own LAN address must refuse.
         addresses = {s.getsockname()[0] for s in server.sockets}
         check(addresses == {"127.0.0.1"},
               "listening only on the loopback: %s" % ", ".join(sorted(addresses)))
         lan = None
         try:
             probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            probe.connect(("192.0.2.1", 9))          # routes nowhere, reveals the local ip
+            probe.connect(("192.0.2.1", 9))      # routes nowhere, reveals the local ip
             lan = probe.getsockname()[0]
             probe.close()
         except OSError:
@@ -157,64 +237,10 @@ async def main():
         else:
             print("  ----   no non-loopback address here to try")
 
-        print("\nthe second lock: an account, once there is one")
-        # The token says where you are; an account says who. Both, once there
-        # is an account to ask for -- and nothing at all until then, because
-        # the first account is made through this page.
-        check(not page.needs_signin(),
-              "with no accounts, nothing to ask for: the token alone opens it")
-        status, _h, body = await loop.run_in_executor(
-            None, request, page.port, "/api/state", b"{}",
-            "fp_setup=" + page.token)
-        check(status == 200 and json.loads(body).get("ok"),
-              "and the page works, which is the bootstrap")
-
-        import types
-        # One account, without touching the real accounts file.
-        page.needs_signin = types.MethodType(lambda _self: True, page)
-        status, _h, body = await loop.run_in_executor(
-            None, request, page.port, "/api/state", b"{}",
-            "fp_setup=" + page.token)
-        answer = json.loads(body)
-        check(status == 401 and answer.get("signin"),
-              "the moment an account exists, the token alone is refused: %d"
-              % status)
-
-        # The form still has to be reachable, or there is no way back in.
-        for open_path in ("/", "/setup.css", "/setup.js"):
-            status, _h, _b = await loop.run_in_executor(
-                None, request, page.port, open_path + "?t=" + page.token)
-            check(status == 200, "%s is still served, so the form can draw: %d"
-                  % (open_path, status))
-        # But only with the token. The login is not an unauthenticated surface.
-        status, _h, _b = await loop.run_in_executor(None, request, page.port, "/")
-        check(status == 403, "and not without the token: %d" % status)
-
-        print("\nand a wrong sign-in says nothing useful")
-        status, _h, body = await loop.run_in_executor(
-            None, request, page.port, "/api/signin",
-            json.dumps({"name": "nobody", "password": "x" * 12,
-                        "code": "000000"}).encode(),
-            "fp_setup=" + page.token)
-        answer = json.loads(body)
-        check(not answer.get("ok"), "a made-up account is refused")
-        check("name, password or code" in (answer.get("error") or ""),
-              "with one answer for all three, so guessing learns nothing: %r"
-              % answer.get("error"))
-        check(page.bad_signins == 1, "and it is counted: %d" % page.bad_signins)
-
-        # Back to the real answer, so what follows tests the file handler
-        # rather than the sign-in gate in front of it. Left patched, the
-        # traversal checks below pass for the wrong reason -- refused at the
-        # door instead of refused by the path check -- which is a test that
-        # would go on passing if the path check were deleted.
-        del page.needs_signin
-
         print("\nand it serves only what is in web/")
-        for attempt in ("/../fourthplayer/accounts.py", "/..%2ffourthplayer/accounts.py",
-                        "/../../etc/passwd"):
-            status, _h, _b = await loop.run_in_executor(
-                None, request, page.port, attempt + "?t=" + page.token)
+        for attempt in ("/../fourthplayer/accounts.py",
+                        "/..%2ffourthplayer/accounts.py", "/../../etc/passwd"):
+            status, _h, _b = await ask(attempt + "?t=" + page.token, None, both)
             check(status == 404, "%s is refused: %d" % (attempt, status))
     finally:
         server.close()

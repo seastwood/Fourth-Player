@@ -13,6 +13,22 @@
     <div id="trouble" class="warn" hidden></div>
   </header>
 
+  <section id="firstrun" class="card" hidden>
+    <h2>Set up this host</h2>
+    <p class="hint">Nobody has an account on this machine yet. Make the
+       administrator's now — it holds every capability, and a session lock can
+       never shut it out. Until it exists this page does nothing else.</p>
+    <div class="row">
+      <label>Name <input id="fr-name" maxlength="32" style="width:12rem"></label>
+    </div>
+    <div class="row">
+      <label>Password <input id="fr-password" type="password" style="width:14rem"></label>
+      <label>Again <input id="fr-again" type="password" style="width:14rem"></label>
+    </div>
+    <p class="hint">At least eight characters.</p>
+    <div class="row"><button class="go" data-do="firstrun">Create it</button></div>
+  </section>
+
   <section id="signin" class="card" hidden>
     <h2>Sign in</h2>
     <p class="hint" id="signin-why"></p>

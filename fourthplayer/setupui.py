@@ -25,8 +25,11 @@ Three things follow from that and are worth stating plainly:
     twice.
 
   * Until the first account exists there is nothing to log in with, so the
-    token alone opens it -- and it says so on the page. That is the bootstrap
-    and it closes itself: the moment an account exists, this asks for one.
+    first thing the page does is *make* one. Not "let you in until somebody
+    gets round to it" -- that was the first version of this and it left a
+    window, however small, where the page was open and nothing was asked. On
+    a first run the only thing that answers is "create the administrator",
+    and everything else is refused until it has been.
   * The token is per-run. Restarting the host invalidates every old URL,
     including one left open in a browser tab, which is what should happen.
   * An administrator on the machine can read the token file. So can anything
@@ -100,13 +103,21 @@ class SetupUI:
 
     SIGNIN_HOURS = 12
 
-    def needs_signin(self):
-        """Whether there is an account to ask for yet."""
+    def has_accounts(self):
         try:
             return bool(accounts.all_accounts())
         except Exception:
-            # An unreadable accounts file must not become a way in.
+            # An unreadable accounts file must not become a way in: treat it
+            # as "there are accounts", so the page asks rather than opens.
             return True
+
+    def needs_signin(self):
+        """Whether there is an account to ask for yet."""
+        return self.has_accounts()
+
+    def first_run(self):
+        """No account has been made, so making one is the only thing on offer."""
+        return not self.has_accounts()
 
     def signed_in(self, headers):
         for part in (headers.get("cookie") or "").split(";"):
@@ -198,7 +209,19 @@ class SetupUI:
         # token, so this is not an unauthenticated surface, it is the login.
         public = route in ("/", "", "/" + PAGE, "/setup.css", "/setup.js",
                            "/api/signin", "/api/whoami")
-        if not public and self.needs_signin() and not self.signed_in(headers):
+
+        if self.first_run():
+            # Nothing but making the first account. Every other endpoint is
+            # refused -- not hidden, refused -- so the window between "the
+            # host started" and "somebody set a password" is not a window in
+            # which this page does anything at all.
+            if not public and route != "/api/account/add":
+                await self._send(
+                    writer, 403, "application/json",
+                    b'{"ok": false, "first_run": true, "error": "make the '
+                    b'administrator account first"}\n')
+                return
+        elif not public and not self.signed_in(headers):
             await self._send(writer, 401, "application/json",
                              b'{"ok": false, "error": "sign in first", '
                              b'"signin": true}\n')
@@ -320,7 +343,9 @@ class SetupUI:
 
     async def _api_whoami(self, _body):
         """Whether anybody needs to sign in, and whether this browser has."""
-        return {"ok": True, "needs_signin": self.needs_signin()}
+        return {"ok": True, "needs_signin": self.needs_signin(),
+                "first_run": self.first_run(),
+                "capabilities": list(accounts.CAPABILITIES)}
 
     async def _api_signout(self, _body):
         return {"ok": True}
@@ -400,6 +425,15 @@ class SetupUI:
         name = (body.get("name") or "").strip()
         password = body.get("password") or ""
         can = [c for c in (body.get("can") or []) if c]
+        if self.first_run():
+            # The administrator, and it holds everything. `admin add` on the
+            # command line gives the first account only `grant`, which is a
+            # reasonable default for somebody who typed a capability list and
+            # left it out -- and a trap here, where the next thing that
+            # happens is the page asking this account to sign in. An
+            # administrator who cannot take the desk on their own machine has
+            # been handed a puzzle rather than a host.
+            can = list(accounts.CAPABILITIES)
         if len(password) < 8:
             return {"ok": False, "error": "A password needs to be at least "
                                           "eight characters."}

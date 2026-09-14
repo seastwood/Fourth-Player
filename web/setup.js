@@ -200,6 +200,15 @@ function fillPicture(stream, policies) {
    that is why, rather than looking like it forgot to lock the door. */
 async function gate() {
   const who = await post("/api/whoami");
+  // Three states, and only one of them draws the page: nobody has an account
+  // yet, somebody does and this browser has not said who it is, or it has.
+  if (who.first_run) {
+    el("firstrun").hidden = false;
+    el("signin").hidden = true;
+    el("everything").hidden = true;
+    return false;
+  }
+  el("firstrun").hidden = true;
   const need = who.needs_signin && !who.who;
   el("signin").hidden = !need;
   el("everything").hidden = need;
@@ -286,6 +295,28 @@ const ACTIONS = {
     el("add-can").querySelectorAll("input:checked").forEach((b) => { b.checked = false; });
     showSecret(answer);
   },
+  async firstrun() {
+    const password = el("fr-password").value;
+    if (password !== el("fr-again").value) {
+      say("those two passwords are not the same", true);
+      return;
+    }
+    if (password.length < 8) {
+      say("a password needs to be at least eight characters", true);
+      return;
+    }
+    const answer = await post("/api/account/add", {
+      name: el("fr-name").value, password,
+    });
+    el("fr-password").value = el("fr-again").value = "";
+    if (!heard(answer)) return;
+    // The secret is shown before anything else happens, because it is shown
+    // once -- and the sign-in that follows will want a code from it.
+    el("firstrun").hidden = true;
+    showSecret(answer);
+    say("account made. Scan the code, then sign in.");
+  },
+
   async signin() {
     const answer = await post("/api/signin", {
       name: el("in-name").value,
@@ -297,9 +328,10 @@ const ACTIONS = {
     el("in-password").value = el("in-code").value = "";
     if (heard(answer, "signed in")) await load();
   },
-  "secret-done"() {
+  async "secret-done"() {
     el("secret").hidden = true;
     el("secret-body").innerHTML = "";     // not left in the document
+    await load();                         // which now asks for a sign-in
   },
 };
 
