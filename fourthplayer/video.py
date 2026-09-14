@@ -1488,27 +1488,19 @@ class Peer:
         # Handed to the thread rather than dropped here, and that is not
         # tidiness -- see the note on `held` below.
         # Everything this peer owns that GStreamer or GLib is still holding,
-        # handed to the thread rather than dropped here.
-        #
-        # `self.ice` is the one that mattered and the one that was missing.
-        # Its own comment says it is "held so webrtcbin's agent outlives it",
-        # and nothing made that true: detach neither kept it nor cleared it,
-        # so the agent was released whenever the *Peer object* was collected
-        # -- after detach returned, with the pipeline possibly still tearing
-        # down on its own thread. An ICE agent freed underneath the webrtcbin
-        # still using it is an access violation in gobject, and that is
-        # exactly what the host did: two crashes on this Windows machine, both
-        # 0xc0000005 in gobject-2.0-0.dll at the same offset, both at the
-        # instant a guest left. The same signature as the SIGSEGVs on the
-        # console.
-        held = [self.webrtc, self.channel, self.desk_channel, self._sources,
-                self.ice, self._caps]
-        self.webrtc = self.channel = self.desk_channel = self.ice = None
+        # taken off it now and released in a deliberate order once the
+        # pipeline has stopped. The order is in see_it_to_null, and it is the
+        # fix rather than a tidiness.
+        extras = [self.webrtc, self.channel, self.desk_channel,
+                  self._sources, self._caps]
+        agent, self.ice = self.ice, None
+        self.webrtc = self.channel = self.desk_channel = None
         self._sources = {}
         self._caps = {}
         who = self.id
 
         def see_it_to_null():
+            nonlocal pipeline, agent
             # `held` keeps this guest's webrtcbin, its data channels and its
             # appsrcs alive for exactly as long as the pipeline they belong
             # to, and it is here because letting go of them early crashed the
@@ -1546,10 +1538,32 @@ class Peer:
                 log.warning("peer %s did not stop cleanly: %s", who, exc)
                 return
             finally:
-                # After NULL, and after the failure paths too: a pipeline that
-                # would not stop is the last thing to go on holding wrappers
-                # into whatever it is still doing.
-                held.clear()
+                # Released here, in this order, and the order is the whole fix.
+                #
+                # faulthandler caught the fault at threading.py:998 -- `del
+                # self._target` -- with no frame of ours on the stack. That is
+                # the thread dropping this closure, and with it every object
+                # the closure captured, in whatever order Python happened to
+                # choose. Three access violations in gobject-2.0-0.dll, all at
+                # the same offset, were that release.
+                #
+                # So it is done here instead, deliberately:
+                #
+                #   1. the wrappers -- webrtcbin, the channels, the appsrcs.
+                #      The pipeline holds references of its own to these, so
+                #      letting ours go changes nothing yet.
+                #   2. the pipeline, whose last reference this is. Dropping it
+                #      disposes the bin, and that is when webrtcbin tears
+                #      itself down and reaches for its ICE agent.
+                #   3. the agent, last, precisely because of that. `self.ice`
+                #      has always carried the comment "held so webrtcbin's
+                #      agent outlives it", and my previous attempt released it
+                #      in step 1 -- ahead of the dispose that needs it. That
+                #      was worse than the bug it was meant to fix, and it is
+                #      why the crash survived the last change.
+                extras.clear()
+                pipeline = None
+                agent = None
             took = time.monotonic() - started
             if state != Gst.State.NULL:
                 # The leak, said out loud. It is the one thing that used to
