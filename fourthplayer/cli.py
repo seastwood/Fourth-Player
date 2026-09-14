@@ -740,7 +740,7 @@ def _check(cfg):
         gi.require_version("Gst", "1.0")
         gi.require_version("GstWebRTC", "1.0")
         from gi.repository import Gst
-        Gst.init(None)
+        Gst.init([])
         for element in ("ximagesrc", "webrtcbin", "rtph264pay", "h264parse"):
             if not Gst.ElementFactory.find(element):
                 problems.append(f"the GStreamer element {element} is missing")

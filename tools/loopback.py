@@ -203,7 +203,7 @@ class Guest:
 
 
 async def run(args):
-    Gst.init(None)
+    Gst.init([])
     loop = asyncio.get_running_loop()
 
     status = control({"cmd": "status"})

@@ -52,7 +52,7 @@ _initialised = False
 def init():
     global _initialised
     if not _initialised:
-        Gst.init(None)
+        Gst.init([])
         _initialised = True
 
 
