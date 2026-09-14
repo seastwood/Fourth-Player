@@ -195,6 +195,11 @@ def main(argv=None):
     # exist, and may never create one. Making an account, resetting a second
     # factor and adding a Steam game are all acts of creation, so all three
     # happen sitting in front of the machine or not at all.
+    setup_cmd = sub.add_parser(
+        "setup", help="open the console's own setup page in a browser")
+    setup_cmd.add_argument("--print", action="store_true", dest="print_only",
+                           help="print the address instead of opening it")
+
     admin = sub.add_parser("admin", help="the accounts guests can log in to")
     admin_sub = admin.add_subparsers(dest="admin_command", required=True)
     admin_add = admin_sub.add_parser("add", help="create an account")
@@ -297,6 +302,26 @@ def main(argv=None):
 
     if args.command == "admin":
         return _admin(args)
+
+    if args.command == "setup":
+        answer = _control({"cmd": "setup"})
+        if not answer.get("ok"):
+            print(answer.get("error") or "no server is running.")
+            return 1
+        url = answer["url"]
+        if args.print_only:
+            print(url)
+            return 0
+        # Printed as well as opened. On a machine with no browser to open --
+        # a host reached over ssh, which is most of them -- the address is the
+        # useful half, and it is also how somebody checks that the thing that
+        # opened is the thing this meant.
+        print(url)
+        import webbrowser
+        if not webbrowser.open(url):
+            print("(could not open a browser here; the address above is the "
+                  "whole of it)")
+        return 0
 
     if args.command == "check":
         return _check(cfg)

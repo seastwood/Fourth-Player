@@ -31,6 +31,7 @@ from .config import Config
 from .session import LAUNCH_POLICIES, LiveSession
 from .tls import ensure_certificate
 from . import control as control_channel
+from . import setupui
 
 log = logging.getLogger("fourthplayer.server")
 
@@ -1031,6 +1032,15 @@ class Server:
     async def _command(self, request):
         command = request.get("cmd")
         try:
+            if command == "setup":
+                # The address, to whoever could already reach this channel --
+                # which is the same user, by the same file permissions. It is
+                # not a widening: anybody who can ask this can already open a
+                # session and kick guests.
+                page = getattr(self, "setup", None)
+                if page is None:
+                    return {"ok": False, "error": "the setup page is not running"}
+                return {"ok": True, "url": page.url()}
             if command == "status":
                 return self._status()
             if command == "chat":
@@ -1581,6 +1591,12 @@ class Server:
         control = await control_channel.serve(self._control)
         self._sockets.append(control)
         log.info("control channel at %s", control_channel.address())
+
+        # The console's own page, on the loopback and behind a per-run token.
+        # It carries the things the guest page must not: creating an account,
+        # and issuing an authenticator secret.
+        self.setup = setupui.SetupUI(self)
+        self._sockets.append(await self.setup.start())
 
         self._restore_session()
 

@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fourth Player — setup</title>
+<style>
+  :root { color-scheme: dark; --bg:#14161a; --bg2:#1c1f26; --ink:#e8e8ea;
+          --dim:#9aa0ab; --edge:#ffd447; --bad:#ff6b6b; --ok:#6bd47f; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:56rem; margin:0 auto; padding:1.5rem 1.2rem 4rem; }
+  h1 { font-size:1.3rem; margin:0 0 .2rem; }
+  h2 { font-size:1rem; margin:2rem 0 .6rem; color:var(--edge); }
+  .sub { color:var(--dim); margin:0 0 1.5rem; }
+  section { background:var(--bg2); border-radius:.5rem; padding:1rem 1.1rem;
+            margin-bottom:1rem; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:.35rem .5rem; border-bottom:1px solid #2a2e37; }
+  th { color:var(--dim); font-weight:500; font-size:.85rem; }
+  code { background:#0d0f12; padding:.1rem .3rem; border-radius:.2rem; }
+  .pill { display:inline-block; background:#0d0f12; color:var(--dim);
+          padding:.05rem .4rem; border-radius:.6rem; font-size:.8rem;
+          margin-right:.2rem; }
+  .none { color:var(--dim); font-style:italic; }
+</style>
+<main>
+  <h1>Fourth Player</h1>
+  <p class="sub">The console's own page. It is on the loopback only, and it can
+     do the things the guest page deliberately cannot.</p>
+
+  <section>
+    <h2 style="margin-top:0">This machine</h2>
+    <table id="picked"></table>
+  </section>
+
+  <section>
+    <h2 style="margin-top:0">Accounts</h2>
+    <table id="accounts"></table>
+  </section>
+
+  <section>
+    <h2 style="margin-top:0">Session</h2>
+    <div id="session" class="none">loading…</div>
+  </section>
+</main>
+<script>
+const el = (id) => document.getElementById(id);
+
+function rows(into, pairs) {
+  into.innerHTML = pairs.map(([k, v]) =>
+    `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
+}
+
+async function load() {
+  const state = await (await fetch("/api/state", {method: "POST"})).json();
+  const p = state.picked || {};
+  rows(el("picked"), [
+    ["capture", p.capture ? `<code>${p.capture}</code>` : "<span class=none>none</span>"],
+    ["encoder", p.encoder ? `<code>${p.encoder}</code> (${p.encoder_kind})` : "<span class=none>none</span>"],
+    ["sound", p.sound ? `<code>${p.sound}</code>` : "<span class=none>none — silent</span>"],
+    ["refused requests to this page", state.refused],
+  ]);
+
+  const list = state.accounts || [];
+  el("accounts").innerHTML =
+    "<tr><th>name</th><th>may</th><th>devices</th></tr>" +
+    (list.length ? list.map(a =>
+      `<tr><td>${a.name}${a.name === state.primary ? " <span class=pill>primary</span>" : ""}</td>` +
+      `<td>${(a.can || []).map(c => `<span class=pill>${c}</span>`).join("") || "<span class=none>nothing yet</span>"}</td>` +
+      `<td>${a.devices}</td></tr>`).join("")
+     : "<tr><td colspan=3 class=none>no accounts yet</td></tr>");
+
+  const s = state.session;
+  el("session").innerHTML = s && s.open
+    ? `open, ${s.guests ? s.guests.length : 0} guest(s)`
+    : "<span class=none>no session open</span>";
+}
+load();
+setInterval(load, 4000);
+</script>
