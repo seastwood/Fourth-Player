@@ -158,6 +158,11 @@ _VA_SYS = ("videoscale ! videoconvert ! video/x-raw,format=NV12,"
            "width={w},height={h}")
 _SW = ("videoscale ! videoconvert ! video/x-raw,format=I420,"
        "width={w},height={h}")
+# Windows' equivalent of _VA: the desktop arrives from d3d11screencapturesrc
+# already in D3D11 memory, and d3d11convert does the format and the resize
+# there, so the frame is never copied out of the GPU on its way to NVENC.
+_D3D11 = ("d3d11convert ! video/x-raw(memory:D3D11Memory),format=NV12,"
+          "width={w},height={h}")
 # The same idea as _VA, for NVENC. cudaupload puts the frame in CUDA memory
 # and cudaconvertscale does the format and the resize there, so it is uploaded
 # once and never comes back; without them every frame is downloaded, converted
@@ -178,9 +183,23 @@ ENCODERS = {
         ("vah264lpenc", "hardware", _VA,
          "{el} name=enc target-usage={usage} bitrate={kbps} "
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        # Windows, and ahead of nvh264enc on purpose. Both are NVENC; this
+        # one takes frames in D3D11 memory, which is where the desktop
+        # capture already has them, while nvh264enc is the CUDA-mode encoder
+        # and would need an upload. Measured on an RTX 4070 Ti: the D3D11
+        # build of GStreamer ships no cudaupload or cudaconvertscale at all,
+        # so the CUDA path is not merely slower there, it is unavailable.
+        ("nvd3d11h264enc", "hardware", _D3D11,
+         "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
+         "rc-mode=cbr"),
         ("nvh264enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
          "rc-mode=cbr"),
+        # Media Foundation: every Windows machine with any hardware encoder
+        # at all, whoever made the GPU. Last of the hardware ones because it
+        # is the most general and the least tunable.
+        ("mfh264enc", "hardware", _SW,
+         "{el} name=enc bitrate={kbps}"),
         ("v4l2h264enc", "hardware", _SW,
          "{el} name=enc extra-controls=\"controls,video_bitrate={bps}\""),
         ("x264enc", "software", _SW,
@@ -197,14 +216,75 @@ ENCODERS = {
         ("vah265lpenc", "hardware", _VA,
          "{el} name=enc target-usage={usage} bitrate={kbps} "
          "key-int-max={keyint} cpb-size={cpb} b-frames=0"),
+        ("nvd3d11h265enc", "hardware", _D3D11,
+         "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
+         "rc-mode=cbr"),
         ("nvh265enc", "hardware", _CUDA,
          "{el} name=enc bitrate={kbps} gop-size={keyint} zerolatency=true "
          "rc-mode=cbr"),
+        ("mfh265enc", "hardware", _SW,
+         "{el} name=enc bitrate={kbps}"),
         ("x265enc", "software", _SW,
          "{el} name=enc speed-preset=ultrafast tune=zerolatency "
          "bitrate={kbps} key-int-max={keyint}"),
     ),
 }
+
+
+# Where the picture comes from, best first. Same shape as ENCODERS above and
+# for the same reason: the machine has whichever of these it has, and asking
+# is cheaper and more honest than deciding from sys.platform. A Wayland
+# session and an X one are both Linux and do not offer the same element.
+#
+# `name=capture` is part of every template rather than being pasted in
+# afterwards -- Stage.stop() silences the source by that name, and so does
+# show_pointer.
+#
+# The third field is what that source calls "draw the mouse pointer into the
+# picture", because they disagree: ximagesrc says show-pointer and
+# d3d11screencapturesrc says show-cursor. None means it cannot, and
+# show_pointer answers False rather than guessing.
+SOURCES = (
+    ("ximagesrc",
+     "ximagesrc name=capture display-name={display} use-damage=0 "
+     "show-pointer=false",
+     "show-pointer"),
+    ("d3d11screencapturesrc",
+     "d3d11screencapturesrc name=capture show-cursor=false",
+     "show-cursor"),
+    # Deprecated in GStreamer and kept as a fallback anyway: it is what a
+    # machine with no working D3D11 path has left, and a soft picture beats
+    # none. It warns on every start, which is the reason it is last.
+    ("gdiscreencapsrc",
+     "gdiscreencapsrc name=capture cursor=false",
+     "cursor"),
+)
+
+
+def pick_source():
+    """The desktop capture this machine has, or None. (element, line, pointer)."""
+    for element, line, pointer in SOURCES:
+        if Gst.ElementFactory.find(element):
+            return element, line, pointer
+    return None
+
+
+# And the sound. pulsesrc takes a named monitor source; wasapi2src takes
+# `loopback=true`, which is Windows' way of saying the same thing -- record
+# what is being played rather than what a microphone hears.
+SOUNDS = (
+    ("pulsesrc", "pulsesrc name=sound device={device} provide-clock=false"),
+    ("wasapi2src", "wasapi2src name=sound loopback=true provide-clock=false"),
+    ("wasapisrc", "wasapisrc name=sound loopback=true provide-clock=false"),
+)
+
+
+def pick_sound():
+    """The loopback capture this machine has, or None. (element, line)."""
+    for element, line in SOUNDS:
+        if Gst.ElementFactory.find(element):
+            return element, line
+    return None
 
 
 def _cuda_converter():
@@ -569,12 +649,24 @@ class Stage:
         # config-interval=-1 puts SPS/PPS in front of every keyframe. Without it
         # a guest who joins mid-session has the parameter sets they need only if
         # they happened to be listening at the start, which they never are.
+        # Whatever this machine captures its desktop with. X11 here, D3D11 on
+        # Windows; the difference is a table lookup rather than anything the
+        # rest of this function needs to know.
+        source = pick_source()
+        if source is None:
+            raise RuntimeError(
+                "this machine has no way to capture its screen: none of %s"
+                % ", ".join(name for name, _line, _ptr in SOURCES))
+        source_element, source_line, self._pointer_property = source
+        self.source_name = source_element
+        log.info("capturing with %s", source_element)
+
         description = (
             # The pointer is off while nobody is driving: a mouse cursor
             # sitting over a game is noise, and there is nothing to point
             # with. Stage.show_pointer turns it on for as long as somebody
             # holds the desk -- see there for why it cannot simply be left on.
-            f"ximagesrc display-name={cfg.display} use-damage=0 show-pointer=false "
+            f"{source_line.format(display=cfg.display)} "
             f"! video/x-raw,framerate={cfg.fps}/1 "
             f"! {convert} "
             f"! {encoder} "
@@ -587,8 +679,6 @@ class Stage:
             f"! appsink name=vsink emit-signals=true sync=false "
             f"max-buffers=4 drop=true"
         )
-        # Named so they can be found and silenced directly when stopping.
-        description = description.replace("ximagesrc ", "ximagesrc name=capture ")
         self._description = description
         self._audio_description = self._audio_branch() if cfg.audio else ""
         self._build(with_audio=bool(self._audio_description))
@@ -613,12 +703,20 @@ class Stage:
         is that nothing downstream can ever hold up the microphone.
         """
         cfg = self.cfg
-        for element in ("pulsesrc", "opusenc", "rtpopuspay"):
+        for element in ("opusenc", "rtpopuspay"):
             if not Gst.ElementFactory.find(element):
                 log.warning("no %s: the session will be silent", element)
                 return ""
+        sound = pick_sound()
+        if sound is None:
+            log.warning("no loopback capture on this machine (none of %s): "
+                        "the session will be silent",
+                        ", ".join(name for name, _line in SOUNDS))
+            return ""
+        sound_element, sound_line = sound
+        log.info("recording the sound with %s", sound_element)
         return (
-            f" pulsesrc name=sound device={cfg.audio_device} provide-clock=false "
+            f" {sound_line.format(device=cfg.audio_device)} "
             f"! queue name=soundq max-size-time={cfg.audio_queue_ms}000000 "
             f"max-size-buffers=0 max-size-bytes=0 leaky=downstream "
             f"! audioconvert ! audioresample "
@@ -738,8 +836,9 @@ class Stage:
         # Silence the sources first. Taking a whole pipeline to NULL can block
         # for a long time when webrtcbin has live transports in it, and an
         # abandoned pipeline that is still capturing costs a screen grab and an
-        # encode for as long as the process lives. Stopping ximagesrc and
-        # pulsesrc is immediate and ends that cost even if the rest hangs.
+        # encode for as long as the process lives. Stopping the two sources is
+        # immediate and ends that cost even if the rest hangs -- by name,
+        # because which elements they are depends on the machine.
         for name in ("capture", "sound"):
             element = self.pipeline.get_by_name(name)
             if element is not None:
@@ -1012,8 +1111,16 @@ class Stage:
         element = self.pipeline.get_by_name("capture")
         if element is None:
             return False
+        # What this source calls it, because they disagree: ximagesrc says
+        # show-pointer and d3d11screencapturesrc says show-cursor. A source
+        # that cannot draw the pointer at all says so rather than being asked.
+        prop = getattr(self, "_pointer_property", "show-pointer")
+        if not prop:
+            log.info("%s cannot draw the pointer into the picture",
+                     getattr(self, "source_name", "this capture"))
+            return False
         try:
-            element.set_property("show-pointer", bool(yes))
+            element.set_property(prop, bool(yes))
         except Exception:
             log.exception("could not change whether the pointer is captured")
             return False
