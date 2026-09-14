@@ -4837,8 +4837,37 @@ function cursorCoast(last) {
    at the same time is not a thing ten fingers on glass can do. */
 const deskMods = new Map();          // code -> "latched" | "locked"
 
+/* Whether a machine needs a field focused to get a keyboard at all.
+ *
+ * The contenteditable exists for one reason: a phone raises its keyboard when
+ * something focusable has focus, and will not otherwise. A laptop needs no
+ * such thing -- physical keys are read from a window listener and never
+ * touched that field -- and focusing it there is actively harmful, because
+ * macOS then treats every held key as text entry and draws its press-and-hold
+ * accent panel over the game. Reported as: holding W shows the other language
+ * characters, on both Safari and Chrome.
+ *
+ * Asked of the device rather than of the user agent string: what matters is
+ * whether there is a real keyboard, and hover/pointer say that as well as
+ * anything can. */
+function needsSoftKeyboard() {
+  try {
+    return window.matchMedia("(hover: none), (pointer: coarse)").matches;
+  } catch (_) {
+    return true;                    // no answer: behave as the phone does
+  }
+}
+
+/* Whether the keyboard is up, meaning *asked for*.
+ *
+ * This used to read document.activeElement, and could not be right on a
+ * machine where nothing is focused: a laptop typing into the console has its
+ * keyboard up in every sense that matters here and no field involved at all.
+ * The intent is already tracked, and the comment on deskShowKeyboard has
+ * always said the intent is the thing -- a phone takes focus away for its own
+ * reasons and that is not somebody deciding they have finished typing. */
 function deskKeyboardUp() {
-  return document.activeElement === el("desk-input");
+  return deskWantKeyboard;
 }
 
 /* Whether the keyboard is *wanted*, which is not the same as whether it is
@@ -4855,7 +4884,9 @@ function deskShowKeyboard(yes) {
   deskRefocus = 0;
   if (yes) {
     deskFieldClear(field);
-    field.focus({ preventScroll: true });
+    // Only where a field is what raises the keyboard. On a laptop this would
+    // buy nothing and cost the macOS accent panel over every held key.
+    if (needsSoftKeyboard()) field.focus({ preventScroll: true });
   } else {
     field.blur();
   }
@@ -5445,7 +5476,8 @@ function deskListen() {
       // focus turning this into a loop. Reaching it stops the *arguing*, not
       // the wanting: nothing is put away, and the next tap on the field opens
       // it again.
-      if (deskWantKeyboard && deskHeld && !document.hidden) {
+      if (deskWantKeyboard && deskHeld && !document.hidden
+          && needsSoftKeyboard()) {
         if (deskRefocus < 12) {
           deskRefocus += 1;
           // Straight away rather than after a turn of the event loop. A phone
