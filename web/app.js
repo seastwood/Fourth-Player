@@ -3326,6 +3326,35 @@ async function tellAboutSound() {
     + (codec && codec.sdpFmtpLine ? " [" + codec.sdpFmtpLine + "]" : ""));
 }
 
+/* What the page was actually given to lay out on, said once.
+
+ * Added because the controls and chips came out oversized in an iOS home
+ * screen app and nowhere else, and there are several ways that can happen
+ * which look identical from the outside: a layout viewport narrower than the
+ * screen (everything sized in vw is then magnified to fit), a taller viewport
+ * with no browser chrome (everything sized against the stage height grows), a
+ * pinch zoom that standalone mode remembers between launches, and the
+ * accessibility text size. These numbers tell them apart; guessing between
+ * them does not. */
+let shapeTold = false;
+
+function tellAboutTheShape() {
+  if (shapeTold) return;
+  shapeTold = true;
+  const vv = window.visualViewport;
+  const root = getComputedStyle(document.documentElement).fontSize;
+  const standalone = document.documentElement.classList.contains("standalone");
+  report("shape: layout " + document.documentElement.clientWidth + "x"
+    + document.documentElement.clientHeight
+    + ", window " + window.innerWidth + "x" + window.innerHeight
+    + ", screen " + Math.round(screen.width) + "x" + Math.round(screen.height)
+    + (vv ? ", visual " + Math.round(vv.width) + "x" + Math.round(vv.height)
+            + " at " + (vv.scale || 1).toFixed(2) + "x" : ", no visualViewport")
+    + ", dpr " + (window.devicePixelRatio || 1)
+    + ", root font " + root
+    + ", " + (standalone ? "standalone" : "in a browser tab"));
+}
+
 async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
@@ -3349,6 +3378,7 @@ async function watchMedia() {
   // Before the branches below, every one of which returns.
   noteFreezes(picture);
   tellAboutSound();
+  tellAboutTheShape();
   reportHealth(picture, path);
 
   if (bytes > lastBytes) {
