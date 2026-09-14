@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 
 log = logging.getLogger("fourthplayer.screen")
 
@@ -60,6 +61,17 @@ log = logging.getLogger("fourthplayer.screen")
 SHELLS = ("moonlight", "kodi", "xfdesktop",
           "xfce4-panel", "xfce4-appfinder", "thunar", "xfce4-session")
 
+# The same idea on Windows, where the shell has different names. explorer is
+# the desktop, the taskbar and every folder window; the rest are the places a
+# pad could wander into that are not a game.
+#
+# Steam is deliberately absent here as it is above: Big Picture is a thing you
+# play, and the console decided long ago that the answer to "a guest could
+# reach the store" is the account system rather than a dead controller.
+WINDOWS_SHELLS = ("explorer.exe", "shellexperiencehost", "searchhost",
+                  "startmenuexperiencehost", "applicationframehost",
+                  "taskmgr.exe", "systemsettings", "lockapp")
+
 
 def sh(*argv):
     """Ask X something. An answer we cannot get is not an error."""
@@ -77,6 +89,52 @@ def environment():
     return env
 
 
+def _windows_foreground():
+    """The focused window on Windows, as "process.exe title", lowercased.
+
+    The same shape of answer as the X version, by a different route: there is
+    no xdotool, and asking the desktop what is in front is three Win32 calls.
+
+    Both halves for the same reason too. A game's title is whatever it feels
+    like and its executable is not, while the shell's windows share
+    explorer.exe and differ only by title.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    window = user32.GetForegroundWindow()
+    if not window:
+        return ""
+
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+
+    name = ""
+    if pid.value:
+        # LIMITED_INFORMATION rather than QUERY_INFORMATION: it is the one a
+        # process gets for an application it does not own, which is most of
+        # them.
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)
+        if handle:
+            try:
+                size = wintypes.DWORD(1024)
+                buffer = ctypes.create_unicode_buffer(size.value)
+                if kernel32.QueryFullProcessImageNameW(
+                        handle, 0, buffer, ctypes.byref(size)):
+                    name = os.path.basename(buffer.value)
+            finally:
+                kernel32.CloseHandle(handle)
+
+    length = user32.GetWindowTextLengthW(window)
+    title = ""
+    if length:
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(window, buffer, length + 1)
+        title = buffer.value
+    return (" ".join(part for part in (name, title) if part)).lower()
+
+
 def foreground():
     """The focused window, as "class name", lowercased. "" if there is none.
 
@@ -84,6 +142,12 @@ def foreground():
     and its name is the film you are watching, while Steam's Big Picture window
     is named "Steam Big Picture Mode" under a class of `steamwebhelper`.
     """
+    if sys.platform == "win32":
+        try:
+            return _windows_foreground()
+        except Exception as exc:
+            log.warning("could not read what is in front (%s)", exc)
+            return ""
     window = sh("xdotool", "getactivewindow")
     if not window:
         return ""

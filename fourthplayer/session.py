@@ -2188,7 +2188,11 @@ class LiveSession:
         """
         if not self.cfg.guest_input_needs_a_game:
             return False, ""
-        shells = tuple(self.cfg.shell_windows) or screen.SHELLS
+        # The shell is a different set of programs on each platform, and the
+        # configured list wins over both.
+        default_shells = (screen.WINDOWS_SHELLS if sys.platform == "win32"
+                          else screen.SHELLS)
+        shells = tuple(self.cfg.shell_windows) or default_shells
         front = screen.foreground()
 
         # We could not read what is in front.
@@ -2212,6 +2216,20 @@ class LiveSession:
                     return False, ""
             except Exception:
                 pass
+            if sys.platform == "win32":
+                # On Linux an unreadable foreground means an override-redirect
+                # window, and a game is the likely answer -- launcher.running()
+                # settles it above. On Windows there is no launcher to ask: it
+                # looks for RetroArch, which is not how anybody plays here. So
+                # an unreadable foreground would hold every guest for ever,
+                # which is what it did: "guest controllers held: the desktop is
+                # in front", permanently, on a host with a game running.
+                #
+                # GetForegroundWindow answers for anything with a window, so
+                # nothing is a rare case rather than the normal one -- and when
+                # it does happen, the guest is far likelier looking at a game
+                # than at a menu. The hold exists for menus.
+                return False, ""
             return True, "the desktop"
 
         if not screen.is_shell(front, shells):
