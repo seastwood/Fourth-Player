@@ -2,78 +2,151 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fourth Player — setup</title>
-<style>
-  :root { color-scheme: dark; --bg:#14161a; --bg2:#1c1f26; --ink:#e8e8ea;
-          --dim:#9aa0ab; --edge:#ffd447; --bad:#ff6b6b; --ok:#6bd47f; }
-  body { margin:0; background:var(--bg); color:var(--ink);
-         font:15px/1.5 system-ui, sans-serif; }
-  main { max-width:56rem; margin:0 auto; padding:1.5rem 1.2rem 4rem; }
-  h1 { font-size:1.3rem; margin:0 0 .2rem; }
-  h2 { font-size:1rem; margin:2rem 0 .6rem; color:var(--edge); }
-  .sub { color:var(--dim); margin:0 0 1.5rem; }
-  section { background:var(--bg2); border-radius:.5rem; padding:1rem 1.1rem;
-            margin-bottom:1rem; }
-  table { border-collapse:collapse; width:100%; }
-  th, td { text-align:left; padding:.35rem .5rem; border-bottom:1px solid #2a2e37; }
-  th { color:var(--dim); font-weight:500; font-size:.85rem; }
-  code { background:#0d0f12; padding:.1rem .3rem; border-radius:.2rem; }
-  .pill { display:inline-block; background:#0d0f12; color:var(--dim);
-          padding:.05rem .4rem; border-radius:.6rem; font-size:.8rem;
-          margin-right:.2rem; }
-  .none { color:var(--dim); font-style:italic; }
-</style>
+<link rel="stylesheet" href="setup.css">
 <main>
-  <h1>Fourth Player</h1>
-  <p class="sub">The console's own page. It is on the loopback only, and it can
-     do the things the guest page deliberately cannot.</p>
+  <header>
+    <h1>Fourth Player</h1>
+    <p class="sub">The console's own page. On the loopback only, so being able
+       to open it is being at the machine — which is why it can do the two
+       things the guest page refuses to: make an account, and issue an
+       authenticator secret.</p>
+    <div id="trouble" class="warn" hidden></div>
+  </header>
 
-  <section>
-    <h2 style="margin-top:0">This machine</h2>
-    <table id="picked"></table>
+  <nav id="tabs">
+    <button data-tab="session" class="on">Session</button>
+    <button data-tab="guests">Guests</button>
+    <button data-tab="accounts">Accounts</button>
+    <button data-tab="picture">Picture</button>
+    <button data-tab="machine">This machine</button>
+  </nav>
+
+  <!-- ---- session ---- -->
+  <section id="tab-session">
+    <div class="card">
+      <h2>The session</h2>
+      <div id="session-now" class="now">…</div>
+      <div class="row" id="session-closed" hidden>
+        <label>for <input id="start-minutes" type="number" min="0" value="0"
+                          style="width:5rem"> minutes <span class="hint">(0 = no limit)</span></label>
+        <label>with <input id="start-slots" type="number" min="1" max="8" value="3"
+                          style="width:4rem"> slots</label>
+        <button class="go" data-do="start">Open a session</button>
+      </div>
+      <div class="row" id="session-open" hidden>
+        <label>add <input id="extend-minutes" type="number" min="1" value="30"
+                          style="width:5rem"> minutes</label>
+        <button data-do="extend">Extend</button>
+        <button data-do="reshare">New link and PIN</button>
+        <button class="danger" data-do="stop">End the session</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>How guests get in</h2>
+      <div class="row">
+        <label>Link <select id="set-link">
+          <option value="required">required — the link and the PIN</option>
+          <option value="open">open — the address and the PIN</option>
+        </select></label>
+        <label>Slots next time <input id="set-slots" type="number" min="1" max="8" style="width:4rem"></label>
+        <label>Connected at once <input id="set-limit" type="number" min="1" max="8" style="width:4rem"></label>
+      </div>
+      <div class="row">
+        <label>A PIN you choose <input id="set-pin" placeholder="six digits, or blank for a new one each time" style="width:20rem"></label>
+      </div>
+      <div class="row">
+        <label>Address links are built on <input id="set-url" placeholder="https://example.com — blank for this machine's address" style="width:26rem"></label>
+      </div>
+      <div class="row">
+        <label>Guests may start games <select id="set-policy"></select></label>
+        <label>Share one controller <select id="set-share">
+          <option value="on">yes</option><option value="off">no</option>
+        </select></label>
+      </div>
+      <div class="row"><button class="go" data-do="apply-access">Apply</button></div>
+    </div>
   </section>
 
-  <section>
-    <h2 style="margin-top:0">Accounts</h2>
-    <table id="accounts"></table>
+  <!-- ---- guests ---- -->
+  <section id="tab-guests" hidden>
+    <div class="card">
+      <h2>Connected now</h2>
+      <table id="guests"></table>
+    </div>
+    <div class="card">
+      <h2>Who may join</h2>
+      <div class="row">
+        <label>Lock <select id="set-lock">
+          <option value="off">off — anybody with the link and PIN</option>
+          <option value="accounts">accounts — only people who have logged in</option>
+        </select></label>
+        <button data-do="apply-lock">Apply</button>
+      </div>
+      <p class="hint">The primary account can never be shut out by a lock.</p>
+    </div>
   </section>
 
-  <section>
-    <h2 style="margin-top:0">Session</h2>
-    <div id="session" class="none">loading…</div>
+  <!-- ---- accounts ---- -->
+  <section id="tab-accounts" hidden>
+    <div class="card">
+      <h2>Accounts</h2>
+      <table id="accounts"></table>
+    </div>
+    <div class="card">
+      <h2>Make one</h2>
+      <p class="hint">The first account made is the primary: a session lock can
+         never shut it out. Capabilities are not implied by that — tick what it
+         should have.</p>
+      <div class="row">
+        <label>Name <input id="add-name" maxlength="32" style="width:12rem"></label>
+        <label>Password <input id="add-password" type="password" style="width:14rem"></label>
+      </div>
+      <div class="row" id="add-can"></div>
+      <div class="row"><button class="go" data-do="account-add">Create, and show the authenticator secret</button></div>
+    </div>
+    <div id="secret" class="card secret" hidden>
+      <h2>Set up an authenticator now</h2>
+      <p class="warn">This is shown once. It is not stored anywhere this page
+         could read it again.</p>
+      <div id="secret-body"></div>
+      <button data-do="secret-done">I have scanned it</button>
+    </div>
+  </section>
+
+  <!-- ---- picture ---- -->
+  <section id="tab-picture" hidden>
+    <div class="card">
+      <h2>The picture</h2>
+      <p class="hint">Every one of these is fixed when the pipeline is built, so
+         applying them rebuilds it — about a second of held picture for
+         everybody. That is why there is an Apply button rather than live
+         sliders.</p>
+      <div class="row">
+        <label>Size <select id="set-size"></select></label>
+        <label>Frames a second <select id="set-fps">
+          <option>30</option><option>60</option>
+        </select></label>
+      </div>
+      <div class="row">
+        <label>Bitrate <input id="set-bitrate" type="number" min="500" max="20000" step="500" style="width:6rem"> kb/s</label>
+        <label>Codec <select id="set-codec"></select></label>
+      </div>
+      <div class="row"><button class="go" data-do="apply-stream">Apply</button></div>
+    </div>
+  </section>
+
+  <!-- ---- machine ---- -->
+  <section id="tab-machine" hidden>
+    <div class="card">
+      <h2>What this machine chose</h2>
+      <table id="picked"></table>
+    </div>
+    <div class="card">
+      <h2>Troubleshooting</h2>
+      <table id="diag"></table>
+    </div>
   </section>
 </main>
-<script>
-const el = (id) => document.getElementById(id);
-
-function rows(into, pairs) {
-  into.innerHTML = pairs.map(([k, v]) =>
-    `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
-}
-
-async function load() {
-  const state = await (await fetch("/api/state", {method: "POST"})).json();
-  const p = state.picked || {};
-  rows(el("picked"), [
-    ["capture", p.capture ? `<code>${p.capture}</code>` : "<span class=none>none</span>"],
-    ["encoder", p.encoder ? `<code>${p.encoder}</code> (${p.encoder_kind})` : "<span class=none>none</span>"],
-    ["sound", p.sound ? `<code>${p.sound}</code>` : "<span class=none>none — silent</span>"],
-    ["refused requests to this page", state.refused],
-  ]);
-
-  const list = state.accounts || [];
-  el("accounts").innerHTML =
-    "<tr><th>name</th><th>may</th><th>devices</th></tr>" +
-    (list.length ? list.map(a =>
-      `<tr><td>${a.name}${a.name === state.primary ? " <span class=pill>primary</span>" : ""}</td>` +
-      `<td>${(a.can || []).map(c => `<span class=pill>${c}</span>`).join("") || "<span class=none>nothing yet</span>"}</td>` +
-      `<td>${a.devices}</td></tr>`).join("")
-     : "<tr><td colspan=3 class=none>no accounts yet</td></tr>");
-
-  const s = state.session;
-  el("session").innerHTML = s && s.open
-    ? `open, ${s.guests ? s.guests.length : 0} guest(s)`
-    : "<span class=none>no session open</span>";
-}
-load();
-setInterval(load, 4000);
-</script>
+<div id="say" class="say" hidden></div>
+<script src="setup.js"></script>

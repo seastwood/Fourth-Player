@@ -1032,6 +1032,17 @@ class Server:
     async def _command(self, request):
         command = request.get("cmd")
         try:
+            if command == "quit":
+                # Answered before going, so whoever asked hears that it was
+                # heard. The stop itself happens on the next turn of the loop,
+                # by which time this reply is on its way out.
+                done = getattr(self, "_done", None)
+                if done is None or done.done():
+                    return {"ok": False, "error": "not running yet"}
+                self.loop.call_soon(
+                    lambda: done.done() or done.set_result("quit"))
+                log.info("asked to stop, and stopping")
+                return {"ok": True, "stopping": True}
             if command == "setup":
                 # The address, to whoever could already reach this channel --
                 # which is the same user, by the same file permissions. It is
@@ -1604,7 +1615,12 @@ class Server:
         watchdog = self.loop.create_task(self._watch_memory())
 
         try:
-            await asyncio.Future()
+            # Not a Future that never resolves any more: the tray icon and
+            # the setup page can ask this to stop, and "stop" has to mean the
+            # same orderly shutdown a signal gets rather than a killed
+            # process leaving pads plugged in and a pipeline mid-teardown.
+            self._done = self.loop.create_future()
+            await self._done
         finally:
             watchdog.cancel()
             if self.session:

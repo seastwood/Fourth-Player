@@ -271,6 +271,7 @@ class SetupUI:
             "session": summary,
             "picked": picked,
             "refused": self.refused,
+            "diagnostics": self._diagnostics(),
         }
 
     # -- accounts ----------------------------------------------------------
@@ -340,3 +341,104 @@ class SetupUI:
         name = (body.get("name") or "").strip()
         accounts.forget_devices(name)
         return {"ok": True, "name": name}
+
+    # -- everything the command line can do --------------------------------
+
+    async def _api_control(self, body):
+        """Forward one command to the server's own control handler.
+
+        Deliberately a forwarder rather than an endpoint per command. The
+        control channel already carries the whole operating surface -- start,
+        stop, extend, reshare, pin, slots, limit, lock, link, url, policy,
+        share, kick, approve, deny, stream -- and writing each of them out
+        again here would be a second list to keep in agreement with the first,
+        which is how a page ends up quietly missing the one setting somebody
+        needs.
+
+        It is not a widening of anything. Reaching this page at all means
+        holding a token written where only this user can read it, and that
+        user can already run `fourth-player stop` from a terminal. What it
+        forwards to is the same method the control socket calls, in the same
+        process, so there is no second implementation to disagree.
+
+        `quit` is refused here on purpose -- see the note on it below.
+        """
+        command = (body.get("cmd") or "").strip()
+        if not command:
+            return {"ok": False, "error": "no command given"}
+        if command == "quit":
+            # Not because it would be dangerous -- the tray does exactly this
+            # -- but because a page that shuts down the server it is served by
+            # cannot report what happened, and leaves a browser tab that looks
+            # broken rather than finished. The tray asks, and can say so.
+            return {"ok": False,
+                    "error": "stopping the host is done from the tray icon, "
+                             "which can still tell you what happened "
+                             "afterwards"}
+        request = dict(body)
+        request["cmd"] = command
+        return await self.server._command(request)
+
+    async def _api_qr(self, body):
+        """The authenticator URI as something a camera can read.
+
+        Drawn here rather than by a library pulled into the page: the host
+        already has the one the command line uses, and a setup page on a
+        machine with no internet should not need to fetch anything to show a
+        QR code -- which is the one moment it absolutely must work.
+
+        invert=True for the same reason `admin add` uses it: dark-on-light is
+        what a phone camera expects, and a light-on-dark code is a
+        photographic negative most scanners refuse.
+        """
+        text = body.get("text") or ""
+        if not text:
+            return {"ok": False, "error": "nothing to draw"}
+        try:
+            import io
+            import qrcode
+        except ImportError:
+            return {"ok": False, "error": "python3-qrcode is not installed"}
+        drawn = qrcode.QRCode(border=2)
+        drawn.add_data(text)
+        out = io.StringIO()
+        drawn.print_ascii(out=out, invert=True)
+        return {"ok": True, "art": out.getvalue()}
+
+    async def _api_diagnostics(self, _body):
+        return {"ok": True, **self._diagnostics()}
+
+    def _diagnostics(self):
+        """What somebody would otherwise have to ask three programs for.
+
+        Each piece guarded on its own, for the reason _api_state is: this is
+        the page you open when something is wrong, so it has to draw on a
+        machine where things are.
+        """
+        import platform
+        out = {}
+        try:
+            out["platform"] = "%s %s" % (platform.system(), platform.release())
+            out["python"] = platform.python_version()
+        except Exception:
+            pass
+        try:
+            from .codes import HAVE_EVDEV
+            from .virtual import BACKEND
+            out["pads"] = "%s (%s codes)" % (
+                BACKEND, "evdev" if HAVE_EVDEV else "built-in table")
+        except Exception as exc:
+            out["pads"] = "unavailable: %s" % exc
+        try:
+            from gi.repository import Gst
+            out["gstreamer"] = Gst.version_string()
+        except Exception as exc:
+            out["gstreamer"] = "unavailable: %s" % exc
+        out["uptime"] = time.time() - self.started
+        # What has been turned away, which is the other half of troubleshooting:
+        # "it says the PIN is wrong" and "nothing has even reached the host"
+        # look identical from a guest's side.
+        server = self.server
+        out["bad_pins"] = getattr(server, "refused_pins", None)
+        out["bad_logins"] = getattr(server, "refused_logins", None)
+        return out

@@ -1,0 +1,312 @@
+/* The console's setup page.
+ *
+ * Every session control goes through one endpoint -- /api/control -- which
+ * forwards to the same handler the command line talks to. That is deliberate:
+ * a second list of commands here would be a second thing to keep in agreement
+ * with the first, which is how a page ends up quietly missing the one setting
+ * somebody needs. The account calls are separate only because they are not in
+ * the control channel at all, for the reason the README gives.
+ */
+const el = (id) => document.getElementById(id);
+let STATE = {};
+
+async function post(path, body) {
+  const answer = await fetch(path, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify(body || {}),
+  });
+  return answer.json();
+}
+
+const control = (cmd, extra) => post("/api/control", Object.assign({cmd}, extra || {}));
+
+function say(text, bad) {
+  const box = el("say");
+  box.textContent = text;
+  box.classList.toggle("bad", !!bad);
+  box.hidden = false;
+  clearTimeout(say.timer);
+  say.timer = setTimeout(() => { box.hidden = true; }, bad ? 8000 : 4000);
+}
+
+/* An answer from the host, reported the same way every time. Returns whether
+   it worked, so a caller can decide what to do next without re-reading it. */
+function heard(answer, done) {
+  if (answer && answer.ok) {
+    if (done) say(done);
+    return true;
+  }
+  say((answer && (answer.error || answer.message)) || "that did not work", true);
+  return false;
+}
+
+/* ---- drawing ---- */
+
+function rows(into, pairs) {
+  into.innerHTML = pairs.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
+}
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
+  (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function drawSession(s) {
+  const open = s && s.open;
+  el("session-closed").hidden = !!open;
+  el("session-open").hidden = !open;
+  if (!open) {
+    el("session-now").innerHTML = "<span class=none>No session open.</span>";
+    return;
+  }
+  const bits = [];
+  if (s.join_url) bits.push(`link <code>${esc(s.join_url)}</code>`);
+  if (s.pin) bits.push(`PIN <code>${esc(s.pin)}</code>`);
+  bits.push(s.minutes_left ? `${s.minutes_left} minutes left` : "no time limit");
+  bits.push(`${(s.guests || []).length} of ${s.slots || "?"} slots`);
+  el("session-now").innerHTML = bits.join(" &middot; ");
+}
+
+function drawGuests(s) {
+  const guests = (s && s.guests) || [];
+  el("guests").innerHTML =
+    "<tr><th>slot</th><th>name</th><th>state</th><th>inputs</th><th></th></tr>" +
+    (guests.length ? guests.map((g) =>
+      `<tr><td>${g.slot}</td><td>${esc(g.label || g.name || "—")}</td>` +
+      `<td>${esc(g.state || (g.connected ? "connected" : "—"))}</td>` +
+      `<td>${g.inputs == null ? "—" : g.inputs}</td>` +
+      `<td><button data-kick="${g.slot}">Remove</button></td></tr>`).join("")
+     : "<tr><td colspan=5 class=none>nobody is connected</td></tr>");
+}
+
+function drawAccounts(state) {
+  const list = state.accounts || [];
+  el("accounts").innerHTML =
+    "<tr><th>name</th><th>may</th><th>devices</th><th></th></tr>" +
+    (list.length ? list.map((a) => {
+      const caps = (state.capabilities || []).map((c) =>
+        `<span class="pill ${a.can.includes(c) ? "on" : ""}" data-can="${a.name}" ` +
+        `data-cap="${c}" title="click to change">${c}</span>`).join("");
+      return `<tr><td>${esc(a.name)}` +
+        (a.name === state.primary ? ' <span class="pill on">primary</span>' : "") +
+        `</td><td>${caps}</td><td>${a.devices}` +
+        (a.devices ? ` <button data-forget="${esc(a.name)}">sign out</button>` : "") +
+        `</td><td><button data-reset2fa="${esc(a.name)}">new authenticator</button>` +
+        (a.name === state.primary ? "" :
+          ` <button class="danger" data-remove="${esc(a.name)}">remove</button>`) +
+        `</td></tr>`;
+    }).join("") : "<tr><td colspan=4 class=none>no accounts yet</td></tr>");
+
+  if (!el("add-can").dataset.built) {
+    el("add-can").innerHTML = (state.capabilities || []).map((c) =>
+      `<label><input type="checkbox" value="${c}"> ${c}</label>`).join("");
+    el("add-can").dataset.built = "1";
+  }
+}
+
+function drawMachine(state) {
+  const p = state.picked || {};
+  rows(el("picked"), [
+    ["capture", p.capture ? `<code>${esc(p.capture)}</code>` : '<span class=none>none</span>'],
+    ["encoder", p.encoder ? `<code>${esc(p.encoder)}</code> (${esc(p.encoder_kind)})`
+                          : '<span class=none>none</span>'],
+    ["sound", p.sound ? `<code>${esc(p.sound)}</code>`
+                      : '<span class=none>none — sessions are silent</span>'],
+  ]);
+  const d = state.diagnostics || {};
+  rows(el("diag"), [
+    ["platform", esc(d.platform || "—")],
+    ["python", esc(d.python || "—")],
+    ["gstreamer", esc(d.gstreamer || "—")],
+    ["virtual pads", esc(d.pads || "—")],
+    ["uptime", d.uptime == null ? "—" : Math.round(d.uptime / 60) + " minutes"],
+    ["refused requests to this page", state.refused],
+    ["failed logins since start", d.bad_logins == null ? "—" : d.bad_logins],
+    ["rejected PINs since start", d.bad_pins == null ? "—" : d.bad_pins],
+  ]);
+}
+
+function fillControls(s) {
+  if (!s) return;
+  const set = (id, v) => { const n = el(id); if (n && document.activeElement !== n && v != null) n.value = v; };
+  set("set-link", s.require_link ? "required" : "open");
+  set("set-slots", s.slots);
+  set("set-limit", s.limit);
+  set("set-url", s.public_url || "");
+  set("set-share", s.share_pads ? "on" : "off");
+  set("set-lock", s.locked || "off");
+  const policy = el("set-policy");
+  if (policy && !policy.dataset.built && s.policies) {
+    policy.innerHTML = s.policies.map((p) => `<option value="${p}">${p}</option>`).join("");
+    policy.dataset.built = "1";
+  }
+  set("set-policy", s.policy);
+  const stream = s.stream || {};
+  const size = el("set-size");
+  if (size && !size.dataset.built && stream.sizes) {
+    size.innerHTML = stream.sizes.map((x) => `<option value="${x}">${x}</option>`).join("");
+    size.dataset.built = "1";
+  }
+  set("set-size", stream.size);
+  set("set-fps", stream.fps);
+  set("set-bitrate", stream.bitrate_kbps);
+  const codec = el("set-codec");
+  if (codec && !codec.dataset.built) {
+    codec.innerHTML = ["auto", "h264", "h265"].map((c) => `<option>${c}</option>`).join("");
+    codec.dataset.built = "1";
+  }
+  set("set-codec", stream.codec);
+}
+
+/* ---- loading ---- */
+
+async function load() {
+  const state = await post("/api/state");
+  STATE = state;
+  el("trouble").hidden = !state.trouble;
+  if (state.trouble) el("trouble").textContent = state.trouble;
+  drawSession(state.session);
+  drawGuests(state.session);
+  drawAccounts(state);
+  drawMachine(state);
+  fillControls(state.session);
+}
+
+/* ---- doing ---- */
+
+const ACTIONS = {
+  async start() {
+    const minutes = Number(el("start-minutes").value) || 0;
+    const slots = Number(el("start-slots").value) || 3;
+    heard(await control("start", {minutes, slots}), "session open");
+  },
+  async extend() {
+    heard(await control("extend", {minutes: Number(el("extend-minutes").value) || 30}),
+          "time added");
+  },
+  async reshare() { heard(await control("reshare"), "a new link and PIN"); },
+  async stop() {
+    const guests = ((STATE.session || {}).guests || []).length;
+    if (!confirm(guests ? `End the session? ${guests} guest(s) are connected.`
+                        : "End the session?")) return;
+    heard(await control("stop"), "session ended");
+  },
+  async "apply-access"() {
+    const steps = [
+      ["link", {set: el("set-link").value}],
+      ["slots", {slots: Number(el("set-slots").value)}],
+      ["limit", {limit: Number(el("set-limit").value)}],
+      ["url", {url: el("set-url").value}],
+      ["share", {set: el("set-share").value}],
+      ["policy", {policy: el("set-policy").value}],
+    ];
+    const pin = el("set-pin").value.trim();
+    if (pin) steps.push(["pin", {pin}]);
+    let bad = 0;
+    for (const [cmd, extra] of steps) {
+      const answer = await control(cmd, extra);
+      if (!answer.ok) { bad++; say(`${cmd}: ${answer.error || "refused"}`, true); }
+    }
+    if (!bad) say("applied");
+  },
+  async "apply-lock"() {
+    heard(await control("lock", {set: el("set-lock").value}), "applied");
+  },
+  async "apply-stream"() {
+    heard(await control("stream", {
+      size: el("set-size").value,
+      fps: Number(el("set-fps").value),
+      bitrate_kbps: Number(el("set-bitrate").value),
+      codec: el("set-codec").value,
+    }), "the picture is being rebuilt");
+  },
+  async "account-add"() {
+    const can = Array.from(el("add-can").querySelectorAll("input:checked"))
+      .map((b) => b.value);
+    const answer = await post("/api/account/add", {
+      name: el("add-name").value,
+      password: el("add-password").value,
+      can,
+    });
+    if (!heard(answer)) return;
+    el("add-name").value = el("add-password").value = "";
+    el("add-can").querySelectorAll("input:checked").forEach((b) => { b.checked = false; });
+    showSecret(answer);
+  },
+  "secret-done"() {
+    el("secret").hidden = true;
+    el("secret-body").innerHTML = "";     // not left in the document
+  },
+};
+
+function showSecret(answer) {
+  el("secret-body").innerHTML =
+    `<p>Account <strong>${esc(answer.name)}</strong></p>` +
+    `<p>secret: <code>${esc(answer.secret)}</code></p>` +
+    `<p>or point a camera at this:</p><pre id="qr">drawing…</pre>` +
+    `<p class="hint">URI: <code>${esc(answer.uri)}</code></p>`;
+  el("secret").hidden = false;
+  el("secret").scrollIntoView({behavior: "smooth", block: "center"});
+  drawQr(answer.uri);
+}
+
+/* The QR code is drawn by the host, which already has the library the command
+   line uses -- rather than pulling a second one into this page. */
+async function drawQr(uri) {
+  const answer = await post("/api/qr", {text: uri});
+  el("qr").textContent = answer.ok ? answer.art : "(could not draw one — use the secret above)";
+}
+
+/* ---- wiring ---- */
+
+document.addEventListener("click", async (event) => {
+  const target = event.target;
+  const doing = target.dataset && target.dataset.do;
+  if (doing && ACTIONS[doing]) { await ACTIONS[doing](); await load(); return; }
+  if (target.dataset && target.dataset.kick) {
+    if (!confirm("Remove this guest?")) return;
+    heard(await control("kick", {slot: Number(target.dataset.kick)}), "removed");
+    await load(); return;
+  }
+  if (target.dataset && target.dataset.reset2fa) {
+    const name = target.dataset.reset2fa;
+    if (!confirm(`A new authenticator secret for ${name}?\n\nEvery remembered device is signed out.`)) return;
+    const answer = await post("/api/account/reset2fa", {name});
+    if (heard(answer)) showSecret(answer);
+    await load(); return;
+  }
+  if (target.dataset && target.dataset.remove) {
+    const name = target.dataset.remove;
+    if (!confirm(`Remove the account ${name}?`)) return;
+    heard(await post("/api/account/remove", {name}), "removed");
+    await load(); return;
+  }
+  if (target.dataset && target.dataset.forget) {
+    heard(await post("/api/account/forget_devices", {name: target.dataset.forget}),
+          "signed out everywhere");
+    await load(); return;
+  }
+  if (target.dataset && target.dataset.can) {
+    // One capability toggled, and the whole list sent -- set_capabilities
+    // replaces rather than adds, so sending one would take the rest away.
+    const name = target.dataset.can, cap = target.dataset.cap;
+    const account = (STATE.accounts || []).find((a) => a.name === name);
+    if (!account) return;
+    const can = account.can.includes(cap)
+      ? account.can.filter((c) => c !== cap)
+      : account.can.concat([cap]);
+    heard(await post("/api/account/can", {name, can}), `${name} may now: ${can.join(" ") || "nothing"}`);
+    await load();
+  }
+});
+
+el("tabs").addEventListener("click", (event) => {
+  const which = event.target.dataset && event.target.dataset.tab;
+  if (!which) return;
+  for (const button of el("tabs").children) button.classList.toggle("on", button === event.target);
+  for (const name of ["session", "guests", "accounts", "picture", "machine"]) {
+    el("tab-" + name).hidden = name !== which;
+  }
+});
+
+load();
+setInterval(() => { if (el("secret").hidden) load(); }, 5000);
