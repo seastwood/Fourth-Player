@@ -32,7 +32,7 @@ gi.require_version("GstSdp", "1.0")
 gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib, GObject  # noqa: E402
 
-from . import net  # noqa: E402
+from . import net, screen  # noqa: E402
 
 log = logging.getLogger("fourthplayer.video")
 
@@ -974,6 +974,24 @@ class Stage:
                  self.sending_width, self.sending_height, self.cfg.fps,
                  self.cfg.bitrate_kbps, self.encoder_name,
                  "on" if self.has_audio else "off")
+        # Asking for more than the desktop has is not a sharper picture. It is
+        # the same pixels scaled up, carried at whatever bitrate was set for
+        # them, and it looks like the stream being soft for no reason -- which
+        # is a thing somebody will spend an evening on. Said once, here, where
+        # the two numbers are both known.
+        try:
+            desktop = screen.desktop_size(self.cfg.display)
+        except Exception:
+            desktop = None
+        if desktop and (self.sending_width > desktop[0]
+                        or self.sending_height > desktop[1]):
+            log.warning("the picture asked for (%dx%d) is larger than this "
+                        "machine's desktop (%dx%d), so it is being scaled up: "
+                        "no more detail than %dx%d, at the bitrate of the "
+                        "bigger one. Raise the desktop resolution to get a "
+                        "genuinely sharper stream.",
+                        self.sending_width, self.sending_height,
+                        desktop[0], desktop[1], desktop[0], desktop[1])
 
     def stop(self):
         """Stop capturing. Must not block, whatever state anything is in.

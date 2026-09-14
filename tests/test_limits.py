@@ -68,5 +68,30 @@ check(re.search(r"box\.max = bound\[1\]", script),
 check('"limits"' in session,
       "the host actually publishes them in stream_settings")
 
+print()
+print("a screen bigger than 1080p can be asked for")
+low_h, high_h = limits.get("height", (0, 0))
+check(high_h >= 1440,
+      "the host offers more than 1080p (up to %dp); a 2560-wide laptop was "
+      "capped below its own panel" % high_h)
+sizes = re.search(r"STREAM_SIZES = \{(.*?)\n    \}", session, re.S)
+named = [int(h) for h in re.findall(r"(\d+): \(\d+, \d+\)",
+                                    sizes.group(1) if sizes else "")]
+check(1440 in named, "1440p is one of the named sizes")
+check(all(h <= high_h for h in named),
+      "and no named size is above the limit, which could only be refused: %s"
+      % named)
+
+print()
+print("and the host says how big its own desktop is")
+# Asking for more than the desktop has is an upscale, not a sharper picture.
+# Nothing said so, and the number is only knowable at the host.
+check('"desktop"' in session, "stream_settings publishes the desktop size")
+check("desktop_size" in open(os.path.join(ROOT, "fourthplayer",
+                                          "screen.py")).read(),
+      "and there is something that reads it")
+check("stream.desktop" in script,
+      "the page reads it, so somebody can see they are upscaling")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

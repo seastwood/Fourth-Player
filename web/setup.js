@@ -240,11 +240,24 @@ function fillPicture(stream, policies) {
   set("set-codec", stream.codec);
   const note = el("picture-now");
   if (note) {
+    // What the host's own screen is, and whether the picture asked for is
+    // bigger than it. A stream larger than the desktop is the same pixels
+    // scaled up at the bitrate of the bigger one: it looks soft for no
+    // apparent reason, and nothing said so.
+    const desk = stream.desktop || [];
+    let over = "";
+    if (desk.length === 2 && stream.height > desk[1]) {
+      over = ` — larger than this machine's desktop (${desk[0]}x${desk[1]}), `
+           + "so it is scaled up rather than sharper";
+    } else if (desk.length === 2) {
+      over = ` — desktop is ${desk[0]}x${desk[1]}`;
+    }
     note.textContent = stream.sending
       ? `sending ${stream.sending}${stream.encoder ? " with " + stream.encoder : ""}`
         + `${stream.hardware ? " (hardware)" : ""}`
-        + `${stream.playing ? ", " + stream.playing : ""}`
+        + `${stream.playing ? ", " + stream.playing : ""}${over}`
       : "";
+    note.classList.toggle("warn", Boolean(over) && over.includes("scaled up"));
   }
   const apply = document.querySelector('[data-do="apply-stream"]');
   if (apply) {
