@@ -533,6 +533,68 @@ def h264_profile_level_id(profile, height):
     return idc + level
 
 
+# HEVC levels, as (level-id, maximum luma samples per second). level-id is the
+# level times thirty, per RFC 7798. The sample rate is what actually decides:
+# 1080p fits inside level 3.1 by picture size and needs 4.1 to be played at
+# sixty frames a second.
+_H265_LEVELS = (
+    (63, 11_059_200),      # 2.1
+    (90, 16_711_680),      # 3.0
+    (93, 33_423_360),      # 3.1
+    (120, 66_846_720),     # 4.0
+    (123, 133_693_440),    # 4.1
+    (150, 267_386_880),    # 5.0
+    (153, 534_773_760),    # 5.1
+    (156, 1_069_547_520),  # 5.2
+)
+
+
+def h265_level_id(width, height, fps):
+    """The lowest HEVC level that covers this picture at this rate.
+
+    Advertising a level above what is sent is allowed; the reverse is not, and
+    is what a black screen at 1080p was. A browser given no `a=fmtp` at all
+    applies RFC 7798's defaults -- Main profile at level 3.1 -- which tops out
+    around 720p30, so a 1080p60 stream arrived at a decoder configured for
+    less than a third of it and nothing was drawn.
+    """
+    rate = max(1, int(width) * int(height) * max(1, int(fps)))
+    for level, allowed in _H265_LEVELS:
+        if rate <= allowed:
+            return level
+    return _H265_LEVELS[-1][0]
+
+
+def h265_fmtp(width, height, fps):
+    """The H.265 parameters a guest's browser reads before it decodes.
+
+    Main profile and Main tier, which is what every hardware encoder here
+    produces and every browser that lists H265 at all will take. tx-mode=SRST
+    says single RTP stream transmission, which is the only mode anything
+    implements and the default -- stated because a parameter a browser has to
+    infer is a parameter it can infer differently.
+    """
+    return ("profile-space=0;profile-id=1;tier-flag=0;"
+            f"level-id={h265_level_id(width, height, fps)};tx-mode=SRST")
+
+
+def fmtp_for(codec, profile, width, height, fps):
+    """The parameters to state for the stream actually being sent.
+
+    One function so both codecs are decided in the same place. H.265 went out
+    with nothing here for as long as it existed, because the H.264 branch was
+    written first and the other half of the conditional was an empty string
+    rather than a question anybody had asked.
+    """
+    if str(codec).lower() in ("h265", "hevc"):
+        return h265_fmtp(width, height, fps)
+    # The level is read off the picture that is actually sent, not the one
+    # that was asked for: a browser told level 4.0 and handed 540p is being
+    # told something untrue about the stream it is decoding.
+    return (f"profile-level-id={h264_profile_level_id(profile, height)};"
+            f"packetization-mode=1;level-asymmetry-allowed=1")
+
+
 def describe_sdp(text):
     """The shape of an SDP in one line, for the log.
 
@@ -552,8 +614,8 @@ def describe_sdp(text):
         ", refused: " + ",".join(refused) if refused else "")
 
 
-def with_fmtp(sdp, fmtp):
-    """Add the H.264 parameters a browser needs, if webrtcbin left them out.
+def with_fmtp(sdp, fmtp, encoding="H264"):
+    """Add the parameters a browser needs, if webrtcbin left them out.
 
     It leaves them out every time: the payloader learns the profile from the
     stream's first SPS, and the offer is written before a single frame has
@@ -565,16 +627,32 @@ def with_fmtp(sdp, fmtp):
     is a filter: one that names a profile-level-id the payloader does not
     produce matches nothing and passes nothing, which turns a picture that was
     merely refused by some browsers into no picture for anybody.
+
+    H.265 has the same hole and it is worse there, because its default is not
+    merely a conservative profile but level 3.1 -- about 720p30. A 1080p60
+    stream offered with no fmtp reached a decoder configured for less than a
+    third of it, and drew nothing at all.
+
+    The payload type is read out of the rtpmap line rather than assumed. It is
+    pinned to 96 in the pipeline, but an fmtp attached to the wrong number is
+    silently ignored, which is the same black screen with a longer search.
     """
-    if not fmtp or "a=fmtp:96" in sdp:
+    if not fmtp:
         return sdp
-    out, added = [], False
+    out, added, want = [], False, f" {encoding}".upper()
     for line in sdp.splitlines(True):
         out.append(line)
-        if not added and line.startswith("a=rtpmap:96 H264"):
-            ending = "\r\n" if line.endswith("\r\n") else "\n"
-            out.append(f"a=fmtp:96 {fmtp}{ending}")
-            added = True
+        if added or not line.startswith("a=rtpmap:"):
+            continue
+        head, _, rest = line[len("a=rtpmap:"):].partition(" ")
+        if not rest.upper().startswith(encoding.upper() + "/"):
+            continue
+        pt = head.strip()
+        if f"a=fmtp:{pt}" in sdp:            # webrtcbin wrote one after all
+            return sdp
+        ending = "\r\n" if line.endswith("\r\n") else "\n"
+        out.append(f"a=fmtp:{pt} {fmtp}{ending}")
+        added = True
     return "".join(out)
 
 
@@ -672,13 +750,8 @@ class Stage:
         # from these caps to build profile-level-id, and without it a browser
         # is guessing.
         profile = "" if hevc else f"! video/x-h264,profile={cfg.h264_profile} "
-        self._fmtp = "" if hevc else (
-            # The level is read off the picture that is actually sent, not
-            # the one that was asked for: a browser told level 4.0 and handed
-            # 540p is being told something untrue about the stream it is
-            # decoding.
-            f"profile-level-id={h264_profile_level_id(cfg.h264_profile, height)};"
-            f"packetization-mode=1;level-asymmetry-allowed=1")
+        self._fmtp = fmtp_for(self.codec, cfg.h264_profile,
+                              width, height, cfg.fps)
         parser = "h265parse" if hevc else "h264parse"
         payloader = "rtph265pay" if hevc else "rtph264pay"
         encoding = "H265" if hevc else "H264"
@@ -1715,7 +1788,8 @@ class Peer:
             log.error("peer %s: create-offer produced an empty description", self.id)
             return
         element.emit("set-local-description", offer, Gst.Promise.new())
-        text = with_fmtp(offer.sdp.as_text(), self.stage._fmtp)
+        text = with_fmtp(offer.sdp.as_text(), self.stage._fmtp,
+                         self.stage.encoding)
         log.info("peer %s: offering %s", self.id, describe_sdp(text))
         # The guest is told how much video to hold before it starts playing.
         # It is the only end that can do anything about arrival that is

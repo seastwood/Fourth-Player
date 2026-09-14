@@ -3355,6 +3355,45 @@ function tellAboutTheShape() {
     + ", " + (standalone ? "standalone" : "in a browser tab"));
 }
 
+/* Which codec the picture actually arrived as, and on what terms, said once.
+
+ * The host picks between H.264 and H.265 from what the browser claims it can
+ * decode, and until now an H.265 offer went out with no parameters at all --
+ * so the browser applied RFC 7798's defaults, level 3.1, and a 1080p60 stream
+ * reached a decoder configured for about a fifth of it. Nothing was drawn and
+ * nothing anywhere said why: the connection was up, the bytes were arriving,
+ * and the log showed a healthy stream.
+ *
+ * So the browser now says what it was given. A black picture with H265 and a
+ * level-id below what the picture needs is that bug; a black picture without
+ * it is something else, and the difference took an evening to find by hand. */
+let pictureTold = false;
+
+async function tellAboutThePicture() {
+  if (pictureTold || !pc || !pc.getStats) return;
+  let video = null, codec = null;
+  try {
+    const stats = await pc.getStats();
+    const byId = new Map();
+    stats.forEach((r) => byId.set(r.id, r));
+    stats.forEach((r) => {
+      if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
+        video = r;
+      }
+    });
+    if (video && video.codecId) codec = byId.get(video.codecId);
+  } catch (_) { return; }
+  // Wait for frames rather than bytes: bytes arrive for a stream that is
+  // never successfully decoded, which is the case worth telling apart.
+  if (!video || (video.framesReceived || 0) < 30) return;
+  pictureTold = true;
+  report("picture: " + (codec ? codec.mimeType : "codec unknown")
+    + (codec && codec.sdpFmtpLine ? " [" + codec.sdpFmtpLine + "]" : " [no fmtp]")
+    + ", " + (video.framesReceived || 0) + " frames received, "
+    + (video.framesDecoded || 0) + " decoded, "
+    + (video.framesDropped || 0) + " dropped");
+}
+
 async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
@@ -3379,6 +3418,7 @@ async function watchMedia() {
   noteFreezes(picture);
   tellAboutSound();
   tellAboutTheShape();
+  tellAboutThePicture();
   reportHealth(picture, path);
 
   if (bytes > lastBytes) {
