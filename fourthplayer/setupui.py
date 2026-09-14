@@ -220,11 +220,19 @@ class SetupUI:
                          (json.dumps(answer) + "\n").encode())
 
     async def _api_state(self, _body):
-        """Everything the page draws, in one request."""
-        from . import video
+        """Everything the page draws, in one request.
+
+        Every part of it is guarded separately, and that is the whole design
+        rather than caution. This is the page somebody opens *because*
+        something is wrong: a host with no GStreamer, a broken plugin, a
+        video.py that will not even import. A status page that cannot draw
+        itself when the thing it reports on is broken is a status page for
+        the days you do not need one.
+        """
         session = self.server.session
         picked = {}
         try:
+            from . import video
             source = video.pick_source()
             sound = video.pick_sound()
             encoder = video.pick_encoder(
@@ -237,20 +245,30 @@ class SetupUI:
             }
         except Exception as exc:                   # pragma: no cover
             picked = {"error": str(exc)}
-        return {
-            "ok": True,
-            "accounts": [
+        try:
+            listed = [
                 {"name": a.get("name"),
                  "can": list(a.get("can") or []),
                  "devices": len(a.get("devices") or []),
                  "last_seen": a.get("last_seen")}
                 for a in accounts.all_accounts()
-            ],
+            ]
+            trouble = None
+        except Exception as exc:
+            listed, trouble = [], "the accounts file could not be read: %s" % exc
+        try:
+            summary = self.server._status() if session else None
+        except Exception as exc:
+            summary = {"error": str(exc)}
+        return {
+            "ok": True,
+            "trouble": trouble,
+            "accounts": listed,
             "capabilities": list(accounts.CAPABILITIES),
             "primary": (accounts.primary() or {}).get("name"),
             # The same summary `status` prints, from the same method, so the
             # page and the command line can never disagree about what is open.
-            "session": self.server._status() if session else None,
+            "session": summary,
             "picked": picked,
             "refused": self.refused,
         }
