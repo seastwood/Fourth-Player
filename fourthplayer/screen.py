@@ -248,3 +248,44 @@ def is_shell(text, shells=SHELLS):
     if not text:
         return True
     return any(shell in text for shell in shells)
+
+
+def desktop_size(display=":0"):
+    """How big the screen being captured actually is, or None if unknown.
+
+    Worth publishing because asking for a bigger picture than the desktop is
+    not a sharper picture, it is the same pixels scaled up and more bitrate
+    spent carrying them. Somebody on a 2560-wide laptop reasonably asks for a
+    2560-wide stream; if the host's desktop is 1920 they get no more detail
+    than 1920 would have given, and nothing anywhere says so.
+
+    None rather than a guess when it cannot be read: a wrong number here would
+    be worse than none, since the page would draw a limit nobody has.
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            # Without this the numbers come back scaled by the DPI setting,
+            # which on a laptop is routinely 125% or 150% -- so a 1920 screen
+            # reads as 1536 and the picture is quietly capped below the panel.
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception:
+                user32.SetProcessDPIAware()
+            # The whole virtual desktop, which is what the capture takes:
+            # SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN, not the primary
+            # monitor, or a second screen would be cropped away.
+            width = user32.GetSystemMetrics(78)
+            height = user32.GetSystemMetrics(79)
+            if width > 0 and height > 0:
+                return (int(width), int(height))
+            width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+            return (int(width), int(height)) if width > 0 and height > 0 else None
+        except Exception:
+            return None
+    # X11: ask the server rather than any toolkit, so this needs nothing
+    # installed that the capture does not already need.
+    out = sh("xdpyinfo", "-display", display)
+    found = re.search(r"dimensions:\s+(\d+)x(\d+)", out or "")
+    return (int(found.group(1)), int(found.group(2))) if found else None

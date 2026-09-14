@@ -2416,7 +2416,14 @@ class LiveSession:
     STREAM_LIMITS = {
         # (lowest, highest). Height carries width: the two are set together
         # from a named size, so there is no way to ask for 1920x480.
-        "height": (480, 1080),
+        # Up to 2160 now. A laptop with a 2560-wide screen was capped at 1920
+        # and could not ask for the picture its panel could draw. The ceiling
+        # that actually matters is not here, though: it is the host's own
+        # desktop, because a stream larger than that is the same pixels scaled
+        # up and more bitrate spent carrying them. stream_settings publishes
+        # the desktop size so the page can say so rather than let somebody
+        # spend 40 Mb/s on an upscale.
+        "height": (480, 2160),
         "fps": (15, 60),
         # A hundred megabits. The ceiling is not about what the encoder can
         # do -- NVENC takes two gigabits and the picture stops improving long
@@ -2442,11 +2449,28 @@ class LiveSession:
     # whatever shape the television is, and these only say how much of it to
     # send.
     STREAM_SIZES = {
+        2160: (3840, 2160),
+        1440: (2560, 1440),
         1080: (1920, 1080),
         720: (1280, 720),
         540: (960, 540),
         480: (854, 480),
     }
+
+    def _desktop_size(self):
+        """The host's own screen, read once and remembered.
+
+        Once because it involves a subprocess on X11, and this is asked for
+        every time the page refreshes. A screen that changes size mid-session
+        is rare enough to be worth a restart, and a wrong answer here only
+        ever costs a hint.
+        """
+        if getattr(self, "_desktop", "unset") == "unset":
+            try:
+                self._desktop = screen.desktop_size(self.cfg.display)
+            except Exception:
+                self._desktop = None
+        return self._desktop
 
     def stream_settings(self):
         """What the picture is doing now, for the page to draw."""
@@ -2469,6 +2493,7 @@ class LiveSession:
             "hardware": getattr(stage, "encoder_kind", "") == "hardware",
             "sizes": sorted(self.STREAM_SIZES, reverse=True),
             "limits": {k: list(v) for k, v in self.STREAM_LIMITS.items()},
+            "desktop": list(self._desktop_size() or ()),
         }
 
     async def set_stream(self, asked, by=None):
