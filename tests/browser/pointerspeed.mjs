@@ -100,4 +100,21 @@ h = harness("2");
 h.fns.deskMoved(1, 1);
 check(h.flushed() === 1, "scaling did not swallow the send");
 
+console.log("\nand it is somewhere a person with a mouse would look");
+// It was first put in the controller panel, among the haptics -- which is the
+// one place somebody with a mouse and keyboard would never think to open.
+// Asked as: how do I edit sensitivity for a regular connected mouse/keyboard
+// setup?
+const html = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
+const deskPanel = html.slice(html.indexOf('id="session-desk"'),
+                             html.indexOf('id="session-reshare"'));
+check(/id="desk-speed"/.test(deskPanel),
+      "the control is inside the panel headed Keyboard and mouse");
+check(/Keyboard and mouse/.test(deskPanel), "which is what that panel is");
+const padPanel = html.slice(html.indexOf('<div id="pads"'),
+                            html.indexOf('id="session-desk"'));
+check(!/id="desk-speed"/.test(padPanel),
+      "and not in the controller panel, where it was and where nobody with a "
+      + "mouse would look");
+
 process.exit(fails ? 1 : 0);

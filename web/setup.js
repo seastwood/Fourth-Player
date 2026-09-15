@@ -245,7 +245,8 @@ function fillPicture(stream, policies) {
   const virtual = el("set-virtual");
   if (virtual) {
     virtual.checked = Boolean(stream.virtual_display);
-    // Disabled where it could not work, rather than offered and ignored.
+    // Disabled where it could not work, rather than offered and ignored --
+    // and never hidden, or "cannot" and "gone" look the same.
     virtual.disabled = !stream.can_virtual_display;
   }
   const virtualNote = el("virtual-note");

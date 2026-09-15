@@ -8151,10 +8151,30 @@ function paintScreens(state) {
   }
   if (row) row.hidden = !several;
 
+  // Shown even where the host cannot make one, disabled and with the reason
+  // beside it. Hiding it meant "this machine cannot do it" and "the control
+  // has gone" looked identical -- which is exactly what happened when the
+  // driver broke: the switch simply was not there and there was nothing
+  // anywhere to say why.
   const virtualRow = el("stream-virtual-row");
-  if (virtualRow) virtualRow.hidden = !state.can_virtual_display;
+  if (virtualRow) virtualRow.hidden = false;
   const virtual = el("stream-virtual");
-  if (virtual) virtual.checked = Boolean(state.virtual_display);
+  if (virtual) {
+    virtual.checked = Boolean(state.virtual_display);
+    virtual.disabled = !state.can_virtual_display;
+  }
+  const virtualNote = el("stream-virtual-note");
+  if (virtualNote) {
+    virtualNote.textContent = !state.can_virtual_display
+      ? "This machine has no virtual display driver, or it needs a restart to "
+        + "come back."
+      : state.on_virtual_display
+        ? "On — a display made at the size being sent, so nothing is scaled. "
+          + "Turning it off removes it, and any left over from before."
+        : "Makes a display in software at the size being sent, so nothing is "
+          + "scaled. Turning it off removes it, and any left over from before.";
+    virtualNote.classList.toggle("warn", !state.can_virtual_display);
+  }
 
   if (chip) {
     // Shown whenever there is more than one screen, the virtual one included.

@@ -25,11 +25,13 @@ function harness() {
   const nodes = {};
   const make = (id) => (nodes[id] = {
     id, hidden: false, innerHTML: "", value: "", textContent: "", title: "",
-    checked: false, dataset: {}, children: [],
+    checked: false, disabled: false, dataset: {}, children: [],
+    classList: { toggle() {} },
     appendChild(c) { this.children.push(c); },
   });
   for (const id of ["stream-screen", "stream-screen-row", "screen-chip",
-                    "stream-virtual", "stream-virtual-row"]) make(id);
+                    "stream-virtual", "stream-virtual-row",
+                    "stream-virtual-note"]) make(id);
   const document = {
     createElement: () => ({ value: "", textContent: "" }),
   };
@@ -105,16 +107,31 @@ check(names.some((t) => t.startsWith("Virtual display")),
 check(names.some((t) => t.includes("Screen 1")),
       "and the real monitor is still there to switch back to");
 
-console.log("\nthe virtual switch is only offered where it could work");
+console.log("\nthe virtual switch is always findable, and says why when it is not usable");
+// It used to be hidden where the host could not make one. That meant "this
+// machine cannot do it" and "the control has gone" looked identical -- which
+// is what happened when the driver broke: the switch simply was not there,
+// with nothing anywhere to say why, and the question came back as "where is
+// the virtual display toggle?".
 h = harness();
 h.paint({ screens: two, monitor: -1, can_virtual_display: false });
-check(h.nodes["stream-virtual-row"].hidden === true,
-      "hidden where the host cannot make one");
+check(h.nodes["stream-virtual-row"].hidden === false,
+      "the row is still there when the host cannot make one");
+check(h.nodes["stream-virtual"].disabled === true, "but the switch is disabled");
+check(/needs a restart|no virtual display driver/
+        .test(h.nodes["stream-virtual-note"].textContent),
+      `and it says why: "${h.nodes["stream-virtual-note"].textContent}"`);
+
 h = harness();
 h.paint({ screens: two, monitor: -1, can_virtual_display: true,
-          virtual_display: true });
+          virtual_display: true, on_virtual_display: true });
 check(h.nodes["stream-virtual-row"].hidden === false, "shown where it can");
+check(h.nodes["stream-virtual"].disabled === false, "and usable");
 check(h.nodes["stream-virtual"].checked === true, "and reflects the host");
+check(/Turning it off removes it/
+        .test(h.nodes["stream-virtual-note"].textContent),
+      "and says that turning it off gets rid of them, which is the thing that "
+      + "was asked for and was not obvious");
 
 console.log("\nthe chip cycles, and wraps");
 const click = app.slice(app.indexOf('if (el("screen-chip"))'),
