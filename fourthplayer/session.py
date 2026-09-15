@@ -2608,7 +2608,7 @@ class LiveSession:
             # not. A switch that silently does nothing is worse than no switch.
             "can_virtual_display": bool(vdisplay.available()),
             "on_virtual_display": bool(getattr(stage, "vdisplay", None)),
-            "monitor": int(getattr(cfg, "monitor", -1)),
+            "monitor": str(getattr(cfg, "monitor", "") or ""),
             # The screens this machine has, so a page can offer the choice
             # only where there is one to make. Empty where the capture cannot
             # be pointed at a single screen -- which is every platform but
@@ -2679,17 +2679,17 @@ class LiveSession:
                 changes[key] = want
 
         if "monitor" in asked:
-            try:
-                want_screen = int(asked["monitor"])
-            except (TypeError, ValueError):
-                raise ValueError("monitor must be a number")
-            # -1 means "whatever the capture would pick", and is always
-            # allowed. Anything else has to be a screen this machine has, or
-            # the session would come back showing nothing anybody chose.
-            if want_screen >= 0 and not any(
-                    s["index"] == want_screen for s in self._screens()):
-                raise ValueError("this machine has no screen %d" % want_screen)
-            if want_screen != int(getattr(self.cfg, "monitor", -1)):
+            want_screen = asked["monitor"]
+            # The device name Windows gives the screen. Empty means "whatever
+            # the capture would pick", and is always allowed; anything else
+            # has to be a screen this machine actually has, or the session
+            # comes back showing something nobody chose.
+            want_screen = "" if want_screen in (None, -1, "-1") else str(want_screen)
+            if want_screen and not any(
+                    s["name"] == want_screen for s in self._screens()):
+                raise ValueError("this machine has no screen called %s"
+                                 % want_screen)
+            if want_screen != str(getattr(self.cfg, "monitor", "") or ""):
                 changes["monitor"] = want_screen
 
         codec = str(asked.get("codec") or "").lower()

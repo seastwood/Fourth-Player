@@ -625,6 +625,42 @@ def fmtp_for(codec, profile, width, height, fps):
             f"packetization-mode=1;level-asymmetry-allowed=1")
 
 
+def _pick_monitor(wanted, made=None):
+    """Which screen to capture: the one asked for, or the virtual one, or none.
+
+    `wanted` is a device name -- "\\\\.\\DISPLAY10" -- because that is what
+    survives. It used to be an index into the monitor list, and the list is
+    renumbered whenever a screen is added or removed; making a virtual display
+    does exactly that, so an index chosen a moment earlier could point at a
+    different screen by the time it was used.
+
+    Old configs hold an integer, and are still read as an index rather than
+    being thrown away: somebody who set this last week should not have their
+    choice silently forgotten.
+
+    None means "whatever the capture would pick on its own", which is the
+    primary screen.
+    """
+    screens = vdisplay.monitors()
+    if isinstance(wanted, str) and wanted:
+        for screen_ in screens:
+            if screen_[5] == wanted:
+                return screen_
+        return None
+    if isinstance(wanted, int) and wanted >= 0:
+        for screen_ in screens:
+            if screen_[0] == wanted:
+                return screen_
+        return None
+    # Nothing asked for. The virtual display, if one was made for this
+    # capture, is what it was made for.
+    if made is not None and made.monitor_handle is not None:
+        for screen_ in screens:
+            if screen_[1] == made.monitor_handle:
+                return screen_
+    return None
+
+
 def describe_sdp(text):
     """The shape of an SDP in one line, for the log.
 
@@ -815,30 +851,31 @@ class Stage:
             display = vdisplay.VirtualDisplay()
             if display.open(width, height, cfg.fps):
                 self.vdisplay = display
-                if display.monitor_index is not None:
-                    # By handle rather than index where the element takes one:
-                    # an index is a position in a list that anything plugging
-                    # in a screen can renumber, and the wrong index means
-                    # streaming a desktop nobody asked to show.
-                    source_line += (" monitor-handle=%d"
-                                    % display.monitor_handle)
             else:
                 log.warning("a virtual display was asked for and could not be "
                             "made; sending this machine's own screen instead")
-        if self.vdisplay is None and int(getattr(cfg, "monitor", -1)) >= 0:
-            # One screen of several. By handle, for the same reason the virtual
-            # one is: an index is a position in a list, and the list changes
-            # when anything is plugged in or unplugged.
-            wanted = int(cfg.monitor)
-            chosen = [m for m in vdisplay.monitors() if m[0] == wanted]
-            if chosen:
-                source_line += " monitor-handle=%d" % chosen[0][1]
-                log.info("sending screen %d (%s), %dx%d", chosen[0][0],
-                         chosen[0][5], chosen[0][2], chosen[0][3])
-            else:
-                log.warning("screen %d was asked for and this machine has %d; "
-                            "sending the usual one", wanted,
-                            len(vdisplay.monitors()))
+
+        # Which screen to send, decided once and in one place.
+        #
+        # Making a virtual display and choosing which screen to send are two
+        # different questions, and they used to be one: the capture was
+        # pointed at the virtual display whenever there was one, so choosing a
+        # screen did nothing at all while it was on. Reported as the switch
+        # appearing to try and always staying put.
+        wanted = getattr(cfg, "monitor", "")
+        chosen = _pick_monitor(wanted, self.vdisplay)
+        if chosen is not None:
+            # By handle rather than index: an index is a position in a list,
+            # and adding or removing a screen renumbers it -- which making a
+            # virtual display does, every time.
+            source_line += " monitor-handle=%d" % chosen[1]
+            log.info("sending %s (%dx%d)%s", chosen[5], chosen[2], chosen[3],
+                     " -- the virtual one" if self.vdisplay is not None
+                     and chosen[1] == self.vdisplay.monitor_handle else "")
+        elif wanted not in ("", -1, None):
+            log.warning("screen %r was asked for and this machine has %s; "
+                        "sending the usual one", wanted,
+                        ", ".join(m[5] for m in vdisplay.monitors()) or "none")
 
         description = (
             # The pointer is off while nobody is driving: a mouse cursor

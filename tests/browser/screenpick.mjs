@@ -48,20 +48,20 @@ const two = [
 
 console.log("one screen: neither control is offered");
 let h = harness();
-h.paint({ screens: [two[0]], monitor: -1 });
+h.paint({ screens: [two[0]], monitor: "" });
 check(h.nodes["stream-screen-row"].hidden === true, "the dropdown row is hidden");
 check(h.nodes["screen-chip"].hidden === true, "and so is the chip");
 
 console.log("\nno screens at all -- a host that cannot choose");
 h = harness();
-h.paint({ monitor: -1 });
+h.paint({ monitor: "" });
 check(h.nodes["stream-screen-row"].hidden === true,
       "nothing is offered rather than an empty dropdown");
 check(h.nodes["screen-chip"].hidden === true, "and no chip");
 
 console.log("\ntwo screens: both appear");
 h = harness();
-h.paint({ screens: two, monitor: -1 });
+h.paint({ screens: two, monitor: "" });
 check(h.nodes["stream-screen-row"].hidden === false, "the dropdown row shows");
 check(h.nodes["screen-chip"].hidden === false, "and the chip shows");
 check(h.nodes["screen-chip"].textContent === "Main screen",
@@ -69,14 +69,15 @@ check(h.nodes["screen-chip"].textContent === "Main screen",
 
 console.log("\nthe chip names the screen actually being sent");
 h = harness();
-h.paint({ screens: two, monitor: 1 });
+h.paint({ screens: two, monitor: "\\\\.\\DISPLAY11" });
 check(h.nodes["screen-chip"].textContent === "Screen 2",
       `screen 1 is "Screen 2" to a human: "${h.nodes["screen-chip"].textContent}"`);
-check(h.nodes["stream-screen"].value === "1", "and the dropdown agrees");
+check(h.nodes["stream-screen"].value === "\\\\.\\DISPLAY11",
+      `and the dropdown agrees: ${h.nodes["stream-screen"].value}`);
 
 console.log("\nthe options say the size, which is what tells screens apart");
 h = harness();
-h.paint({ screens: two, monitor: -1 });
+h.paint({ screens: two, monitor: "" });
 const labels = h.nodes["stream-screen"].children.map((c) => c.textContent);
 check(labels.some((t) => t.includes("1920x1080")), "the 1080p one is named");
 check(labels.some((t) => t.includes("2560x1440")), "and the 1440p one");
@@ -96,7 +97,8 @@ const withVirtual = [
     primary: false, virtual: true },
 ];
 h = harness();
-h.paint({ screens: withVirtual, monitor: 1, on_virtual_display: true });
+h.paint({ screens: withVirtual, monitor: "\\\\.\\DISPLAY12",
+          on_virtual_display: true });
 check(h.nodes["screen-chip"].hidden === false,
       "the chip shows while the virtual display is on");
 check(h.nodes["screen-chip"].textContent === "Virtual",
@@ -114,7 +116,7 @@ console.log("\nthe virtual switch is always findable, and says why when it is no
 // with nothing anywhere to say why, and the question came back as "where is
 // the virtual display toggle?".
 h = harness();
-h.paint({ screens: two, monitor: -1, can_virtual_display: false });
+h.paint({ screens: two, monitor: "", can_virtual_display: false });
 check(h.nodes["stream-virtual-row"].hidden === false,
       "the row is still there when the host cannot make one");
 check(h.nodes["stream-virtual"].disabled === true, "but the switch is disabled");
@@ -123,7 +125,7 @@ check(/needs a restart|no virtual display driver/
       `and it says why: "${h.nodes["stream-virtual-note"].textContent}"`);
 
 h = harness();
-h.paint({ screens: two, monitor: -1, can_virtual_display: true,
+h.paint({ screens: two, monitor: "", can_virtual_display: true,
           virtual_display: true, on_virtual_display: true });
 check(h.nodes["stream-virtual-row"].hidden === false, "shown where it can");
 check(h.nodes["stream-virtual"].disabled === false, "and usable");
@@ -132,6 +134,20 @@ check(/Turning it off removes it/
         .test(h.nodes["stream-virtual-note"].textContent),
       "and says that turning it off gets rid of them, which is the thing that "
       + "was asked for and was not obvious");
+
+console.log("\nscreens are identified by name, not by position in a list");
+// Windows renumbers the monitor list whenever a screen is added or removed,
+// and making a virtual display does exactly that. An index chosen a moment
+// earlier can point at a different screen by the time it is used -- which is
+// why choosing one appeared to try and then stay put.
+h = harness();
+h.paint({ screens: two, monitor: "" });
+const values = h.nodes["stream-screen"].children.map((c) => c.value);
+check(values.includes("\\\\.\\DISPLAY1") && values.includes("\\\\.\\DISPLAY11"),
+      `the options carry device names: ${JSON.stringify(values)}`);
+check(!values.includes("0") && !values.includes("1"),
+      "and not positions, which do not survive a display being added");
+check(values[0] === "", "with the empty one meaning whichever is main");
 
 console.log("\nthe chip cycles, and wraps");
 const click = app.slice(app.indexOf('if (el("screen-chip"))'),

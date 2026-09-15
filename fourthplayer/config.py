@@ -60,14 +60,21 @@ class Config:
     # Windows only, and it needs SudoVDA installed. A machine without it says
     # so once and streams its own desktop.
     virtual_display: bool = False
-    # Which screen to send when the machine has more than one. -1 is whatever
-    # the capture would pick on its own, which is the primary.
+    # Which screen to send when the machine has more than one, as the device
+    # name Windows gives it -- "\\\\.\\DISPLAY10". Empty is whatever the capture
+    # would pick on its own, which is the primary.
+    #
+    # A name rather than an index, because the list is renumbered whenever a
+    # screen is added or removed and making a virtual display does exactly
+    # that. An index chosen a moment earlier could point somewhere else by the
+    # time it was used. An integer left in an old config is still read, as an
+    # index, rather than the choice being silently dropped.
     #
     # Only meaningful where the capture can be pointed at one screen, which
     # today means Windows: d3d11screencapturesrc takes a monitor, and ximagesrc
     # takes a whole X display. A host that cannot choose publishes no screens
     # and the page does not offer the choice.
-    monitor: int = -1
+    monitor: str = ""
     bitrate_kbps: int = 1500
     hardware_encode: bool = True
     # The tallest picture a *software* encoder will be asked for, whatever

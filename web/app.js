@@ -7944,16 +7944,16 @@ if (el("screen-chip")) {
     const state = streamNow || {};
     const screens = Array.isArray(state.screens) ? state.screens : [];
     if (screens.length < 2 || !may("stream")) return;
-    const at = screens.findIndex((s) => s.index === state.monitor);
+    const at = screens.findIndex((s) => s.name === state.monitor);
     const next = screens[(at + 1 + screens.length) % screens.length];
     if (!next) return;
     const picker = el("stream-screen");
-    if (picker) picker.value = String(next.index);
+    if (picker) picker.value = String(next.name);
     // Said before the host answers, so a tap feels like it did something on a
     // connection where the rebuild takes a second.
     el("screen-chip").textContent = next.virtual
       ? "Virtual" : `Screen ${next.index + 1}`;
-    send({ t: "stream", settings: { ...streamFields(), monitor: next.index } });
+    send({ t: "stream", settings: { ...streamFields(), monitor: next.name } });
   });
 }
 
@@ -8086,7 +8086,7 @@ function streamFields() {
   const custom = virtual && el("stream-width") && el("stream-height")
     && Number(el("stream-width").value) && Number(el("stream-height").value);
   return {
-    monitor: Number(el("stream-screen").value),
+    monitor: el("stream-screen").value,
     virtual_display: virtual,
     ...(custom ? { width: Number(el("stream-width").value) } : {}),
     height: custom ? Number(el("stream-height").value)
@@ -8121,8 +8121,7 @@ function paintStreamValues() {
       && want.height === streamNow.height
       && want.codec === streamNow.codec
       && Boolean(want.virtual_display) === Boolean(streamNow.virtual_display)
-      && Number(want.monitor) === Number(
-        streamNow.monitor == null ? -1 : streamNow.monitor)
+      && String(want.monitor) === String(streamNow.monitor || "")
       // Width only counts while the exact boxes are in play; off a virtual
       // display it is not sent at all and the named size decides.
       && (want.width === undefined
@@ -8215,12 +8214,17 @@ function paintScreens(state) {
     if (picker.dataset.built !== built) {
       picker.innerHTML = "";
       const auto = document.createElement("option");
-      auto.value = "-1";
+      auto.value = "";
       auto.textContent = "Whichever is the main one";
       picker.appendChild(auto);
       for (const s of screens) {
         const opt = document.createElement("option");
-        opt.value = String(s.index);
+        // The device name, not the index. Windows renumbers the list whenever
+        // a screen is added or removed, and making a virtual display does
+        // exactly that -- so an index chosen a moment ago can point at a
+        // different screen by the time it is used, which is why choosing one
+        // appeared to do nothing.
+        opt.value = String(s.name);
         // The size is what tells two screens apart at a glance; the device
         // name is "\\.\DISPLAY11" and means nothing to anybody.
         opt.textContent = s.virtual
@@ -8231,7 +8235,7 @@ function paintScreens(state) {
       }
       picker.dataset.built = built;
     }
-    picker.value = String(state.monitor == null ? -1 : state.monitor);
+    picker.value = String(state.monitor == null ? "" : state.monitor);
   }
   if (row) row.hidden = !several;
 
@@ -8279,7 +8283,7 @@ function paintScreens(state) {
     // there left no way back to the real desktop.
     chip.hidden = !several;
     if (!chip.hidden) {
-      const current = screens.find((s) => s.index === state.monitor);
+      const current = screens.find((s) => s.name === state.monitor);
       chip.textContent = current
         ? (current.virtual ? "Virtual" : `Screen ${current.index + 1}`)
         : (state.on_virtual_display ? "Virtual" : "Main screen");
