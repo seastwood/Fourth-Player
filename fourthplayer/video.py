@@ -152,18 +152,25 @@ def _first_present(names):
 # `converter` is what has to sit in front of it: the VA encoders take frames
 # the GPU already holds, so they want vapostproc rather than videoconvert.
 _VA = "vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width={w},height={h}"
+# add-borders wherever the scaler has it, which is every one that is not a
+# fixed-function GPU block. Without it a picture whose shape does not match the
+# size being sent is stretched to fit -- and that is not hypothetical: choosing
+# a 2560x1440 monitor while the stream was set to the 2560x1610 of a virtual
+# display stretched the real screen vertically. Borders are a black bar;
+# stretching is every face in the game being the wrong shape.
+#
 # The way into a VA encoder on a machine with no vapostproc. Same elements as
 # _SW but NV12, not I420: a VA encoder takes system-memory frames and uploads
 # them itself, and NV12 is the only format its sink pad offers for them.
-_VA_SYS = ("videoscale ! videoconvert ! video/x-raw,format=NV12,"
-           "width={w},height={h}")
-_SW = ("videoscale ! videoconvert ! video/x-raw,format=I420,"
-       "width={w},height={h}")
+_VA_SYS = ("videoscale add-borders=true ! videoconvert ! "
+           "video/x-raw,format=NV12,width={w},height={h}")
+_SW = ("videoscale add-borders=true ! videoconvert ! "
+       "video/x-raw,format=I420,width={w},height={h}")
 # Windows' equivalent of _VA: the desktop arrives from d3d11screencapturesrc
 # already in D3D11 memory, and d3d11convert does the format and the resize
 # there, so the frame is never copied out of the GPU on its way to NVENC.
-_D3D11 = ("d3d11convert ! video/x-raw(memory:D3D11Memory),format=NV12,"
-          "width={w},height={h}")
+_D3D11 = ("d3d11convert add-borders=true ! "
+          "video/x-raw(memory:D3D11Memory),format=NV12,width={w},height={h}")
 # The same idea as _VA, for NVENC. cudaupload puts the frame in CUDA memory
 # and cudaconvertscale does the format and the resize there, so it is uploaded
 # once and never comes back; without them every frame is downloaded, converted
@@ -865,6 +872,37 @@ class Stage:
         # appearing to try and always staying put.
         wanted = getattr(cfg, "monitor", "")
         chosen = _pick_monitor(wanted, self.vdisplay)
+        # A real screen is sent at its own size.
+        #
+        # The custom size belongs to the virtual display: it is the size that
+        # display is *made* at, chosen to match a particular guest's screen,
+        # and it is meaningful only there. Applying it to a physical monitor
+        # scales that monitor's picture to a shape it is not -- which is how
+        # choosing the real screen while the stream was set to 2560x1610 came
+        # out stretched.
+        #
+        # The borders above would now letterbox it rather than stretch it,
+        # which is better and still wrong: a 2560x1440 screen would be sent
+        # inside a 2560x1610 frame with bars, spending bitrate on black. Sent
+        # at its own size there is nothing to scale and nothing to pad.
+        on_virtual = (self.vdisplay is not None and chosen is not None
+                      and chosen[1] == self.vdisplay.monitor_handle)
+        if chosen is not None and not on_virtual:
+            its_width, its_height = chosen[2], chosen[3]
+            # Still inside what a software encoder can carry. The cap above
+            # was worked out against the configured size, and taking a screen
+            # at its own size must not walk round it -- 1080p in software once
+            # took a machine to a load average of fifty and kept it there.
+            if kind == "software" and its_height > cap:
+                its_width = max(2, int(round(its_width * cap / its_height)) // 2 * 2)
+                its_height = cap
+            if (its_width, its_height) != (width, height):
+                log.info("sending %s at %dx%d rather than the %dx%d set for "
+                         "the virtual display, so nothing is scaled",
+                         chosen[5], its_width, its_height, width, height)
+                width, height = its_width, its_height
+                self.sending_width, self.sending_height = width, height
+                convert = converter.format(w=width, h=height)
         if chosen is not None:
             # By handle rather than index: an index is a position in a list,
             # and adding or removing a screen renumbers it -- which making a
