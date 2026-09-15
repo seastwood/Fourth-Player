@@ -25,8 +25,12 @@ const prompt = html.slice(html.indexOf('id="prompt"'),
 check(/hidden/.test(prompt), "it starts hidden");
 check(!/Press any button on your controller/.test(html),
       "and the page no longer carries that sentence at all");
-check(!/play on the keyboard/.test(html),
-      "nor the offer that remapped the keyboard without saying so");
+// The button, not the phrase: the comment explaining why it went says the
+// words too, and a test that cannot tell prose from markup fails on its own
+// explanation.
+check(!/<button[^>]*id="use-keys"/.test(html),
+      "nor the button that remapped the keyboard without saying so");
+check(!/<button[^>]*id="use-touch"/.test(html), "nor its neighbour");
 // The element stays: other things borrow it and put their own words in.
 check(/id="prompt"/.test(html), "the panel itself is still there to borrow");
 

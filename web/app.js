@@ -2224,34 +2224,12 @@ function showTouch(on, layout) {
   el("prompt").hidden = true;
 }
 
-// The two shortcuts that used to live in the "no controller?" prompt. The
-// prompt is gone -- see index.html for why -- and these are guarded rather
-// than deleted so anything else that wants to offer them still can.
-if (el("use-touch")) {
-  el("use-touch").addEventListener("click", (event) => {
-    event.preventDefault();
-    showTouch(true);
-  });
-}
+// The two shortcuts that lived in the "no controller?" prompt are gone with
+// it -- see index.html. Deleted rather than guarded: a handler for an element
+// nothing renders is dead code that looks like a feature, and test_page reads
+// every id this file mentions and expects the page to have it.
 
-/* The same offer for somebody at a desk. A laptop has no touchscreen to put
-   buttons on and often no controller either, and this page had nothing to say
-   to them at all. */
-if (el("use-keys")) {
-  el("use-keys").addEventListener("click", (event) => {
-    event.preventDefault();
-    buildLayoutPicker();
-    el("padpick").hidden = false;
-    el("padtype").value = "keyboard";
-    try { localStorage.setItem(LAYOUT_KEY, "keyboard"); } catch (_) {}
-    chosenByHand = true;
-    applyLayoutChoice("keyboard");
-    el("prompt").hidden = true;
-    showNotice("Keyboard controls are on. The arrow keys are the d-pad; "
-               + "<strong>Controls</strong> at the top shows every key and "
-               + "changes any of them.", false);
-  });
-}
+
 
 let refusedTimer = null;
 

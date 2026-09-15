@@ -65,9 +65,15 @@ check("if (padsOpen) return;" in js,
       "nothing pressed while the panel is open reaches the game")
 check("learnPress(" in js and "armed" in js,
       "and a button is learned once per press, not once per frame")
-check("padIndex === null && !touchOn" in js,
-      "closing the panel only brings back the prompt when there is no other "
-      "way to play")
+# The prompt this used to guard is gone. Entering a stream raised "press any
+# button on your controller" with an offer to "play on the keyboard", which
+# quietly remapped every key onto a gamepad; closing this panel put it back,
+# arguing with the choice somebody had just made in it. What is checked now is
+# that nothing reopens it at all.
+check("el(\"prompt\").hidden = false" not in js.split("function closePads")[-1][:600],
+      "closing the controls panel does not reopen a prompt over the picture")
+check("Press any button on your controller" not in html,
+      "and the page no longer carries the sentence that started it")
 check("localStorage.setItem(mapKey()" in js,
       "a mapping is remembered per controller")
 
