@@ -4255,6 +4255,12 @@ function paintLogin() {
   if (again) {
     again.hidden = !reauth;
     if (reauth) {
+      // Whose code this is, for the password manager. Without it macOS has a
+      // saved verification code and no way to tell which of its entries this
+      // form belongs to, so it offers nothing and the six digits get typed by
+      // hand -- on the same account that fills itself on an iPhone.
+      const who = el("login-again-user");
+      if (who) who.value = (account && account.name) || "";
       const field = el("login-again-code");
       if (field && document.activeElement !== field) {
         field.value = "";

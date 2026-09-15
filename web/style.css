@@ -2802,3 +2802,18 @@ input.name {
   color: var(--dim);
   flex: 0 0 auto;
 }
+
+/* Off the screen but not out of the page.
+ *
+ * For the account-name field that sits beside a verification code so a
+ * password manager knows whose code it is. display:none and hidden are both
+ * wrong here: a manager skips a field it considers invisible, and then the
+ * code is not offered at all -- which is the thing being fixed. */
+.offscreen {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
