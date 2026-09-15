@@ -317,6 +317,28 @@ def adapters():
     return found
 
 
+def _settle(tries=30, pause=0.1):
+    """Wait until the monitor list stops changing. True if it did.
+
+    Stability rather than a fixed sleep: a fixed one is either too short on a
+    slow machine or wasted on a fast one, and this is in the path of every
+    capture that uses a virtual display.
+    """
+    import time
+    last, steady = None, 0
+    for _ in range(tries):
+        now = [(m[1], m[2], m[3]) for m in monitors()]
+        if now == last and now:
+            steady += 1
+            if steady >= 3:               # three readings the same
+                return True
+        else:
+            steady = 0
+        last = now
+        time.sleep(pause)
+    return False
+
+
 def set_mode(device_name, width, height, hz):
     """Put one adapter into a given mode. True if Windows took it.
 
@@ -454,6 +476,15 @@ class VirtualDisplay:
         # and the capture scales one to the other -- which is a picture that
         # looks stretched and nothing that says why.
         self._set_requested_mode()
+        # Let Windows finish rearranging before anything reads a handle.
+        #
+        # Adding a screen and then changing its mode both renumber the monitor
+        # list and invalidate the HMONITORs in it. Reading one while that is
+        # still settling gives a handle that is good for a moment and stale by
+        # the time a capture pipeline starts with it -- which does not fail
+        # politely: the capture refuses, the session cannot be restored, and
+        # the PIN somebody is typing has nothing to let them into.
+        _settle()
         if not self._find_monitor(before):
             # Made but unusable: Windows would not attach it at the size that
             # was asked for. Taken away again rather than left as a screen

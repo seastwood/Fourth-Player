@@ -21,6 +21,7 @@ loop runs on its own thread and every callback is marshalled back with
 
 import concurrent.futures
 import logging
+import re
 import threading
 import time
 
@@ -1012,6 +1013,28 @@ class Stage:
                                         name="gst-mainloop", daemon=True)
         self._thread.start()
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            # A screen that is no longer the screen it was.
+            #
+            # d3d11screencapturesrc is given an HMONITOR, and Windows
+            # invalidates those whenever the display arrangement changes --
+            # which making a virtual display and then setting its mode does,
+            # twice. The handle can be good when the pipeline is built and
+            # stale by the time it starts, and then the capture refuses, and
+            # then the session cannot be restored at all. Somebody's PIN
+            # stopped working because of it.
+            #
+            # Losing which screen is sent is a far smaller thing than losing
+            # the session, so the choice is dropped and the primary is used.
+            # Same rule as the audio below, and for the same reason.
+            if "monitor-handle=" in (self._description or ""):
+                log.warning("the capture refused the screen it was given (the "
+                            "handle went stale, which a display being added or "
+                            "resized does); sending the main screen instead")
+                self.pipeline.set_state(Gst.State.NULL)
+                self._description = re.sub(r" monitor-handle=\d+", "",
+                                           self._description)
+                self._build(with_audio=bool(self._audio_description))
+                return self.start()
             # Refused outright, which is what a missing or busy sound server
             # produces: pulsesrc answers "Connection refused" and takes the
             # whole pipeline down with it. Losing sound must not cost the
@@ -1372,9 +1395,41 @@ class Stage:
     def _on_error(self, _bus, message):
         err, debug = message.parse_error()
         log.error("pipeline error: %s (%s)", err.message, debug)
+        # A screen the capture will not take.
+        #
+        # This arrives here rather than as a refusal from set_state, which is
+        # why dropping the handle in start() was not enough: the state change
+        # is asynchronous, so the capture fails afterwards, on the bus, and
+        # ensure_playing then retried the same broken description for ever.
+        # The log filled with "Failed to prepare capture object" and the
+        # session could never be restored -- which is somebody's PIN not
+        # working, with nothing anywhere connecting the two.
+        #
+        # Dropped once. If it fails again without a handle it is a real
+        # failure and the usual retry is the right answer.
+        if ("prepare capture" in (err.message or "").lower()
+                and "monitor-handle=" in (self._description or "")):
+            log.warning("the capture will not take the screen it was given "
+                        "(the handle went stale, which adding or resizing a "
+                        "display does); sending the main screen instead")
+            self._description = re.sub(r" monitor-handle=\d+", "",
+                                       self._description)
+            self.worker.submit(self._rebuild_without_screen)
+            return
         # This bus carries the capture only. A guest's pipeline has its own bus
         # and its own errors, which is the point of them being separate.
         self.worker.submit(self.ensure_playing)
+
+    def _rebuild_without_screen(self):
+        """Start again with the screen choice dropped. Never raises."""
+        try:
+            if self.pipeline is not None:
+                self.pipeline.set_state(Gst.State.NULL)
+            self._build(with_audio=bool(self._audio_description))
+            self.start()
+        except Exception:
+            log.exception("could not start the capture without a screen "
+                          "choice either")
 
     # -- fanning the encoded stream out to the guests ------------------------
 
