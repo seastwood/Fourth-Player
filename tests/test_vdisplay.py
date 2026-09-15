@@ -13,6 +13,7 @@ were copied from a header by hand, and that the module is safe to import and
 ask on a machine that has none of it.
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -164,6 +165,32 @@ check("customRow.hidden = !state.virtual_display" in script,
       "shown only while a display made in software is on")
 check("virtual && el(\"stream-width\")" in script,
       "and only sent when it is, so the named size still decides otherwise")
+
+print()
+print("the exact-size boxes are not wearing the PIN box's clothes")
+# The base `input` rule is written for the PIN field on the way in: 1.6rem of
+# pixel font, .3em of letter-spacing, nearly a rem of padding. Four digits in
+# that is wider than any sensible field, so the number was cut off inside a
+# control that dwarfed its row. These need their own rule, and it has to
+# override the three properties that caused it -- checking only that a class
+# exists would pass while the page still looked wrong.
+css = open(os.path.join(ROOT, "web", "style.css")).read()
+check('class="tune-number"' in page, "the boxes carry their own class")
+check('style="width' not in page.split('id="stream-width"')[1][:200],
+      "and no inline width, which was the first attempt at fixing this and "
+      "only made the field narrower than its own text")
+rule = css[css.index(".tune-number {"):css.index(".tune-number:focus")]
+for name in ("font-size", "letter-spacing", "padding", "text-indent"):
+    check(name in rule,
+          "%s is overridden, or the base input rule still applies" % name)
+# Specificity: a class beats an element selector, and this comes after it.
+check(css.index(".tune-number {") > css.index("\ninput {"),
+      "and the rule comes after the base one, so it wins on order as well as "
+      "on specificity")
+size = re.search(r"\.tune-number \{[^}]*font-size: ([\d.]+)rem", css)
+check(size and float(size.group(1)) < 1.0,
+      "the font is small enough for four digits to fit: %srem"
+      % (size.group(1) if size else "?"))
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

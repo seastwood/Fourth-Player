@@ -51,6 +51,33 @@ console.log("\nthere is a separate choice for a real keyboard and mouse");
 check(/desk\.value = "desk"/.test(app), "the option exists");
 check(/desk\.textContent = "Mouse and keyboard"/.test(app), "and is named so");
 
+console.log("\nbut only for somebody who may actually use it");
+// The desk lands on the machine itself, as a keyboard and a mouse: the
+// signed-in Steam account, a browser, somebody's files. The host has always
+// gated it -- granted per account, never by default, and an authenticator
+// code at the moment of use -- but the menu offered it to everybody, which
+// says the opposite to anyone reading it.
+const option = app.slice(app.indexOf("function paintDeskOption"),
+                         app.indexOf("let deskMode = false;"));
+check(/const allowed = may\("desk"\)/.test(option),
+      "the option is in the list only while the guest holds `desk`");
+check(/if \(allowed && !present\)/.test(option), "added when they may");
+check(/present\.remove\(\)/.test(option), "and taken away when they may not");
+check(/picker\.value === "desk" \|\| deskMode/.test(option),
+      "and somebody already in that mode when the permission goes is moved "
+      + "off it, rather than left on a choice that is no longer in the menu");
+check(/show\("session-desk", may\("desk"\)\);\n  paintDeskOption\(\);/.test(app),
+      "and it is repainted with the rest of the permissions, so it follows a "
+      + "grant without a reload");
+
+console.log("\nthe page is not the gate, though");
+// Worth stating: this is the page agreeing with the host, not a second lock.
+check(/taking the desk is a request the\n \* host answers/.test(app),
+      "the code says so, so nobody later mistakes the menu for enforcement");
+check(/may\("desk"\)/.test(app.slice(app.indexOf("function paintDeskMode"),
+                                    app.indexOf("function buildLayoutPicker"))),
+      "and the note does not tell somebody to press a button they cannot see");
+
 const apply = app.slice(app.indexOf("function applyLayoutChoice"),
                         app.indexOf("function paintPicker"));
 check(/deskMode = key === "desk"/.test(apply), "choosing it sets the mode");

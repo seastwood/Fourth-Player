@@ -2768,3 +2768,37 @@ input.name {
   border-color: var(--accent);
   color: var(--bg);
 }
+
+/* The exact-size boxes beside the virtual display switch.
+ *
+ * Without this they take the base `input` rule, which is written for the PIN
+ * box on the way in: 1.6rem of pixel font, .3em of letter-spacing and nearly
+ * a rem of padding. Four digits in that is far wider than the field, so the
+ * number was cut off inside a control that dwarfed the row it sat in.
+ *
+ * Sized like the chips around it instead, and wide enough for four digits
+ * with the spinner the browser adds. */
+.tune-number {
+  font-family: var(--pixel);
+  font-size: .48rem;
+  line-height: 1.5;
+  letter-spacing: .03em;
+  text-indent: 0;
+  text-align: center;
+  padding: .4rem .35rem;
+  border: 2px solid var(--dim);
+  background: rgba(16, 14, 40, .9);
+  color: var(--ink);
+  width: 4.6rem;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+.tune-number:focus { border-color: var(--accent); }
+/* The times sign between them, so it does not inherit the row's gap as though
+   it were another control. */
+.tune-by {
+  font-family: var(--pixel);
+  font-size: .48rem;
+  color: var(--dim);
+  flex: 0 0 auto;
+}

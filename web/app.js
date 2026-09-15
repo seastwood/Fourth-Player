@@ -1816,6 +1816,41 @@ function paintAttached() {
   }
 }
 
+/* The "Mouse and keyboard" choice, offered only to whoever may actually use it.
+ *
+ * The desk is the most powerful thing an account can hold: it lands on the
+ * machine itself, as a keyboard and a mouse, which is the signed-in Steam
+ * account and a browser and somebody's files. The host has always enforced
+ * that -- the capability is granted per account, never by default, and asks
+ * for an authenticator code at the moment it is used -- but the menu offered
+ * the choice to everybody, which says the opposite. Somebody reading it would
+ * reasonably conclude anyone in the room can take the keyboard.
+ *
+ * So the option is in the list only while the guest holds `desk`. That is the
+ * page agreeing with the host rather than a second gate: a guest who edits
+ * their own JavaScript to put the option back gets a mode that stops their
+ * on-screen pad and nothing else, because taking the desk is a request the
+ * host answers. */
+function paintDeskOption() {
+  const picker = el("padtype");
+  if (!picker) return;
+  const present = picker.querySelector('option[value="desk"]');
+  const allowed = may("desk");
+  if (allowed && !present) {
+    const desk = document.createElement("option");
+    desk.value = "desk";
+    desk.textContent = "Mouse and keyboard";
+    picker.appendChild(desk);
+  } else if (!allowed && present) {
+    present.remove();
+    // Somebody who was in that mode and has just lost the permission -- their
+    // account changed, or they logged out -- must not be left on a choice
+    // that is no longer in the menu.
+    if (picker.value === "desk" || deskMode) applyLayoutChoice("off");
+  }
+  mirrorPicker();
+}
+
 /* Whether this guest has chosen to drive with a real keyboard and mouse.
  *
  * A client-side choice about what this page does with the hardware in front of
@@ -1833,7 +1868,7 @@ function paintDeskMode() {
   // What it does is say where the rest of it lives, because choosing a mode
   // and seeing nothing change is the complaint this whole change came from.
   const note = el("desk-mode-note");
-  if (note) note.hidden = !deskMode;
+  if (note) note.hidden = !deskMode || !may("desk");
 }
 
 function buildLayoutPicker() {
@@ -1858,10 +1893,11 @@ function buildLayoutPicker() {
   picker.appendChild(keys);
   // And the other one: a real keyboard and mouse, driving the machine as a
   // keyboard and mouse. No pad emulation of any kind.
-  const desk = document.createElement("option");
-  desk.value = "desk";
-  desk.textContent = "Mouse and keyboard";
-  picker.appendChild(desk);
+  //
+  // Added by paintDeskOption rather than here, because whether it belongs in
+  // the list is the host's answer and is not known yet when this runs. See
+  // there for why an option nobody may use should not be in the menu.
+  paintDeskOption();
   for (const [key, layout] of Object.entries(LAYOUTS)) {
     const option = document.createElement("option");
     option.value = key;
@@ -4333,6 +4369,7 @@ function paintSession() {
   show("session-kick", may("kick"));
   show("session-grant", may("grant"));
   show("session-desk", may("desk"));
+  paintDeskOption();
   deskPaint();
 
   const count = el("limit-count");
