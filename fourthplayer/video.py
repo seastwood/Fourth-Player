@@ -32,7 +32,7 @@ gi.require_version("GstSdp", "1.0")
 gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib, GObject  # noqa: E402
 
-from . import net, screen  # noqa: E402
+from . import net, screen, vdisplay  # noqa: E402
 
 log = logging.getLogger("fourthplayer.video")
 
@@ -806,6 +806,26 @@ class Stage:
         self.source_name = source_element
         log.info("capturing with %s", source_element)
 
+        # A screen of our own, if one was asked for and this machine can make
+        # one. Made at exactly the size being sent, so the capture is the
+        # picture and nothing is scaled: the whole point of it is the case
+        # where the desktop is smaller than what the guest wants.
+        self.vdisplay = None
+        if cfg.virtual_display:
+            display = vdisplay.VirtualDisplay()
+            if display.open(width, height, cfg.fps):
+                self.vdisplay = display
+                if display.monitor_index is not None:
+                    # By handle rather than index where the element takes one:
+                    # an index is a position in a list that anything plugging
+                    # in a screen can renumber, and the wrong index means
+                    # streaming a desktop nobody asked to show.
+                    source_line += (" monitor-handle=%d"
+                                    % display.monitor_handle)
+            else:
+                log.warning("a virtual display was asked for and could not be "
+                            "made; sending this machine's own screen instead")
+
         description = (
             # The pointer is off while nobody is driving: a mouse cursor
             # sitting over a game is noise, and there is nothing to point
@@ -985,7 +1005,12 @@ class Stage:
         # is a thing somebody will spend an evening on. Said once, here, where
         # the two numbers are both known.
         try:
-            desktop = screen.desktop_size(self.cfg.display)
+            # The virtual screen, when there is one: it was made at exactly
+            # the size being sent, so comparing against the machine's own
+            # panel would warn about an upscale that is not happening.
+            desktop = ((self.vdisplay.width, self.vdisplay.height)
+                       if getattr(self, "vdisplay", None) is not None
+                       else screen.desktop_size(self.cfg.display))
         except Exception:
             desktop = None
         if desktop and (self.sending_width > desktop[0]
@@ -1021,6 +1046,19 @@ class Stage:
                     element.set_state(Gst.State.NULL)
                 except Exception:
                     pass
+        # And the screen that was made for this capture, if one was. Before
+        # the slow part below rather than after it, because that part is
+        # allowed not to finish -- and a monitor left behind is one somebody
+        # finds in their display settings later and cannot explain. It would
+        # go when the process ends whatever happens, since the driver ties it
+        # to the open handle, but a recapture would otherwise make a second
+        # one first and leave the room briefly with two.
+        if getattr(self, "vdisplay", None) is not None:
+            try:
+                self.vdisplay.close()
+            except Exception:
+                pass
+            self.vdisplay = None
         for element in (self.encoder,):
             if element is not None:
                 try:

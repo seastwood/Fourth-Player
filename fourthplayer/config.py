@@ -47,6 +47,19 @@ class Config:
     # not in this distribution -- so the bitrate never adapts, and a figure the
     # link cannot carry does not degrade the picture, it queues packets and
     # turns into delay. Conservative is therefore the low-latency choice.
+    # Make a monitor in software and send that, rather than whatever screen
+    # the machine has. Off by default, because a console with a television
+    # attached should send the television.
+    #
+    # It is for the two cases where the desktop is the wrong size: a host
+    # whose screen is smaller than the guest's -- asking for more than the
+    # desktop has is the same pixels scaled up -- and a host with no screen at
+    # all. When it is on, the virtual monitor is made at exactly the size
+    # being streamed, so nothing is scaled anywhere.
+    #
+    # Windows only, and it needs SudoVDA installed. A machine without it says
+    # so once and streams its own desktop.
+    virtual_display: bool = False
     bitrate_kbps: int = 1500
     hardware_encode: bool = True
     # The tallest picture a *software* encoder will be asked for, whatever
