@@ -242,6 +242,24 @@ function fillPicture(stream, policies) {
   set("set-codec", stream.codec);
   set("set-audio-bitrate", stream.audio_bitrate_kbps);
   set("set-audio-queue", stream.audio_queue_ms);
+  const virtual = el("set-virtual");
+  if (virtual) {
+    virtual.checked = Boolean(stream.virtual_display);
+    // Disabled where it could not work, rather than offered and ignored.
+    virtual.disabled = !stream.can_virtual_display;
+  }
+  const virtualNote = el("virtual-note");
+  if (virtualNote) {
+    const desk = stream.desktop || [];
+    virtualNote.textContent = !stream.can_virtual_display
+      ? "not available on this machine (needs the SudoVDA driver, Windows only)"
+      : stream.on_virtual_display
+        ? "on — the picture is made at exactly the size being sent, so nothing "
+          + "is scaled"
+        : desk.length === 2
+          ? `off — sending this machine's own screen, ${desk[0]}x${desk[1]}`
+          : "off — sending this machine's own screen";
+  }
   const sound = el("set-audio");
   if (sound) sound.checked = Boolean(stream.audio);
   const soundNote = el("sound-now");
@@ -428,6 +446,7 @@ const ACTIONS = {
       // A real boolean. Sending the string "off" once turned a setting on,
       // because bool("off") is true at the other end.
       audio: Boolean(el("set-audio") && el("set-audio").checked),
+      virtual_display: Boolean(el("set-virtual") && el("set-virtual").checked),
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
       codec: el("set-codec").value,

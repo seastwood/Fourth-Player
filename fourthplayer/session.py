@@ -23,7 +23,8 @@ import dataclasses
 
 from . import (accounts, catalogue as cataloguelib, deskwire, gpu, invites,
                launcher, steamgames,
-               pads as padlib, protocol, retroarch, screen)
+               pads as padlib, protocol, retroarch, screen,
+               vdisplay)
 from . import video
 from .video import Stage, best_shared_codec, CODEC_PREFERENCE
 
@@ -2503,6 +2504,12 @@ class LiveSession:
             "queue_ms": cfg.queue_ms, "cpb_ms": cfg.cpb_ms,
             "codec": cfg.codec,
             "audio": bool(cfg.audio),
+            "virtual_display": bool(cfg.virtual_display),
+            # Whether one could be made here at all, so the page can offer the
+            # switch where it means something and explain itself where it does
+            # not. A switch that silently does nothing is worse than no switch.
+            "can_virtual_display": bool(vdisplay.available()),
+            "on_virtual_display": bool(getattr(stage, "vdisplay", None)),
             "audio_bitrate_kbps": cfg.audio_bitrate_kbps,
             "audio_queue_ms": cfg.audio_queue_ms,
             "sounding": bool(getattr(stage, "has_audio", False)),
@@ -2556,13 +2563,15 @@ class LiveSession:
         # the link and share settings are -- which had to be fixed once
         # already, because bool("off") is True and a string sent from a page
         # therefore turned everything on.
-        if "audio" in asked:
-            want_audio = asked["audio"]
-            if isinstance(want_audio, str):
-                want_audio = want_audio.strip().lower() in ("1", "true", "on", "yes")
-            want_audio = bool(want_audio)
-            if want_audio != bool(self.cfg.audio):
-                changes["audio"] = want_audio
+        for flag in ("audio", "virtual_display"):
+            if flag not in asked:
+                continue
+            want = asked[flag]
+            if isinstance(want, str):
+                want = want.strip().lower() in ("1", "true", "on", "yes")
+            want = bool(want)
+            if want != bool(getattr(self.cfg, flag)):
+                changes[flag] = want
 
         if not changes:
             return {"ok": True, "changed": [], **self.stream_settings()}

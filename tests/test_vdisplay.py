@@ -100,5 +100,22 @@ print("and it is given back when the capture stops")
 check("self.vdisplay.close()" in source,
       "stop() closes it, so a recapture does not leave two behind")
 
+print()
+print("it is a switch somebody can reach, not a line in a file")
+sess = open(os.path.join(ROOT, "fourthplayer", "session.py")).read()
+page = open(os.path.join(ROOT, "web", "setup.html")).read()
+script = open(os.path.join(ROOT, "web", "setup.js")).read()
+check('"virtual_display"' in sess, "the host publishes whether it is on")
+check('"can_virtual_display"' in sess,
+      "and whether this machine could do it at all -- a switch that silently "
+      "does nothing is worse than no switch")
+check('id="set-virtual"' in page, "the page has the switch")
+check("virtual_display: Boolean(" in script,
+      "and sends a real boolean; a string would be true whatever it said, "
+      "which turned a setting on once already")
+check('for flag in ("audio", "virtual_display")' in sess,
+      "both flags are read the same way, rather than one growing its own "
+      "slightly different parsing")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
