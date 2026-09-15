@@ -2537,21 +2537,24 @@ class LiveSession:
         unplugged is exactly the moment somebody opens this panel, and a list
         that was right an hour ago is worse than no list.
 
-        The virtual one is left out while it exists. It is not a choice --
-        it is the thing the switch above turns on -- and offering it here as
-        well would let somebody pick it and then wonder why turning the switch
-        off changed the picture.
+        The virtual one is in the list, marked as such. It was left out at
+        first, on the reasoning that it is a mode rather than one of the
+        machine's screens -- which was wrong in the only setup that has one:
+        a host with a single monitor and the virtual display on then had
+        exactly one screen to choose from, so the switcher never appeared and
+        there was no way to look at the real desktop. It is a screen. It is
+        listed.
         """
         try:
             found = vdisplay.monitors()
         except Exception:
             return []
         mine = getattr(getattr(self, "stage", None), "vdisplay", None)
-        skip = getattr(mine, "monitor_handle", None)
+        ours = getattr(mine, "monitor_handle", None)
         return [{"index": index, "name": name, "width": width,
-                 "height": height, "primary": primary}
-                for index, handle, width, height, primary, name in found
-                if handle != skip]
+                 "height": height, "primary": primary,
+                 "virtual": handle == ours and ours is not None}
+                for index, handle, width, height, primary, name in found]
 
     def _desktop_size(self):
         """The host's own screen, read once and remembered.
@@ -2673,6 +2676,22 @@ class LiveSession:
             want = bool(want)
             if want != bool(getattr(self.cfg, flag)):
                 changes[flag] = want
+                if flag == "virtual_display" and not want:
+                    # Off means gone, including the ones an earlier run left
+                    # behind. They are not reaped on their own: the driver's
+                    # watchdog is fed by any live client rather than per
+                    # screen, so a host restarted a few times accumulates a
+                    # display each time with no way to be rid of them.
+                    #
+                    # Done before the recapture below, so the capture is not
+                    # pointed at a screen that is about to disappear.
+                    try:
+                        gone = vdisplay.remove_all()
+                        if gone:
+                            log.info("removed %d virtual display(s)", gone)
+                    except Exception:
+                        log.warning("could not remove the virtual displays",
+                                    exc_info=True)
 
         if not changes:
             return {"ok": True, "changed": [], **self.stream_settings()}

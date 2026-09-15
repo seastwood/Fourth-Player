@@ -3363,10 +3363,22 @@ async function tellAboutSound() {
   let since = "";
   if (soundAgain && soundFirst) {
     // Against the first report rather than against the whole connection.
-    total = Math.max(1, total - soundFirst.samples);
-    concealed = Math.max(0, concealed - soundFirst.concealed);
-    lost = Math.max(0, lost - soundFirst.lost);
-    since = " (the last minute, not the start)";
+    const grown = total - soundFirst.samples;
+    const hidden = concealed - soundFirst.concealed;
+    // Only if the counters actually went forward. A renegotiation restarts
+    // them, so the difference can be negative or nearly nothing while the
+    // concealment difference is large -- which printed "382700.00% of samples
+    // invented" into the log. Clamping the divisor to 1 stopped it being
+    // Infinity and left it nonsense, which is worse: a number nobody can read
+    // is at least obviously broken, and that one looks like a measurement.
+    if (grown >= 48000 && hidden >= 0) {
+      total = grown;
+      concealed = hidden;
+      lost = Math.max(0, lost - soundFirst.lost);
+      since = " (the last minute, not the start)";
+    } else {
+      since = " (since connecting; the counters restarted)";
+    }
   }
   const invented = concealed / total * 100;
   report("sound: "
@@ -7874,7 +7886,8 @@ if (el("screen-chip")) {
     if (picker) picker.value = String(next.index);
     // Said before the host answers, so a tap feels like it did something on a
     // connection where the rebuild takes a second.
-    el("screen-chip").textContent = `Screen ${next.index + 1}`;
+    el("screen-chip").textContent = next.virtual
+      ? "Virtual" : `Screen ${next.index + 1}`;
     send({ t: "stream", settings: { ...streamFields(), monitor: next.index } });
   });
 }
@@ -8126,8 +8139,10 @@ function paintScreens(state) {
         opt.value = String(s.index);
         // The size is what tells two screens apart at a glance; the device
         // name is "\\.\DISPLAY11" and means nothing to anybody.
-        opt.textContent = `Screen ${s.index + 1} — ${s.width}x${s.height}`
-          + (s.primary ? " (main)" : "");
+        opt.textContent = s.virtual
+          ? `Virtual display — ${s.width}x${s.height}`
+          : `Screen ${s.index + 1} — ${s.width}x${s.height}`
+            + (s.primary ? " (main)" : "");
         picker.appendChild(opt);
       }
       picker.dataset.built = built;
@@ -8142,15 +8157,17 @@ function paintScreens(state) {
   if (virtual) virtual.checked = Boolean(state.virtual_display);
 
   if (chip) {
-    // On the virtual screen there is nothing to cycle between, so the chip
-    // says what is happening rather than offering a switch that would fight
-    // the one above.
-    chip.hidden = !several || Boolean(state.on_virtual_display);
+    // Shown whenever there is more than one screen, the virtual one included.
+    // It used to hide while the virtual display was on, which was exactly
+    // backwards: a machine with one monitor and a virtual display is the
+    // commonest case with two screens to move between, and hiding the switch
+    // there left no way back to the real desktop.
+    chip.hidden = !several;
     if (!chip.hidden) {
       const current = screens.find((s) => s.index === state.monitor);
       chip.textContent = current
-        ? `Screen ${current.index + 1}`
-        : "Main screen";
+        ? (current.virtual ? "Virtual" : `Screen ${current.index + 1}`)
+        : (state.on_virtual_display ? "Virtual" : "Main screen");
       chip.title = "Send the next screen";
     }
   }

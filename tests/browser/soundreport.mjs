@@ -42,6 +42,20 @@ check(/Math\.max\(1, total - soundFirst\.samples\)/.test(body),
 check(/Math\.max\(0, concealed - soundFirst\.concealed\)/.test(body),
       "nor can a counter that was reset by a renegotiation go negative");
 
+console.log("\ncounters that restarted are not reported as a measurement");
+// A renegotiation restarts them, so the difference can be negative or nearly
+// nothing while the concealment difference is large. Clamping the divisor to 1
+// stopped that being Infinity and left it nonsense: the log carried
+// "382700.00% of samples invented", which reads as a measurement rather than
+// as obviously broken.
+check(/grown >= 48000 && hidden >= 0/.test(body),
+      "the difference is only used when the counters actually went forward");
+check(/the counters restarted/.test(body),
+      "and otherwise it says so, rather than printing a percentage nobody "
+      + "can believe");
+check(!/Math\.max\(1, total - soundFirst\.samples\)/.test(body),
+      "the divisor is no longer clamped into a number that looks real");
+
 console.log("\nand it says which of the two it is");
 check(/the last minute, not the start/.test(body),
       "the line distinguishes itself, so two numbers an order of magnitude "

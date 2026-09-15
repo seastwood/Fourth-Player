@@ -52,6 +52,28 @@ IOCTL_VERSION = _ctl(0x8FF)
 INTERFACE_GUID = "{e5bcc234-1e0c-418a-a0d4-ef8b7501414d}"
 
 
+# The monitors this program is allowed to make, named in advance.
+#
+# Not random, and that is the point. A monitor is removed by its GUID, so a
+# random one can only be removed by the process that made it -- and when that
+# process is killed the monitor stays, because the driver's watchdog is fed by
+# any live client rather than per monitor. A host restarted eight times left
+# eight screens behind, all called FourthPlyr, with no way to get rid of them
+# short of a reboot.
+#
+# Derived from a fixed namespace instead, so every run works out the same
+# names and can therefore clear up after every previous one, including after a
+# crash and with no state file to lose.
+_NAMESPACE = uuid.UUID("6f0a2a1e-5c4b-4d7a-9b3e-fourthplayer"[:36].replace(
+    "fourthplayer", "8f4c2d1a6b0e"))
+MAX_SCREENS = 8
+
+
+def _names():
+    return [uuid.uuid5(_NAMESPACE, "fourth-player-screen-%d" % i)
+            for i in range(MAX_SCREENS)]
+
+
 def available():
     """Whether this machine could make a virtual monitor at all."""
     if sys.platform != "win32":
@@ -200,6 +222,26 @@ def monitors():
     return found
 
 
+def remove_all():
+    """Take away every virtual screen this program has ever made. How many.
+
+    Wanted as a plain "turn it off and get rid of them" -- including the ones
+    a previous run left behind, which is most of them, because a monitor whose
+    maker has gone is not reaped while anything else is talking to the driver.
+
+    Opens its own handle so it works when nothing is streaming.
+    """
+    if sys.platform != "win32":
+        return 0
+    screen = VirtualDisplay()
+    if not screen._open_handle():
+        return 0
+    try:
+        return screen._sweep(keep=None)
+    finally:
+        screen.close_handle()
+
+
 class VirtualDisplay:
     """One virtual monitor, alive for as long as this object is open."""
 
@@ -216,16 +258,11 @@ class VirtualDisplay:
         self.monitor_index = None
         self.monitor_handle = None
 
-    def open(self, width, height, fps=60, name="FourthPlyr"):
-        """Make the monitor. True if it is there afterwards.
-
-        Never raises: a host that cannot make a virtual screen should stream
-        the real one, not fail to start.
-        """
+    def _open_handle(self):
+        """Open the driver. True if it is there and would talk to us."""
         if sys.platform != "win32":
             return False
         import ctypes
-        from ctypes import wintypes
         path = None
         try:
             path = _device_path()
@@ -246,14 +283,40 @@ class VirtualDisplay:
                         "open (error %d)", ctypes.get_last_error())
             return False
         self._handle = handle
+        return True
+
+    def close_handle(self):
+        """Let go of the driver without touching any screens."""
+        if self._handle is None:
+            return
+        try:
+            import ctypes
+            ctypes.WinDLL("kernel32").CloseHandle(ctypes.c_void_p(self._handle))
+        except Exception:
+            pass
+        self._handle = None
+
+    def open(self, width, height, fps=60, name="FourthPlyr"):
+        """Make the monitor. True if it is there afterwards.
+
+        Never raises: a host that cannot make a virtual screen should stream
+        the real one, not fail to start.
+        """
+        if not self._open_handle():
+            return False
         version = self._ask(IOCTL_VERSION, None, VersionOut)
         if version is not None:
             log.info("virtual display driver protocol %d.%d.%d%s",
                      version.Major, version.Minor, version.Incremental,
                      " (test build)" if version.TestBuild else "")
 
+        # Anything this program left behind, before making a new one.
+        # Otherwise a host that has been restarted a few times accumulates a
+        # screen per restart, all of them called FourthPlyr, none of them
+        # showing anything.
+        self._sweep(keep=None)
         before = {m[1] for m in monitors()}
-        self._guid = uuid.uuid4()
+        self._guid = _names()[0]
         params = AddParams()
         params.Width, params.Height = int(width), int(height)
         params.RefreshRate = int(fps)
@@ -348,26 +411,45 @@ class VirtualDisplay:
             return None if out_type is not None else False
         return out if out is not None else True
 
+    def _sweep(self, keep=None):
+        """Remove every screen this program knows how to make.
+
+        `keep` is one to leave alone. Removing a name that is not in use is
+        expected to fail and is ignored: there is no way to ask the driver
+        which of these exist, and trying all of them is both cheap and the
+        only thing that can clear up after a process that is no longer here.
+        """
+        removed = 0
+        for name in _names():
+            if keep is not None and name == keep:
+                continue
+            try:
+                params = RemoveParams()
+                params.MonitorGuid = GUID.parse("{%s}" % name)
+                if self._ask(IOCTL_REMOVE, params, None):
+                    removed += 1
+            except Exception:
+                pass
+        if removed:
+            log.info("removed %d virtual screen(s) left over from before",
+                     removed)
+        return removed
+
     def close(self):
         """Take the monitor away. Safe to call more than once."""
         if self._stop is not None:
             self._stop.set()
             self._stop = None
-        if self._handle is not None and self._guid is not None:
-            try:
-                params = RemoveParams()
-                params.MonitorGuid = GUID.parse("{%s}" % self._guid)
-                self._ask(IOCTL_REMOVE, params, None)
-            except Exception:
-                pass
         if self._handle is not None:
             try:
-                import ctypes
-                ctypes.WinDLL("kernel32").CloseHandle(
-                    ctypes.c_void_p(self._handle))
+                # All of them, not just this one. The driver's watchdog is fed
+                # by any live client rather than per monitor, so a screen whose
+                # maker is gone is not reaped while this process is running --
+                # which is how they piled up.
+                self._sweep(keep=None)
             except Exception:
                 pass
-        self._handle = None
+        self.close_handle()
         self._guid = None
         self.width = self.height = self.fps = 0
         self.monitor_index = self.monitor_handle = None

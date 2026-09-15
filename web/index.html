@@ -773,6 +773,21 @@
           <label class="tune-label" for="stream-screen">Screen</label>
           <select id="stream-screen" class="chip"></select>
         </div>
+        <!-- A display that exists only in software, at exactly the size being
+             sent. For the two cases where the host's own desktop is the wrong
+             size: a console whose monitor is smaller than the guest's, and one
+             with no monitor at all. Hidden where the host cannot do it, rather
+             than offered and ignored.
+
+             Not filed under Advanced. It changes what everybody is looking at,
+             which is the opposite of the settings down there. -->
+        <div class="acct-row" id="stream-virtual-row" hidden>
+          <label class="tune-label" for="stream-virtual">Virtual display</label>
+          <input id="stream-virtual" type="checkbox" class="chip">
+        </div>
+        <p class="footnote" id="stream-virtual-note">Makes a display in
+           software at the size being sent, so nothing is scaled. Turning it
+           off removes it, and any left over from before.</p>
         <div class="acct-row">
           <label class="tune-label" for="stream-size">Size</label>
           <select id="stream-size" class="chip"></select>
@@ -815,7 +830,7 @@
            juddering.</p>
 
         <details class="acct-more">
-          <summary>The ones nobody should need</summary>
+          <summary>Advanced</summary>
           <div class="acct-row">
             <label class="tune-label" for="stream-queue">Send queue</label>
             <input id="stream-queue" class="pad-range retro-range" type="range"
@@ -832,16 +847,6 @@
           </div>
           <p class="footnote">Small stops the encoder smoothing bursts by
              holding frames back, which is exactly what adds delay.</p>
-          <!-- A screen made in software, at exactly the size being sent.
-               For the two cases where the host's own desktop is the wrong
-               size: a console whose monitor is smaller than the guest's, and
-               one with no monitor at all. Hidden where the host cannot do it,
-               rather than offered and ignored. -->
-          <div class="acct-row" id="stream-virtual-row" hidden>
-            <label class="tune-label" for="stream-virtual">Screen made in
-              software</label>
-            <input id="stream-virtual" type="checkbox" class="chip">
-          </div>
           <div class="acct-row">
             <label class="tune-label" for="stream-codec">Codec</label>
             <select id="stream-codec" class="chip">
