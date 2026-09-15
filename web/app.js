@@ -8110,10 +8110,23 @@ function paintStreamValues() {
   // after: every one of these costs the room a second of picture.
   const apply = el("stream-apply");
   if (apply && streamNow) {
+    // Every field Apply would send has to be compared here, or the button
+    // says "Nothing to apply" about a change somebody has just made and there
+    // is no way to send it. That is what happened to the virtual display
+    // switch: it was added to the settings and not to this list, so unticking
+    // it left the button dead and the display in place.
+    const want = streamFields();
     const same = ["fps", "bitrate_kbps", "jitter_ms", "queue_ms", "cpb_ms"]
-      .every((k) => Number(streamFields()[k]) === Number(streamNow[k]))
-      && streamFields().height === streamNow.height
-      && streamFields().codec === streamNow.codec;
+      .every((k) => Number(want[k]) === Number(streamNow[k]))
+      && want.height === streamNow.height
+      && want.codec === streamNow.codec
+      && Boolean(want.virtual_display) === Boolean(streamNow.virtual_display)
+      && Number(want.monitor) === Number(
+        streamNow.monitor == null ? -1 : streamNow.monitor)
+      // Width only counts while the exact boxes are in play; off a virtual
+      // display it is not sent at all and the named size decides.
+      && (want.width === undefined
+          || Number(want.width) === Number(streamNow.width));
     apply.disabled = same;
     apply.textContent = same ? "Nothing to apply" : "Apply";
   }
@@ -8350,9 +8363,31 @@ function wireStream() {
       fixPad(Number.isFinite(value) && value !== padIndex ? value : null);
     });
   }
-  for (const id of ["stream-size", "stream-fps", "stream-codec"]) {
+  // Everything that changes what Apply would send tells the button so. The
+  // checkbox and the two number boxes were added without this, so even once
+  // the comparison knew about them the button would not have noticed until
+  // something else was touched.
+  for (const id of ["stream-size", "stream-fps", "stream-codec",
+                    "stream-virtual", "stream-screen",
+                    "stream-width", "stream-height"]) {
     const node = el(id);
-    if (node) node.addEventListener("change", paintStreamValues);
+    if (!node) continue;
+    node.addEventListener("change", paintStreamValues);
+    // Typing in a number box is `input`, not `change`: `change` waits for the
+    // field to be left, so the button would stay dead while somebody looked
+    // straight at the number they had just typed.
+    if (node.tagName === "INPUT" && node.type === "number") {
+      node.addEventListener("input", paintStreamValues);
+    }
+  }
+  // Ticking the switch shows or hides the exact-size boxes, which is part of
+  // what the panel should say about itself before Apply is pressed.
+  const virtualBox = el("stream-virtual");
+  if (virtualBox) {
+    virtualBox.addEventListener("change", () => {
+      const row = el("stream-custom-row");
+      if (row) row.hidden = !virtualBox.checked;
+    });
   }
   const apply = el("stream-apply");
   if (apply) {
