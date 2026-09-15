@@ -117,5 +117,53 @@ check('for flag in ("audio", "virtual_display")' in sess,
       "both flags are read the same way, rather than one growing its own "
       "slightly different parsing")
 
+print()
+print("a display made in software can be any size, not one of six")
+# The named sizes exist because the capture is a real screen and those are the
+# shapes real screens come in. A software one has no such constraint, and
+# matching a client exactly is the point of having it -- a MacBook is
+# 2560x1664, which is not 16:9 and is never going to be in a list.
+sess = open(os.path.join(ROOT, "fourthplayer", "session.py")).read()
+check("if want_virtual and custom:" in sess,
+      "an exact size is taken when the display is one we made")
+check("_even" in sess, "and passed through something that squares it up")
+
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    "sessmod", os.path.join(ROOT, "fourthplayer", "session.py"))
+# Importing session.py needs GStreamer, so the rounding is exercised as the
+# plain function it is rather than through the module.
+import re as _re
+body = _re.search(r"def _even\(value, low, high\):.*?return number - \(number % 2\)",
+                  sess, _re.S).group(0)
+ns = {}
+exec("class _T:\n    @staticmethod\n    " + body.replace("\n", "\n    "), ns)
+even = ns["_T"]._even
+
+check(even(2560, 640, 7680) == 2560, "an even size is left alone")
+check(even(1665, 480, 4320) == 1664,
+      "an odd one is rounded down, because encoders refuse odd dimensions "
+      "and somebody typing their laptop's height will not know that: got %d"
+      % even(1665, 480, 4320))
+check(even(100, 640, 7680) == 640, "below the floor is raised to it")
+check(even(99999, 640, 7680) == 7680, "above the ceiling is capped")
+check(even(4320, 480, 4320) == 4320, "the ceiling itself is allowed")
+try:
+    even("wide", 640, 7680)
+    check(False, "nonsense is refused")
+except ValueError:
+    check(True, "nonsense is refused rather than turned into a size")
+
+print()
+print("and the boxes for it are only shown where they mean something")
+page = open(os.path.join(ROOT, "web", "index.html")).read()
+script = open(os.path.join(ROOT, "web", "app.js")).read()
+check('id="stream-custom-row"' in page, "the row exists")
+check('id="stream-custom-row" hidden' in page, "and starts hidden")
+check("customRow.hidden = !state.virtual_display" in script,
+      "shown only while a display made in software is on")
+check("virtual && el(\"stream-width\")" in script,
+      "and only sent when it is, so the named size still decides otherwise")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

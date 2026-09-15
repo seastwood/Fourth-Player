@@ -1816,6 +1816,26 @@ function paintAttached() {
   }
 }
 
+/* Whether this guest has chosen to drive with a real keyboard and mouse.
+ *
+ * A client-side choice about what this page does with the hardware in front of
+ * it, which is why it lives beside the layout rather than with the host's
+ * permission to hold the desk. Somebody may choose this and not be allowed the
+ * desk yet; they should still see the settings for it and the button to ask. */
+let deskMode = false;
+
+function paintDeskMode() {
+  // Deliberately does not touch whether the desk panel is shown. That is the
+  // host's answer -- may("desk") -- and gating it on this choice as well would
+  // take the panel away from somebody who has the permission and simply has
+  // not opened this menu.
+  //
+  // What it does is say where the rest of it lives, because choosing a mode
+  // and seeing nothing change is the complaint this whole change came from.
+  const note = el("desk-mode-note");
+  if (note) note.hidden = !deskMode;
+}
+
 function buildLayoutPicker() {
   const picker = el("padtype");
   if (picker.options.length) return;          // built once
@@ -1827,10 +1847,21 @@ function buildLayoutPicker() {
   picker.appendChild(none);
   // Beside "off" rather than among the layouts below it: those are shapes of
   // the same on-screen pad, and this is a different thing to press.
+  // "Keyboard" was the wrong name for it. It maps the keyboard onto a
+  // gamepad -- arrow keys become a d-pad, letters become buttons -- which is
+  // a very different thing from typing at the machine, and somebody who
+  // picked it expecting the latter found their keyboard remapped underneath
+  // them. The name now says which of the two it is.
   const keys = document.createElement("option");
   keys.value = "keyboard";
-  keys.textContent = "Keyboard";
+  keys.textContent = "Keyboard-Controller";
   picker.appendChild(keys);
+  // And the other one: a real keyboard and mouse, driving the machine as a
+  // keyboard and mouse. No pad emulation of any kind.
+  const desk = document.createElement("option");
+  desk.value = "desk";
+  desk.textContent = "Mouse and keyboard";
+  picker.appendChild(desk);
   for (const [key, layout] of Object.entries(LAYOUTS)) {
     const option = document.createElement("option");
     option.value = key;
@@ -1866,7 +1897,13 @@ function applyLayoutChoice(key) {
   // Whatever was held on the way out of keyboard mode is let go of here, or it
   // stays held on somebody else's television.
   if (!keyboardOn) keyButtons = 0;
-  if (key === "off" || keyboardOn) {
+  // Driving the machine with a real keyboard and mouse rather than pretending
+  // either is a gamepad. Nothing is remapped, which is the whole point of it
+  // being a separate choice: picking "Keyboard-Controller" by mistake turns
+  // every key into a pad button, and that is not something to discover.
+  deskMode = key === "desk";
+  paintDeskMode();
+  if (key === "off" || keyboardOn || deskMode) {
     el("touch").hidden = true;
     releaseAllTouch();
   } else {
@@ -2187,10 +2224,15 @@ function showTouch(on, layout) {
   el("prompt").hidden = true;
 }
 
-el("use-touch").addEventListener("click", (event) => {
-  event.preventDefault();
-  showTouch(true);
-});
+// The two shortcuts that used to live in the "no controller?" prompt. The
+// prompt is gone -- see index.html for why -- and these are guarded rather
+// than deleted so anything else that wants to offer them still can.
+if (el("use-touch")) {
+  el("use-touch").addEventListener("click", (event) => {
+    event.preventDefault();
+    showTouch(true);
+  });
+}
 
 /* The same offer for somebody at a desk. A laptop has no touchscreen to put
    buttons on and often no controller either, and this page had nothing to say
@@ -3734,10 +3776,12 @@ function forgetPad() {
   paintPicker();
   // Their controller has gone; offer the on-screen one back unless they
   // turned it off deliberately.
+  //
+  // Nothing is said when they have chosen for themselves. The page used to
+  // open "press any button on your controller" here, which is the wrong thing
+  // to say to somebody playing on the keyboard, and the wrong thing to put in
+  // front of anybody who has already picked what they want.
   if (!chosenByHand && el("padtype").value !== "off") showTouch(true);
-  // "Press any button on your controller" is the wrong thing to say to
-  // somebody who is playing on the keyboard and has no controller to press.
-  else if (!keyboardOn) el("prompt").hidden = false;
 }
 
 function hasGamepad() {
@@ -7429,10 +7473,10 @@ function closePads() {
   padsOpen = false;
   remapStep = -1;
   el("pads").hidden = true;
-  // Only worth saying when there is no other way to play. With a controller
-  // attached it is wrong, and with the on-screen pad up it is noise sitting
-  // over the picture -- which is what closing this panel used to put back.
-  if (padIndex === null && !touchOn && !keyboardOn) el("prompt").hidden = false;
+  // Nothing is put back here. Closing this panel used to reopen "press any
+  // button on your controller" over the picture, which is the panel somebody
+  // had just been in to choose how they play -- so it argued with the choice
+  // they had come out of making.
   if (padsFrame) { cancelAnimationFrame(padsFrame); padsFrame = null; }
 }
 
@@ -8015,11 +8059,17 @@ function showToast(what, footnote) {
 let streamNow = null;
 
 function streamFields() {
+  const virtual = Boolean(el("stream-virtual") && el("stream-virtual").checked);
+  // On a virtual display the exact boxes win, because that is what they are
+  // for. Off it, they are not even shown and the named size decides.
+  const custom = virtual && el("stream-width") && el("stream-height")
+    && Number(el("stream-width").value) && Number(el("stream-height").value);
   return {
     monitor: Number(el("stream-screen").value),
-    virtual_display: Boolean(el("stream-virtual")
-                             && el("stream-virtual").checked),
-    height: Number(el("stream-size").value) || 0,
+    virtual_display: virtual,
+    ...(custom ? { width: Number(el("stream-width").value) } : {}),
+    height: custom ? Number(el("stream-height").value)
+                   : Number(el("stream-size").value) || 0,
     fps: Number(el("stream-fps").value) || 0,
     bitrate_kbps: Number(el("stream-bitrate").value) || 0,
     jitter_ms: Number(el("stream-jitter").value),
@@ -8162,6 +8212,17 @@ function paintScreens(state) {
   if (virtual) {
     virtual.checked = Boolean(state.virtual_display);
     virtual.disabled = !state.can_virtual_display;
+  }
+  // The exact size boxes only mean anything on a display made in software.
+  const customRow = el("stream-custom-row");
+  if (customRow) {
+    customRow.hidden = !state.virtual_display;
+  }
+  if (el("stream-width") && document.activeElement !== el("stream-width")) {
+    el("stream-width").value = String(state.width || "");
+  }
+  if (el("stream-height") && document.activeElement !== el("stream-height")) {
+    el("stream-height").value = String(state.height || "");
   }
   const virtualNote = el("stream-virtual-note");
   if (virtualNote) {

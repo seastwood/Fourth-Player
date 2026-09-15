@@ -323,13 +323,18 @@
     </div>
   </div>
 
-  <div id="prompt" class="prompt">
-    <p><strong>Press any button on your controller.</strong></p>
-    <p class="footnote">Browsers hide gamepads until you use one.
-       No controller? <button type="button" id="use-touch" class="linkish">Use
-       on-screen buttons</button>, or <button type="button" id="use-keys"
-       class="linkish">play on the keyboard</button>.</p>
-  </div>
+  <!-- Kept as the page's one prompt panel -- other things borrow it and put
+       their own words in -- but it no longer opens itself to say "press any
+       button on your controller".
+
+       It used to appear on entering a stream, offering on-screen buttons or
+       "play on the keyboard". The second of those maps the keyboard onto a
+       gamepad, so somebody who took the offer found every key remapped
+       underneath them, which is not what "play on the keyboard" sounds like
+       and not something to discover mid-game. The choice belongs in the
+       Controls menu, where it is named for what it does and can be changed
+       back. -->
+  <div id="prompt" class="prompt" hidden></div>
 
   <!-- What the browser thinks your controller is doing. Every pad reports a
        different layout, and a guest holding one the browser has mapped oddly
@@ -713,6 +718,10 @@
                A client setting rather than a host one: it is about this
                person's mouse and this person's hand, and two guests on one
                session would not agree about it. -->
+          <p class="footnote" id="desk-mode-note" hidden>You have chosen a
+             mouse and keyboard. Press <strong>Take the keyboard and
+             mouse</strong> above to send them to the machine; nothing is
+             remapped, and your keys arrive as keys.</p>
           <div class="acct-row">
             <label class="tune-label" for="desk-speed">Pointer speed</label>
             <select id="desk-speed" class="chip"
@@ -796,6 +805,20 @@
         <p class="footnote" id="stream-virtual-note">Makes a display in
            software at the size being sent, so nothing is scaled. Turning it
            off removes it, and any left over from before.</p>
+        <!-- Any size at all, but only on a virtual display. The named sizes
+             above exist because the capture is a real screen and those are
+             the shapes real screens come in; a display made in software has
+             no such constraint, and matching a client exactly is the point of
+             having one. A MacBook is 2560x1664, which is not 16:9 and is
+             never going to be in a list of named sizes. -->
+        <div class="acct-row" id="stream-custom-row" hidden>
+          <label class="tune-label" for="stream-width">Exact size</label>
+          <input id="stream-width" type="number" min="640" max="7680" step="2"
+                 style="width:5.5rem" aria-label="Picture width">
+          <span aria-hidden="true">&times;</span>
+          <input id="stream-height" type="number" min="480" max="4320" step="2"
+                 style="width:5.5rem" aria-label="Picture height">
+        </div>
         <div class="acct-row">
           <label class="tune-label" for="stream-size">Size</label>
           <select id="stream-size" class="chip"></select>

@@ -2530,6 +2530,21 @@ class LiveSession:
         480: (854, 480),
     }
 
+    @staticmethod
+    def _even(value, low, high):
+        """A sane, even picture dimension. Encoders refuse odd ones.
+
+        Rounded rather than refused: somebody typing their laptop's height is
+        not going to know that 1665 cannot be encoded, and a number that is
+        quietly made to work is better than a form that argues.
+        """
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("the picture size must be a number")
+        number = max(low, min(int(high), number))
+        return number - (number % 2)
+
     def _screens(self):
         """Every screen that could be sent, newest state each time.
 
@@ -2636,10 +2651,28 @@ class LiveSession:
                 raise ValueError("%s must be a number" % key)
             want = max(low, min(want, high))
             if key == "height":
-                if want not in self.STREAM_SIZES:
+                # A named size, or -- on a virtual display -- whatever was
+                # asked for. The named list exists because the capture is a
+                # real screen and those are the shapes real screens come in.
+                # A display made in software has no such constraint: the
+                # driver will make anything from 640x480 up, and the point of
+                # it is matching a client exactly. A MacBook is 2560x1664,
+                # which is not 16:9 and never will be in that list.
+                want_virtual = asked.get("virtual_display")
+                if isinstance(want_virtual, str):
+                    want_virtual = want_virtual.strip().lower() in (
+                        "1", "true", "on", "yes")
+                if want_virtual is None:
+                    want_virtual = bool(self.cfg.virtual_display)
+                custom = asked.get("width")
+                if want_virtual and custom:
+                    width = self._even(custom, 640, 7680)
+                    height = self._even(want, 480, 4320)
+                elif want not in self.STREAM_SIZES:
                     raise ValueError("%dp is not one of the sizes offered"
                                      % want)
-                width, height = self.STREAM_SIZES[want]
+                else:
+                    width, height = self.STREAM_SIZES[want]
                 if (width, height) != (self.cfg.width, self.cfg.height):
                     changes["width"], changes["height"] = width, height
             elif want != getattr(self.cfg, key):
