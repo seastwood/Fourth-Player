@@ -825,6 +825,20 @@ class Stage:
             else:
                 log.warning("a virtual display was asked for and could not be "
                             "made; sending this machine's own screen instead")
+        if self.vdisplay is None and int(getattr(cfg, "monitor", -1)) >= 0:
+            # One screen of several. By handle, for the same reason the virtual
+            # one is: an index is a position in a list, and the list changes
+            # when anything is plugged in or unplugged.
+            wanted = int(cfg.monitor)
+            chosen = [m for m in vdisplay.monitors() if m[0] == wanted]
+            if chosen:
+                source_line += " monitor-handle=%d" % chosen[0][1]
+                log.info("sending screen %d (%s), %dx%d", chosen[0][0],
+                         chosen[0][5], chosen[0][2], chosen[0][3])
+            else:
+                log.warning("screen %d was asked for and this machine has %d; "
+                            "sending the usual one", wanted,
+                            len(vdisplay.monitors()))
 
         description = (
             # The pointer is off while nobody is driving: a mouse cursor

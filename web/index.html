@@ -115,6 +115,12 @@
       </svg>
     </button>
     <span id="slot" class="chip">&mdash;</span>
+    <!-- Which screen is being sent, and a tap to move to the next one.
+         Only drawn when the host has more than one: a button that cycles
+         between one thing is a button that appears broken. A button rather
+         than a chip-shaped label, because it does something. -->
+    <button id="screen-chip" type="button" class="chip" hidden
+            title="Send the next screen">Screen</button>
     <!-- A lit pip, not the word "connected"; the words are on it for a
          screen reader and for a long press. -->
     <span id="link" class="chip link" title="Connecting"
@@ -759,6 +765,14 @@
         <p class="footnote" id="stream-preset-note">A preset fills in the dials
            below; nothing changes until you press Apply.</p>
 
+        <!-- Which screen, when there is more than one. Hidden outright when
+             there is only one, because a choice with a single option is not a
+             choice. The chip over the picture is the same setting for
+             switching while playing; this is for setting it deliberately. -->
+        <div class="acct-row" id="stream-screen-row" hidden>
+          <label class="tune-label" for="stream-screen">Screen</label>
+          <select id="stream-screen" class="chip"></select>
+        </div>
         <div class="acct-row">
           <label class="tune-label" for="stream-size">Size</label>
           <select id="stream-size" class="chip"></select>
@@ -818,6 +832,16 @@
           </div>
           <p class="footnote">Small stops the encoder smoothing bursts by
              holding frames back, which is exactly what adds delay.</p>
+          <!-- A screen made in software, at exactly the size being sent.
+               For the two cases where the host's own desktop is the wrong
+               size: a console whose monitor is smaller than the guest's, and
+               one with no monitor at all. Hidden where the host cannot do it,
+               rather than offered and ignored. -->
+          <div class="acct-row" id="stream-virtual-row" hidden>
+            <label class="tune-label" for="stream-virtual">Screen made in
+              software</label>
+            <input id="stream-virtual" type="checkbox" class="chip">
+          </div>
           <div class="acct-row">
             <label class="tune-label" for="stream-codec">Codec</label>
             <select id="stream-codec" class="chip">

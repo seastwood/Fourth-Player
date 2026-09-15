@@ -7857,6 +7857,28 @@ if (el("desk-speed")) {
   });
 }
 
+if (el("screen-chip")) {
+  el("screen-chip").addEventListener("click", () => {
+    // The next screen along, wrapping. Sent as the whole settings object the
+    // way Apply does, because the host applies what it is given and a partial
+    // one would read as "change everything else back to the page's idea of
+    // it" -- which on a page that has not been opened yet is whatever the
+    // markup says.
+    const state = streamNow || {};
+    const screens = Array.isArray(state.screens) ? state.screens : [];
+    if (screens.length < 2 || !may("stream")) return;
+    const at = screens.findIndex((s) => s.index === state.monitor);
+    const next = screens[(at + 1 + screens.length) % screens.length];
+    if (!next) return;
+    const picker = el("stream-screen");
+    if (picker) picker.value = String(next.index);
+    // Said before the host answers, so a tap feels like it did something on a
+    // connection where the rebuild takes a second.
+    el("screen-chip").textContent = `Screen ${next.index + 1}`;
+    send({ t: "stream", settings: { ...streamFields(), monitor: next.index } });
+  });
+}
+
 if (el("pads-buzz-strength")) {
   el("pads-buzz-strength").addEventListener("change", (event) => {
     setStrength(event.target.value);
@@ -7981,6 +8003,9 @@ let streamNow = null;
 
 function streamFields() {
   return {
+    monitor: Number(el("stream-screen").value),
+    virtual_display: Boolean(el("stream-virtual")
+                             && el("stream-virtual").checked),
     height: Number(el("stream-size").value) || 0,
     fps: Number(el("stream-fps").value) || 0,
     bitrate_kbps: Number(el("stream-bitrate").value) || 0,
@@ -8070,6 +8095,67 @@ function buildStreamPresets(sizes) {
   }
 }
 
+/* Which screens the host has, and which one is being sent.
+ *
+ * Two controls for one setting: a dropdown in the picture panel for choosing
+ * deliberately, and a chip over the video for switching while playing. Both
+ * appear only when the host has more than one screen -- a choice with a single
+ * option is not a choice, and a button that cycles between one thing looks
+ * broken.
+ *
+ * The virtual screen is its own switch rather than an entry in this list. It
+ * is a mode, not one of the machine's screens, and offering it here as well
+ * would let somebody pick it and then wonder why the switch changed it back. */
+function paintScreens(state) {
+  const screens = Array.isArray(state.screens) ? state.screens : [];
+  const picker = el("stream-screen");
+  const row = el("stream-screen-row");
+  const chip = el("screen-chip");
+  const several = screens.length > 1;
+
+  if (picker) {
+    const built = JSON.stringify(screens.map((s) => [s.index, s.name]));
+    if (picker.dataset.built !== built) {
+      picker.innerHTML = "";
+      const auto = document.createElement("option");
+      auto.value = "-1";
+      auto.textContent = "Whichever is the main one";
+      picker.appendChild(auto);
+      for (const s of screens) {
+        const opt = document.createElement("option");
+        opt.value = String(s.index);
+        // The size is what tells two screens apart at a glance; the device
+        // name is "\\.\DISPLAY11" and means nothing to anybody.
+        opt.textContent = `Screen ${s.index + 1} — ${s.width}x${s.height}`
+          + (s.primary ? " (main)" : "");
+        picker.appendChild(opt);
+      }
+      picker.dataset.built = built;
+    }
+    picker.value = String(state.monitor == null ? -1 : state.monitor);
+  }
+  if (row) row.hidden = !several;
+
+  const virtualRow = el("stream-virtual-row");
+  if (virtualRow) virtualRow.hidden = !state.can_virtual_display;
+  const virtual = el("stream-virtual");
+  if (virtual) virtual.checked = Boolean(state.virtual_display);
+
+  if (chip) {
+    // On the virtual screen there is nothing to cycle between, so the chip
+    // says what is happening rather than offering a switch that would fight
+    // the one above.
+    chip.hidden = !several || Boolean(state.on_virtual_display);
+    if (!chip.hidden) {
+      const current = screens.find((s) => s.index === state.monitor);
+      chip.textContent = current
+        ? `Screen ${current.index + 1}`
+        : "Main screen";
+      chip.title = "Send the next screen";
+    }
+  }
+}
+
 function paintStream(state) {
   streamNow = state;
   const size = el("stream-size");
@@ -8084,6 +8170,7 @@ function paintStream(state) {
   }
   if (size) size.value = String(state.height);
   buildStreamPresets(state.sizes);
+  paintScreens(state);
 
   // The host owns the bounds. They are in the markup too, so the controls are
   // sane before the first reply arrives, but the moment the host says what it

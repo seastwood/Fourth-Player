@@ -60,6 +60,14 @@ class Config:
     # Windows only, and it needs SudoVDA installed. A machine without it says
     # so once and streams its own desktop.
     virtual_display: bool = False
+    # Which screen to send when the machine has more than one. -1 is whatever
+    # the capture would pick on its own, which is the primary.
+    #
+    # Only meaningful where the capture can be pointed at one screen, which
+    # today means Windows: d3d11screencapturesrc takes a monitor, and ximagesrc
+    # takes a whole X display. A host that cannot choose publishes no screens
+    # and the page does not offer the choice.
+    monitor: int = -1
     bitrate_kbps: int = 1500
     hardware_encode: bool = True
     # The tallest picture a *software* encoder will be asked for, whatever

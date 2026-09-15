@@ -2530,6 +2530,29 @@ class LiveSession:
         480: (854, 480),
     }
 
+    def _screens(self):
+        """Every screen that could be sent, newest state each time.
+
+        Not cached, unlike the desktop size: a screen being plugged in or
+        unplugged is exactly the moment somebody opens this panel, and a list
+        that was right an hour ago is worse than no list.
+
+        The virtual one is left out while it exists. It is not a choice --
+        it is the thing the switch above turns on -- and offering it here as
+        well would let somebody pick it and then wonder why turning the switch
+        off changed the picture.
+        """
+        try:
+            found = vdisplay.monitors()
+        except Exception:
+            return []
+        mine = getattr(getattr(self, "stage", None), "vdisplay", None)
+        skip = getattr(mine, "monitor_handle", None)
+        return [{"index": index, "name": name, "width": width,
+                 "height": height, "primary": primary}
+                for index, handle, width, height, primary, name in found
+                if handle != skip]
+
     def _desktop_size(self):
         """The host's own screen, read once and remembered.
 
@@ -2567,6 +2590,13 @@ class LiveSession:
             # not. A switch that silently does nothing is worse than no switch.
             "can_virtual_display": bool(vdisplay.available()),
             "on_virtual_display": bool(getattr(stage, "vdisplay", None)),
+            "monitor": int(getattr(cfg, "monitor", -1)),
+            # The screens this machine has, so a page can offer the choice
+            # only where there is one to make. Empty where the capture cannot
+            # be pointed at a single screen -- which is every platform but
+            # Windows today -- rather than listing screens that selecting
+            # would do nothing about.
+            "screens": self._screens(),
             "audio_bitrate_kbps": cfg.audio_bitrate_kbps,
             "audio_queue_ms": cfg.audio_queue_ms,
             "sounding": bool(getattr(stage, "has_audio", False)),
@@ -2611,6 +2641,20 @@ class LiveSession:
                     changes["width"], changes["height"] = width, height
             elif want != getattr(self.cfg, key):
                 changes[key] = want
+
+        if "monitor" in asked:
+            try:
+                want_screen = int(asked["monitor"])
+            except (TypeError, ValueError):
+                raise ValueError("monitor must be a number")
+            # -1 means "whatever the capture would pick", and is always
+            # allowed. Anything else has to be a screen this machine has, or
+            # the session would come back showing nothing anybody chose.
+            if want_screen >= 0 and not any(
+                    s["index"] == want_screen for s in self._screens()):
+                raise ValueError("this machine has no screen %d" % want_screen)
+            if want_screen != int(getattr(self.cfg, "monitor", -1)):
+                changes["monitor"] = want_screen
 
         codec = str(asked.get("codec") or "").lower()
         if codec in ("auto", "h264", "h265") and codec != self.cfg.codec:
