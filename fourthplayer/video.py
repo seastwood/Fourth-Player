@@ -32,7 +32,7 @@ gi.require_version("GstSdp", "1.0")
 gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib, GObject  # noqa: E402
 
-from . import net, screen, vdisplay  # noqa: E402
+from . import net, screen, vdisplay, windesktop  # noqa: E402
 
 log = logging.getLogger("fourthplayer.video")
 
@@ -1009,6 +1009,13 @@ class Stage:
                 return self.start()
             raise RuntimeError(
                 f"the capture pipeline stalled reaching PLAYING (got {state.value_nick})")
+        # Which Windows desktop the input is on, and whether this host could
+        # follow it. Said once per capture because it is the difference
+        # between "the stream went black" and "the machine locked and this
+        # host is not allowed to see the sign-in screen" -- which look
+        # identical from a phone, and only one of them is a fault.
+        if windesktop.supported():
+            log.info("desktop: %s", windesktop.explain())
         log.info("capture running: %dx%d @%d, %d kb/s, %s, audio %s",
                  self.sending_width, self.sending_height, self.cfg.fps,
                  self.cfg.bitrate_kbps, self.encoder_name,
