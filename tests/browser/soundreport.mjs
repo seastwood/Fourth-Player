@@ -36,11 +36,16 @@ check(/total - soundFirst\.samples/.test(body)
       && /lost - soundFirst\.lost/.test(body),
       "samples, concealment and loss are all differenced; leaving any of them "
       + "cumulative would mix the startup back in");
-check(/Math\.max\(1, total - soundFirst\.samples\)/.test(body),
-      "and the divisor cannot reach zero, which would make the percentage "
-      + "Infinity on a stream that stopped");
-check(/Math\.max\(0, concealed - soundFirst\.concealed\)/.test(body),
-      "nor can a counter that was reset by a renegotiation go negative");
+// These used to assert that the divisor was clamped to 1 and the concealment
+// to 0. That prevented Infinity and produced nonsense instead -- the log
+// carried "382700.00% of samples invented" -- so the clamps are gone and the
+// difference is simply not used unless it is real.
+check(/grown >= 48000/.test(body),
+      "a difference is only reported when a real amount of sound arrived, so "
+      + "a divisor near zero never reaches the arithmetic at all");
+check(/hidden >= 0/.test(body),
+      "and never when the concealment counter went backwards, which is what a "
+      + "renegotiation does to it");
 
 console.log("\ncounters that restarted are not reported as a measurement");
 // A renegotiation restarts them, so the difference can be negative or nearly

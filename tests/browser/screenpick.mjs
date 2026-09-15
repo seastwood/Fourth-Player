@@ -82,15 +82,28 @@ check(!labels.some((t) => t.includes("DISPLAY11")),
       "and not by device name, which means nothing to anybody");
 check(labels.some((t) => t.includes("main")), "the main one says so");
 
-console.log("\non the virtual screen the chip stands down");
-// There is nothing to cycle between, and a switch that fought the virtual
-// display toggle would be two controls disagreeing about one picture.
+console.log("\nthe virtual screen is one of the screens, not a mode apart");
+// It was left out of the list at first, on the reasoning that it is a mode
+// rather than a screen. That is backwards in the only setup that has one: a
+// machine with a single monitor and a virtual display is the commonest case
+// with two screens to move between, and hiding the switch there left no way
+// back to the real desktop.
+const withVirtual = [
+  two[0],
+  { index: 1, name: "\\\\.\\DISPLAY12", width: 2560, height: 1440,
+    primary: false, virtual: true },
+];
 h = harness();
-h.paint({ screens: two, monitor: -1, on_virtual_display: true });
-check(h.nodes["screen-chip"].hidden === true, "the chip is hidden");
-check(h.nodes["stream-screen-row"].hidden === false,
-      "but the deliberate choice stays reachable, so somebody can set what to "
-      + "come back to");
+h.paint({ screens: withVirtual, monitor: 1, on_virtual_display: true });
+check(h.nodes["screen-chip"].hidden === false,
+      "the chip shows while the virtual display is on");
+check(h.nodes["screen-chip"].textContent === "Virtual",
+      `and says which it is: "${h.nodes["screen-chip"].textContent}"`);
+const names = h.nodes["stream-screen"].children.map((c) => c.textContent);
+check(names.some((t) => t.startsWith("Virtual display")),
+      `the list names it plainly: ${JSON.stringify(names)}`);
+check(names.some((t) => t.includes("Screen 1")),
+      "and the real monitor is still there to switch back to");
 
 console.log("\nthe virtual switch is only offered where it could work");
 h = harness();
