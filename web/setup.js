@@ -357,6 +357,11 @@ const ACTIONS = {
     const slots = Number(el("start-slots").value) || 3;
     heard(await control("start", {minutes, slots}), "session open");
   },
+  async forever() {
+    heard(await control("extend", {forever: true}),
+          "This session now runs until somebody stops it.");
+  },
+
   async extend() {
     heard(await control("extend", {minutes: Number(el("extend-minutes").value) || 30}),
           "time added");

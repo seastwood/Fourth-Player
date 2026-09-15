@@ -64,6 +64,11 @@
         <label>add <input id="extend-minutes" type="number" min="1" value="30"
                           style="width:5rem"> minutes</label>
         <button data-do="extend">Extend</button>
+        <!-- The other answer to "it keeps running out": stop it running out.
+             There was no way to do this to a session already open, so the only
+             route to no limit was ending the one people were in and asking
+             everybody for a new PIN. -->
+        <button data-do="forever">No time limit</button>
         <button data-do="reshare">New link and PIN</button>
         <button class="danger" data-do="stop">End the session</button>
       </div>

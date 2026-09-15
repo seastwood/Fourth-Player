@@ -843,8 +843,17 @@
 
         <div class="acct-row">
           <label class="tune-label" for="stream-fps">Frames a second</label>
+          <!-- The host trims this list to what it will accept; see
+               paintStream. The high ones are only useful on a screen that can
+               draw them and a link that can carry them, and both say so
+               themselves rather than being guessed at here. -->
           <select id="stream-fps" class="chip">
-            <option value="60">60 &mdash; snappiest</option>
+            <option value="240">240</option>
+            <option value="165">165</option>
+            <option value="144">144</option>
+            <option value="120">120</option>
+            <option value="90">90</option>
+            <option value="60">60 &mdash; safe everywhere</option>
             <option value="50">50</option>
             <option value="30">30 &mdash; easiest on the host</option>
             <option value="24">24</option>

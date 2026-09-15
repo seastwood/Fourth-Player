@@ -736,6 +736,32 @@ class LiveSession:
     def unlimited(self):
         return self.invite is not None and self.invite.unlimited
 
+    def remove_deadline(self):
+        """Take the time limit off a session that is already running.
+
+        There was no way to do this: a session opened with a duration ran out,
+        and the only way to have no limit was to have said so when it started
+        -- which means ending the one people are in and asking everybody for a
+        new PIN, to change a number nobody outside the room can see.
+
+        An infinite expiry rather than a flag, the same as a session started
+        without one, so every comparison that asks whether this is still alive
+        keeps working without learning about a second way to be alive.
+        """
+        if self.invite is None:
+            raise RuntimeError("no session is open")
+        if self.invite.unlimited:
+            return False
+        self.invite.expires_at = math.inf
+        self._warned = set()
+        log.info("the session's time limit was removed; it now runs until "
+                 "somebody stops it")
+        # `remaining` is null on the wire for a session with no deadline --
+        # JSON has no infinity, and JSON.parse("Infinity") is an error in a
+        # browser.
+        self.notify({"t": "extended", "remaining": None})
+        return True
+
     def extend(self, seconds):
         """Push the deadline back. The invite and every guest survive it."""
         if self.invite is None:
@@ -2482,7 +2508,13 @@ class LiveSession:
         # the desktop size so the page can say so rather than let somebody
         # spend 40 Mb/s on an upscale.
         "height": (480, 2160),
-        "fps": (15, 60),
+        # Up to 240. Sixty was the ceiling, and a 120Hz or 144Hz laptop
+        # cannot be sent what it can draw -- which is the one thing a frame
+        # rate is for. What actually limits this is the encoder and the link,
+        # both of which say so on their own: NVENC refuses what it cannot do,
+        # and a link that cannot carry it shows up as dropped frames rather
+        # than as a setting nobody was allowed to choose.
+        "fps": (15, 240),
         # A hundred megabits. The ceiling is not about what the encoder can
         # do -- NVENC takes two gigabits and the picture stops improving long
         # before either -- it is about what leaves the machine. Every guest is

@@ -414,7 +414,12 @@ function connect(hello) {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${scheme}//${location.host}/ws`);
 
-  socket.addEventListener("open", () => socket.send(JSON.stringify(hello)));
+  socket.addEventListener("open", () => {
+    // A new connection knows nothing: the picture may have changed while this
+    // page was away, and the screens certainly may have.
+    askedStream = false;
+    socket.send(JSON.stringify(hello));
+  });
   socket.addEventListener("close", (event) => {
     if (ended) return;
     // A socket we have already replaced, closing after the fact. Without this
@@ -1858,6 +1863,13 @@ function paintDeskOption() {
  * permission to hold the desk. Somebody may choose this and not be allowed the
  * desk yet; they should still see the settings for it and the button to ask. */
 let deskMode = false;
+
+/* Whether this connection has asked the host what the picture is doing.
+ *
+ * Once per connection: the answer is pushed again whenever anybody changes
+ * it, so asking repeatedly would be noise. Reset when the socket is replaced,
+ * because a new connection knows nothing. */
+let askedStream = false;
 
 function paintDeskMode() {
   // Deliberately does not touch whether the desk panel is shown. That is the
@@ -3458,6 +3470,34 @@ async function tellAboutSound() {
  * them does not. */
 let shapeTold = false;
 
+/* Roughly how often this screen redraws, in hertz, or 0 if it cannot be told.
+ *
+ * There is no property for it: screen.refreshRate does not exist, so it is
+ * measured by counting animation frames. Worth having because "choose a higher
+ * refresh rate" is only sensible up to what the screen can actually draw, and
+ * the host has no other way to know that a guest is on 120Hz. */
+let screenHz = 0;
+
+function measureRefresh() {
+  let frames = 0;
+  const began = performance.now();
+  const tick = () => {
+    frames += 1;
+    const gone = performance.now() - began;
+    // Half a second is enough to tell 60 from 120 and short enough not to
+    // matter; rounded to something recognisable so 59.6 reads as 60.
+    if (gone < 500) return requestAnimationFrame(tick);
+    const raw = frames / (gone / 1000);
+    const known = [24, 30, 50, 60, 75, 90, 100, 120, 144, 165, 240];
+    screenHz = known.reduce((best, hz) =>
+      Math.abs(hz - raw) < Math.abs(best - raw) ? hz : best, known[0]);
+    return undefined;
+  };
+  requestAnimationFrame(tick);
+}
+
+measureRefresh();
+
 function tellAboutTheShape() {
   if (shapeTold) return;
   shapeTold = true;
@@ -3472,6 +3512,7 @@ function tellAboutTheShape() {
             + " at " + (vv.scale || 1).toFixed(2) + "x" : ", no visualViewport")
     + ", dpr " + (window.devicePixelRatio || 1)
     + ", root font " + root
+    + (screenHz ? ", screen about " + screenHz + " Hz" : "")
     + ", " + (standalone ? "standalone" : "in a browser tab"));
 }
 
@@ -4375,6 +4416,16 @@ function paintSession() {
   show("session-kick", may("kick"));
   show("session-grant", may("grant"));
   show("session-desk", may("desk"));
+  // The picture settings, once, as soon as we are allowed them.
+  //
+  // They used to be asked for only when the admin tab was opened, and the
+  // list of screens comes with them -- so the screen chip over the picture
+  // could not appear until somebody had been into a panel they had no reason
+  // to open. Reported as the chip not always showing up.
+  if (may("stream") && !askedStream) {
+    askedStream = true;
+    send({ t: "stream" });
+  }
   paintDeskOption();
   deskPaint();
 
@@ -4922,16 +4973,75 @@ function cursorDriving() {
   return deskHeld && (cursorOn || deskKeyboardUp());
 }
 
+/* How a finger drives the pointer: as a place, or as a movement.
+ *
+ * "absolute" puts the pointer where the finger is, which is what a touchscreen
+ * has taught everybody and is right for a desktop, a menu, a browser.
+ *
+ * "relative" sends the movement instead, like a trackpad. It is the only one
+ * that works in a game: a game reads the mouse as turning, not as pointing,
+ * and an absolute pointer is pinned inside the screen -- so an aiming
+ * crosshair stops dead at the edge and will not turn any further, which is
+ * exactly what was reported.
+ *
+ * Remembered per browser, like the pointer speed it multiplies. */
+const CURSOR_MODE_KEY = "fp:cursor-mode";
+
+function savedCursorMode() {
+  try {
+    const kept = localStorage.getItem(CURSOR_MODE_KEY);
+    return kept === "relative" ? "relative" : "absolute";
+  } catch (_) {
+    return "absolute";
+  }
+}
+
+let cursorMode = savedCursorMode();
+
+function setCursorMode(mode) {
+  cursorMode = mode === "relative" ? "relative" : "absolute";
+  try { localStorage.setItem(CURSOR_MODE_KEY, cursorMode); } catch (_) {}
+  paintCursorMode();
+}
+
+function paintCursorMode() {
+  const button = el("desk-cursor");
+  if (!button) return;
+  const relative = cursorMode === "relative";
+  button.classList.toggle("is-relative", relative);
+  button.title = relative
+    ? "Pointer: moves like a trackpad — works in games. Tap and hold to change."
+    : "Pointer: goes where you touch. Tap and hold to change.";
+}
+
 function cursorSend() {
   deskSend([{ t: "p",
               x: Math.round(cursorU * POINT_MAX),
               y: Math.round(cursorV * POINT_MAX) }]);
 }
 
+/* One drag, sent the way the current mode says. Returns true if it was sent
+   as movement, so the caller knows not to also move the absolute estimate. */
+function cursorSendMotion(du, dv) {
+  if (cursorMode !== "relative") return false;
+  const picture = pictureBox();
+  // Back into picture pixels: du and dv are fractions of the picture, and the
+  // host wants the same relative motion a mouse would have made. deskMoved
+  // applies the pointer speed and keeps the estimate in step.
+  deskMoved(du * (picture.width || 1) * zoom,
+            dv * (picture.height || 1) * zoom);
+  return true;
+}
+
 /* Move the pointer by a fraction of the picture, stopping at its edges, and
    bring the view along. Returns whether it actually went anywhere -- a
    cursor already against an edge stops a coast rather than grinding there. */
 function cursorMove(du, dv) {
+  // In relative mode there are no edges to stop at: the movement goes to the
+  // host as movement, and the host's pointer keeps turning. That is the whole
+  // point of the mode, and the reason this returns true -- a coast must not be
+  // stopped by an edge that does not exist.
+  if (cursorSendMotion(du, dv)) return true;
   const wasU = cursorU, wasV = cursorV;
   cursorU = Math.max(0, Math.min(1, cursorU + du));
   cursorV = Math.max(0, Math.min(1, cursorV + dv));
@@ -7925,6 +8035,43 @@ el("pads-buzz").addEventListener("change", (event) => {
   report("turned the buzz " + (hapticsOn ? "on" : "off") + ", via " + feelPath
          + " on " + navigator.userAgent);
 });
+
+/* The cursor button: a tap chooses the cursor, a press and hold changes how it
+   moves. A second button would be another thing in a corner that is already
+   three buttons wide on a phone, and the setting belongs to the control it
+   changes. */
+if (el("desk-cursor")) {
+  const button = el("desk-cursor");
+  let holding = 0;
+  let changed = false;
+  const begin = () => {
+    changed = false;
+    clearTimeout(holding);
+    holding = setTimeout(() => {
+      changed = true;
+      setCursorMode(cursorMode === "relative" ? "absolute" : "relative");
+      buzz();
+      showNotice(cursorMode === "relative"
+        ? "Pointer moves like a trackpad. Drag to turn — this is the one that "
+          + "works in games, where the pointer has no edges to stop at."
+        : "Pointer goes where you touch. Right for desktops and menus.", false);
+    }, 600);
+  };
+  const end = (event) => {
+    clearTimeout(holding);
+    // A hold has already done something; letting the tap through as well
+    // would change the mode and then switch away from the cursor.
+    if (changed && event) { event.preventDefault(); event.stopPropagation(); }
+  };
+  button.addEventListener("pointerdown", begin);
+  button.addEventListener("pointerup", end, true);
+  button.addEventListener("pointercancel", end, true);
+  button.addEventListener("pointerleave", end, true);
+  button.addEventListener("click", (event) => {
+    if (changed) { event.preventDefault(); event.stopPropagation(); changed = false; }
+  }, true);
+  paintCursorMode();
+}
 
 if (el("desk-speed")) {
   el("desk-speed").value = String(deskSpeed);

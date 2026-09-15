@@ -2833,3 +2833,14 @@ input.name {
   pointer-events: none;
 }
 .stage.locked .hud > * { pointer-events: none; }
+
+/* The cursor button while it is in trackpad mode.
+ *
+ * One button with two meanings needs to say which it is in without a word:
+ * the tap still chooses the cursor, and a press and hold changes how the
+ * cursor moves. Marked rather than relabelled, because the label is an icon
+ * and the strip is already three buttons wide on a phone. */
+.desk-more-only.is-relative {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}

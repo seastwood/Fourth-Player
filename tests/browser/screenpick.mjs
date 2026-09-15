@@ -163,6 +163,19 @@ check(/\.\.\.streamFields\(\)/.test(click),
       "it sends the whole settings object, not just the screen -- a partial "
       + "one reads as 'set everything else back to what this page thinks'");
 
+console.log("\nthe screen list is asked for without opening a panel first");
+// It used to be requested only when the admin tab was opened, and the list of
+// screens arrives with it -- so the chip over the picture could not appear
+// until somebody had been into a panel they had no reason to open. Reported
+// as the chip not always showing up.
+check(/if \(may\("stream"\) && !askedStream\)/.test(app),
+      "the settings are asked for as soon as the capability is known");
+check(/askedStream = true;\n    send\(\{ t: "stream" \}\)/.test(app),
+      "and only once, since the host pushes the answer again on every change");
+check(/askedStream = false;\n    socket\.send/.test(app),
+      "and again on a new connection, which knows nothing about what changed "
+      + "while the page was away");
+
 console.log("\nthe markup has both, and starts hidden");
 check(/id="stream-screen-row"[^>]*hidden/.test(html),
       "the dropdown row starts hidden, so a single-screen host never flashes "

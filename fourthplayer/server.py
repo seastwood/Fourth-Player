@@ -1129,6 +1129,14 @@ class Server:
             if command == "extend":
                 if not (self.session and self.session.open):
                     return {"ok": False, "error": "no session"}
+                # Take the limit off altogether, rather than pushing it back
+                # by a number somebody has to keep coming back to.
+                if request.get("forever"):
+                    if not self.session.remove_deadline():
+                        return {"ok": False,
+                                "error": "this session already has no limit"}
+                    log.info("the session was set to run with no time limit")
+                    return self._status()
                 if self.session.unlimited:
                     return {"ok": False,
                             "error": "this session has no time limit to extend"}
