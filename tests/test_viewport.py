@@ -197,5 +197,21 @@ for name, rule in (("the search field", r"\.browser-bar\.searching \.find \{([^}
         check("max-width" in body,
               "%s stops somewhere: %r" % (name, body.strip()[:70]))
 
+print()
+print("nothing floats over the picture while the pointer is captured")
+# With the pointer locked it is on the console, so none of this can be
+# clicked: it is a row of controls sitting on the game that do not work. The
+# desk buttons already went; the chip strip was asked for in the same words.
+for what in (".desk-dock", ".hud"):
+    rule = re.search(r"\.stage\.locked " + re.escape(what) + r" \{([^}]*)\}",
+                     css)
+    check(rule is not None, "%s is put away while captured" % what)
+    if rule:
+        check("opacity: 0" in rule.group(1),
+              "%s is faded rather than removed, so the strip does not jump "
+              "when it comes back" % what)
+        check("pointer-events: none" in rule.group(1),
+              "%s cannot be clicked through while it is invisible" % what)
+
 print(("FAILED: %d" % len(fails)) if fails else "test_viewport: all ok")
 sys.exit(1 if fails else 0)

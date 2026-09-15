@@ -192,5 +192,58 @@ check(size and float(size.group(1)) < 1.0,
       "the font is small enough for four digits to fit: %srem"
       % (size.group(1) if size else "?"))
 
+print()
+print("the virtual screen is found by what it is, never by guessing")
+# Reported as: the picture feels stretched rather than the resolution I set.
+# It was. Adding a display makes Windows rebuild its monitor list and the
+# handles change with it, so the *existing* screens look new too -- and this
+# took the first thing that appeared. On a machine with one 2560x1440 panel
+# and a virtual display asked for at 2560x1610, it pointed the capture at the
+# real monitor and scaled 1440 up to 1610.
+src = open(os.path.join(ROOT, "fourthplayer", "vdisplay.py")).read()
+find = src[src.index("def _find_monitor"):src.index("def _keep_alive")]
+check("(m[2], m[3]) == want" in find,
+      "a screen is only ours if it is the size we asked for")
+check("or fresh)[0]" not in find,
+      "and there is no fall back to whatever turned up, which is what "
+      "captured the wrong monitor")
+check("return False" in find,
+      "not finding it is reported rather than papered over")
+check("self.close()" in src[src.index("if not self._find_monitor"):][:400],
+      "and a display that cannot be found is taken away again, so the host "
+      "streams the real screen instead of leaving one nobody looks at")
+
+print()
+print("and it is put into the size that was asked for")
+# SudoVDA makes the monitor; Windows attaches it at a mode of its own
+# choosing. On this machine a display asked for at 2560x1610 arrived as
+# 2560x1440 -- the size of the other screen -- and nothing said so.
+check("def set_mode(" in src, "there is something that sets a mode")
+check("ChangeDisplaySettingsExW" in src, "via the API that changes one")
+check("EnumDisplaySettingsW" in src,
+      "reading the current mode first, so an already-correct screen is not "
+      "disturbed")
+check("if (mode.dmPelsWidth, mode.dmPelsHeight) == (width, height)" in src,
+      "and skipped entirely when it is already right")
+check("sudomaker" in src.lower(),
+      "ours is picked out by the driver's own description, not by size or "
+      "position: two screens can be the same size, and only one of them is a "
+      "SudoMaker adapter")
+
+print()
+print("the platform test is defined before anything guards on it")
+# The first version of the mode-setting code was pasted in above the line
+# that defines SUPPORTED, and took the host down on import with a NameError.
+import ast
+tree = ast.parse(src)
+assigned = min(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Assign)
+               for t in n.targets
+               if isinstance(t, ast.Name) and t.id == "SUPPORTED")
+loaded = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Name)
+          and n.id == "SUPPORTED" and isinstance(n.ctx, ast.Load)]
+check(assigned < min(loaded),
+      "SUPPORTED is assigned at line %d and first read at line %d"
+      % (assigned, min(loaded)))
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

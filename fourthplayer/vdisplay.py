@@ -51,6 +51,12 @@ IOCTL_VERSION = _ctl(0x8FF)
 # not one of the standard display ones it also exposes.
 INTERFACE_GUID = "{e5bcc234-1e0c-418a-a0d4-ef8b7501414d}"
 
+# Everything here is Windows-only. Named once rather than repeating the
+# platform test, and named *before* anything that guards on it -- the
+# first version of the mode-setting code was pasted in above this line
+# and took the host down on import with a NameError.
+SUPPORTED = sys.platform == "win32"
+
 
 # The monitors this program is allowed to make, named in advance.
 #
@@ -242,6 +248,114 @@ def remove_all():
         screen.close_handle()
 
 
+if SUPPORTED:
+    class DEVMODEW(ctypes.Structure):
+        _fields_ = [
+            ("dmDeviceName", ctypes.c_wchar * 32),
+            ("dmSpecVersion", ctypes.c_ushort),
+            ("dmDriverVersion", ctypes.c_ushort),
+            ("dmSize", ctypes.c_ushort),
+            ("dmDriverExtra", ctypes.c_ushort),
+            ("dmFields", ctypes.c_ulong),
+            ("dmPositionX", ctypes.c_long), ("dmPositionY", ctypes.c_long),
+            ("dmDisplayOrientation", ctypes.c_ulong),
+            ("dmDisplayFixedOutput", ctypes.c_ulong),
+            ("dmColor", ctypes.c_short), ("dmDuplex", ctypes.c_short),
+            ("dmYResolution", ctypes.c_short),
+            ("dmTTOption", ctypes.c_short), ("dmCollate", ctypes.c_short),
+            ("dmFormName", ctypes.c_wchar * 32),
+            ("dmLogPixels", ctypes.c_ushort),
+            ("dmBitsPerPel", ctypes.c_ulong),
+            ("dmPelsWidth", ctypes.c_ulong), ("dmPelsHeight", ctypes.c_ulong),
+            ("dmDisplayFlags", ctypes.c_ulong),
+            ("dmDisplayFrequency", ctypes.c_ulong),
+            ("dmICMMethod", ctypes.c_ulong), ("dmICMIntent", ctypes.c_ulong),
+            ("dmMediaType", ctypes.c_ulong), ("dmDitherType", ctypes.c_ulong),
+            ("dmReserved1", ctypes.c_ulong), ("dmReserved2", ctypes.c_ulong),
+            ("dmPanningWidth", ctypes.c_ulong),
+            ("dmPanningHeight", ctypes.c_ulong)]
+
+    class DISPLAY_DEVICEW(ctypes.Structure):
+        _fields_ = [("cb", ctypes.c_ulong),
+                    ("DeviceName", ctypes.c_wchar * 32),
+                    ("DeviceString", ctypes.c_wchar * 128),
+                    ("StateFlags", ctypes.c_ulong),
+                    ("DeviceID", ctypes.c_wchar * 128),
+                    ("DeviceKey", ctypes.c_wchar * 128)]
+
+    DM_PELSWIDTH = 0x00080000
+    DM_PELSHEIGHT = 0x00100000
+    DM_DISPLAYFREQUENCY = 0x00400000
+    ENUM_CURRENT_SETTINGS = -1
+    CDS_UPDATEREGISTRY = 0x00000001
+    DISP_CHANGE_SUCCESSFUL = 0
+
+
+def adapters():
+    r"""Every display adapter Windows has, as (device name, description).
+
+    The device name is "\\.\DISPLAY1" and so on, which is what
+    ChangeDisplaySettingsEx and EnumDisplayMonitors both speak. The
+    description is the driver's own, which is how the virtual one is picked
+    out: it says "SudoMaker Virtual Display Adapter" and nothing else does.
+    """
+    if not SUPPORTED:
+        return []
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found, index = [], 0
+    while True:
+        device = DISPLAY_DEVICEW()
+        device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
+        if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(device), 0):
+            break
+        # Only the ones actually attached to the desktop; the others have no
+        # mode to set and no picture to capture.
+        if device.StateFlags & 0x00000001:
+            found.append((device.DeviceName, device.DeviceString))
+        index += 1
+    return found
+
+
+def set_mode(device_name, width, height, hz):
+    """Put one adapter into a given mode. True if Windows took it.
+
+    SudoVDA makes the monitor but Windows attaches it at a mode of its own
+    choosing -- on a machine with a 2560x1440 panel, a virtual display asked
+    for at 2560x1610 arrived as 2560x1440. The size that was asked for has to
+    be applied afterwards, which is what this does and what every other tool
+    that matches a client's resolution is doing.
+    """
+    if not SUPPORTED:
+        return False
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    mode = DEVMODEW()
+    mode.dmSize = ctypes.sizeof(DEVMODEW)
+    if not user32.EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS,
+                                       ctypes.byref(mode)):
+        log.debug("could not read the current mode of %s", device_name)
+        return False
+    if (mode.dmPelsWidth, mode.dmPelsHeight) == (width, height):
+        return True                       # already right; nothing to disturb
+    mode.dmPelsWidth, mode.dmPelsHeight = int(width), int(height)
+    mode.dmDisplayFrequency = int(hz)
+    mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY
+    result = user32.ChangeDisplaySettingsExW(device_name, ctypes.byref(mode),
+                                             None, CDS_UPDATEREGISTRY, None)
+    if result != DISP_CHANGE_SUCCESSFUL:
+        # -2 is DISP_CHANGE_BADMODE: the driver will not do that size. Worth
+        # naming, because it is the difference between "this size is
+        # impossible here" and "something went wrong".
+        log.warning("%s would not go to %dx%d@%d (code %d%s)", device_name,
+                    width, height, hz, result,
+                    "; the driver does not offer that mode" if result == -2
+                    else "")
+        return False
+    log.info("%s set to %dx%d@%d", device_name, width, height, hz)
+    return True
+
+
 class VirtualDisplay:
     """One virtual monitor, alive for as long as this object is open."""
 
@@ -334,33 +448,77 @@ class VirtualDisplay:
         log.info("made a virtual monitor: %dx%d @%d, target %d",
                  self.width, self.height, self.fps, out.TargetId)
         self._keep_alive()
-        self._find_monitor(before)
+        # Windows attaches it at a mode of its own choosing, so the size that
+        # was asked for is applied here. Without this a virtual display asked
+        # for at 2560x1610 arrives as whatever the machine's other screen is,
+        # and the capture scales one to the other -- which is a picture that
+        # looks stretched and nothing that says why.
+        self._set_requested_mode()
+        if not self._find_monitor(before):
+            # Made but unusable: Windows would not attach it at the size that
+            # was asked for. Taken away again rather than left as a screen
+            # nobody is looking at, and the caller streams the real desktop.
+            self.close()
+            return False
         return True
 
-    def _find_monitor(self, before):
-        """Which screen the new monitor turned out to be.
+    def _set_requested_mode(self):
+        """Put our adapter into the size that was asked for.
 
-        Windows takes a moment to attach it, so this waits rather than looking
-        once and giving up -- a capture pointed at the wrong screen is a
-        session showing somebody the desktop they did not ask for.
+        Ours is picked out by the driver's own description rather than by
+        size or by position: a machine can have two screens the same size, and
+        only one of them is called a SudoMaker Virtual Display Adapter.
         """
         import time
-        for _ in range(40):                       # up to four seconds
+        for _ in range(40):                       # it takes a moment to appear
+            mine = [name for name, said in adapters()
+                    if "sudomaker" in said.lower() or "sudovda" in said.lower()]
+            if mine:
+                for name in mine:
+                    set_mode(name, self.width, self.height, self.fps)
+                return
+            time.sleep(0.1)
+        log.debug("no virtual display adapter is attached to the desktop yet")
+
+    def _find_monitor(self, before):
+        """Which screen the new monitor turned out to be. True if found.
+
+        Identified by its size, not by being new. Adding a display makes
+        Windows rebuild its monitor list and the handles change with it, so
+        the *existing* screens look new too -- and an earlier version of this
+        took the first thing that appeared. On a machine with one 2560x1440
+        monitor and a virtual display asked for at 2560x1610, that meant
+        capturing the real monitor and scaling it up to a size it never had.
+        Reported, correctly, as the picture looking stretched.
+
+        A handle that was there before is still preferred against, because two
+        screens of the same size is an ordinary thing to own. But nothing is
+        chosen that is not the size that was asked for: a capture pointed at
+        the wrong screen shows somebody a desktop they did not ask to see, and
+        guessing is worse than saying so.
+        """
+        import time
+        want = (self.width, self.height)
+        for attempt in range(80):                 # up to eight seconds
             now = monitors()
-            fresh = [m for m in now if m[1] not in before]
-            if fresh:
-                # If more than one appeared, the one that is the size we asked
-                # for is ours.
-                mine = ([m for m in fresh
-                         if m[2] == self.width and m[3] == self.height]
-                        or fresh)[0]
+            right = [m for m in now if (m[2], m[3]) == want]
+            if right:
+                # Prefer one that was not there before; fall back to size
+                # alone, since a handle can be renumbered by the very act of
+                # adding a screen.
+                mine = ([m for m in right if m[1] not in before] or right)[0]
                 self.monitor_index, self.monitor_handle = mine[0], mine[1]
                 log.info("the virtual monitor is screen %d (%s), %dx%d",
                          mine[0], mine[5], mine[2], mine[3])
-                return
+                return True
             time.sleep(0.1)
-        log.warning("the virtual monitor was made but Windows has not "
-                    "attached it to the desktop; capturing the usual screen")
+        sizes = ", ".join("%dx%d" % (m[2], m[3]) for m in monitors()) or "none"
+        log.warning("the virtual monitor was asked for at %dx%d and no screen "
+                    "of that size appeared (this machine has: %s). Not "
+                    "capturing anything at a size it is not, because that is "
+                    "a stretched picture rather than an error anybody can see.",
+                    self.width, self.height, sizes)
+        return False
 
     def _keep_alive(self):
         """Tell the driver we are still here, for as long as we are.

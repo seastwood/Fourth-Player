@@ -2817,3 +2817,19 @@ input.name {
   opacity: 0;
   pointer-events: none;
 }
+
+/* The chip strip, while the pointer is captured.
+ *
+ * Same reasoning as the desk buttons just above, and asked for in the same
+ * words: with the pointer locked it is on the console, so nothing up here can
+ * be clicked. The chips are then a row of things sitting over the game that
+ * cannot be used, which is all cost and no use. Escape gives the pointer back
+ * and brings them with it.
+ *
+ * Faded rather than removed, so the strip does not jump when it returns, and
+ * unclickable so a stray click cannot land on a ghost. */
+.stage.locked .hud {
+  opacity: 0;
+  pointer-events: none;
+}
+.stage.locked .hud > * { pointer-events: none; }
