@@ -66,7 +66,15 @@ check(/present\.remove\(\)/.test(option), "and taken away when they may not");
 check(/picker\.value === "desk" \|\| deskMode/.test(option),
       "and somebody already in that mode when the permission goes is moved "
       + "off it, rather than left on a choice that is no longer in the menu");
-check(/show\("session-desk", may\("desk"\)\);\n  paintDeskOption\(\);/.test(app),
+// Asserted as "inside the function that paints the permissions", not as
+// "on the line after show(session-desk)". The first version of this checked
+// the two were adjacent, and broke the moment something unrelated was added
+// between them -- which is a test measuring the layout of the file rather
+// than the behaviour it is there for.
+const session = app.slice(app.indexOf("function paintSession() {"),
+                          app.indexOf("function wireSession"));
+check(/show\("session-desk", may\("desk"\)\)/.test(session)
+      && /paintDeskOption\(\)/.test(session),
       "and it is repainted with the rest of the permissions, so it follows a "
       + "grant without a reload");
 
