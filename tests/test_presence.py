@@ -1,24 +1,32 @@
-"""How long an authenticator code goes on proving somebody is there.
+"""Not asking for the authenticator code again after a blip.
 
-The capabilities in NEEDS_CODE ask for six digits at the moment they are used,
-because a remembered device says who somebody is and not that they are the one
-holding it. Asking once is the point.
+Reported as: "it's kind of frustrating how frequently I have to input the
+authenticator code -- it lost connection briefly and now I have to re-enter it".
 
-Asking every time is a different thing, and it is what the desk became. A code
-proved presence only for the socket it arrived on, and sockets drop constantly
--- a stalled encoder, a browser refusing the video, a phone changing network.
-Every one of those asked again, in the middle of driving a cursor.
+There was already a grace period for this, thirty minutes of sudo-style
+"you proved you were there recently". It never applied to the two things that
+actually produce the retyping, because it was kept on the live connection:
 
-So the moment lasts, and using it puts it forward. What must not follow from
-that is a remembered device on somebody else's phone inheriting it, which is
-the case at the bottom.
+  The slot is given away the moment somebody stops being heard from, so a
+  guest who reconnects often reclaims a *different* slot -- which the code
+  itself calls the normal outcome of a network switch. A different slot means
+  no existing connection to inherit from, so a brand new one, so zero.
+
+  And a host restart leaves no connections at all. Every restart cost
+  everybody six digits, and from the far end a restart and a blip look exactly
+  the same.
+
+So the moment is kept with the token, which is the thing that survives both.
 """
-import dataclasses
 import os
 import sys
+import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.realpath(__file__))
+ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+
+from fourthplayer import invites
 
 fails = []
 
@@ -29,85 +37,93 @@ def check(cond, msg):
         fails.append(msg)
 
 
-try:
-    from fourthplayer.session import LiveSession
-    from fourthplayer.config import Config
-except Exception as exc:
-    print("SKIPPED: cannot import the host here (%s)" % exc)
-    sys.exit(0)
+def a_session(now, slots=4):
+    return invites.Session(slots=slots, duration=3600, now=now, pin="123456")
 
 
-class Guest:
-    logged_in_at = 0.0
-
-
-NOW = 1_000_000.0
-
-
-def session(minutes=30):
-    s = LiveSession.__new__(LiveSession)
-    s.cfg = dataclasses.replace(Config(), code_grace_minutes=minutes)
-    s._now = lambda: NOW
-    return s
-
-
-print("the default is a window, not a single instant")
-check(Config().code_grace_minutes == 30,
-      "a code stands for %d minutes by default" % Config().code_grace_minutes)
-
-print("\na code that was just given still counts")
-s, g = session(), Guest()
-check(not s.presence_ok(g), "nobody who never gave one is let through")
-g.logged_in_at = NOW
-check(s.presence_ok(g), "somebody who just did is")
-check(s.presence_ok(g, now=NOW + 29 * 60), "and still is 29 minutes later")
-check(not s.presence_ok(g, now=NOW + 31 * 60),
-      "but not 31 minutes later, when whoever gave it may be long gone")
-
-print("\nand using it puts it forward")
-# The whole point: somebody working at the desk is never asked twice. Without
-# this the window is a hard stop that lands mid-cursor at minute thirty.
-s, g = session(), Guest()
-g.logged_in_at = NOW
-later = NOW + 20 * 60
-s.touch_presence(g, now=later)
-check(g.logged_in_at == later, "a use moves the moment to now")
-check(s.presence_ok(g, now=NOW + 45 * 60),
-      "so continuous use never lapses, even past the original window")
-
-print("\nit cannot be conjured out of nothing")
-# touch_presence must never *create* presence: it is called after the gate has
-# already been passed, and a bug that let it run first would turn the gate into
-# a formality.
-s, g = session(), Guest()
-s.touch_presence(g)
-check(g.logged_in_at == 0.0 and not s.presence_ok(g),
-      "touching a connection that never gave a code leaves it with nothing")
-
-print("\nand it can be switched off entirely")
-s, g = session(minutes=0), Guest()
-g.logged_in_at = NOW
-check(not s.presence_ok(g),
-      "zero asks every single time, which is what this used to do")
-
-print("\nwhat a remembered device gets from it: nothing")
-# The security case. A remembered device restores who somebody is without a
-# code -- logged_in_at stays at zero -- and the window is read off the
-# connection, not the account. So somebody else's phone, remembering an
-# account whose owner used a code a minute ago on their own phone, is still
-# asked for six digits.
-s = session()
-owner, borrowed = Guest(), Guest()
-owner.logged_in_at = NOW              # gave a code, on their own connection
-check(s.presence_ok(owner), "the connection that gave the code is let through")
-check(not s.presence_ok(borrowed),
-      "and another connection to the same account is not, however recently "
-      "the first one proved anything")
+print("a code typed now is remembered against the token")
+now = 1000.0
+sess = a_session(now)
+slot, token = sess.join(sess.clear_invite[0], "123456", now=now, address="1.2.3.4")
+digest = invites.digest_of(token)
+check(sess.proof_age_digest(digest, now) is None,
+      "nothing proved yet, so no age")
+sess.proved_digest(digest, now)
+check(sess.proof_age_digest(digest, now) == 0.0, "proved just now")
+check(sess.proof_age_digest(digest, now + 60) == 60.0,
+      "and it ages: %s" % sess.proof_age_digest(digest, now + 60))
+check(sess.guests[slot].proved_at == now,
+      "the live record carries it too")
 
 print()
-if fails:
-    print("FAILURES: %d" % len(fails))
-    for f in fails:
-        print("  " + f)
-    sys.exit(1)
-print("test_presence: all ok")
+print("it survives losing the slot, which is what a network switch does")
+# The slot goes back the moment they stop being heard from, and somebody else
+# may take it. Coming back means reclaiming whatever is free.
+sess.release(slot, now=now + 5)
+sess.join(sess.clear_invite[0], "123456", now=now + 6, address="9.9.9.9")   # someone else
+again = sess.reclaim(token, now=now + 10)
+check(again != slot, "they came back to a different slot (%s, was %s)"
+      % (again, slot))
+check(sess.guests[again].proved_at == now,
+      "and the moment of their code came with them, rather than resetting to "
+      "zero because the connection object is new")
+
+print()
+print("and it survives the host restarting, which looks identical from a phone")
+now2 = 5000.0                       # a fresh monotonic clock, as after a restart
+snapshot = sess.snapshot(now=now + 20)
+back = invites.Session.restore(snapshot, now=now2)
+check(back is not None, "the invite came back")
+age_before = (now + 20) - now
+age_after = back.proof_age_digest(digest, now2)
+check(age_after is not None, "the proof came back too")
+check(abs(age_after - age_before) < 2.0,
+      "and is the same age across the restart: %.1fs before, %.1fs after"
+      % (age_before, age_after if age_after is not None else -1))
+
+print()
+print("a restart neither extends a proof nor throws it away")
+# Written as an age rather than a timestamp, so it cannot be laundered into a
+# fresh one by bouncing the host -- that would make a restart a way past the
+# code.
+# Ten minutes, not an hour: an hour of downtime also runs the session out, so
+# restore returns None and the check would pass for the wrong reason -- which
+# is what the first version of it did.
+old_snapshot = sess.snapshot(now=now + 20)
+old_snapshot["saved_at"] = time.time() - 600
+stale = invites.Session.restore(old_snapshot, now=now2)
+check(stale is not None, "the session itself outlived the downtime")
+aged = stale.proof_age_digest(digest, now2) if stale else None
+check(aged is not None and 600 < aged < 700,
+      "ten minutes of downtime ages the proof by ten minutes: %s" % aged)
+
+print()
+print("reclaiming after the proof has gone stale carries a stale one")
+# The invite layer keeps the age honestly; whether it is still worth anything
+# is the session's decision, against code_grace_minutes. Keeping those two
+# apart is what stops the grace being silently different in two places.
+check(sess.proof_age_digest(digest, now + 100000) > 99000,
+      "the age keeps growing rather than being forgotten")
+
+print()
+print("somebody else's token gets nothing from it")
+other_slot, other = sess.join(sess.clear_invite[0], "123456", now=now + 30,
+                              address="5.5.5.5")
+check(sess.proof_age_digest(invites.digest_of(other), now + 30) is None,
+      "a different token has proved nothing, whoever else has")
+
+print()
+print("the session consults it, and bounds it by the grace")
+source = open(os.path.join(ROOT, "fourthplayer", "session.py")).read()
+check("_proof_from_token" in source, "there is a path that restores it")
+check("code_grace_minutes" in source.split("_proof_from_token")[2][:900],
+      "and it refuses a proof older than the grace, so this restores a "
+      "moment that is still standing rather than creating one")
+check("guest.token_digest = invites.digest_of(guest_token)" in source,
+      "a returning connection is keyed to the token it returned on")
+check(source.count("guest.token_digest = invites.digest_of") >= 3,
+      "and so is every other way of making one, or the fix would apply to "
+      "some arrivals and not others")
+
+print("\nFAILURES: %d" % len(fails))
+sys.exit(1 if fails else 0)

@@ -142,6 +142,16 @@ class RateLimiter:
         self.failures.pop(who, None)
 
 
+def digest_of(guest_token):
+    """The stored form of a guest token.
+
+    Public so that callers can key on a token without keeping one: the live
+    connection wants to say "this is the same person" across a reconnect, and
+    a digest does that without a second copy of the secret lying about.
+    """
+    return _digest(guest_token)
+
+
 @dataclass
 class Guest:
     slot: int
@@ -149,6 +159,16 @@ class Guest:
     joined_at: float
     label: str = ""
     address: str = ""
+    # When this person last typed an authenticator code, as a monotonic time.
+    #
+    # It lives here, with the token, rather than only on the live connection,
+    # because the live connection is the thing that keeps disappearing. A
+    # dropped socket that costs somebody their slot, and a host restart, both
+    # end with a brand new connection object -- and presence kept only there
+    # went to zero on both, so the grace period that exists precisely to stop
+    # people retyping six digits never once applied to the two cases that
+    # produce the retyping.
+    proved_at: float = 0.0
 
 
 class Session:
@@ -181,6 +201,10 @@ class Session:
         self.guests = {}             # slot -> Guest
         self._burned = set()         # digests of kicked guests, never readmitted
         self._claims = {}            # digest -> (slot, when they left)
+        # digest -> when they last proved they were there. Kept beside
+        # the claims because it outlives a connection in exactly the
+        # same way and for the same reasons.
+        self._proofs = {}
 
     # -- what the owner may read -------------------------------------------
 
@@ -473,8 +497,33 @@ class Session:
         # The same digest, so the token they are holding keeps working if they
         # drop again -- which is the whole point.
         self.guests[slot] = Guest(slot=slot, token_digest=digest, joined_at=now,
-                                  label=f"Guest {slot + 1}")
+                                  label=f"Guest {slot + 1}",
+                                  # Carried across, so somebody who proved
+                                  # they were there a minute ago is not asked
+                                  # again merely because their slot moved.
+                                  proved_at=self._proof_for(digest))
         return slot
+
+    def proved_digest(self, digest, now):
+        """Remember that this token digest proved presence just now."""
+        self._proofs[digest] = now
+        for guest in self.guests.values():
+            if hmac.compare_digest(digest, guest.token_digest):
+                guest.proved_at = now
+
+    def proof_age_digest(self, digest, now):
+        """How long ago this digest proved presence, or None if never."""
+        when = self._proof_for(digest)
+        return None if not when else max(0.0, now - when)
+
+    def _proof_for(self, digest):
+        """When this token last proved presence, or 0.0 if it never did."""
+        for kept, when in self._proofs.items():
+            if hmac.compare_digest(digest, kept):
+                return when
+        return 0.0
+
+
 
     # -- surviving a restart -------------------------------------------------
 
@@ -508,6 +557,14 @@ class Session:
             # ones who cannot get back in, which is precisely backwards.
             "playing": {b64(g.token_digest): [slot, 0.0]
                         for slot, g in self.guests.items()},
+            # How long ago each of them proved they were there. Written as an
+            # age rather than a timestamp for the same reason the deadlines
+            # are: the monotonic clock does not survive the process. Without
+            # this a restart asks everybody for six digits again, and a
+            # restart is indistinguishable from a blip to the person holding
+            # the phone.
+            "proofs": {b64(d): max(0.0, now - when)
+                       for d, when in self._proofs.items() if when},
         }
 
     @classmethod
@@ -549,6 +606,10 @@ class Session:
         claims.update(data.get("playing") or {})
         invite._claims = {raw(d): (int(slot), now - float(ago))
                           for d, (slot, ago) in claims.items()}
+        # Aged forward by however long the process was down, so a restart
+        # neither extends somebody's proof nor throws it away.
+        invite._proofs = {raw(d): now - elapsed - float(ago)
+                          for d, ago in (data.get("proofs") or {}).items()}
         return invite
 
     def kick(self, slot):

@@ -199,6 +199,12 @@ class GuestConnection:
     # restores who somebody is; it is deliberately not enough on its own for
     # the capabilities that affect other people, and this is what those ask.
     logged_in_at = 0.0
+    # The digest of the guest token this connection came in on. A digest
+    # rather than the token, because the only thing it is for is saying "the
+    # same person" across a reconnect, and that does not need a second copy of
+    # the secret. It is what lets the moment of an authenticator code be kept
+    # with the token instead of only with the socket.
+    token_digest = None
 
     def can(self, capability):
         """Whether this connection may do something. The only place to ask.
@@ -804,7 +810,17 @@ class LiveSession:
         guest.account = account["name"]
         guest.capabilities = tuple(account.get("can") or ())
         guest.primary = accounts.is_primary(account["name"])
-        guest.logged_in_at = now if fresh else 0.0
+        if fresh:
+            guest.logged_in_at = now
+            # Written down with the token as well as on this connection. The
+            # connection is the thing that keeps vanishing -- a slot given
+            # away, a host restart -- and presence kept only here went to zero
+            # on exactly the events that make people retype the code.
+            self._remember_proof(guest, now)
+        elif not guest.logged_in_at:
+            # A remembered device says who they are. Whether they are *there*
+            # is whatever their token last proved, which may be nothing.
+            guest.logged_in_at = self._proof_from_token(guest, now)
         log.info("%s logged in as %s (may: %s)", guest.label, guest.account,
                  " ".join(guest.capabilities) or "nothing")
         # Logging in can be the difference between a held controller and a
@@ -812,6 +828,35 @@ class LiveSession:
         # -- and give them the controller the new answer entitles them to.
         self.tell_hold(guest)
         return guest.capabilities
+
+    def _remember_proof(self, guest, now):
+        """Keep the moment of the code with the token, not just the socket."""
+        digest = getattr(guest, "token_digest", None)
+        if digest and self.invite is not None:
+            try:
+                self.invite.proved_digest(digest, now)
+            except Exception:                 # never break a login over this
+                log.debug("could not record the proof of presence",
+                          exc_info=True)
+
+    def _proof_from_token(self, guest, now):
+        """What this guest's token last proved, as a logged_in_at, or 0.0.
+
+        Bounded by the same grace the live check uses, so a token carrying a
+        proof from three hours ago restores nothing: this restores a moment
+        that is still standing, it does not create one.
+        """
+        digest = getattr(guest, "token_digest", None)
+        if not digest or self.invite is None:
+            return 0.0
+        try:
+            age = self.invite.proof_age_digest(digest, now)
+        except Exception:
+            return 0.0
+        grace = getattr(self.cfg, "code_grace_minutes", 30) or 0
+        if age is None or grace <= 0 or age > grace * 60:
+            return 0.0
+        return now - age
 
     def presence_ok(self, guest, now=None):
         """Whether this connection's authenticator code is still standing.
@@ -841,7 +886,12 @@ class LiveSession:
     def touch_presence(self, guest, now=None):
         """Being at the desk is evidence of being at the desk."""
         if guest.logged_in_at:
-            guest.logged_in_at = self._now() if now is None else now
+            now = self._now() if now is None else now
+            guest.logged_in_at = now
+            # Forward on the token too, or a guest who worked for an hour and
+            # then lost their slot would be asked for a code on the strength
+            # of when they first typed one.
+            self._remember_proof(guest, now)
 
     def logout(self, guest):
         guest.account = None
@@ -898,6 +948,7 @@ class LiveSession:
             token, pin, now=self._now(), address=address, label=name,
             require_token=getattr(self.cfg, "require_link", True))
         guest = GuestConnection(self, slot, socket, name)
+        guest.token_digest = invites.digest_of(guest_token)
         self.guests[slot] = guest
         self.plug_in(guest)              # plug their controller in
         # Write it down now. The snapshot was only taken when a session opened
@@ -930,6 +981,7 @@ class LiveSession:
         slot, token = self.invite.join_beside(
             guest_token, now=self._now(), address=address, label=name)
         guest = GuestConnection(self, slot, socket, name)
+        guest.token_digest = invites.digest_of(token)
         self.guests[slot] = guest
         self.plug_in(guest)
         self.save()
@@ -1163,6 +1215,11 @@ class LiveSession:
         if name.startswith("Player "):
             name = ""                       # a slot number is not a name
         guest = GuestConnection(self, record.slot, socket, name)
+        # The same token they came back on, so the moment of their
+        # authenticator code is found again below. This is the path that a
+        # host restart and a slot handed away both end up on, and it is
+        # exactly where the grace period used to be lost.
+        guest.token_digest = invites.digest_of(guest_token)
         self.guests[record.slot] = guest
         self.plug_in(guest)              # plug their controller back in
         self.save()
