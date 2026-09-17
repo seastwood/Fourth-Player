@@ -1411,7 +1411,14 @@ function applyOrient(pick) {
 
 function paintOrient() {
   const row = el("orient-row");
-  if (row) row.hidden = !canTurn();
+  // Offered wherever it can do something, which is no longer only where the
+  // browser can lock. A phone that cannot lock can still be drawn sideways,
+  // and hiding the choice there left the one device that needs it most --
+  // an iPhone, which has never had the lock -- with no way to ask.
+  //
+  // Still hidden on a desktop: a window that is already whatever shape
+  // somebody dragged it to has nothing to gain from either.
+  if (row) row.hidden = !(canTurn() || needsSoftKeyboard());
   const picker = el("pads-orient");
   if (picker) picker.value = savedOrient();
 }

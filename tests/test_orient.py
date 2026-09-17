@@ -102,6 +102,19 @@ const orientation = {
 const screen = job.canTurn ? { orientation } : {};
 const window = { screen: job.canTurn ? screen : {} };
 
+// applyOrient asks whether the page has to draw itself sideways, which is the
+// fallback for a browser with no orientation lock. Not this test's subject --
+// test_turned covers it -- so it is stubbed and its effect recorded, rather
+// than the function being made to tolerate its absence.
+let turnedAsked = 0;
+const paintTurned = () => { turnedAsked += 1; };
+let turned = false;
+// Whether this is a device whose screen turns on its own -- a phone. The
+// orientation choice is offered on one of those even when the browser cannot
+// lock, because the page can still draw itself sideways. On a desktop neither
+// is any use and the row stays hidden.
+const needsSoftKeyboard = () => job.touch !== false;
+
 const note = { textContent: "" };
 const row = { hidden: null };
 const picker = { value: null };
@@ -116,7 +129,7 @@ paintOrient();
 setTimeout(() => {
   process.stdout.write(JSON.stringify({
     locks, unlocked, note: note.textContent, hidden: row.hidden,
-    picked: picker.value, saved: savedOrient() }));
+    picked: picker.value, saved: savedOrient(), turnedAsked }));
 }, 0);
 """
 
@@ -163,11 +176,26 @@ check("rotation lock" in out["note"],
 out = run(apply="any", throws=True)
 check(out["unlocked"] == 1, "and so does one that throws on it")
 
-print("where it cannot work")
+print("where the browser cannot lock")
+# This used to assert the choice was hidden and nothing said. That was right
+# when there was nothing else to offer; there is now -- the page can draw
+# itself sideways -- and hiding the control there left an iPhone, which has
+# never had the lock, with no way to ask for the one thing that would work.
 out = run(canTurn=False, apply="landscape")
-check(out["hidden"] is True, "a browser with no orientation lock is not offered it")
-check(out["locks"] == [] and out["note"] == "",
-      "and nothing is attempted or claimed")
+check(out["locks"] == [],
+      "no lock is attempted, because there is none to attempt")
+check(out["turnedAsked"] >= 1,
+      "but the sideways fallback is asked about, which is what replaces it")
+check("cannot lock" in out["note"],
+      "and the note says so rather than being blank: %r" % out["note"])
+check(out["hidden"] is False,
+      "and the choice is offered on a phone, which is the only device where "
+      "either answer means anything")
+
+out = run(canTurn=False, touch=False, apply="landscape")
+check(out["hidden"] is True,
+      "but not on a desktop, where a window is already whatever shape it was "
+      "dragged to and neither a lock nor a transform has anything to add")
 out = run(canTurn=True)
 check(out["hidden"] is False, "a browser that has one is")
 
