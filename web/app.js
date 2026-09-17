@@ -1284,6 +1284,56 @@ const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 const ORIENT_KEY = "fp:orient";
 const ORIENTATIONS = ["any", "landscape", "portrait"];
 
+/* Turning the page ourselves, where the browser will not turn the screen.
+ *
+ * iOS Safari has never implemented screen.orientation.lock, installed web app
+ * or not -- Safari 16.4 added the type, the angle and the event and left the
+ * lock out, and it is still absent. So a phone lying on its side goes back to
+ * portrait and there is nothing a page can ask for to stop it.
+ *
+ * What a page can do is draw itself sideways. The stage is rotated a quarter
+ * turn and given the viewport's height for its width, so the picture fills a
+ * landscape rectangle on a portrait screen.
+ *
+ * The cost is that a finger still moves in the screen's directions while
+ * everything it is moving is in the stage's, so every movement has to be
+ * turned with it -- which is `turnedDelta` below, and is the one thing this
+ * adds to the touch paths. Positions are left alone: the picture's own
+ * measurements come from offsetWidth, which a transform does not touch, so
+ * the arithmetic downstream is already in the stage's frame. */
+let turned = false;
+
+function wantsTurning() {
+  // Only when somebody asked for landscape, the browser cannot deliver it,
+  // and the screen is actually portrait. On anything that can lock, the lock
+  // is better than a transform in every way.
+  if (savedOrient() !== "landscape" || canTurn()) return false;
+  const vv = window.visualViewport;
+  const wide = vv ? vv.width > vv.height
+                  : window.innerWidth > window.innerHeight;
+  return !wide;
+}
+
+function paintTurned() {
+  const want = wantsTurning();
+  if (want === turned) return;
+  turned = want;
+  document.documentElement.classList.toggle("turned", turned);
+  // Everything that sizes itself from the viewport has to look again.
+  if (typeof fitStage === "function") fitStage();
+  applyZoom();
+}
+
+/* A movement in screen directions, expressed in the stage's.
+ *
+ * The stage is rotated a quarter turn clockwise, so a finger moving down the
+ * screen is moving left across the stage, and one moving right is moving
+ * down. Everything that consumes a drag passes through here; when nothing is
+ * turned it is the identity and costs a comparison. */
+function turnedDelta(dx, dy) {
+  return turned ? { dx: dy, dy: -dx } : { dx, dy };
+}
+
 function canTurn() {
   return !!(window.screen && screen.orientation && screen.orientation.lock);
 }
@@ -1303,7 +1353,19 @@ function savedOrient() {
 function applyOrient(pick) {
   const note = el("pads-orient-note");
   const say = (text) => { if (note) note.textContent = text; };
-  if (!canTurn()) return say("");
+  // Where the browser cannot lock, the page draws itself sideways instead.
+  // Asked here as well as on rotation, because choosing landscape while the
+  // phone is already on its side has to take effect at once.
+  paintTurned();
+  if (!canTurn()) {
+    return say(turned
+      ? "This browser cannot lock the screen, so the page is drawn sideways "
+        + "instead. Turn the phone back upright to use it."
+      : pick === "landscape"
+        ? "This browser cannot lock the screen. Held sideways, the page will "
+          + "draw itself that way."
+        : "");
+  }
   /* "any" is a lock, not the absence of one.
    *
    * unlock() was the obvious call and it is the wrong one: it drops back to
@@ -2879,7 +2941,10 @@ video.addEventListener("pointermove", (event) => {
       // Driving the host's pointer, and this is a drag rather than a pinch:
       // the fingers are asking the *host* to scroll, not the picture to move.
       if (twoMode === "drag" && cursorDriving()) {
-        if (pinchAt) deskScrollBy(at.x - pinchAt.x, at.y - pinchAt.y);
+        if (pinchAt) {
+          const moved = turnedDelta(at.x - pinchAt.x, at.y - pinchAt.y);
+          deskScrollBy(moved.dx, moved.dy);
+        }
         pinchGap = gap;
         pinchAt = at;
         dragged = true;
@@ -2896,8 +2961,9 @@ video.addEventListener("pointermove", (event) => {
       // somebody keeps hold of what they were looking at while resizing it,
       // and during a drag it is the whole gesture.
       if (twoMode && pinchAt) {
-        panX += at.x - pinchAt.x;
-        panY += at.y - pinchAt.y;
+        const moved = turnedDelta(at.x - pinchAt.x, at.y - pinchAt.y);
+        panX += moved.dx;
+        panY += moved.dy;
       }
       if (twoMode) applyZoom();
     }
@@ -2916,7 +2982,8 @@ video.addEventListener("pointermove", (event) => {
   // pointing at it is one job, not two.
   if (cursorDriving() && cursorFrom) {
     const scale = cursorScale();
-    const dx = now.x - was.x, dy = now.y - was.y;
+    const turn = turnedDelta(now.x - was.x, now.y - was.y);
+    const dx = turn.dx, dy = turn.dy;
     cursorMove(dx * scale.x, dy * scale.y);
     // Speed is taken from this move alone rather than averaged over the
     // drag: what a flick means is how fast the finger was going as it left,
@@ -3080,7 +3147,9 @@ video.addEventListener("gesturechange", (event) => {
   if (gestureMode === "drag" && cursorDriving()) {
     // As above, for the path Safari actually delivers.
     if (gestureLast) {
-      deskScrollBy(event.clientX - gestureLast.x, event.clientY - gestureLast.y);
+      const swipe = turnedDelta(event.clientX - gestureLast.x,
+                                event.clientY - gestureLast.y);
+      deskScrollBy(swipe.dx, swipe.dy);
     }
     gestureLast = { x: event.clientX, y: event.clientY };
     return;
@@ -5746,7 +5815,33 @@ function deskListen() {
       measureLift && measureLift();
       deskPaintKeys();
     });
-    field.addEventListener("blur", () => {
+    field.addEventListener("blur", (event) => {
+      // Somebody using a control is not the phone dropping focus.
+      //
+      // Every tap on a dropdown, a switch or a button blurs this field, and
+      // taking focus straight back cancelled the tap -- so with the keyboard
+      // up on an iPhone the controller dropdown would not open, and nor would
+      // anything else in the panels. Reported exactly that way.
+      //
+      // Which of the two it was is only knowable once the browser has moved
+      // focus, so this looks after the fact rather than guessing: relatedTarget
+      // is not filled in for a <select> on iOS, and activeElement is not
+      // updated yet at the moment blur fires. A turn of the event loop later
+      // it is right in both.
+      //
+      // The keyboard is still *wanted* either way -- deskWantKeyboard is
+      // untouched -- so leaving the field is not leaving the keyboard, and
+      // finishing with the dropdown and tapping the field brings it back.
+      const going = event && event.relatedTarget;
+      if (going && going !== field) return;
+      setTimeout(() => {
+        const now = document.activeElement;
+        if (now && now !== document.body && now !== field) return;
+        deskAfterBlur(field);
+      }, 0);
+    });
+
+    function deskAfterBlur(field) {
       // The keyboard closes when it is asked to close, and at no other time.
       // Asking means the keyboard button, or the controller taking the
       // screen; both go through deskShowKeyboard, which is the only thing
@@ -5765,10 +5860,17 @@ function deskListen() {
           && needsSoftKeyboard()) {
         if (deskRefocus < 12) {
           deskRefocus += 1;
-          // Straight away rather than after a turn of the event loop. A phone
-          // starts putting its keyboard away the moment focus leaves, and
-          // taking it back in the same beat is the difference between nothing
-          // happening and a keyboard that visibly flinches.
+          // As soon as possible. This used to run inside the blur handler
+          // itself, which was as soon as there is -- a phone starts putting
+          // its keyboard away the moment focus leaves, and taking it back in
+          // the same beat is the difference between nothing happening and a
+          // keyboard that visibly flinches.
+          //
+          // It is one task later now, because whether focus went to a control
+          // somebody tapped cannot be known any earlier: activeElement is not
+          // updated when blur fires, and a <select> on iOS fills in no
+          // relatedTarget. One task is a few milliseconds and the keyboard
+          // does not begin to move in that time; stealing a tap was worse.
           try { field.focus({ preventScroll: true }); } catch (_) {}
           setTimeout(() => { deskRefocus = Math.max(0, deskRefocus - 1); }, 1000);
         }
@@ -5781,7 +5883,7 @@ function deskListen() {
       document.documentElement.style.setProperty("--desk-lift", "0px");
       applyZoom();
       deskPaintKeys();
-    });
+    }
   }
   const row = el("desk-keys");
   if (row) {
@@ -6942,7 +7044,12 @@ if (window.visualViewport) {
     pending = true;
     requestAnimationFrame(() => { pending = false; fitStage(); });
   };
-  window.visualViewport.addEventListener("resize", schedule);
+  window.visualViewport.addEventListener("resize", () => {
+    // iOS does not always raise orientationchange for a rotation, and the
+    // viewport changing shape is the thing that actually matters here.
+    paintTurned();
+    schedule();
+  });
   window.visualViewport.addEventListener("scroll", schedule);
   /* The keyboard coming up is a viewport resize like any other, and it is the
      one that shows. Two things make it rough rather than smooth: the last
@@ -6962,7 +7069,12 @@ if (window.visualViewport) {
       log.scrollTop = log.scrollHeight;
     });
   });
-  window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
+  window.addEventListener("orientationchange", () => setTimeout(() => {
+    // Whether the page has to draw itself sideways depends on which way the
+    // screen now is, so this is asked again before anything is measured.
+    paintTurned();
+    fitStage();
+  }, 200));
   fitStage();
 }
 
