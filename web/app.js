@@ -906,9 +906,19 @@ async function answer(message) {
 
   await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
   holdVideoBack(message.jitter);
+  // Which line the microphone may go out on, if the host offered one. Taken
+  // before the answer is built: a track attached now is answered as sendonly
+  // rather than inactive, which is the difference between a working
+  // microphone and a line nobody can use.
+  micLineIndex = (typeof message.mic_line === "number") ? message.mic_line : null;
+  if (micOn && micTrack) {
+    const line = micLine();
+    if (line) { try { await line.sender.replaceTrack(micTrack); } catch (_) {} }
+  }
   const local = await pc.createAnswer();
   await pc.setLocalDescription(local);
   socket.send(JSON.stringify({ t: "answer", sdp: local.sdp }));
+  paintMic();
 
   // A video section answered with port 0 is a refusal, and it is worth saying
   // so out loud: everything else works -- the connection, the controller, the
@@ -8216,16 +8226,25 @@ if (el("desk-speed")) {
 let micTrack = null;
 let micOn = false;
 
+/* Which m-line the host said the microphone is on, straight from the offer. */
+let micLineIndex = null;
+
 function micLine() {
   if (!pc || !pc.getTransceivers) return null;
-  // The one line this end may speak on.
+  // By the index the host named, not by looking for a direction.
   //
-  // Every other line is the host sending -- the picture, the game's sound --
-  // and those read as "recvonly" from here. The host offered exactly one line
-  // the other way round, so "sendonly" names it without needing to count
-  // m-lines or trust their order.
-  return pc.getTransceivers().find((t) => t.sender
-    && (t.currentDirection === "sendonly" || t.direction === "sendonly")) || null;
+  // Looking for "sendonly" could not work and was a deadlock: with no track
+  // attached yet, a browser answers an offered recvonly line as *inactive*,
+  // so the line was never found, so no track could be attached, so it stayed
+  // inactive -- and the microphone button never appeared at all.
+  //
+  // The host added the transceiver and counted the m-lines itself, and a
+  // browser indexes its transceivers in m-line order, so the index is the
+  // one thing both ends agree on without inferring anything.
+  if (micLineIndex == null) return null;
+  const all = pc.getTransceivers();
+  const line = all[micLineIndex];
+  return line && line.sender ? line : null;
 }
 
 async function setMic(on) {

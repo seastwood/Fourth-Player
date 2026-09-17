@@ -93,5 +93,24 @@ check("desktop_size" in open(os.path.join(ROOT, "fourthplayer",
 check("stream.desktop" in script,
       "the page reads it, so somebody can see they are upscaling")
 
+print()
+print("no limit contradicts its own note")
+# This one did: the comment said "the floor is not zero" directly above a
+# floor of zero, somebody set zero, and got the freezes the note describes --
+# a third of a second at a time with no packet loss, because a frame is sent
+# as one burst and a burst spread by a wifi hop arrives after the browser has
+# decided to draw it.
+low_j, high_j = limits.get("jitter_ms", (0, 0))
+check(low_j > 0,
+      "the jitter buffer cannot be switched off entirely (floor %d ms)" % low_j)
+check(low_j <= 30,
+      "but the floor is small enough to cost nothing anybody can feel: %d ms"
+      % low_j)
+check(high_j >= 200,
+      "and a guest on mobile data can still ask for plenty: %d ms" % high_j)
+for name, (low, high) in limits.items():
+    check(low <= high, "%s: floor %s is not above its ceiling %s"
+          % (name, low, high))
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

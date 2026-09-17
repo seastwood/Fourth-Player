@@ -153,5 +153,38 @@ check("guest_mic_device: el(\"set-mic-device\")" in script,
 check("Nowhere" in script,
       "with an explicit off, because off is a real choice and the default one")
 
+print()
+print("the host names the microphone's line rather than the page guessing")
+# The page used to look for the transceiver whose direction was "sendonly".
+# That cannot work, and was a deadlock: with no track attached yet a browser
+# answers an offered recvonly line as *inactive*, so the line was never found,
+# so no track could be attached, so it stayed inactive -- and the button never
+# appeared. The host added the transceiver and can simply say which line it is.
+check("mic_line" in video, "the offer carries the line number")
+check("def mic_line_index" in video, "worked out from the offer itself")
+
+# Exercised as the plain function it is; a pipeline is not needed to count
+# m-lines, and the count is what a browser indexes its transceivers by.
+body = video[video.index("def mic_line_index"):video.index("def describe_sdp")]
+ns = {}
+exec(body, ns)
+index_of = ns["mic_line_index"]
+two = "\n".join(["v=0", "m=video 9 x", "m=audio 9 x", "m=audio 9 x",
+                  "m=application 0 y"])
+check(index_of(two) == 2,
+      "the second audio line is the microphone's, at index 2: %r"
+      % index_of(two))
+check(index_of("v=0\nm=video 9 x\nm=audio 9 x") is None,
+      "one audio line means no microphone offered, not the game's sound "
+      "mistaken for one")
+check(index_of("v=0\nm=video 9 x") is None, "and no audio at all means none")
+
+check("micLineIndex" in app, "the page keeps the number it was given")
+check("micLineIndex == null) return null" in app,
+      "and offers nothing when the host offered nothing")
+check("typeof message.mic_line" in app,
+      "read from the offer, and type-checked -- index 0 is a real answer and "
+      "must not be mistaken for absence")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

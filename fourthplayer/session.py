@@ -2524,10 +2524,19 @@ class LiveSession:
         # asking for far more than 20 Mb/s is a reasonable thing to want, and
         # was simply not allowed before.
         "bitrate_kbps": (500, 100000),
-        # The buffer the *browser* holds before it draws. The floor is not
-        # zero: a little is what absorbs a burst arriving late, and a guest on
-        # mobile data wants more of it than somebody on a cable.
-        "jitter_ms": (0, 300),
+        # The buffer the *browser* holds before it draws.
+        #
+        # The floor is not zero, and used to be: this said "the floor is not
+        # zero" directly above a floor of zero, and somebody set it to zero and
+        # got precisely what that note warns about -- repeated freezes of a
+        # third of a second with no packet loss at all, because every packet
+        # of a frame is sent in one burst and a burst spread out by a wifi hop
+        # arrives after the instant the browser had decided to draw it.
+        #
+        # 20 ms is well under one frame at any rate this offers, so it costs
+        # nothing anybody can feel and leaves no way to switch the absorption
+        # off entirely. A guest on mobile data wants 100 or more.
+        "jitter_ms": (20, 300),
         # How much encoded video may pile up per guest before frames are
         # dropped. Straight delay when a link is tight.
         "queue_ms": (10, 500),

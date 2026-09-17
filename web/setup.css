@@ -64,3 +64,22 @@ code { background:#0d0f12; padding:.1rem .3rem; border-radius:.2rem;
 .share-pin strong { font-size:2.1rem; letter-spacing:.18em; color:var(--edge);
                     font-variant-numeric:tabular-nums; }
 .share-url code { font-size:.82rem; }
+
+/* Capability pills that are actually controls.
+ *
+ * They were spans with a title saying "click to change" -- no cursor, no
+ * hover, no focus ring, indistinguishable from the static "primary" pill next
+ * to them, and unreachable by keyboard. They are buttons now, and these are
+ * the rules that make them look like the thing they are. */
+button.pill.can {
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.5;
+}
+button.pill.can:hover { border-color: var(--edge); color: var(--fg); }
+button.pill.can.on:hover { filter: brightness(1.15); }
+button.pill.can:focus-visible { outline: 2px solid var(--edge); outline-offset: 1px; }
+/* A pill that is only a label keeps the old flat look, so the two are not
+   mistaken for each other. */
+span.pill { cursor: default; }

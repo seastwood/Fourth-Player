@@ -139,9 +139,19 @@ function drawAccounts(state) {
   el("accounts").innerHTML =
     "<tr><th>name</th><th>may</th><th>devices</th><th></th></tr>" +
     (list.length ? list.map((a) => {
-      const caps = (state.capabilities || []).map((c) =>
-        `<span class="pill ${a.can.includes(c) ? "on" : ""}" data-can="${a.name}" ` +
-        `data-cap="${c}" title="click to change">${c}</span>`).join("");
+      // Buttons, not styled spans.
+      //
+      // These were spans with a title saying "click to change", which is no
+      // affordance at all: they looked exactly like the static "primary" pill
+      // beside them, a title never appears on a touchscreen, and they could
+      // not be reached by keyboard. Reported, fairly, as the permissions not
+      // seeming clickable -- they worked and nothing said so.
+      const caps = (state.capabilities || []).map((c) => {
+        const on = a.can.includes(c);
+        return `<button type="button" class="pill can ${on ? "on" : ""}" ` +
+          `data-can="${esc(a.name)}" data-cap="${c}" aria-pressed="${on}" ` +
+          `title="${on ? "Remove" : "Give"} ${c}">${c}</button>`;
+      }).join("");
       return `<tr><td>${esc(a.name)}` +
         (a.name === state.primary ? ' <span class="pill on">primary</span>' : "") +
         `</td><td>${caps}</td><td>${a.devices}` +

@@ -669,6 +669,22 @@ def _pick_monitor(wanted, made=None):
     return None
 
 
+def mic_line_index(sdp):
+    """Which m-line in this offer is the guest's microphone, or None.
+
+    A plain function so it can be exercised without a pipeline. Counted over
+    the m-lines only, because that count is exactly how a browser indexes its
+    transceivers -- the third m-line is the third transceiver.
+
+    Ours is the second audio line: the first carries the game's sound out, and
+    the microphone is the only line offered the other way round.
+    """
+    lines = [line for line in sdp.splitlines() if line.startswith("m=")]
+    audio = [index for index, line in enumerate(lines)
+             if line.startswith("m=audio")]
+    return audio[1] if len(audio) > 1 else None
+
+
 def describe_sdp(text):
     """The shape of an SDP in one line, for the log.
 
@@ -2153,8 +2169,33 @@ class Peer:
         # It is the only end that can do anything about arrival that is
         # uneven: webrtcbin's own `latency` is the size of a buffer for media
         # coming *in*, and nothing comes in here.
+        # Which m-line the guest may speak on, named rather than guessed.
+        #
+        # The page used to look for the transceiver whose direction was
+        # "sendonly". That cannot work: with no track attached yet, a browser
+        # answers an offered recvonly line as *inactive*, so the line could
+        # not be found, so no track could be attached, so it stayed inactive.
+        # A deadlock, and the microphone button never appeared.
+        #
+        # The index is what the host knows for certain -- it added the
+        # transceiver -- so it says so and the page uses it directly.
         self._emit("offer", {"sdp": text, "type": "offer",
-                             "jitter": self.stage.cfg.jitter_ms})
+                             "jitter": self.stage.cfg.jitter_ms,
+                             "mic_line": self._mic_line_index(text)})
+
+    def _mic_line_index(self, sdp):
+        """Which m-line is the microphone's, or None if there is not one.
+
+        Counted from the offer rather than asked of webrtcbin, because the
+        m-line order is what the page indexes its transceivers by, and that
+        order is a property of the text that was sent.
+
+        Ours is the second audio line: the first is the game's sound going
+        out, and this one is the only line offered the other way round.
+        """
+        if getattr(self, "mic_transceiver", None) is None:
+            return None
+        return mic_line_index(sdp)
 
     def _on_ice_candidate(self, _element, mline_index, candidate):
         # Candidate types decide whether anybody outside can reach us at all:
