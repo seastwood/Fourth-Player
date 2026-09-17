@@ -8478,16 +8478,37 @@ function paintStreamValues() {
  * streaming actually uses: about 0.15 bits per pixel per frame, where 1080p30
  * at 4500 -- the setting that prompted this -- is 0.07.
  */
+/* The whole combination, not one dial.
+ *
+ * Every entry sets the delay chain as well as the picture, because that is
+ * what "responsive" actually means and it is three numbers rather than one:
+ * `jitter` is how long the browser holds a frame before drawing it, `queue`
+ * is how much encoded video may pile up on the host, and `cpb` is how much
+ * the encoder may hold back to smooth a burst. Each is latency. Presets used
+ * to set only jitter, so choosing "sharpest" left the other two wherever a
+ * previous experiment had put them.
+ *
+ * Nothing here asks for more frames than a desktop can produce. A screen at
+ * 60Hz cannot be captured at 120 -- the extra frames are duplicates, and they
+ * cost bitrate to carry and buy no smoothness at all -- so the high ones say
+ * what they need. */
 const STREAM_PRESETS = [
+  { label: "Buttery", height: 1080, fps: 120, kbps: 40000, jitter: 25,
+    queue: 30, cpb: 80,
+    why: "wired, and the host's screen set to 120Hz or more" },
+  { label: "Buttery 1440p", height: 1440, fps: 120, kbps: 60000, jitter: 25,
+    queue: 30, cpb: 80,
+    why: "a 1440p desktop at 120Hz or more, wired" },
   { label: "Sharpest", height: 1080, fps: 60, kbps: 16000, jitter: 50,
+    queue: 50, cpb: 120,
     why: "a wired link on this network" },
-  { label: "Sharp", height: 1080, fps: 30, kbps: 9000, jitter: 60,
+  { label: "Sharp", height: 1080, fps: 30, kbps: 9000, jitter: 60, queue: 60, cpb: 150,
     why: "1080p that is actually sharp" },
-  { label: "Smooth", height: 720, fps: 60, kbps: 8000, jitter: 60,
+  { label: "Smooth", height: 720, fps: 60, kbps: 8000, jitter: 60, queue: 60, cpb: 150,
     why: "motion first -- best for anything fast" },
-  { label: "Balanced", height: 720, fps: 30, kbps: 4500, jitter: 70,
+  { label: "Balanced", height: 720, fps: 30, kbps: 4500, jitter: 70, queue: 70, cpb: 170,
     why: "a good default over the internet" },
-  { label: "Modest link", height: 540, fps: 30, kbps: 2500, jitter: 100,
+  { label: "Modest link", height: 540, fps: 30, kbps: 2500, jitter: 100, queue: 120, cpb: 250,
     why: "mobile data, or a weak uplink" },
 ];
 
@@ -8511,6 +8532,15 @@ function buildStreamPresets(sizes) {
       el("stream-fps").value = String(preset.fps);
       el("stream-bitrate").value = String(preset.kbps);
       el("stream-jitter").value = String(preset.jitter);
+      // The rest of the delay chain, which is as much of "responsive" as the
+      // frame rate is. Guarded because a host that publishes no limits for
+      // these still has the controls.
+      if (el("stream-queue") && preset.queue != null) {
+        el("stream-queue").value = String(preset.queue);
+      }
+      if (el("stream-cpb") && preset.cpb != null) {
+        el("stream-cpb").value = String(preset.cpb);
+      }
       const note = el("stream-preset-note");
       if (note) {
         note.textContent = `${preset.label}: ${preset.height}p${preset.fps} at `

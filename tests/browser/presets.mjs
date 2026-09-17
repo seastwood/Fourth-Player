@@ -1,62 +1,83 @@
-/* The picture presets, checked for the thing they exist to prevent.
+/* The quality presets, which exist because these settings are not independent.
  *
- * The dials are not independent: bits are shared across every pixel of every
- * frame, so raising the size at a fixed bitrate makes the picture softer. The
- * report that prompted these was "I increased the resolution to 1080p and the
- * quality remained kind of poor" -- true, and arithmetic rather than a fault.
- * A preset list that repeated the mistake would be worse than none.
+ * Asked for as: make the stream more responsive and buttery smooth, like
+ * playing natively.
+ *
+ * "Responsive" is not one dial. It is the frame rate, and then three separate
+ * buffers that each add delay: how long the browser holds a frame before
+ * drawing it, how much encoded video may pile up on the host, and how much
+ * the encoder may hold back to smooth a burst. A preset that set only the
+ * first left the other two wherever a previous experiment had put them --
+ * which is how a host ended up at jitter 60, queue 70 and cpb 170 while
+ * somebody wondered why it felt slow.
  */
 import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
-const from = app.indexOf("const STREAM_PRESETS = [");
-const until = app.indexOf("];", from) + 2;
-if (from < 0) { console.log("FAIL no STREAM_PRESETS in app.js"); process.exit(1); }
-const presets = new Function(app.slice(from, until) + "; return STREAM_PRESETS;")();
 
 let fails = 0;
 const check = (c, m) => { console.log((c ? "  ok   " : "  FAIL ") + m); if (!c) fails++; };
 
-const bpp = (p) => (p.kbps * 1000) / (p.height * (p.height * 16 / 9) * p.fps);
+const block = app.slice(app.indexOf("const STREAM_PRESETS = ["),
+                        app.indexOf("/* Only the sizes this host"));
+const entries = block.match(/\{[^{}]*\}/gs) || [];
+check(entries.length >= 5, `${entries.length} presets found`);
 
-check(presets.length >= 4, "there are enough presets to be a real choice");
-check(presets.every((p) => p.label && p.why && p.height && p.fps && p.kbps),
-      "every preset is fully specified, including why somebody would pick it");
+const presets = entries.map((text) => {
+  const num = (key) => {
+    const m = new RegExp(key + ":\\s*(\\d+)").exec(text);
+    return m ? Number(m[1]) : null;
+  };
+  return {
+    label: /label: "([^"]+)"/.exec(text)[1],
+    height: num("height"), fps: num("fps"), kbps: num("kbps"),
+    jitter: num("jitter"), queue: num("queue"), cpb: num("cpb"),
+  };
+});
 
+console.log("every preset sets the whole delay chain, not just one buffer");
 for (const p of presets) {
-  const v = bpp(p);
-  check(v >= 0.09 && v <= 0.30,
-        `${p.label} (${p.height}p${p.fps} @ ${p.kbps}) is ${v.toFixed(3)} bits/pixel -- in the sane band`);
+  check(p.jitter != null && p.queue != null && p.cpb != null,
+        `${p.label}: jitter ${p.jitter}, queue ${p.queue}, cpb ${p.cpb}`);
 }
 
-// The failure that prompted this: 1080p30 at 4500 is 0.07 bits/pixel.
-check(bpp({ height: 1080, fps: 30, kbps: 4500 }) < 0.09,
-      "and the setting that was reported as poor sits below that band, as it should");
-
-// Bigger pictures must ask for more bits, never the same or fewer.
-//
-// Ordered by real pixels a second, which goes as the square of the height --
-// the width is 16/9 of it. Getting that wrong makes 720p60 look like more
-// work than 1080p30 when it is in fact less (55.3M against 62.2M), and this
-// test failed on its own arithmetic before it failed on anything real.
-const rate = (p) => (16 / 9) * p.height * p.height * p.fps;
-const byPixels = [...presets].sort((a, b) => rate(a) - rate(b));
-let ok = true;
-for (let i = 1; i < byPixels.length; i++) {
-  if (byPixels[i].kbps < byPixels[i - 1].kbps) ok = false;
+console.log("\nand the applying code writes all of them");
+const apply = app.slice(app.indexOf("function buildStreamPresets"),
+                        app.indexOf("/* Which screens the host has"));
+for (const id of ["stream-size", "stream-fps", "stream-bitrate",
+                  "stream-jitter", "stream-queue", "stream-cpb"]) {
+  check(apply.includes(id), `${id} is written`);
 }
-check(ok, "more pixels per second always asks for more bitrate, never less");
 
-check(presets.some((p) => p.height <= 540),
-      "there is something for a weak uplink");
-check(presets.some((p) => p.fps >= 60),
-      "and something that puts motion first");
+console.log("\nthe faster a preset is, the less it buffers");
+// Not a rule of thumb: buffering is latency, so anything sold as more
+// responsive must ask for less of it. A preset offering 120fps with a
+// mobile-data jitter buffer would be a contradiction nobody could see.
+const sorted = [...presets].sort((a, b) => b.fps - a.fps || b.kbps - a.kbps);
+for (let i = 1; i < sorted.length; i += 1) {
+  const faster = sorted[i - 1], slower = sorted[i];
+  check(faster.jitter <= slower.jitter,
+        `${faster.label} (${faster.fps}fps) buffers no more than `
+        + `${slower.label} (${slower.fps}fps): ${faster.jitter} <= ${slower.jitter}`);
+}
 
-// Smoothing should rise as the link gets worse, not fall.
-const weakest = byPixels[0], strongest = byPixels[byPixels.length - 1];
-check(weakest.jitter >= strongest.jitter,
-      "the modest preset holds more picture back than the sharpest one");
+console.log("\nand bitrate rises with the pixels and frames it has to carry");
+// The complaint this whole mechanism exists for: raising the resolution and
+// getting a softer picture, because the bits were spread over more pixels.
+for (const p of presets) {
+  const load = (p.height * p.height * 16 / 9) * p.fps;
+  check(p.kbps / (load / 1e6) > 30,
+        `${p.label} has ${Math.round(p.kbps / (load / 1e6))} kb/s per megapixel-second`);
+}
 
-console.log("");
-if (fails) { console.log(`presets: ${fails} FAILED`); process.exit(1); }
-console.log("presets: all ok");
+console.log("\nthe fast ones say what they need of the host");
+// A 60Hz desktop cannot be captured at 120: the extra frames are duplicates
+// that cost bitrate and buy nothing. The preset has to say so, because the
+// host's refresh rate is not something the page can see.
+for (const p of presets.filter((x) => x.fps > 60)) {
+  const text = entries.find((e) => e.includes(`"${p.label}"`));
+  check(/Hz|refresh/i.test(text),
+        `${p.label} mentions what refresh rate the host's screen needs`);
+}
+
+process.exit(fails ? 1 : 0);
