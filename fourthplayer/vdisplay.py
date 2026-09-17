@@ -365,13 +365,19 @@ def modes(device_name):
 
 
 def best_refresh(device_name, wanted):
-    """The refresh rate to use for `wanted` frames a second, or None.
+    """The lowest rate the screen offers that still draws `wanted` frames.
 
-    The highest rate the screen offers at its current size that is no more
-    than what was asked for -- so 60 frames a second on a 143Hz panel picks
-    60 and not 143, and 120 picks 120 where it exists and 60 where it does
-    not. Sending more frames than the screen draws is duplicates: bitrate
-    spent to carry the same picture twice.
+    The first version of this took the highest rate *at or below* what was
+    asked for, which is backwards and would have been unkind: at 30 frames a
+    second it would have dropped a 143Hz panel to 30Hz. A desktop's refresh
+    rate is the person sitting at it's business, and the only thing a
+    streaming host legitimately needs is that the screen draws at least as
+    many frames as are being sent -- sending more than it draws is the same
+    picture twice, bitrate spent for nothing.
+
+    So: the lowest offered rate that is >= wanted, because there is no reason
+    to run a panel at 143 to capture 60. If nothing is fast enough, the
+    fastest there is, and the caller says so rather than pretending.
     """
     if not SUPPORTED:
         return None
@@ -387,10 +393,22 @@ def best_refresh(device_name, wanted):
                     if (w, h) == size and hz > 0})
     if not rates:
         return None
-    fits = [hz for hz in rates if hz <= wanted]
-    # Nothing at or below what was asked for means the screen's slowest mode
-    # is already faster, which is fine -- it just cannot go lower.
-    return fits[-1] if fits else rates[0]
+    fast_enough = [hz for hz in rates if hz >= wanted]
+    return fast_enough[0] if fast_enough else rates[-1]
+
+
+def current_refresh(device_name):
+    """What rate this adapter is running at now, or None."""
+    if not SUPPORTED:
+        return None
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    mode = DEVMODEW()
+    mode.dmSize = ctypes.sizeof(DEVMODEW)
+    if not user32.EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS,
+                                       ctypes.byref(mode)):
+        return None
+    return int(mode.dmDisplayFrequency) or None
 
 
 def set_refresh(device_name, hz):

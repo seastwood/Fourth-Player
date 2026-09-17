@@ -1203,8 +1203,14 @@ class Stage:
                 return
             if hz < wanted:
                 log.info("%s offers at most %dHz at this size, so %d frames a "
-                         "second would be sending the same picture twice; "
-                         "consider %d", device, hz, wanted, hz)
+                         "second is sending the same picture twice; %d would "
+                         "look the same and cost less", device, hz, wanted, hz)
+            # Only ever upwards. A desktop's refresh rate belongs to whoever
+            # sits at it, and lowering it to match a modest stream would make
+            # their screen worse to be kind to a guest.
+            current = vdisplay.current_refresh(device)
+            if current is not None and hz <= current:
+                return
             vdisplay.set_refresh(device, hz)
         except Exception:
             log.debug("could not match the screen's refresh rate",

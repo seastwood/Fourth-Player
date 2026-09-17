@@ -249,6 +249,20 @@ check("if self.vdisplay is not None" in body,
 check("primary" in body,
       "and only the screen being captured -- a second monitor somebody is "
       "working on is not the host's to reconfigure")
+check("hz <= current" in body,
+      "and only ever raises the rate: lowering a 143Hz panel to match a 30fps "
+      "stream would make somebody's desktop worse to be kind to a guest, "
+      "which is what the first version would have done")
+
+vd = open(os.path.join(ROOT, "fourthplayer", "vdisplay.py")).read()
+best = vd[vd.index("def best_refresh"):vd.index("def current_refresh")]
+check("hz >= wanted" in best,
+      "the rate chosen is fast enough to draw every frame being sent")
+check("fast_enough[0]" in best,
+      "and the lowest such rate, because there is no reason to run a panel at "
+      "143 to capture 60")
+check("rates[-1]" in best,
+      "falling back to the fastest there is when nothing is fast enough")
 check("match_refresh" in body and "return" in body,
       "and can be switched off, for somebody whose console screen is also a "
       "desk they work at")
