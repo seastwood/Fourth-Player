@@ -1294,56 +1294,6 @@ const DPAD = { up: 12, down: 13, left: 14, right: 15 };
 const ORIENT_KEY = "fp:orient";
 const ORIENTATIONS = ["any", "landscape", "portrait"];
 
-/* Turning the page ourselves, where the browser will not turn the screen.
- *
- * iOS Safari has never implemented screen.orientation.lock, installed web app
- * or not -- Safari 16.4 added the type, the angle and the event and left the
- * lock out, and it is still absent. So a phone lying on its side goes back to
- * portrait and there is nothing a page can ask for to stop it.
- *
- * What a page can do is draw itself sideways. The stage is rotated a quarter
- * turn and given the viewport's height for its width, so the picture fills a
- * landscape rectangle on a portrait screen.
- *
- * The cost is that a finger still moves in the screen's directions while
- * everything it is moving is in the stage's, so every movement has to be
- * turned with it -- which is `turnedDelta` below, and is the one thing this
- * adds to the touch paths. Positions are left alone: the picture's own
- * measurements come from offsetWidth, which a transform does not touch, so
- * the arithmetic downstream is already in the stage's frame. */
-let turned = false;
-
-function wantsTurning() {
-  // Only when somebody asked for landscape, the browser cannot deliver it,
-  // and the screen is actually portrait. On anything that can lock, the lock
-  // is better than a transform in every way.
-  if (savedOrient() !== "landscape" || canTurn()) return false;
-  const vv = window.visualViewport;
-  const wide = vv ? vv.width > vv.height
-                  : window.innerWidth > window.innerHeight;
-  return !wide;
-}
-
-function paintTurned() {
-  const want = wantsTurning();
-  if (want === turned) return;
-  turned = want;
-  document.documentElement.classList.toggle("turned", turned);
-  // Everything that sizes itself from the viewport has to look again.
-  if (typeof fitStage === "function") fitStage();
-  applyZoom();
-}
-
-/* A movement in screen directions, expressed in the stage's.
- *
- * The stage is rotated a quarter turn clockwise, so a finger moving down the
- * screen is moving left across the stage, and one moving right is moving
- * down. Everything that consumes a drag passes through here; when nothing is
- * turned it is the identity and costs a comparison. */
-function turnedDelta(dx, dy) {
-  return turned ? { dx: dy, dy: -dx } : { dx, dy };
-}
-
 function canTurn() {
   return !!(window.screen && screen.orientation && screen.orientation.lock);
 }
@@ -1363,18 +1313,15 @@ function savedOrient() {
 function applyOrient(pick) {
   const note = el("pads-orient-note");
   const say = (text) => { if (note) note.textContent = text; };
-  // Where the browser cannot lock, the page draws itself sideways instead.
-  // Asked here as well as on rotation, because choosing landscape while the
-  // phone is already on its side has to take effect at once.
-  paintTurned();
   if (!canTurn()) {
-    return say(turned
-      ? "This browser cannot lock the screen, so the page is drawn sideways "
-        + "instead. Turn the phone back upright to use it."
-      : pick === "landscape"
-        ? "This browser cannot lock the screen. Held sideways, the page will "
-          + "draw itself that way."
-        : "");
+    // Said rather than hidden. Safari has never implemented the orientation
+    // lock -- installed web app or not -- and a page cannot turn the screen
+    // any other way: drawing itself sideways was tried and is worse, because
+    // the *viewport* stays portrait, so every phone-portrait rule in the
+    // stylesheet still applies inside a landscape-shaped box.
+    return say(pick === "any" ? ""
+      : "This browser cannot lock the screen — Safari has never been able to. "
+        + "Use the rotation lock in Control Centre instead.");
   }
   /* "any" is a lock, not the absence of one.
    *
@@ -2958,10 +2905,7 @@ video.addEventListener("pointermove", (event) => {
       // Driving the host's pointer, and this is a drag rather than a pinch:
       // the fingers are asking the *host* to scroll, not the picture to move.
       if (twoMode === "drag" && cursorDriving()) {
-        if (pinchAt) {
-          const moved = turnedDelta(at.x - pinchAt.x, at.y - pinchAt.y);
-          deskScrollBy(moved.dx, moved.dy);
-        }
+        if (pinchAt) deskScrollBy(at.x - pinchAt.x, at.y - pinchAt.y);
         pinchGap = gap;
         pinchAt = at;
         dragged = true;
@@ -2978,9 +2922,8 @@ video.addEventListener("pointermove", (event) => {
       // somebody keeps hold of what they were looking at while resizing it,
       // and during a drag it is the whole gesture.
       if (twoMode && pinchAt) {
-        const moved = turnedDelta(at.x - pinchAt.x, at.y - pinchAt.y);
-        panX += moved.dx;
-        panY += moved.dy;
+        panX += at.x - pinchAt.x;
+        panY += at.y - pinchAt.y;
       }
       if (twoMode) applyZoom();
     }
@@ -2999,8 +2942,7 @@ video.addEventListener("pointermove", (event) => {
   // pointing at it is one job, not two.
   if (cursorDriving() && cursorFrom) {
     const scale = cursorScale();
-    const turn = turnedDelta(now.x - was.x, now.y - was.y);
-    const dx = turn.dx, dy = turn.dy;
+    const dx = now.x - was.x, dy = now.y - was.y;
     cursorMove(dx * scale.x, dy * scale.y);
     // Speed is taken from this move alone rather than averaged over the
     // drag: what a flick means is how fast the finger was going as it left,
@@ -3164,9 +3106,7 @@ video.addEventListener("gesturechange", (event) => {
   if (gestureMode === "drag" && cursorDriving()) {
     // As above, for the path Safari actually delivers.
     if (gestureLast) {
-      const swipe = turnedDelta(event.clientX - gestureLast.x,
-                                event.clientY - gestureLast.y);
-      deskScrollBy(swipe.dx, swipe.dy);
+      deskScrollBy(event.clientX - gestureLast.x, event.clientY - gestureLast.y);
     }
     gestureLast = { x: event.clientX, y: event.clientY };
     return;
@@ -7062,12 +7002,7 @@ if (window.visualViewport) {
     pending = true;
     requestAnimationFrame(() => { pending = false; fitStage(); });
   };
-  window.visualViewport.addEventListener("resize", () => {
-    // iOS does not always raise orientationchange for a rotation, and the
-    // viewport changing shape is the thing that actually matters here.
-    paintTurned();
-    schedule();
-  });
+  window.visualViewport.addEventListener("resize", schedule);
   window.visualViewport.addEventListener("scroll", schedule);
   /* The keyboard coming up is a viewport resize like any other, and it is the
      one that shows. Two things make it rough rather than smooth: the last
@@ -7087,12 +7022,7 @@ if (window.visualViewport) {
       log.scrollTop = log.scrollHeight;
     });
   });
-  window.addEventListener("orientationchange", () => setTimeout(() => {
-    // Whether the page has to draw itself sideways depends on which way the
-    // screen now is, so this is asked again before anything is measured.
-    paintTurned();
-    fitStage();
-  }, 200));
+  window.addEventListener("orientationchange", () => setTimeout(fitStage, 200));
   fitStage();
 }
 

@@ -2845,29 +2845,3 @@ input.name {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-/* Drawing the page sideways, where the browser will not turn the screen.
- *
- * iOS Safari has never implemented the orientation lock -- installed web app
- * or not -- so a phone lying on its side returns to portrait and no API can
- * stop it. This is the fallback: a quarter turn, with the viewport's height
- * for the stage's width, so the picture fills a landscape rectangle on a
- * portrait screen.
- *
- * Only ever on when somebody chose landscape, the browser cannot lock, and
- * the screen really is portrait. On anything that can lock, the lock is
- * better than this in every way and this never applies. */
-html.turned #stage {
-  position: fixed;
-  top: 0;
-  left: 0;
-  /* The long side of the screen becomes the stage's width. dvh and dvw rather
-     than vh and vw: the bars come and go on a phone, and the stage has to be
-     the size of what is actually on show. */
-  width: 100dvh;
-  height: 100dvw;
-  transform: rotate(90deg) translateY(-100%);
-  transform-origin: top left;
-  /* The rotated stage is what everything is measured against, so nothing may
-     leak out of it. */
-  overflow: hidden;
-}
