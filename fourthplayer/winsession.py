@@ -80,11 +80,19 @@ def console_session():
     0xFFFFFFFF means there is no console session at all, which happens for a
     moment during a fast user switch and while the machine is starting. It is
     not an error, it is a "not yet" -- the caller waits and asks again.
+
+    From kernel32 and not wtsapi32, despite the name. Everything else with a
+    WTS prefix is in wtsapi32 and this one is not, which is exactly the sort
+    of thing that is obvious the moment it is run and invisible while it is
+    only read: the first version of this looked it up in wtsapi32 and threw
+    AttributeError every single time, so the service would never have started
+    a host at all.
     """
     if not SUPPORTED:
         return None
-    _wtsapi32.WTSGetActiveConsoleSessionId.restype = wintypes.DWORD
-    found = _wtsapi32.WTSGetActiveConsoleSessionId()
+    _kernel32.WTSGetActiveConsoleSessionId.restype = wintypes.DWORD
+    _kernel32.WTSGetActiveConsoleSessionId.argtypes = []
+    found = _kernel32.WTSGetActiveConsoleSessionId()
     return None if found == 0xFFFFFFFF else int(found)
 
 

@@ -152,5 +152,35 @@ print("\nand it is honest about being run the wrong way")
 check("This entry point is for the service" in source,
       "running it by hand says so rather than hanging")
 
+print()
+print("each Windows call is looked up in the library that actually has it")
+# WTSGetActiveConsoleSessionId is in kernel32, not wtsapi32, despite the
+# prefix -- everything else named WTS* is in wtsapi32 and that one is not.
+# The first version looked it up in wtsapi32 and raised AttributeError every
+# single time, so the service would never have started a host at all. That is
+# invisible while the code is only read and obvious the moment it is run.
+from fourthplayer import winsession
+import inspect as _inspect
+src = _inspect.getsource(winsession)
+console = src[src.index("def console_session"):src.index("def _system_token_for")]
+check("_kernel32.WTSGetActiveConsoleSessionId" in console,
+      "the console session id comes from kernel32")
+check("_wtsapi32.WTSGetActiveConsoleSessionId" not in src,
+      "and never from wtsapi32, which does not export it")
+check("argtypes" in console,
+      "with its signature stated, so a pseudo-handle or a DWORD is not "
+      "guessed at")
+
+print()
+print("and asking is safe on a machine that cannot answer")
+# None rather than an exception: no console session is an ordinary state
+# during a fast user switch and while the machine is starting.
+check(winsession.console_session() is None or
+      isinstance(winsession.console_session(), int),
+      "console_session() answers rather than raising")
+check(isinstance(winsession.explain(), str) and winsession.explain(),
+      "and explain() says something either way: %r"
+      % winsession.explain()[:60])
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)
