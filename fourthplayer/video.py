@@ -1123,6 +1123,19 @@ class Stage:
                 return self.start()
             raise RuntimeError(
                 f"the capture pipeline stalled reaching PLAYING (got {state.value_nick})")
+        # Ask the screen for the frame rate that is being sent.
+        #
+        # A screen that draws 59 frames a second cannot be captured at 120:
+        # the extra frames are the same picture twice, costing bitrate and
+        # buying no smoothness at all. This host was sitting at 59Hz on a
+        # panel that offers 143, so choosing a higher frame rate in the
+        # picture settings did nothing anybody could see.
+        #
+        # So the frame rate carries the refresh rate with it. Only ever
+        # downwards to what the screen actually offers, never above what was
+        # asked for, and only on the screen being captured -- a second monitor
+        # somebody is working on is not this host's to reconfigure.
+        self._match_refresh(chosen)
         # Which Windows desktop the input is on, and whether this host could
         # follow it. Said once per capture because it is the difference
         # between "the stream went black" and "the machine locked and this
@@ -1157,6 +1170,39 @@ class Stage:
                         "genuinely sharper stream.",
                         self.sending_width, self.sending_height,
                         desktop[0], desktop[1], desktop[0], desktop[1])
+
+    def _match_refresh(self, chosen):
+        """Put the captured screen at the frame rate being sent, if it can.
+
+        `chosen` is the monitor row the capture settled on, or None for
+        whatever the capture picks itself. Never raises: a refresh rate that
+        will not change is a less smooth picture, not a broken session.
+        """
+        if not getattr(self.cfg, "match_refresh", True):
+            return
+        if self.vdisplay is not None:
+            return          # made at the right rate already
+        try:
+            wanted = int(self.cfg.fps)
+            device = chosen[5] if chosen else None
+            if device is None:
+                # Whatever Windows calls the primary, which is what the
+                # capture will have taken.
+                primary = [m for m in vdisplay.monitors() if m[4]]
+                device = primary[0][5] if primary else None
+            if not device:
+                return
+            hz = vdisplay.best_refresh(device, wanted)
+            if hz is None:
+                return
+            if hz < wanted:
+                log.info("%s offers at most %dHz at this size, so %d frames a "
+                         "second would be sending the same picture twice; "
+                         "consider %d", device, hz, wanted, hz)
+            vdisplay.set_refresh(device, hz)
+        except Exception:
+            log.debug("could not match the screen's refresh rate",
+                      exc_info=True)
 
     def stop(self):
         """Stop capturing. Must not block, whatever state anything is in.

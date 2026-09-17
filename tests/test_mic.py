@@ -65,9 +65,21 @@ print("the pipeline plays, rather than records")
 tail = micsink.describe("Speakers (VB-Audio Virtual Cable)")
 check("audioconvert" in tail and "audioresample" in tail,
       "it converts and resamples, because a browser sends what it likes")
-check("leaky=downstream" in tail,
-      "and drops the oldest rather than backing up into the connection: this "
-      "is somebody talking, and late audio is worse than missing audio")
+# This used to assert leaky=downstream, on the reasoning that late audio is
+# worse than missing audio. That is right for the game's sound going out and
+# backwards for somebody talking: a voice arriving 150 ms late is a
+# conversation, a voice with syllables removed is not. It threw speech away on
+# any hesitation in the sink, and was reported as words cut off before they
+# finished.
+check("leaky" not in tail,
+      "nothing is dropped -- a full queue pushes back rather than discarding "
+      "what somebody said")
+check("max-size-time=250000000" in tail,
+      "and there is room to ride out a device hiccup: %r"
+      % tail.split("!")[0].strip())
+check("low-latency" not in tail,
+      "and the sink is not asked for the smallest buffer the device will "
+      "give, which is what guaranteed the hesitation")
 check("sync=false" in tail,
       "and does not wait on a clock it does not share")
 
@@ -207,6 +219,39 @@ check("the guest answered the microphone line" in video,
       "and the host logs what was agreed, because a microphone that is on at "
       "one end and silent at the other has two different causes and only the "
       "answer tells them apart")
+
+print()
+print("the guest controls what their microphone costs, and its processing")
+check("MIC_KBPS_KEY" in app, "the bitrate is a client setting")
+check("maxBitrate" in app,
+      "set on the sender, because the encoder is what decides the rate and "
+      "it is the only end that can be told")
+check("await applyMicRate()" in app,
+      "applied after the track is attached, since a sender with no track can "
+      "report no encodings at all and a rate set on nothing is lost")
+check("MIC_CLEAN_KEY" in app, "and the browser's noise gate can be turned off")
+check("echoCancellation: micClean" in app,
+      "which is the other thing that clips the ends of words: a gate decides "
+      "what is speech moment by moment, and a word's energy falls away at "
+      "its end")
+
+print()
+print("and the frame rate carries the screen's refresh rate with it")
+check("match_refresh" in video, "the capture asks the screen")
+check("def best_refresh" in open(os.path.join(ROOT, "fourthplayer",
+                                              "vdisplay.py")).read(),
+      "for the best rate it actually offers")
+# Sliced from the definition, not the first mention: the first is the call
+# site, and reading 600 characters from there measures the wrong function.
+body = video[video.index("def _match_refresh"):video.index("    def stop(self):")]
+check("if self.vdisplay is not None" in body,
+      "and leaves a virtual display alone, which is made at the right rate")
+check("primary" in body,
+      "and only the screen being captured -- a second monitor somebody is "
+      "working on is not the host's to reconfigure")
+check("match_refresh" in body and "return" in body,
+      "and can be switched off, for somebody whose console screen is also a "
+      "desk they work at")
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

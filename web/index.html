@@ -457,6 +457,33 @@
         <option value="strong">Strong</option>
       </select>
     </p>
+    <!-- How much bandwidth this room's microphone is worth.
+         Only shown to somebody the host has given the microphone to, since
+         for anybody else it is a setting for a thing they cannot switch on.
+         A client setting: it is this person's microphone and this person's
+         uplink, and two guests would not agree. -->
+    <p class="browse-note pads-feel" id="mic-quality-row" hidden>
+      <span class="switch-name">Microphone</span>
+      <select id="mic-quality" class="chip"
+              aria-label="How much bandwidth your microphone uses">
+        <option value="16000">Speech &mdash; 16 kb/s</option>
+        <option value="24000">Voice chat &mdash; 24 kb/s</option>
+        <option value="40000">Clear &mdash; 40 kb/s</option>
+        <option value="64000">High &mdash; 64 kb/s</option>
+        <option value="128000">Music &mdash; 128 kb/s</option>
+      </select>
+    </p>
+    <!-- The browser's own noise gate, which is the other thing that clips
+         the ends of words: it decides what is speech and what is room, and
+         at the end of a word the energy falls away, so an aggressive gate
+         takes the last syllable with it. On by default because it is right
+         for most rooms; off is the first thing to try when words truncate. -->
+    <p class="browse-note pads-feel" id="mic-clean-row" hidden>
+      <label class="switch" for="mic-clean">
+        <input id="mic-clean" type="checkbox" switch checked>
+        <span class="switch-name">Clean up my microphone</span>
+      </label>
+    </p>
     <!-- The other half of the same complaint. The pad is drawn as a Nintendo
          diamond and sent as an Xbox pad, so the button printed A arrives as B
          in a game that names its buttons. Two ways out, and which one is

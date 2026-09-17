@@ -115,10 +115,20 @@ def describe(device, name_to_id=None):
     """
     element = sink_element()
     ident = (name_to_id or {}).get(device, device)
-    # low-latency where the element has it: this is somebody talking, and a
-    # buffer that would be unremarkable for music is a conversation with a
-    # delay in it.
-    extra = " low-latency=true" if element == "wasapi2sink" else ""
-    return ("queue max-size-time=100000000 leaky=downstream "
+    # Not leaky, and roomier than it was.
+    #
+    # This queue was 100ms with leaky=downstream, on the reasoning that late
+    # audio is worse than missing audio. That is right for the game's sound
+    # going out and wrong for somebody talking: a voice arriving 150ms late is
+    # a conversation, and a voice with syllables removed is not. Any hesitation
+    # in the sink -- and low-latency=true on wasapi2sink guarantees some, since
+    # it asks for the smallest buffer the device will give -- threw speech
+    # away. Reported exactly as words being cut off before they finished.
+    #
+    # 250ms is enough to ride out a device hiccup and still inside what a
+    # conversation tolerates, and nothing is dropped: a full queue now pushes
+    # back rather than discarding what somebody said.
+    return ("queue max-size-time=250000000 max-size-buffers=0 "
+            "max-size-bytes=0 "
             "! audioconvert ! audioresample "
-            "! %s device=\"%s\"%s sync=false" % (element, ident, extra))
+            "! %s device=\"%s\" sync=false" % (element, ident))

@@ -8191,6 +8191,84 @@ if (el("desk-speed")) {
 let micTrack = null;
 let micOn = false;
 
+/* How much bandwidth this room's microphone is worth.
+ *
+ * Opus will happily spend 128 kb/s on a voice, which is more than a voice
+ * needs and more than somebody on a thin uplink can spare -- reported as the
+ * sound quality being too high. It is set on the sender rather than asked of
+ * getUserMedia, because the encoder is what decides the rate and it is the
+ * only end that can be told.
+ *
+ * A client setting, remembered per browser: it is this person's microphone
+ * and this person's uplink, and two guests in one session would not agree. */
+const MIC_KBPS_KEY = "fp:mic-bitrate";
+const MIC_RATES = [16000, 24000, 40000, 64000, 128000];
+
+function savedMicRate() {
+  let raw = null;
+  try { raw = localStorage.getItem(MIC_KBPS_KEY); } catch (_) {}
+  const value = Number(raw);
+  return MIC_RATES.includes(value) ? value : 24000;
+}
+
+let micRate = savedMicRate();
+
+/* Whether the browser may process the microphone before sending it.
+ *
+ * Echo cancellation, noise suppression and automatic gain are on by default
+ * and are right for most rooms. They are also a gate: they decide moment by
+ * moment what is speech and what is room noise, and the energy of a word
+ * falls away at its end -- so a gate that is slightly too keen removes the
+ * last syllable. That is one of the two things that clips words, the other
+ * being a host-side queue that was throwing audio away.
+ *
+ * Offered rather than chosen, because which is better depends on the room. */
+const MIC_CLEAN_KEY = "fp:mic-clean";
+
+function savedMicClean() {
+  try { return localStorage.getItem(MIC_CLEAN_KEY) !== "off"; } catch (_) { return true; }
+}
+
+let micClean = savedMicClean();
+
+function setMicClean(on) {
+  micClean = !!on;
+  try { localStorage.setItem(MIC_CLEAN_KEY, micClean ? "on" : "off"); } catch (_) {}
+  // Takes effect on the next microphone, because these are constraints on
+  // getUserMedia and not something a live track can be told.
+  if (micOn) {
+    report("microphone processing " + (micClean ? "on" : "off")
+           + "; restarting it");
+    setMic(false).then(() => setMic(true));
+  }
+}
+
+async function applyMicRate() {
+  const line = micLine();
+  if (!line || !line.sender || !line.sender.getParameters) return;
+  try {
+    const params = line.sender.getParameters();
+    // encodings can come back empty before anything has been sent; a bare
+    // object is the documented way to set a rate on the single encoding.
+    params.encodings = (params.encodings && params.encodings.length)
+      ? params.encodings : [{}];
+    params.encodings[0].maxBitrate = micRate;
+    await line.sender.setParameters(params);
+  } catch (err) {
+    // Not fatal: some browsers refuse setParameters on an audio sender, and
+    // a microphone at the wrong bitrate is better than no microphone.
+    report("could not set the microphone bitrate: " + (err && err.name));
+  }
+}
+
+function setMicRate(value) {
+  const rate = Number(value);
+  if (!MIC_RATES.includes(rate)) return;
+  micRate = rate;
+  try { localStorage.setItem(MIC_KBPS_KEY, String(rate)); } catch (_) {}
+  if (micOn) applyMicRate();
+}
+
 /* Which m-line the host said the microphone is on, straight from the offer. */
 let micLineIndex = null;
 
@@ -8222,8 +8300,8 @@ async function setMic(on) {
   if (on) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true,
-                 autoGainControl: true },
+        audio: { echoCancellation: micClean, noiseSuppression: micClean,
+                 autoGainControl: micClean },
       });
       micTrack = stream.getAudioTracks()[0] || null;
     } catch (err) {
@@ -8236,7 +8314,10 @@ async function setMic(on) {
     }
     await line.sender.replaceTrack(micTrack);
     micOn = true;
-    report("microphone on");
+    // After the track, not before: a sender with no track can report no
+    // encodings at all, and setting a rate on nothing is silently lost.
+    await applyMicRate();
+    report("microphone on at " + Math.round(micRate / 1000) + " kb/s");
   } else {
     await line.sender.replaceTrack(null);
     if (micTrack) { try { micTrack.stop(); } catch (_) {} }
@@ -8248,6 +8329,16 @@ async function setMic(on) {
 }
 
 function paintMic() {
+  // The bandwidth choice is only worth showing to somebody who may use the
+  // microphone at all.
+  const row = el("mic-quality-row");
+  if (row) row.hidden = !may("mic");
+  const cleanRow = el("mic-clean-row");
+  if (cleanRow) cleanRow.hidden = !may("mic");
+  const clean = el("mic-clean");
+  if (clean && clean.checked !== micClean) clean.checked = micClean;
+  const picker = el("mic-quality");
+  if (picker && picker.value !== String(micRate)) picker.value = String(micRate);
   const chip = el("mic-chip");
   if (!chip) return;
   // Only for somebody the host has given it to, and only where the host
@@ -8263,6 +8354,21 @@ function paintMic() {
 
 if (el("mic-chip")) {
   el("mic-chip").addEventListener("click", () => { setMic(!micOn); });
+}
+
+if (el("mic-clean")) {
+  el("mic-clean").checked = micClean;
+  el("mic-clean").addEventListener("change", (event) => {
+    setMicClean(event.target.checked);
+  });
+}
+
+if (el("mic-quality")) {
+  el("mic-quality").value = String(micRate);
+  el("mic-quality").addEventListener("change", (event) => {
+    setMicRate(event.target.value);
+    el("mic-quality").value = String(micRate);
+  });
 }
 
 if (el("screen-chip")) {

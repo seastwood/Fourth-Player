@@ -339,6 +339,91 @@ def _settle(tries=30, pause=0.1):
     return False
 
 
+def modes(device_name):
+    """Every mode this adapter offers, as (width, height, hz).
+
+    Asked of Windows rather than assumed, because a monitor's capabilities are
+    not something a streaming host can guess: the panel here reports a maximum
+    of 143Hz and was sitting at 59, and only the list says which rates in
+    between actually exist.
+    """
+    if not SUPPORTED:
+        return []
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found, index = [], 0
+    while True:
+        mode = DEVMODEW()
+        mode.dmSize = ctypes.sizeof(DEVMODEW)
+        if not user32.EnumDisplaySettingsW(device_name, index,
+                                          ctypes.byref(mode)):
+            break
+        found.append((int(mode.dmPelsWidth), int(mode.dmPelsHeight),
+                      int(mode.dmDisplayFrequency)))
+        index += 1
+    return found
+
+
+def best_refresh(device_name, wanted):
+    """The refresh rate to use for `wanted` frames a second, or None.
+
+    The highest rate the screen offers at its current size that is no more
+    than what was asked for -- so 60 frames a second on a 143Hz panel picks
+    60 and not 143, and 120 picks 120 where it exists and 60 where it does
+    not. Sending more frames than the screen draws is duplicates: bitrate
+    spent to carry the same picture twice.
+    """
+    if not SUPPORTED:
+        return None
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    now = DEVMODEW()
+    now.dmSize = ctypes.sizeof(DEVMODEW)
+    if not user32.EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS,
+                                       ctypes.byref(now)):
+        return None
+    size = (int(now.dmPelsWidth), int(now.dmPelsHeight))
+    rates = sorted({hz for w, h, hz in modes(device_name)
+                    if (w, h) == size and hz > 0})
+    if not rates:
+        return None
+    fits = [hz for hz in rates if hz <= wanted]
+    # Nothing at or below what was asked for means the screen's slowest mode
+    # is already faster, which is fine -- it just cannot go lower.
+    return fits[-1] if fits else rates[0]
+
+
+def set_refresh(device_name, hz):
+    """Change only the refresh rate, leaving the size alone. True if it took.
+
+    Separate from set_mode because a physical screen's size is the person's
+    choice and none of this host's business -- only the rate is, and only
+    because a screen that draws 59 frames a second cannot be captured at 120.
+    """
+    if not SUPPORTED:
+        return False
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    mode = DEVMODEW()
+    mode.dmSize = ctypes.sizeof(DEVMODEW)
+    if not user32.EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS,
+                                       ctypes.byref(mode)):
+        return False
+    if int(mode.dmDisplayFrequency) == int(hz):
+        return True                       # already right; do not disturb it
+    was = int(mode.dmDisplayFrequency)
+    mode.dmDisplayFrequency = int(hz)
+    mode.dmFields = DM_DISPLAYFREQUENCY
+    result = user32.ChangeDisplaySettingsExW(device_name, ctypes.byref(mode),
+                                             None, CDS_UPDATEREGISTRY, None)
+    if result != DISP_CHANGE_SUCCESSFUL:
+        log.warning("%s would not go from %dHz to %dHz (code %d)",
+                    device_name, was, hz, result)
+        return False
+    log.info("%s refresh rate %dHz -> %dHz", device_name, was, hz)
+    return True
+
+
 def set_mode(device_name, width, height, hz):
     """Put one adapter into a given mode. True if Windows took it.
 

@@ -70,6 +70,17 @@ class Config:
     # Empty means nowhere, and a guest turning their microphone on is told so
     # rather than talking into a hole.
     guest_mic_device: str = ""
+    # Put the captured screen at the frame rate being sent.
+    #
+    # A screen drawing 59 frames a second cannot be captured at 120 -- the
+    # extra frames are the same picture twice -- so choosing a higher rate in
+    # the picture settings does nothing until the screen itself is asked. Only
+    # ever downwards to a rate the screen offers, and only the screen being
+    # captured.
+    #
+    # Off for somebody whose console screen is also a desk they work at and
+    # who would rather it were left alone.
+    match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device
     # name Windows gives it -- "\\\\.\\DISPLAY10". Empty is whatever the capture
