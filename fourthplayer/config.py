@@ -70,6 +70,16 @@ class Config:
     # Empty means nowhere, and a guest turning their microphone on is told so
     # rather than talking into a hole.
     guest_mic_device: str = ""
+    # How much of a guest's voice to hold before playing it, in milliseconds.
+    #
+    # This is a conversation, so the whole budget is small: every millisecond
+    # here is somebody waiting for a reply. The defaults it replaces were not
+    # small -- webrtcbin buffers 200ms of incoming media and wasapi2sink asks
+    # the device for another 200, which is nearly half a second of delay
+    # before anything this project wrote gets involved.
+    #
+    # Raise it if a voice breaks up; a thin or wireless uplink wants more.
+    guest_mic_latency_ms: int = 40
     # Put the captured screen at the frame rate being sent.
     #
     # A screen drawing 59 frames a second cannot be captured at 120 -- the

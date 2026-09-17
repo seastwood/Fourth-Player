@@ -105,7 +105,7 @@ def sink_element():
     return "wasapi2sink" if sys.platform == "win32" else "pulsesink"
 
 
-def describe(device, name_to_id=None):
+def describe(device, name_to_id=None, latency_ms=40):
     """The tail of a pipeline that plays audio into `device`.
 
     The device is matched by display name against what the monitor reported,
@@ -115,7 +115,7 @@ def describe(device, name_to_id=None):
     """
     element = sink_element()
     ident = (name_to_id or {}).get(device, device)
-    # Not leaky, and roomier than it was.
+    # Not leaky, and sized for a conversation.
     #
     # This queue was 100ms with leaky=downstream, on the reasoning that late
     # audio is worse than missing audio. That is right for the game's sound
@@ -128,7 +128,19 @@ def describe(device, name_to_id=None):
     # 250ms is enough to ride out a device hiccup and still inside what a
     # conversation tolerates, and nothing is dropped: a full queue now pushes
     # back rather than discarding what somebody said.
-    return ("queue max-size-time=250000000 max-size-buffers=0 "
-            "max-size-bytes=0 "
+    # buffer-time is the device's own buffer and it defaults to 200ms, which
+    # is a fifth of a second of delay for no benefit on a machine that is
+    # decoding one voice. latency-time is how often it is topped up; the
+    # default 10ms is already fine.
+    hold = max(10, int(latency_ms or 40))
+    device_us = hold * 1000
+    if element == "wasapi2sink":
+        extra = " buffer-time=%d latency-time=10000" % device_us
+    else:
+        extra = " buffer-time=%d latency-time=10000" % device_us
+    # The queue absorbs a hiccup without discarding speech. Capacity, not
+    # delay: it only holds anything when the sink is behind.
+    return ("queue max-size-time=%d max-size-buffers=0 max-size-bytes=0 "
             "! audioconvert ! audioresample "
-            "! %s device=\"%s\" sync=false" % (element, ident))
+            "! %s device=\"%s\"%s sync=false"
+            % (max(60, hold * 3) * 1000000, element, ident, extra))

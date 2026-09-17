@@ -1768,6 +1768,25 @@ class Peer:
             # a host that cannot play it anywhere is a promise nobody can keep.
             if micsink.where(self.stage.cfg):
                 self._add_mic_line()
+                # How long webrtcbin holds incoming media before it comes out.
+                #
+                # 200ms by default, and the comment further down this file
+                # used to dismiss it -- "nothing comes in here" -- which was
+                # true until a microphone did. It is the larger half of the
+                # delay a guest hears as a slow conversation.
+                #
+                # Only set where something is actually received: on a peer
+                # with no microphone line this property governs nothing, and
+                # changing it would be noise in the log.
+                try:
+                    hold = max(10, int(getattr(self.stage.cfg,
+                                               "guest_mic_latency_ms", 40)))
+                    self.webrtc.set_property("latency", hold)
+                    log.info("peer %s: holding incoming audio %dms "
+                             "(webrtcbin's default is 200)", self.id, hold)
+                except Exception:
+                    log.debug("this webrtcbin has no latency property",
+                              exc_info=True)
 
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("this guest's pipeline would not start")
@@ -1867,7 +1886,9 @@ class Peer:
     def _play_mic(self, pad, device):
         """Build the decode-and-play chain and hang this pad off it."""
         names = {name: ident for name, ident in micsink.sinks(Gst) if ident}
-        tail = micsink.describe(device, names)
+        tail = micsink.describe(device, names,
+                                getattr(self.stage.cfg,
+                                        "guest_mic_latency_ms", 40))
         chain = Gst.parse_bin_from_description(
             "rtpopusdepay ! opusdec plc=true ! " + tail, True)
         if chain is None:
@@ -2253,8 +2274,12 @@ class Peer:
         log.info("peer %s: offering %s", self.id, describe_sdp(text))
         # The guest is told how much video to hold before it starts playing.
         # It is the only end that can do anything about arrival that is
-        # uneven: webrtcbin's own `latency` is the size of a buffer for media
-        # coming *in*, and nothing comes in here.
+        # uneven for the picture: webrtcbin's own `latency` buffers media
+        # coming *in*, which for a long time was nothing at all.
+        #
+        # It is no longer nothing -- a guest's microphone comes in -- and that
+        # property is set where the microphone line is added, because 200ms of
+        # it was most of why a voice arrived late.
         # Which m-line the guest may speak on, named rather than guessed.
         #
         # The page used to look for the transceiver whose direction was

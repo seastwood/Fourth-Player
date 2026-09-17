@@ -211,6 +211,10 @@
         <label>Guest microphone goes to
           <select id="set-mic-device" style="max-width:20rem"></select></label>
       </div>
+      <div class="row">
+        <label>Guest microphone delay <input id="set-mic-latency" type="number"
+               min="10" max="400" step="5" style="width:5rem"> ms</label>
+      </div>
       <div class="row"><span class="hint" id="mic-now"></span></div>
       <div class="row"><button class="go" data-do="apply-stream">Apply</button>
         <span class="hint" id="picture-now"></span></div>

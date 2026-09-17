@@ -74,9 +74,18 @@ check("audioconvert" in tail and "audioresample" in tail,
 check("leaky" not in tail,
       "nothing is dropped -- a full queue pushes back rather than discarding "
       "what somebody said")
-check("max-size-time=250000000" in tail,
-      "and there is room to ride out a device hiccup: %r"
-      % tail.split("!")[0].strip())
+# Asserted as a relationship, not a number: the queue is derived from the
+# latency budget now, and the first version of this pinned the literal
+# 250000000 and went stale the moment the budget became a setting.
+_hold = 40
+_cap = int(re.search(r"max-size-time=(\d+)",
+                     micsink.describe("x", latency_ms=_hold)).group(1)) / 1e6
+check(_cap >= _hold * 2,
+      "there is room to ride out a hiccup: %.0fms of queue for a %dms budget"
+      % (_cap, _hold))
+check(_cap <= 400,
+      "and not so much that a backed-up sink becomes a long delay: %.0fms"
+      % _cap)
 check("low-latency" not in tail,
       "and the sink is not asked for the smallest buffer the device will "
       "give, which is what guaranteed the hesitation")
@@ -266,6 +275,33 @@ check("rates[-1]" in best,
 check("match_refresh" in body and "return" in body,
       "and can be switched off, for somebody whose console screen is also a "
       "desk they work at")
+
+print()
+print("the delay a voice arrives with is small, and is ours to choose")
+# Nearly half a second of it came from two defaults, neither of them written
+# here: webrtcbin holds 200ms of incoming media, and wasapi2sink asks the
+# device for another 200. A comment in this project dismissed the first --
+# "nothing comes in here" -- which was true right up until a microphone did.
+check("guest_mic_latency_ms" in open(os.path.join(
+    ROOT, "fourthplayer", "config.py")).read(),
+    "there is one number for it")
+check('set_property("latency"' in video,
+      "webrtcbin's incoming buffer is set rather than left at 200ms")
+check("holding incoming audio" in video,
+      "and said out loud, because a default nobody set is the hardest kind "
+      "to find")
+check("buffer-time=" in micsink.describe("x", latency_ms=40),
+      "and the device's own buffer too: %s"
+      % micsink.describe("x", latency_ms=40).split("!")[-1].strip())
+
+# The queue is capacity, not delay -- it holds nothing while the sink keeps
+# up -- so it is allowed to be larger than the latency budget.
+short = micsink.describe("x", latency_ms=40)
+long_ = micsink.describe("x", latency_ms=200)
+check("buffer-time=40000" in short and "buffer-time=200000" in long_,
+      "the device buffer follows the setting")
+check("leaky" not in short,
+      "and still nothing is discarded at any setting")
 
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

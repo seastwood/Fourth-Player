@@ -2552,6 +2552,10 @@ class LiveSession:
         # which is heard as warble rather than as silence, because the decoder
         # invents its way across the hole.
         "audio_queue_ms": (20, 500),
+        # How long a guest's voice is held before it is played. A
+        # conversation, so the whole budget is small: every millisecond is
+        # somebody waiting for a reply. Raise it if a voice breaks up.
+        "guest_mic_latency_ms": (10, 400),
     }
 
     # audio_frame_ms is deliberately not here. Opus takes 2.5, 5, 10, 20, 40
@@ -2682,6 +2686,8 @@ class LiveSession:
             "sounding": bool(getattr(stage, "has_audio", False)),
             "sound_source": getattr(stage, "source_sound_name", "") or "",
             "guest_mic_device": getattr(cfg, "guest_mic_device", "") or "",
+            "guest_mic_latency_ms": int(
+                getattr(cfg, "guest_mic_latency_ms", 40)),
             "mic_sinks": self._mic_sinks(),
             "mic_suggestion": self._mic_suggestion(),
             "sending": "%dx%d" % (sent_w, sent_h),

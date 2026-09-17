@@ -235,7 +235,8 @@ function fillPicture(stream, policies) {
   const limits = stream.limits || {};
   for (const [field, id] of [["bitrate_kbps", "set-bitrate"],
                             ["audio_bitrate_kbps", "set-audio-bitrate"],
-                            ["audio_queue_ms", "set-audio-queue"]]) {
+                            ["audio_queue_ms", "set-audio-queue"],
+                            ["guest_mic_latency_ms", "set-mic-latency"]]) {
     const box = el(id), bound = limits[field];
     if (!box || !bound || bound.length !== 2) continue;
     box.min = bound[0];
@@ -291,6 +292,7 @@ function fillPicture(stream, policies) {
     }
     mic.value = stream.guest_mic_device || "";
   }
+  set("set-mic-latency", stream.guest_mic_latency_ms);
   const micNote = el("mic-now");
   if (micNote) {
     const chosen = stream.guest_mic_device || "";
@@ -507,6 +509,7 @@ const ACTIONS = {
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
       guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",
+      guest_mic_latency_ms: Number(el("set-mic-latency").value),
       codec: el("set-codec").value,
     }}), "the picture is being rebuilt — about a second of held picture");
   },
