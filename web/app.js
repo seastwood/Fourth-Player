@@ -5033,12 +5033,21 @@ function setCursorMode(mode) {
 
 function paintCursorMode() {
   const button = el("desk-cursor");
-  if (!button) return;
   const relative = cursorMode === "relative";
-  button.classList.toggle("is-relative", relative);
-  button.title = relative
-    ? "Pointer: moves like a trackpad — works in games. Tap and hold to change."
-    : "Pointer: goes where you touch. Tap and hold to change.";
+  if (button) {
+    button.classList.toggle("is-relative", relative);
+    button.title = relative
+      ? "Pointer moves like a trackpad. Tap to change."
+      : "Pointer goes where you touch. Tap to change.";
+  }
+  const menu = el("cursor-menu");
+  if (!menu) return;
+  // Which one is in force, marked rather than implied.
+  for (const item of menu.querySelectorAll("[data-cursor]")) {
+    const on = item.dataset.cursor === cursorMode;
+    item.classList.toggle("on", on);
+    item.setAttribute("aria-checked", on ? "true" : "false");
+  }
 }
 
 function cursorSend() {
@@ -8096,42 +8105,52 @@ el("pads-buzz").addEventListener("change", (event) => {
          + " on " + navigator.userAgent);
 });
 
-/* The cursor button: a tap chooses the cursor, a press and hold changes how it
-   moves. A second button would be another thing in a corner that is already
-   three buttons wide on a phone, and the setting belongs to the control it
-   changes. */
-if (el("desk-cursor")) {
+/* The cursor button opens a list of what the cursor can do.
+ *
+ * It used to change the mode on a press and hold. That is the worst of both:
+ * the setting is invisible until somebody finds it by accident, and when they
+ * do it changes to something they were not shown and cannot see. Reported,
+ * fairly, as hard to understand.
+ *
+ * A tap opens the list, the current choice is marked, and picking one both
+ * sets it and switches to the cursor -- so one gesture does the obvious thing
+ * and nothing happens that was not asked for. */
+function cursorMenuOpen(yes) {
+  const menu = el("cursor-menu");
+  if (!menu) return;
+  menu.hidden = !yes;
   const button = el("desk-cursor");
-  let holding = 0;
-  let changed = false;
-  const begin = () => {
-    changed = false;
-    clearTimeout(holding);
-    holding = setTimeout(() => {
-      changed = true;
-      setCursorMode(cursorMode === "relative" ? "absolute" : "relative");
-      buzz();
-      showNotice(cursorMode === "relative"
-        ? "Pointer moves like a trackpad. Drag to turn — this is the one that "
-          + "works in games, where the pointer has no edges to stop at."
-        : "Pointer goes where you touch. Right for desktops and menus.", false);
-    }, 600);
-  };
-  const end = (event) => {
-    clearTimeout(holding);
-    // A hold has already done something; letting the tap through as well
-    // would change the mode and then switch away from the cursor.
-    if (changed && event) { event.preventDefault(); event.stopPropagation(); }
-  };
-  button.addEventListener("pointerdown", begin);
-  button.addEventListener("pointerup", end, true);
-  button.addEventListener("pointercancel", end, true);
-  button.addEventListener("pointerleave", end, true);
-  button.addEventListener("click", (event) => {
-    if (changed) { event.preventDefault(); event.stopPropagation(); changed = false; }
-  }, true);
-  paintCursorMode();
+  if (button) button.setAttribute("aria-expanded", yes ? "true" : "false");
+  if (yes) paintCursorMode();
 }
+
+if (el("desk-cursor")) {
+  el("desk-cursor").addEventListener("click", (event) => {
+    // The list, rather than the mode. Choosing from it is what turns the
+    // cursor on, below.
+    event.preventDefault();
+    event.stopPropagation();
+    cursorMenuOpen(el("cursor-menu") && el("cursor-menu").hidden);
+  }, true);
+}
+
+if (el("cursor-menu")) {
+  el("cursor-menu").addEventListener("click", (event) => {
+    const pick = event.target.closest("[data-cursor]");
+    if (!pick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCursorMode(pick.dataset.cursor);
+    cursorMenuOpen(false);
+    // Picking how the cursor moves is asking for the cursor.
+    deskChoose("cursor");
+  }, true);
+}
+
+// Anywhere else closes it, the same way the bar itself behaves.
+document.addEventListener("click", () => cursorMenuOpen(false));
+
+paintCursorMode();
 
 if (el("desk-speed")) {
   el("desk-speed").value = String(deskSpeed);

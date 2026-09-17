@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
+const html = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
 
 let fails = 0;
 const check = (c, m) => { console.log((c ? "  ok   " : "  FAIL ") + m); if (!c) fails++; };
@@ -89,10 +90,22 @@ check(/Math\.max\(0, Math\.min\(1, cursorU \+ du\)\)/.test(move),
       "and the clamping is still there for the absolute one, which does have "
       + "edges");
 
-console.log("\nthe button says which mode it is in");
-check(/is-relative/.test(app), "the class is set");
-check(/\.desk-more-only\.is-relative/.test(css), "and styled");
-check(/tap and hold to change/i.test(app),
-      "and the title says how to change it, since one button has two jobs");
+console.log("\nit is chosen from a list, not toggled blindly");
+// The button used to change the mode on a press and hold: invisible until
+// somebody found it by accident, and then silent about what it had become.
+// Reported as hard to understand.
+check(!/tap and hold to change/i.test(app),
+      "there is no press-and-hold gesture left");
+check(/cursorMenuOpen/.test(app), "a list is opened instead");
+check(/data-cursor/.test(html), "with an entry per mode");
+check(/aria-checked/.test(app),
+      "and the one in force is marked, rather than left to be inferred");
+check(/deskChoose\("cursor"\)/.test(app.slice(app.indexOf('el("cursor-menu")'))),
+      "picking one also switches to the cursor, so one tap does the obvious "
+      + "thing");
+check(/\.cursor-menu/.test(css), "and it is styled");
+check(/\.desk-bar \{[^}]*position: relative/.test(css),
+      "anchored to the bar, or an absolutely positioned list lands somewhere "
+      + "else entirely");
 
 process.exit(fails ? 1 : 0);

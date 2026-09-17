@@ -295,10 +295,16 @@ function fillPicture(stream, policies) {
   if (micNote) {
     const chosen = stream.guest_mic_device || "";
     const hint = stream.mic_suggestion || "";
+    // Named both halves. A loopback cable has a playback side, which is what
+    // this plays into, and a recording side, which is what Discord has to be
+    // pointed at -- and the two are not obviously related by name.
+    const other = /vb-audio virtual cable/i.test(chosen)
+      ? 'CABLE Output (VB-Audio Virtual Cable)'
+      : chosen.replace(/\bIn\b/, "Out").replace(/^Speakers/, "Output");
     micNote.textContent = chosen
-      ? `Guests who are given the microphone are heard on "${chosen}". `
-        + "Whatever should listen — a call, a game — picks the recording half "
-        + "of that cable as its microphone."
+      ? `Guests given the microphone are played into "${chosen}". `
+        + `In Discord, or anything else that wants a microphone, choose `
+        + `"${other}" — the recording half of the same cable.`
       : hint
         ? `Off. "${hint}" looks like a loopback cable, which is what this `
           + "wants."

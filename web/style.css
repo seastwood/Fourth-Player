@@ -2628,6 +2628,10 @@ input.name {
   display: flex;
   flex: 0 0 auto;
   gap: .4rem;
+  /* The cursor list is positioned against this, so it has to be the thing
+     that "absolute" means. Without it the list anchors to the page and lands
+     somewhere else entirely. */
+  position: relative;
 }
 .desk-dock.has-keys .desk-bar {
   /* Pinned to the right of the row rather than scrolling with it: these are
@@ -2845,3 +2849,50 @@ input.name {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
+
+/* The list of what the cursor can do.
+ *
+ * Opened by the cursor button, which used to change the mode on a press and
+ * hold -- invisible until found by accident, and then silent about what it
+ * had changed to. Sits above the dock rather than in it: the dock is already
+ * three buttons wide on a phone and this needs room for a sentence.
+ */
+.cursor-menu {
+  position: absolute;
+  bottom: calc(100% + .4rem);
+  right: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 15rem;
+  max-width: min(22rem, 80vw);
+  padding: 2px;
+  background: var(--bg2);
+  border: 2px solid var(--edge);
+}
+.cursor-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: .5rem .6rem;
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  color: var(--dim);
+  font-family: inherit;
+  cursor: pointer;
+}
+.cursor-menu button strong {
+  display: block;
+  font-family: var(--pixel);
+  font-size: .5rem;
+  letter-spacing: .04em;
+  color: var(--ink);
+  text-transform: uppercase;
+}
+.cursor-menu button span { display: block; font-size: .78rem; line-height: 1.5; }
+.cursor-menu button:hover { background: rgba(255, 255, 255, .06); }
+/* The one in force, said rather than implied. */
+.cursor-menu button.on { border-left-color: var(--accent); }
+.cursor-menu button.on strong { color: var(--accent); }
