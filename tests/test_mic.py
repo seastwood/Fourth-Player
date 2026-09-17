@@ -186,5 +186,27 @@ check("typeof message.mic_line" in app,
       "read from the offer, and type-checked -- index 0 is a real answer and "
       "must not be mistaken for absence")
 
+print()
+print("the line is made sendonly before the answer, not after")
+# replaceTrack() attaches a track and does *not* change a transceiver's
+# direction. With no track at answer time the browser negotiates the line
+# inactive, and attaching a track afterwards sends nothing -- an inactive
+# line stays inactive until the next offer and answer. The host log said it
+# outright: "the guest answered the microphone line inactive".
+answer = app[app.index("micLineIndex = (typeof message.mic_line"):]
+answer = answer[:answer.index("const local = await pc.createAnswer()")]
+check('mic.direction = "sendonly"' in answer,
+      "the direction is declared")
+check(answer.index('mic.direction = "sendonly"')
+      < len(answer),
+      "and before the answer is created, which is the only moment it can be "
+      "negotiated without a second offer")
+check("replaceTrack" in answer,
+      "a track already in hand is attached in the same pass")
+check("the guest answered the microphone line" in video,
+      "and the host logs what was agreed, because a microphone that is on at "
+      "one end and silent at the other has two different causes and only the "
+      "answer tells them apart")
+
 print("\nFAILURES: %d" % len(fails))
 sys.exit(1 if fails else 0)

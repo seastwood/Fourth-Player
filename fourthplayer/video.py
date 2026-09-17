@@ -1757,6 +1757,34 @@ class Peer:
         self._assembled = True
         self._negotiate()
 
+    def on_answer(self, sdp_text):
+        """Say what the guest agreed to for the microphone line, once.
+
+        Worth logging because "the microphone is on" at one end and silence at
+        the other has two quite different causes: a line the guest never
+        activated, and a line that is active with nothing arriving. Only the
+        answer can tell them apart, and it was invisible.
+        """
+        try:
+            lines = [l for l in sdp_text.splitlines() if l.startswith("m=")]
+            index = mic_line_index(sdp_text)
+            if index is None or index >= len(lines):
+                return
+            # The direction attribute in that section.
+            block, seen, direction = [], -1, "(none stated)"
+            for line in sdp_text.splitlines():
+                if line.startswith("m="):
+                    seen += 1
+                elif seen == index and line.startswith("a=") and \
+                        line[2:].strip() in ("sendonly", "recvonly",
+                                             "sendrecv", "inactive"):
+                    direction = line[2:].strip()
+            log.info("peer %s: the guest answered the microphone line %s",
+                     self.id, direction)
+        except Exception:
+            log.debug("could not read the microphone line's direction",
+                      exc_info=True)
+
     def _on_incoming(self, _webrtc, pad):
         """A guest is sending something. Play it, if it is their microphone."""
         if pad.get_direction() != Gst.PadDirection.SRC:
@@ -2388,6 +2416,7 @@ class Peer:
             raise RuntimeError("could not allocate an SDP message")
         GstSdp.sdp_message_parse_buffer(sdp_text.encode(), message)
         log.info("peer %s: answered with %s", self.id, describe_sdp(sdp_text))
+        self.on_answer(sdp_text)
         answer = GstWebRTC.WebRTCSessionDescription.new(
             GstWebRTC.WebRTCSDPType.ANSWER, message)
         self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())

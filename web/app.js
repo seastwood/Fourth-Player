@@ -911,9 +911,25 @@ async function answer(message) {
   // rather than inactive, which is the difference between a working
   // microphone and a line nobody can use.
   micLineIndex = (typeof message.mic_line === "number") ? message.mic_line : null;
-  if (micOn && micTrack) {
-    const line = micLine();
-    if (line) { try { await line.sender.replaceTrack(micTrack); } catch (_) {} }
+  const mic = micLine();
+  if (mic) {
+    // Made sendonly here, before the answer, whether or not anybody has
+    // switched the microphone on yet.
+    //
+    // This is the part that was missing and it is not obvious:
+    // replaceTrack() attaches a track and does *not* change a transceiver's
+    // direction. With no track at answer time the browser negotiates the
+    // line inactive, and attaching a track afterwards then sends nothing --
+    // an inactive line stays inactive until the next offer and answer. The
+    // host saw no incoming pad at all, which is exactly that.
+    //
+    // Declaring sendonly up front costs nothing while the microphone is off
+    // (a sendonly line with no track sends no media) and means switching it
+    // on is a replaceTrack and not a renegotiation mid-game.
+    try { mic.direction = "sendonly"; } catch (_) {}
+    if (micOn && micTrack) {
+      try { await mic.sender.replaceTrack(micTrack); } catch (_) {}
+    }
   }
   const local = await pc.createAnswer();
   await pc.setLocalDescription(local);
