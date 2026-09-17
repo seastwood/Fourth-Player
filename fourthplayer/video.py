@@ -765,6 +765,7 @@ class Stage:
         self._thread = None
         self.has_audio = False
         self.source_sound_name = ""
+        self._chosen_monitor = None
         # Where this machine is reachable from outside, discovered once. Only
         # the address is used; see fourthplayer/net.py for why not the port.
         self.public_ip = cfg.public_ip
@@ -919,6 +920,11 @@ class Stage:
                 width, height = its_width, its_height
                 self.sending_width, self.sending_height = width, height
                 convert = converter.format(w=width, h=height)
+        # Kept, because start() needs it and cannot see this local. The first
+        # version of the refresh-rate change referred to `chosen` from there
+        # and raised NameError, which took the capture down with it -- and
+        # py_compile cannot see a name that is only missing at runtime.
+        self._chosen_monitor = chosen
         if chosen is not None:
             # By handle rather than index: an index is a position in a list,
             # and adding or removing a screen renumbers it -- which making a
@@ -1135,7 +1141,7 @@ class Stage:
         # downwards to what the screen actually offers, never above what was
         # asked for, and only on the screen being captured -- a second monitor
         # somebody is working on is not this host's to reconfigure.
-        self._match_refresh(chosen)
+        self._match_refresh(getattr(self, "_chosen_monitor", None))
         # Which Windows desktop the input is on, and whether this host could
         # follow it. Said once per capture because it is the difference
         # between "the stream went black" and "the machine locked and this
@@ -2397,6 +2403,26 @@ class Peer:
         if self._route_logged or self.webrtc is None:
             return
         self._route_logged = True
+
+        def describe(pool, ident):
+            """One candidate as "address:port (type)", or something honest.
+
+            This function did not exist. It was called twice below, raised
+            NameError every time a pair was nominated, and the NameError was
+            caught by the `except Exception` around it and logged at debug --
+            so the one line that says whether media is going over the LAN, the
+            public address or a relay has never appeared. The comment above
+            about this "silently producing nothing at all" was more right than
+            it knew.
+            """
+            found = pool.get(ident)
+            if found is None:
+                return "unknown"
+            address = found.get_string("address") or "?"
+            kind = found.get_string("candidate-type") or ""
+            ok, port = found.get_int("port")
+            where = "%s:%d" % (address, port) if ok else address
+            return "%s (%s)" % (where, kind) if kind else where
 
         def report(promise, _a, _b):
             try:
