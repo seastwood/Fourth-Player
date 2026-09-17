@@ -261,6 +261,41 @@ function fillPicture(stream, policies) {
           ? `off — sending this machine's own screen, ${desk[0]}x${desk[1]}`
           : "off — sending this machine's own screen";
   }
+  const mic = el("set-mic-device");
+  if (mic) {
+    const list = Array.isArray(stream.mic_sinks) ? stream.mic_sinks : [];
+    const built = JSON.stringify(list);
+    if (mic.dataset.built !== built) {
+      mic.innerHTML = "";
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "Nowhere — guests cannot be heard";
+      mic.appendChild(none);
+      for (const name of list) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        mic.appendChild(opt);
+      }
+      mic.dataset.built = built;
+    }
+    mic.value = stream.guest_mic_device || "";
+  }
+  const micNote = el("mic-now");
+  if (micNote) {
+    const chosen = stream.guest_mic_device || "";
+    const hint = stream.mic_suggestion || "";
+    micNote.textContent = chosen
+      ? `Guests who are given the microphone are heard on "${chosen}". `
+        + "Whatever should listen — a call, a game — picks the recording half "
+        + "of that cable as its microphone."
+      : hint
+        ? `Off. "${hint}" looks like a loopback cable, which is what this `
+          + "wants."
+        : "Off. This needs a loopback cable — a device that plays into a "
+          + "recording device — such as VB-Audio Virtual Cable.";
+    micNote.classList.toggle("warn", !chosen);
+  }
   const sound = el("set-audio");
   if (sound) sound.checked = Boolean(stream.audio);
   const soundNote = el("sound-now");
@@ -455,6 +490,7 @@ const ACTIONS = {
       virtual_display: Boolean(el("set-virtual") && el("set-virtual").checked),
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
+      guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",
       codec: el("set-codec").value,
     }}), "the picture is being rebuilt — about a second of held picture");
   },

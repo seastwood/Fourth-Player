@@ -121,6 +121,12 @@
          than a chip-shaped label, because it does something. -->
     <button id="screen-chip" type="button" class="chip" hidden
             title="Send the next screen">Screen</button>
+    <!-- Talking to the room. Only drawn for somebody the host has given `mic`
+         to: it puts a live microphone from this room onto that machine as a
+         recording device, where anything signed in there can listen. -->
+    <button id="mic-chip" type="button" class="chip" hidden
+            aria-pressed="false"
+            title="Send your microphone to the machine">&#127908; Mic</button>
     <!-- A lit pip, not the word "connected"; the words are on it for a
          screen reader and for a long press. -->
     <span id="link" class="chip link" title="Connecting"

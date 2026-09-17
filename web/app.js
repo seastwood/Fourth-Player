@@ -4498,6 +4498,7 @@ function paintSession() {
   // list of screens comes with them -- so the screen chip over the picture
   // could not appear until somebody had been into a panel they had no reason
   // to open. Reported as the chip not always showing up.
+  paintMic();
   if (may("stream") && !askedStream) {
     askedStream = true;
     send({ t: "stream" });
@@ -8198,6 +8199,86 @@ if (el("desk-speed")) {
     setDeskSpeed(event.target.value);
     el("desk-speed").value = String(deskSpeed);
   });
+}
+
+/* Sending this room's microphone to the machine.
+ *
+ * The host offers a one-way audio line in its very first offer, whether or not
+ * anybody ever speaks -- so switching this on is attaching a track to a line
+ * that already exists, which costs a replaceTrack and nothing else. Adding the
+ * line here instead would mean a fresh offer and answer in the middle of a
+ * game, and this connection has quite enough of those.
+ *
+ * The track is stopped as well as detached when it goes off. A getUserMedia
+ * track that is merely detached leaves the browser's recording indicator lit
+ * and the microphone open, which is a light on somebody's laptop saying they
+ * are being listened to when they are not. */
+let micTrack = null;
+let micOn = false;
+
+function micLine() {
+  if (!pc || !pc.getTransceivers) return null;
+  // The one line this end may speak on.
+  //
+  // Every other line is the host sending -- the picture, the game's sound --
+  // and those read as "recvonly" from here. The host offered exactly one line
+  // the other way round, so "sendonly" names it without needing to count
+  // m-lines or trust their order.
+  return pc.getTransceivers().find((t) => t.sender
+    && (t.currentDirection === "sendonly" || t.direction === "sendonly")) || null;
+}
+
+async function setMic(on) {
+  const line = micLine();
+  if (!line) {
+    showNotice("This host has nowhere to play a microphone, so it did not "
+               + "offer one. Set a microphone device in the setup page.", false);
+    return;
+  }
+  if (on) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true,
+                 autoGainControl: true },
+      });
+      micTrack = stream.getAudioTracks()[0] || null;
+    } catch (err) {
+      // Refused, or there is no microphone. Both are the person's business
+      // and neither is a fault here.
+      showNotice("No microphone: " + (err && err.name === "NotAllowedError"
+        ? "this browser was not given permission."
+        : "none was found."), false);
+      return;
+    }
+    await line.sender.replaceTrack(micTrack);
+    micOn = true;
+    report("microphone on");
+  } else {
+    await line.sender.replaceTrack(null);
+    if (micTrack) { try { micTrack.stop(); } catch (_) {} }
+    micTrack = null;
+    micOn = false;
+    report("microphone off");
+  }
+  paintMic();
+}
+
+function paintMic() {
+  const chip = el("mic-chip");
+  if (!chip) return;
+  // Only for somebody the host has given it to, and only where the host
+  // offered a line to speak on.
+  chip.hidden = !may("mic") || !micLine();
+  chip.classList.toggle("ok", micOn);
+  chip.setAttribute("aria-pressed", micOn ? "true" : "false");
+  chip.textContent = micOn ? "\u{1F3A4} On" : "\u{1F3A4} Mic";
+  chip.title = micOn
+    ? "Your microphone is going to the machine. Tap to stop."
+    : "Send your microphone to the machine";
+}
+
+if (el("mic-chip")) {
+  el("mic-chip").addEventListener("click", () => { setMic(!micOn); });
 }
 
 if (el("screen-chip")) {

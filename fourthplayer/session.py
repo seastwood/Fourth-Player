@@ -2577,6 +2577,27 @@ class LiveSession:
         number = max(low, min(int(high), number))
         return number - (number % 2)
 
+    def _mic_sinks(self):
+        """Every audio output a guest's microphone could be played into."""
+        try:
+            from . import micsink, video as videolib
+            return [name for name, _ident in micsink.sinks(videolib.Gst)]
+        except Exception:
+            return []
+
+    def _mic_suggestion(self):
+        """One of them that looks like a loopback cable, or "".
+
+        A suggestion and not a default: choosing one automatically would put a
+        guest's voice into whatever the machine's speakers happen to be, the
+        first time anybody pressed the button.
+        """
+        try:
+            from . import micsink, video as videolib
+            return micsink.suggest(videolib.Gst)
+        except Exception:
+            return ""
+
     def _screens(self):
         """Every screen that could be sent, newest state each time.
 
@@ -2651,6 +2672,9 @@ class LiveSession:
             "audio_queue_ms": cfg.audio_queue_ms,
             "sounding": bool(getattr(stage, "has_audio", False)),
             "sound_source": getattr(stage, "source_sound_name", "") or "",
+            "guest_mic_device": getattr(cfg, "guest_mic_device", "") or "",
+            "mic_sinks": self._mic_sinks(),
+            "mic_suggestion": self._mic_suggestion(),
             "sending": "%dx%d" % (sent_w, sent_h),
             "playing": getattr(stage, "codec", "") or "",
             "encoder": getattr(stage, "encoder_name", "") or "",
@@ -2732,6 +2756,17 @@ class LiveSession:
         # the link and share settings are -- which had to be fixed once
         # already, because bool("off") is True and a string sent from a page
         # therefore turned everything on.
+        if "guest_mic_device" in asked:
+            want_mic = str(asked["guest_mic_device"] or "")
+            # Empty is always allowed and means "nowhere". Anything else has
+            # to be a device this machine has, or a guest would switch their
+            # microphone on and talk into a name that matches nothing.
+            if want_mic and want_mic not in self._mic_sinks():
+                raise ValueError("this machine has no audio output called %s"
+                                 % want_mic)
+            if want_mic != str(getattr(self.cfg, "guest_mic_device", "") or ""):
+                changes["guest_mic_device"] = want_mic
+
         for flag in ("audio", "virtual_display"):
             if flag not in asked:
                 continue

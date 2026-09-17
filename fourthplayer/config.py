@@ -59,6 +59,17 @@ class Config:
     #
     # Windows only, and it needs SudoVDA installed. A machine without it says
     # so once and streams its own desktop.
+    # Where a guest's microphone is played, so the machine hears it as a
+    # recording device and a call or a game can use it.
+    #
+    # Windows has no virtual microphone of its own, so this is the playback
+    # half of a loopback cable -- "Speakers (VB-Audio Virtual Cable)" -- and
+    # whatever wants to listen selects the recording half. Linux needs no
+    # cable: a null sink and its monitor do the same thing natively.
+    #
+    # Empty means nowhere, and a guest turning their microphone on is told so
+    # rather than talking into a hole.
+    guest_mic_device: str = ""
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device
     # name Windows gives it -- "\\\\.\\DISPLAY10". Empty is whatever the capture

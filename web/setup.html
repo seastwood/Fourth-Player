@@ -203,6 +203,15 @@
         <label>Sound buffer <input id="set-audio-queue" type="number"
                min="20" max="500" step="10" style="width:5rem"> ms</label>
       </div>
+      <!-- Where a guest's microphone is played, so the machine hears it as a
+           recording device and a call can use it. Windows has no virtual
+           microphone, so this is the playback half of a loopback cable and
+           whatever wants to listen selects the recording half. -->
+      <div class="row">
+        <label>Guest microphone goes to
+          <select id="set-mic-device" style="max-width:20rem"></select></label>
+      </div>
+      <div class="row"><span class="hint" id="mic-now"></span></div>
       <div class="row"><button class="go" data-do="apply-stream">Apply</button>
         <span class="hint" id="picture-now"></span></div>
       <div class="row"><span class="hint" id="sound-now"></span></div>

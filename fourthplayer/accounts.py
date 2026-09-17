@@ -66,7 +66,7 @@ DEVICE_BYTES = 32                # 256 bits
 # console command is refused rather than stored and silently never matched.
 # A per-game grant is written "steam:274190" and is checked separately.
 CAPABILITIES = ("steam", "stop", "kick", "reshare", "slots", "lock", "grant",
-                "desk", "stream")
+                "desk", "stream", "mic")
 
 # The ones that reach past the screen. These ask for an authenticator code at
 # the moment they are used, even from a device that is remembered -- a
@@ -83,7 +83,11 @@ CAPABILITIES = ("steam", "stop", "kick", "reshare", "slots", "lock", "grant",
 # about a second -- but it cannot lock anybody out, take anybody's controller,
 # or reach the machine. It is a dial, and a dial that asks for six digits every
 # time is a dial nobody turns. `slots` sits outside for the same reason.
-NEEDS_CODE = ("kick", "reshare", "lock", "grant", "desk")
+# `mic` is here with `desk` and for the same reason. It puts a live microphone
+# from somebody's room onto the machine as a recording device, where anything
+# signed in can listen to it -- a call, a game, a browser tab. A remembered
+# phone left on a sofa should not be able to switch that on.
+NEEDS_CODE = ("kick", "reshare", "lock", "grant", "desk", "mic")
 
 
 class AccountError(Exception):

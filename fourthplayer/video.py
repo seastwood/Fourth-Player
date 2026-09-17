@@ -33,7 +33,7 @@ gi.require_version("GstSdp", "1.0")
 gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstWebRTC, GstSdp, GstVideo, GLib, GObject  # noqa: E402
 
-from . import net, screen, vdisplay, windesktop  # noqa: E402
+from . import micsink, net, screen, vdisplay, windesktop  # noqa: E402
 
 log = logging.getLogger("fourthplayer.video")
 
@@ -1667,6 +1667,11 @@ class Peer:
         self._connect(self.webrtc, "on-negotiation-needed", self._on_negotiation_needed)
         self._connect(self.webrtc, "on-ice-candidate", self._on_ice_candidate)
         self._connect(self.webrtc, "notify::ice-connection-state", self._on_ice_state)
+        # Anything this guest sends us arrives as a new pad. Today that is
+        # only their microphone; the handler says so rather than assuming it,
+        # because a pad that turns up for another reason must not be wired
+        # into somebody's speakers.
+        self._connect(self.webrtc, "pad-added", self._on_incoming)
 
         # Video first so the offer's m-lines come out in that order and
         # transceiver 0 is always the picture. A peer that carries no media
@@ -1676,6 +1681,19 @@ class Peer:
             self._feed("video", None)
             if self.stage.has_audio:
                 self._feed("audio", None)
+            # A line for the guest's microphone, added whether or not they
+            # ever switch it on.
+            #
+            # Added up front on purpose: a track attached to an m-line that is
+            # already there costs nothing but a replaceTrack in the browser,
+            # where adding the line later is a renegotiation -- a fresh offer
+            # and answer mid-game, which this has quite enough of. So the line
+            # exists, empty, and turning the microphone on fills it.
+            #
+            # Only where there is somewhere for it to go. An m-line offered by
+            # a host that cannot play it anywhere is a promise nobody can keep.
+            if micsink.where(self.stage.cfg):
+                self._add_mic_line()
 
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("this guest's pipeline would not start")
@@ -1685,7 +1703,11 @@ class Peer:
             transceiver = self.webrtc.emit("get-transceiver", index)
             if transceiver is None:
                 break
-            self._one_way(transceiver, index)
+            # Every line but the microphone's is one-way outward. That one is
+            # the only thing this host ever receives, and turning it round
+            # here would silently undo it.
+            if transceiver is not getattr(self, "mic_transceiver", None):
+                self._one_way(transceiver, index)
             index += 1
 
         # Unreliable and unordered on purpose: pad state is a snapshot, so a
@@ -1718,6 +1740,62 @@ class Peer:
 
         self._assembled = True
         self._negotiate()
+
+    def _on_incoming(self, _webrtc, pad):
+        """A guest is sending something. Play it, if it is their microphone."""
+        if pad.get_direction() != Gst.PadDirection.SRC:
+            return
+        caps = pad.get_current_caps() or pad.query_caps(None)
+        text = caps.to_string() if caps else ""
+        if "media=(string)audio" not in text and "media=audio" not in text:
+            log.info("peer %s sent something that is not audio; ignoring it",
+                     self.id)
+            return
+        device = micsink.where(self.stage.cfg)
+        if not device:
+            log.warning("peer %s is sending a microphone and this host has "
+                        "nowhere to play it; set the microphone device",
+                        self.id)
+            return
+        try:
+            self._play_mic(pad, device)
+        except Exception:
+            log.exception("peer %s: could not play their microphone", self.id)
+
+    def _play_mic(self, pad, device):
+        """Build the decode-and-play chain and hang this pad off it."""
+        names = {name: ident for name, ident in micsink.sinks(Gst) if ident}
+        tail = micsink.describe(device, names)
+        chain = Gst.parse_bin_from_description(
+            "rtpopusdepay ! opusdec plc=true ! " + tail, True)
+        if chain is None:
+            raise RuntimeError("could not build the microphone chain")
+        chain.set_name("mic_%s" % self.id)
+        self.pipeline.add(chain)
+        chain.sync_state_with_parent()
+        sink_pad = chain.get_static_pad("sink")
+        if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError("could not link the microphone")
+        self._mic_chain = chain
+        log.info("peer %s: their microphone is playing into %s",
+                 self.id, device)
+
+    def _add_mic_line(self):
+        """Offer a one-way audio line the guest may speak into."""
+        try:
+            caps = Gst.Caps.from_string(
+                "application/x-rtp,media=audio,encoding-name=OPUS,"
+                "payload=111,clock-rate=48000,encoding-params=(string)2")
+            self.mic_transceiver = self.webrtc.emit(
+                "add-transceiver",
+                GstWebRTC.WebRTCRTPTransceiverDirection.RECVONLY, caps)
+            if self.mic_transceiver is None:
+                log.info("this webrtcbin would not add a microphone line")
+        except Exception as exc:
+            # Older webrtcbins have no add-transceiver. Losing the microphone
+            # must not cost the session.
+            log.info("no microphone line for this guest (%s)", exc)
+            self.mic_transceiver = None
 
     def _one_way(self, transceiver, index):
         """This guest receives and never sends, and may ask for a packet again.
