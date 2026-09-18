@@ -29,19 +29,21 @@ source = open(os.path.join(ROOT, "fourthplayer", "video.py"),
               encoding="utf-8").read()
 
 print("the capture is paced before its rate is declared")
-check('f"! videorate' in source, "there is a videorate at all")
-rate = source.find('f"! videorate')
+# Built into a variable now that it is a switch, so the element is looked
+# for where it is assembled rather than inside the description.
+check('"! videorate drop-only=true "' in source, "there is a videorate at all")
+rate = source.find("{pacing}")
 caps = source.find("framerate={cfg.fps}/1")
 check(rate > 0 and caps > rate,
       "it comes before the caps filter, so the filter is what it aims at")
 
 print("and it drops rather than repeats")
-check('f"! videorate drop-only=true ' in source,
+check('pacing = "! videorate drop-only=true " if pace else ""' in source,
       "drop-only: a repeated frame is bitrate spent saying nothing changed")
 
 print("the order through the pipeline is still capture, pace, convert, encode")
 order = []
-for name in ("format(display=cfg.display)", 'f"! videorate', "framerate={cfg.fps}",
+for name in ("format(display=cfg.display)", "{pacing}", "framerate={cfg.fps}",
              "{convert}", "{encoder}"):
     order.append(source.find(name))
 check(all(order[i] < order[i + 1] for i in range(len(order) - 1)),
@@ -49,7 +51,7 @@ check(all(order[i] < order[i + 1] for i in range(len(order) - 1)),
 
 print("nothing else claims to pace the picture")
 # In the description, not in the prose about it.
-check(source.count('f"! videorate') == 1,
+check(source.count('"! videorate drop-only=true "') == 1,
       "one videorate element, so there is one place the rate is held")
 
 try:
