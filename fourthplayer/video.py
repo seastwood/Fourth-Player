@@ -1070,6 +1070,23 @@ class Stage:
             # with. Stage.show_pointer turns it on for as long as somebody
             # holds the desk -- see there for why it cannot simply be left on.
             f"{source_line.format(display=cfg.display)} "
+            # The frame rate below is a *claim* without this. A caps filter
+            # says what the pictures are, not when they arrive, and the
+            # desktop captures do not pace themselves to it: measured on this
+            # host, asked for 120 a second, it produced 137 -- with a median
+            # gap of 4.6ms against the 8.3ms it had been asked for, a worst of
+            # 23ms, and one frame in ten arriving more than half a frame late.
+            # Frames in clumps, which is what "they do not arrive at a steady
+            # rate" is from the other end, and what every native streaming
+            # client calls frame pacing and does on the way in.
+            #
+            # drop-only on purpose. videorate will otherwise repeat a frame to
+            # fill a gap, and a repeated frame is a real frame to the encoder:
+            # bitrate spent saying nothing changed, on a desktop that is still
+            # for most of its life. Dropping needs no frame held back either,
+            # so this costs no delay -- it only ever discards something that
+            # arrived too early for its slot.
+            f"! videorate drop-only=true "
             # (ANY) matters and is not decoration. This filter exists to pin
             # the frame rate and nothing else, but `video/x-raw` on its own
             # also says "in system memory" -- which is true of ximagesrc and
