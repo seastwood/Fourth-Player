@@ -1210,6 +1210,7 @@ class Stage:
         self.vsink.connect("new-sample", self._on_video)
         if self.asink is not None:
             self.asink.connect("new-sample", self._on_audio)
+        self._watch_the_capture()
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
@@ -1767,6 +1768,52 @@ class Stage:
                     "(%d gap%s so far)",
                     kind, (now - last) * 1000, count, "" if count == 1 else "s")
 
+    def _watch_the_capture(self):
+        """Record when the desktop is really sampled, against what it claims.
+
+        There are two clocks on every captured frame and they are not the
+        same one. The timestamp is what the guest's browser is told to draw
+        by; the moment the frame actually left the capture is when the
+        picture inside it was true. A live GstBaseSrc with do-timestamp off
+        derives the first from a frame counter, so it is perfectly even
+        whatever the machine was doing -- which is how this host could report
+        a flawless timeline over a picture that plainly was not.
+
+        If the two disagree, the guest is being handed evenly spaced frames
+        whose contents advanced by uneven amounts, and no buffer anywhere can
+        fix that: the timestamps are wrong, not late. This measures the
+        disagreement rather than assuming it either way.
+        """
+        self._grabbed = []
+        self._grab_last = 0.0
+        element = self.pipeline.get_by_name("capture")
+        pad = element.get_static_pad("src") if element is not None else None
+        if pad is None:
+            return
+        pad.add_probe(Gst.PadProbeType.BUFFER, self._on_grabbed)
+
+    def _on_grabbed(self, _pad, info):
+        """One frame, straight off the capture. Kept as cheap as it looks."""
+        now = time.monotonic()
+        last, self._grab_last = self._grab_last, now
+        if last:
+            self._grabbed.append(now - last)
+        return Gst.PadProbeReturn.OK
+
+    def _grab_report(self):
+        """What the capture did, or "" if it has not been watched."""
+        taken = self._grabbed
+        if len(taken) < 30:
+            return ""
+        self._grabbed = []
+        taken.sort()
+        nominal = 1.0 / max(1, self.cfg.fps)
+        rough = sum(1 for g in taken if g > nominal * 1.5 or g < nominal * 0.5)
+        return ("; the desktop was really sampled every %.1fms typical, "
+                "worst %.0fms, %d of %d nowhere near %.1fms"
+                % (taken[len(taken) // 2] * 1000, taken[-1] * 1000,
+                   rough, len(taken), nominal * 1000))
+
     def _note_pace(self, buffer):
         """How evenly frames are actually leaving, as a number rather than a guess.
 
@@ -1832,7 +1879,7 @@ class Stage:
                      "%d uneven (a frame should be %.1fms)"
                      % (stamps[len(stamps) // 2] * 1000, stamps[-1] * 1000,
                         ragged, nominal * 1000))
-        log.info("%s", said)
+        log.info("%s%s", said, self._grab_report())
 
     def _forward(self, sink, kind):
         """Hand one encoded packet to every guest.
