@@ -94,7 +94,13 @@ class FakeStage:
         self.peers[peer_id] = peer
         return peer
 
-    def take_peer(self, peer_id):
+    def take_peer(self, peer_id, expected=None):
+        # `expected` is which peer the caller means: the real Stage refuses to
+        # unhook somebody else's. Kept faithful here so a caller that stops
+        # passing it is noticed.
+        held = self.peers.get(peer_id)
+        if expected is not None and held is not None and held is not expected:
+            return None
         return self.peers.pop(peer_id, None)
 
 
