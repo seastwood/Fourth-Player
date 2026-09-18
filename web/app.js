@@ -8760,35 +8760,55 @@ function watchThePictureBox() {
  * just under the chips and just above the buttons now, and the page's own
  * background shows either side.
  *
- * It never takes more than the black there is. The picture is not made
- * smaller to tidy up an edge: where it already fills the height -- a phone
- * held sideways -- there is no slack, both numbers come out zero, and nothing
- * moves. Where there is less slack than the furniture wants, the two share
- * what there is in the proportion they asked for, so neither edge takes it
- * all.
+ * It never takes more than the black there is, and *how much that is* has to
+ * be measured rather than worked out. The first version of this took the
+ * stage's height and subtracted the picture's fitted height, which ignores
+ * that upright the on-screen controller has the bottom of the column: the
+ * picture's box was never the stage. On a phone with the address bar showing,
+ * the pad up and the chips wrapped to three rows, that arithmetic thought
+ * there were six hundred pixels of black to give away where there were barely
+ * two hundred -- and handing away what was not there squeezed the box below
+ * the picture, which made the *picture* smaller. Reported as the video
+ * rendering very small and far too low.
+ *
+ * So the box is measured with nothing taken off it, which is the only number
+ * that accounts for every other thing sharing the column, and what the chips
+ * and the buttons ask for is capped at the black that measurement found. Two
+ * layouts per call; it runs when the page changes shape, not per frame.
  */
 function fitPicture() {
   if (!stage || !video) return;
+  const style = document.documentElement.style;
+
+  // Nothing taken off, and read back: `had` is the box the picture would get
+  // if this function did nothing at all.
+  style.setProperty("--picture-top", "0px");
+  style.setProperty("--picture-bottom", "0px");
+  const had = video.offsetHeight, across = video.offsetWidth;
+
   const box = stage.getBoundingClientRect();
-  if (!box.height || !box.width) return;
-  const room = (part, from) => {
+  const room = (part, edge) => {
     if (!part || part.hidden) return 0;
     const at = part.getBoundingClientRect();
     if (at.height <= 0) return 0;
-    return Math.max(0, from === "top" ? at.bottom - box.top
+    return Math.max(0, edge === "top" ? at.bottom - box.top
                                       : box.bottom - at.top);
   };
   const wantTop = room(el("hud"), "top");
   const wantBottom = room(el("desk-dock"), "bottom");
 
-  // The black there is to give away: the height of the box, less the height
-  // the picture actually occupies in it.
+  // The black there is to give away: the box, less the height the picture
+  // actually occupies in it.
   const shape = streamSize();
   let slack = 0;
-  if (shape && shape.width && shape.height) {
-    const fit = Math.min(box.width / shape.width, box.height / shape.height);
-    slack = Math.max(0, box.height - shape.height * fit);
+  if (shape && shape.width && shape.height && had > 0 && across > 0) {
+    const fit = Math.min(across / shape.width, had / shape.height);
+    slack = Math.max(0, had - shape.height * fit);
   }
+
+  // Where there is less than the chips and the buttons want, the two share
+  // what there is in the proportion they asked for, so neither edge takes it
+  // all and the picture keeps every pixel it had.
   let top = wantTop, bottom = wantBottom;
   const want = wantTop + wantBottom;
   if (want > slack) {
@@ -8796,9 +8816,8 @@ function fitPicture() {
     top = wantTop * share;
     bottom = wantBottom * share;
   }
-  const style = document.documentElement.style;
-  style.setProperty("--picture-top", Math.round(top) + "px");
-  style.setProperty("--picture-bottom", Math.round(bottom) + "px");
+  style.setProperty("--picture-top", Math.floor(top) + "px");
+  style.setProperty("--picture-bottom", Math.floor(bottom) + "px");
 }
 
 function fitPainted() {
