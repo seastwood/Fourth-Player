@@ -161,6 +161,24 @@ class Config:
     # what somebody sees the first time they connect.
     draw_with: str = "browser"
 
+    # Which way Windows is asked for the screen.
+    #
+    # "dxgi" is Desktop Duplication, which is what this has always used and
+    # what the element picks by itself. It is a polling interface: the
+    # capture asks whether anything has changed, on its own clock, and takes
+    # what it finds. Measured here at 60 frames a second, it delivered them
+    # 15.5ms apart typically and 32ms apart at worst, with a quarter of them
+    # nowhere near the interval they were then labelled with -- and a picture
+    # whose contents advance unevenly judders however evenly it is shown.
+    #
+    # "wgc" is Windows Graphics Capture, which the compositor drives: a frame
+    # arrives when one is composed. It is what the native streaming hosts
+    # prefer for games, for this reason.
+    #
+    # Empty leaves the element to choose, which is what happened before this
+    # existed.
+    capture_api: str = ""
+
     match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device

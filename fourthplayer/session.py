@@ -163,6 +163,9 @@ WARN_AT = (300, 120, 30)
 # see web/paint.js and the PAINT_METHODS beside it in web/app.js.
 DRAW_WAYS = ("browser", "here")
 
+# How Windows is asked for the screen. Empty means the element chooses.
+CAPTURE_WAYS = ("dxgi", "wgc")
+
 # Settings that tell a browser what to do and say nothing about the capture.
 # Changing one must not cost the room a second of picture rebuilding
 # something that is not affected by it.
@@ -2733,6 +2736,8 @@ class LiveSession:
             "true_time": bool(getattr(cfg, "true_time", False)),
             "draw_with": str(getattr(cfg, "draw_with", "browser") or "browser"),
             "draw_ways": list(DRAW_WAYS),
+            "capture_api": str(getattr(cfg, "capture_api", "") or ""),
+            "capture_ways": list(CAPTURE_WAYS),
             # Whether one could be made here at all, so the page can offer the
             # switch where it means something and explain itself where it does
             # not. A switch that silently does nothing is worse than no switch.
@@ -2835,6 +2840,13 @@ class LiveSession:
         # the link and share settings are -- which had to be fixed once
         # already, because bool("off") is True and a string sent from a page
         # therefore turned everything on.
+        if "capture_api" in asked:
+            want_api = str(asked["capture_api"] or "").strip().lower()
+            if want_api and want_api not in CAPTURE_WAYS:
+                raise ValueError("no such way of capturing: %s" % want_api)
+            if want_api != str(getattr(self.cfg, "capture_api", "") or ""):
+                changes["capture_api"] = want_api
+
         if "draw_with" in asked:
             want_draw = str(asked["draw_with"] or "browser")
             if want_draw not in DRAW_WAYS:

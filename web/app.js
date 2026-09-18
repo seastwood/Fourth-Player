@@ -9410,6 +9410,7 @@ function streamFields() {
                         && el("stream-oversample").checked),
     test_pattern: Boolean(el("stream-testpattern")
                           && el("stream-testpattern").checked),
+    capture_api: el("stream-capture") ? el("stream-capture").value : "",
     true_time: Boolean(el("stream-truetime")
                        && el("stream-truetime").checked),
   };
@@ -9440,6 +9441,7 @@ function paintStreamValues() {
       && Boolean(want.oversample) === Boolean(streamNow.oversample)
       && Boolean(want.test_pattern) === Boolean(streamNow.test_pattern)
       && Boolean(want.true_time) === Boolean(streamNow.true_time)
+      && String(want.capture_api) === String(streamNow.capture_api || "")
       && String(want.monitor) === String(streamNow.monitor || "")
       // Width only counts while the exact boxes are in play; off a virtual
       // display it is not sent at all and the named size decides.
@@ -9630,6 +9632,13 @@ function paintScreens(state) {
   // than letting somebody set a pair that quietly cancels out.
   const truetime = el("stream-truetime");
   if (truetime) truetime.checked = Boolean(state.true_time);
+  // Only where there is a choice to make: this is a Windows question and
+  // every other host would be offered a control that does nothing.
+  const grabbing = el("stream-capture");
+  const grabbingRow = el("stream-capture-row");
+  const ways = Array.isArray(state.capture_ways) ? state.capture_ways : [];
+  if (grabbingRow) grabbingRow.hidden = ways.length < 2;
+  if (grabbing) grabbing.value = String(state.capture_api || "");
   if (pace && Boolean(state.true_time)) {
     pace.checked = false;
     pace.disabled = true;
@@ -9779,6 +9788,7 @@ function wireStream() {
                     "stream-virtual", "stream-screen",
                     "stream-pace", "stream-oversample",
                     "stream-testpattern", "stream-truetime",
+                    "stream-capture",
                     "stream-width", "stream-height"]) {
     const node = el(id);
     if (!node) continue;

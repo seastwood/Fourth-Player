@@ -310,6 +310,13 @@ SOURCES = (
 )
 
 
+# The ways Windows can be asked for the screen, and what to call them.
+CAPTURE_APIS = {
+    "dxgi": "Desktop Duplication",
+    "wgc": "Windows Graphics Capture",
+}
+
+
 def pick_source():
     """The desktop capture this machine has, or None. (element, line, pointer)."""
     for element, line, pointer in SOURCES:
@@ -1015,6 +1022,21 @@ class Stage:
         source_element, source_line, self._pointer_property = source
         self.source_name = source_element
         log.info("capturing with %s", source_element)
+
+        # How Windows is asked for the screen, where that is a choice. See
+        # config.capture_api: the two interfaces differ in who decides when a
+        # frame happens, which is the difference between a picture whose
+        # contents advance evenly and one that judders however well it is
+        # drawn.
+        wanted_api = str(getattr(cfg, "capture_api", "") or "").strip().lower()
+        if wanted_api and source_element == "d3d11screencapturesrc":
+            if wanted_api in CAPTURE_APIS:
+                source_line += " capture-api=%s" % wanted_api
+                log.info("asking Windows for the screen through %s",
+                         CAPTURE_APIS[wanted_api])
+            else:
+                log.warning("no such way of capturing the screen: %r; leaving "
+                            "it to the element", wanted_api)
 
         # Or not the screen at all.
         #

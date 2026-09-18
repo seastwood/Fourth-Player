@@ -897,6 +897,19 @@
         </div>
         <p class="footnote">Frames held back before drawing, when this page is
            drawing. More rides out a stutter; less is nearer to live.</p>
+        <div class="acct-row" id="stream-capture-row" hidden>
+          <label class="tune-label" for="stream-capture">Grab the screen
+             with</label>
+          <select id="stream-capture">
+            <option value="">Whatever the host picks</option>
+            <option value="dxgi">Desktop Duplication</option>
+            <option value="wgc">Windows Graphics Capture</option>
+          </select>
+        </div>
+        <p class="footnote">Desktop Duplication asks the screen what changed,
+           on its own clock. Windows Graphics Capture is handed a frame when
+           the compositor makes one, which is usually the more even of the
+           two for a game.</p>
         <div class="acct-row">
           <label class="tune-label" for="stream-truetime">Time frames when
              they arrive</label>
