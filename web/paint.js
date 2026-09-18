@@ -442,6 +442,22 @@ function makePainter(canvas, say) {
           return;
         }
         if (m.painted) { ever = true; return; }
+        // The worker cannot reach the channel: it has the counters, the page
+        // has the wire. Both of these are the worker asking the page to say
+        // something to the host.
+        if (m.ask === "key") {
+          try { if (channel.readyState === "open") channel.send("key"); }
+          catch (_) {}
+          return;
+        }
+        if (m.tally) {
+          try {
+            if (channel.readyState === "open") {
+              channel.send(JSON.stringify(m.tally));
+            }
+          } catch (_) {}
+          return;
+        }
         if (m.note) { say(m.note); return; }
         if (m.stats) { last = m.stats; return; }
         if (m.failed) {
@@ -525,7 +541,8 @@ function makePainter(canvas, say) {
               + last.fed + " fed to the decoder, " + last.out + " came out, "
               + last.drawn + " painted, " + last.refused + " refused, "
               + last.skipped + " before the first keyframe, " + last.stale
-              + " too late to matter, " + last.reserve + "ms reserve, canvas "
+              + " too late to matter, " + (last.lost || 0)
+              + " lost on the way, " + last.reserve + "ms reserve, canvas "
               + (last.size || "?")
               + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
               + (last.ticks

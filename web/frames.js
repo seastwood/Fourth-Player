@@ -44,6 +44,8 @@ const state = {
   timer: 0,
   rung: 0,
   handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
+  lost: 0,
+  gotAll: 0, shownAll: 0, toldAt: 0, toldGot: 0, toldShown: 0,
   ever: false,
   saidDraw: false,
   saidFirst: false,
@@ -177,6 +179,7 @@ function draw(frame) {
     if (!state.context) throw new Error("no way to paint");
     state.context.paint(frame);
     state.drawn += 1;
+    state.shownAll += 1;
     // How evenly the picture is actually painted, which is the only thing
     // anybody watching can see. Every other number in this report describes
     // something upstream of the eye: frames handed over, fed, decoded. A
@@ -220,6 +223,30 @@ function draw(frame) {
  * An animation frame happens just after a refresh. Painting there puts every
  * frame on the display's own cadence instead of near it.
  */
+/* Tell the host what actually arrived, once a second.
+ *
+ * The host's own send queue read empty while this end was receiving
+ * thirty-six of every sixty frames sent -- an empty queue only proves the
+ * bytes were handed to SCTP, not that they turned up. So this end counts, and
+ * says so, and the host steers the encoder by the difference. It is the one
+ * measurement of the link that cannot be fooled.
+ */
+const TELL_EVERY = 1000;
+
+function tell(at) {
+  if (!state.toldAt) { state.toldAt = at; return; }
+  if (at - state.toldAt < TELL_EVERY) return;
+  state.toldAt = at;
+  const got = state.gotAll - state.toldGot;
+  const shown = state.shownAll - state.toldShown;
+  state.toldGot = state.gotAll;
+  state.toldShown = state.shownAll;
+  self.postMessage({ tally: {
+    got, shown,
+    late: Math.round(state.pacer ? -state.pacer.reserve() : 0),
+  } });
+}
+
 function tick() {
   state.ticks += 1;
   if (!state.waiting.length) {
@@ -550,33 +577,81 @@ function close() {
 /* Putting a frame back together.
  *
  * SCTP will not carry an arbitrarily large message and a keyframe is easily
- * larger than a browser's limit, so the host sends each frame in pieces. Nine
- * bytes in front of each say whether it starts a frame, whether it ends one,
- * whether the frame is a keyframe, and when it was captured. Nothing else is
- * needed: the pieces of one frame arrive in order and no frame is begun
- * before the one before it has ended, because the channel is ordered.
+ * larger than a browser's limit, so the host sends each frame in pieces.
+ * Thirteen bytes in front of each say whether it starts a frame, whether it
+ * ends one, whether the frame is a keyframe, when it was captured, which
+ * piece this is and how many there are.
+ *
+ * The last two are why this is not just a concatenation. The channel is
+ * ordered but no longer endlessly reliable: the host gives each piece a
+ * lifetime, so a piece that cannot be delivered in time is abandoned rather
+ * than retransmitted for ever while everything behind it waits. That trade
+ * buys back the stalls -- one loss used to stop the picture dead and then
+ * deliver a pile of frames all far too old to show -- and the price is that
+ * pieces can go missing. A frame with a hole in it is not a frame, so the
+ * numbers make the hole plain, the frame is dropped whole, and the host is
+ * asked for a keyframe because everything after a dropped frame decodes
+ * against something that never arrived.
  */
 const FIRST = 2, LAST = 4;
 let building = null;
+
+/* Ask for a keyframe, but not once per lost frame: on a link losing pieces
+   steadily that is a request per frame, and a host answering all of them
+   spends the whole bitrate on recovery, which makes a struggling link worse.
+   The host rate-limits too; this keeps the asking off the wire in the first
+   place. */
+let askedKeyAt = 0;
+const ASK_KEY_EVERY = 400;
+
+function lostFrame(why) {
+  building = null;
+  state.lost += 1;
+  const at = (typeof performance !== "undefined") ? performance.now() : Date.now();
+  if (at - askedKeyAt < ASK_KEY_EVERY) return;
+  askedKeyAt = at;
+  self.postMessage({ ask: "key" });
+  if (state.lost <= 3 || state.lost % 200 === 0) {
+    say("a frame arrived with a hole in it (" + why + "), so it was dropped "
+        + "and a keyframe asked for; " + state.lost + " so far");
+  }
+}
 
 function chunk(buffer) {
   const view = new DataView(buffer);
   const flags = view.getUint8(0);
   const stamp = Number(view.getBigUint64(1, true));
-  const body = new Uint8Array(buffer, 9);
+  const index = view.getUint16(9, true);
+  const pieces = view.getUint16(11, true);
+  const body = new Uint8Array(buffer, 13);
   if (flags & FIRST) {
-    building = { key: (flags & 1) !== 0, stamp, parts: [], size: 0 };
+    // A frame already under construction when the next one starts means the
+    // tail of that one never arrived.
+    if (building) lostFrame("its last piece never came");
+    building = { key: (flags & 1) !== 0, stamp, parts: [], size: 0,
+                 next: 0, pieces };
   }
   if (!building) return;                 // a tail with no head: wait for one
+  if (index !== building.next || stamp !== building.stamp) {
+    lostFrame("piece " + building.next + " of " + building.pieces
+              + " never came");
+    return;
+  }
+  building.next += 1;
   building.parts.push(body);
   building.size += body.length;
   if (!(flags & LAST)) return;
+  if (building.next !== building.pieces) {
+    lostFrame("it ended after " + building.next + " of " + building.pieces);
+    return;
+  }
   const whole = new Uint8Array(building.size);
   let at = 0;
   for (const part of building.parts) { whole.set(part, at); at += part.length; }
   const made = building;
   building = null;
   state.handed += 1;
+  state.gotAll += 1;
   // Once per connection, not once per report: the counters are zeroed every
   // window, so this was announcing a first frame every twelve seconds.
   if (!state.saidFirst) {
@@ -642,6 +717,7 @@ self.onmessage = (event) => {
         handed: state.handed, fed: state.fed, out: state.out,
         drawn: state.drawn, refused: state.refused,
         skipped: state.skipped, stale: state.stale,
+        lost: state.lost,
         // Whether a keyframe has been seen at all. Frames arriving and
         // nothing being painted is two different situations: a decoder that
         // will not work, and a decoder that has not been given anything it
@@ -669,6 +745,7 @@ self.onmessage = (event) => {
     if (m.report) {
       state.handed = state.fed = state.out = state.drawn = 0;
       state.refused = state.skipped = state.stale = 0;
+      state.lost = 0;
       state.drawFails = 0;
       state.ticks = state.starved = 0;
     }
@@ -693,6 +770,7 @@ self.onmessage = (event) => {
     }
     state.lastBeat = at;
     tick();
+    tell(at);
     return;
   }
   if (m.chunk) { chunk(m.chunk); return; }

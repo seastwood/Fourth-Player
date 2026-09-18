@@ -20,6 +20,7 @@ loop runs on its own thread and every callback is marshalled back with
 """
 
 import concurrent.futures
+import json
 import logging
 import re
 import struct
@@ -319,6 +320,22 @@ SOURCES = (
 # A fifth of a second is the most that can sit in a send queue and still be
 # worth showing when it arrives -- past that it is not a picture of now.
 FRAME_QUEUE_SECONDS = 0.2
+
+# How long a piece of a frame is worth retransmitting for.
+#
+# Past this the browser has either shown the frame without it or moved on, so
+# a copy that arrives later is not a picture, it is a delay imposed on every
+# frame queued behind it. Generous enough for one retransmit on a mobile link
+# and short enough that a loss costs a frame rather than a second.
+FRAME_LIFETIME_MS = 150
+
+# What the browser's own count of arriving frames has to fall to before the
+# encoder is told the link cannot carry what it is being given, and what it
+# has to reach before it is given some back. The browser is the only witness
+# that cannot be fooled: a send queue that reads empty proves the host handed
+# the bytes on, not that anybody received them.
+FRAMES_ARRIVING_LOW = 0.85
+FRAMES_ARRIVING_GOOD = 0.97
 
 # What the encoder is allowed to do about a link that cannot carry what it is
 # being given. Down quickly, up slowly, and never below something watchable.
@@ -2022,31 +2039,80 @@ class Stage:
     def _ease_the_rate(self, behind):
         """Match the encoder to a link that cannot carry what it is given.
 
-        A send queue that will not drain is the only honest signal there is
-        that the link is narrower than the picture: nothing is lost, nothing
-        errors, the bytes simply sit there -- and a guest watching sees the
-        picture slow down while the queue fills and speed up while it drains,
-        which is exactly how it was described.
+        Two signals, because one of them turned out to be blind.
 
-        The answer is to send less, and to do it the way every congestion
-        control does: down quickly, because the queue is already somebody's
-        delay, and up slowly, because the link has not proved anything yet.
+        A send queue that will not drain is the obvious one: the bytes simply
+        sit there, and a guest watching sees the picture slow down while the
+        queue fills and speed up while it drains, which is exactly how it was
+        described. But that queue read empty for a guest on mobile data who
+        was receiving thirty-six of every sixty frames sent -- an empty queue
+        only proves the host handed the bytes to SCTP. So the browser's own
+        count is the other signal, and the more trustworthy one; see
+        `note_arrivals`.
+
+        Either one moves the rate the same way, which is the way every
+        congestion control moves it: down quickly, because the queue is
+        already somebody's delay, and up slowly, because the link has not
+        proved anything yet.
         """
+        limit = self.frame_queue_limit()
+        if behind > limit:
+            self._rate_calm = 0
+            self._set_rate(down=True,
+                           why="%d bytes are waiting to be sent and %d is the "
+                               "most worth keeping" % (behind, limit))
+            return
+        self._rate_calm += 1
+        if self._rate_calm < BITRATE_CALM:
+            return
+        self._rate_calm = 0
+        if self._arriving() < FRAMES_ARRIVING_GOOD:
+            # The queue is empty but the frames are not arriving, which is the
+            # case this whole path was blind to. Nothing to give back yet.
+            return
+        self._set_rate(down=False, why="the queue has stayed empty")
+
+    def note_arrivals(self):
+        """A guest has said how much of the picture is reaching it.
+
+        Once a second rather than once a frame, so this steps the rate at most
+        once a second in either direction. Driving the per-frame path from a
+        per-second signal would walk the encoder to the floor on a single bad
+        report.
+        """
+        arriving = self._arriving()
+        if arriving < FRAMES_ARRIVING_LOW:
+            self._rate_calm = 0
+            self._set_rate(down=True,
+                           why="only %.0f%% of the frames sent are arriving"
+                               % (arriving * 100))
+
+    def _arriving(self):
+        """The worst-off guest's share of the frames sent to it.
+
+        The worst rather than the average: the encoder is shared, so a rate
+        that suits three guests and drowns the fourth is a rate that is too
+        high. Guests that have never reported count as fine, which is what
+        they are until they say otherwise.
+        """
+        shares = [getattr(peer, "frames_arriving", 1.0)
+                  for peer in list(self.peers.values())
+                  if getattr(peer, "frames_wanted", False)]
+        return min(shares) if shares else 1.0
+
+    def _set_rate(self, down, why):
+        """Move the encoder's bitrate one step, and say why."""
         encoder = self.encoder
         if encoder is None:
             return
         asked = max(BITRATE_FLOOR_KBPS, int(self.cfg.bitrate_kbps))
         if self._rate_now is None:
             self._rate_now = asked
-        limit = self.frame_queue_limit()
-        if behind > limit:
-            self._rate_calm = 0
+        if down:
             want = max(BITRATE_FLOOR_KBPS, int(self._rate_now * BITRATE_DOWN))
         else:
-            self._rate_calm += 1
-            if self._rate_calm < BITRATE_CALM or self._rate_now >= asked:
+            if self._rate_now >= asked:
                 return
-            self._rate_calm = 0
             want = min(asked, int(self._rate_now * BITRATE_UP) + 1)
         if want == self._rate_now:
             return
@@ -2056,11 +2122,10 @@ class Stage:
             log.debug("this encoder will not change its bitrate mid-stream",
                       exc_info=True)
             return
-        log.info("the link is %s: %d kb/s -> %d kb/s (%d bytes waiting, "
-                 "%d is the most worth keeping)",
-                 "narrower than the picture" if want < self._rate_now
+        log.info("the link is %s: %d kb/s -> %d kb/s (%s)",
+                 "narrower than the picture" if down
                  else "keeping up, so giving some back",
-                 self._rate_now, want, behind, limit)
+                 self._rate_now, want, why)
         self._rate_now = want
 
     def _note_gap(self, kind):
@@ -2377,8 +2442,16 @@ class Peer:
         # itself. Off until one asks: see _on_picture_asked.
         self.frame_channel = None
         self.frames_wanted = False
+        self.frames_arriving = 1.0
         self._said_shut = False
         self.frames_skipped = 0
+        self._sent_frames = 0
+        self._reported_at = 0
+        self._reports = 0
+        # What fraction of the frames sent to this guest reach it. Unknown
+        # until it says so, and "all of them" is the honest starting guess:
+        # nothing has gone wrong yet.
+        self.frames_arriving = 1.0
         self.channel_behind = 0
         self.on_input = None          # set by the session; called with raw bytes
         self.on_desk = None           # ditto, for keyboard and mouse messages
@@ -2538,12 +2611,29 @@ class Peer:
         self._connect(self.desk_channel, "on-message-data", self._on_desk_data)
 
         # The picture again, as whole frames, for a guest that decodes it
-        # itself. Ordered and reliable: a frame with a hole in it is not a
-        # frame, and unlike a pad snapshot there is no later message that
-        # makes it right. Created for every guest and used by the ones that
-        # ask -- an empty channel costs a few bytes of SDP.
+        # itself. Created for every guest and used by the ones that ask -- an
+        # empty channel costs a few bytes of SDP.
+        #
+        # Ordered, but only worth retransmitting for a moment.
+        #
+        # It was ordered *and* fully reliable, on the reasoning that a frame
+        # with a hole in it is not a frame. That is true and it was still the
+        # wrong trade. Fully reliable SCTP will retransmit a lost chunk for as
+        # long as it takes, and everything behind it waits -- so on a link
+        # that drops a packet now and then, one loss stops the picture dead
+        # and then delivers a pile of frames that are all far too old to show.
+        # That is exactly what was described: "getting stuck for milliseconds
+        # and missing frames entirely until it comes back".
+        #
+        # With a lifetime, a chunk that cannot be delivered in time is
+        # abandoned, and SCTP tells the far end to skip past it. Ordered is
+        # kept so that the pieces of a frame still arrive in order and the
+        # only thing the browser has to cope with is a missing one, which it
+        # notices from the piece numbers and answers by dropping that frame
+        # and asking for a keyframe. One dropped frame beats a stall.
         video_options = Gst.Structure.new_from_string(
-            "options, ordered=(boolean)true")
+            "options, ordered=(boolean)true, max-packet-lifetime=(int)%d"
+            % FRAME_LIFETIME_MS)
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
                                               video_options)
         if self.frame_channel is not None:
@@ -2566,14 +2656,62 @@ class Peer:
         to somebody who is not decoding them is the picture twice over -- once
         on the media track they are watching and once down here into nothing.
         """
-        want = str(message or "").strip().lower() in ("1", "on", "yes", "true")
+        text = str(message or "").strip()
+        # A guest whose frame had a hole in it. Everything after a dropped
+        # frame decodes against something that never arrived, so the picture
+        # stays wrong until a keyframe -- and with an infinite GOP there is no
+        # next one unless somebody asks. Rate-limited on the Stage, which is
+        # where a storm from four guests has to be answered.
+        if text.lower() == "key":
+            self.stage.request_keyframe(self.id)
+            return
+        if text.startswith("{"):
+            self._take_picture_report(text)
+            return
+        want = text.lower() in ("1", "on", "yes", "true")
         self.frames_wanted = want
+        # A fresh start knows nothing about the link, and the share left over
+        # from the last one would otherwise hold the encoder down -- or, worse,
+        # let it climb on a report that predates this decoder.
+        self.frames_arriving = 1.0
+        self._reported_at = self._sent_frames
         log.info("peer %s: %s sending whole frames down the picture channel",
                  self.id, "started" if want else "stopped")
         if want:
             log.info("peer %s: forcing a keyframe, because a decoder that has "
                      "just started has nothing to decode against", self.id)
             self.stage.force_keyframe()
+
+    def _take_picture_report(self, text):
+        """What the browser says it actually received.
+
+        The only honest measure of the link there is. The host's own send
+        queue read zero bytes behind while the browser was receiving
+        thirty-six of every sixty frames sent, because an empty queue proves
+        the bytes were handed to SCTP, not that they arrived. This end knows
+        what it sent; only that end knows what turned up; the difference is
+        the link, and it is the difference the encoder is steered by.
+        """
+        try:
+            report = json.loads(text)
+        except Exception:
+            log.debug("peer %s sent something unreadable up the picture "
+                      "channel: %r", self.id, text[:120])
+            return
+        got = int(report.get("got") or 0)
+        sent = self._sent_frames
+        since = sent - self._reported_at
+        self._reported_at = sent
+        if since <= 0:
+            return
+        self.frames_arriving = min(1.0, got / float(since))
+        self._reports += 1
+        if self._reports % 10 == 1 or self.frames_arriving < FRAMES_ARRIVING_LOW:
+            log.info("peer %s: the browser received %d of the %d frames sent "
+                     "(%.0f%%), painted %d and was %dms behind",
+                     self.id, got, since, self.frames_arriving * 100,
+                     int(report.get("shown") or 0), int(report.get("late") or 0))
+        self.stage.note_arrivals()
 
     def send_frame(self, data, key, stamp):
         """One encoded frame to a guest that asked for them.
@@ -2618,6 +2756,14 @@ class Peer:
         try:
             waiting = int(channel.props.buffered_amount)
         except Exception:
+            # Said once, because a signal that silently reads zero is worse
+            # than no signal: it looks like a link that is keeping up.
+            if not getattr(self, "_said_blind", False):
+                self._said_blind = True
+                log.warning("peer %s: this webrtcbin will not say how much is "
+                            "waiting to be sent, so the browser's own count "
+                            "is the only measure of the link", self.id,
+                            exc_info=True)
             waiting = 0
         self.channel_behind = waiting
         if waiting > self.stage.frame_queue_limit() and not key:
@@ -2631,13 +2777,23 @@ class Peer:
         # Well under the 256KB a browser will take, so one frame is a few
         # messages rather than one that might be refused.
         limit = 60000
-        self._sent_frames = getattr(self, "_sent_frames", 0) + 1
+        self._sent_frames += 1
         if self._sent_frames % 600 == 0:
             log.info("peer %s: the picture channel has sent %d frames and is "
                      "%d bytes behind, having skipped %d",
                      self.id, self._sent_frames, waiting, self.frames_skipped)
         total = len(data)
+        # Numbered, and told how many there are.
+        #
+        # The channel abandons a piece it cannot deliver in time, so "the
+        # pieces arrive in order" is still true but "they all arrive" is not.
+        # Without a number, a lost middle piece is a head and a tail
+        # concatenated into something that is not a frame and is fed to the
+        # decoder as though it were. With one, the gap is plain and the frame
+        # is dropped on purpose.
+        pieces = max(1, (total + limit - 1) // limit)
         at = 0
+        index = 0
         while at < total:
             end = min(at + limit, total)
             flags = (1 if key else 0)
@@ -2645,10 +2801,11 @@ class Peer:
                 flags |= 2
             if end >= total:
                 flags |= 4
-            head = struct.pack("<BQ", flags, int(stamp))
+            head = struct.pack("<BQHH", flags, int(stamp), index, pieces)
             chunk = head + data[at:end]
             channel.emit("send-data", GLib.Bytes.new(chunk))
             at = end
+            index += 1
 
     def on_answer(self, sdp_text):
         """Say what the guest agreed to for the microphone line, once.

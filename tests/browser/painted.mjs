@@ -106,12 +106,14 @@ const pps = [0x68, 0xce, 0x3c, 0x80];
 const idr = [0x65, 0x88, 0x84, 0x21];
 const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
                                  0, 0, 1, ...idr]).buffer;
-const framed = (bytes, key, stamp, first, last) => {
-  const out = new Uint8Array(9 + bytes.byteLength);
+const framed = (bytes, key, stamp, first, last, index = 0, pieces = 1) => {
+  const out = new Uint8Array(13 + bytes.byteLength);
   const view = new DataView(out.buffer);
   view.setUint8(0, (key ? 1 : 0) | (first ? 2 : 0) | (last ? 4 : 0));
   view.setBigUint64(1, BigInt(stamp), true);
-  out.set(new Uint8Array(bytes), 9);
+  view.setUint16(9, index, true);
+  view.setUint16(11, pieces, true);
+  out.set(new Uint8Array(bytes), 13);
   return out.buffer;
 };
 self_.onmessage({ data: { chunk: framed(keyframe, true, 0, true, true) } });
@@ -263,15 +265,55 @@ console.log("a frame in pieces is put back together before it is decoded");
 const half = new Uint8Array(keyframe);
 const head = half.slice(0, 8).buffer, tail = half.slice(8).buffer;
 const fedBefore = built[0].chunks.length;
-self_.onmessage({ data: { chunk: framed(head, true, 5, true, false) } });
+self_.onmessage({ data: { chunk: framed(head, true, 5, true, false, 0, 2) } });
 check(built[0].chunks.length === fedBefore,
       "a first piece on its own decodes nothing");
-self_.onmessage({ data: { chunk: framed(tail, true, 5, false, true) } });
+self_.onmessage({ data: { chunk: framed(tail, true, 5, false, true, 1, 2) } });
 check(built[0].chunks.length === fedBefore + 1,
       "and the last piece completes it");
 const rebuilt = new Uint8Array(built[0].chunks[fedBefore].data);
 check(rebuilt.length === half.length,
       `put back to its full length: ${rebuilt.length} of ${half.length}`);
+
+console.log("a frame with a piece missing is dropped, not decoded");
+// The channel gives each piece a lifetime now rather than retransmitting it
+// for ever while everything behind it waits, so pieces can go missing. A head
+// and a tail concatenated is not a frame: feeding one to the decoder turns a
+// stall into corruption that lasts until the next keyframe, and with an
+// infinite GOP there is no next one unless somebody asks.
+const beforeHole = built[0].chunks.length;
+const askedBefore = sent.filter((m) => m.ask === "key").length;
+self_.onmessage({ data: { chunk: framed(head, true, 7, true, false, 0, 3) } });
+// Piece 1 never arrives; piece 2 does.
+self_.onmessage({ data: { chunk: framed(tail, true, 7, false, true, 2, 3) } });
+check(built[0].chunks.length === beforeHole,
+      "nothing was decoded from the pieces that did arrive");
+check(sent.filter((m) => m.ask === "key").length === askedBefore + 1,
+      "and a keyframe was asked for");
+
+console.log("a frame that is never finished does not swallow the next one");
+const beforeOrphan = built[0].chunks.length;
+self_.onmessage({ data: { chunk: framed(head, true, 8, true, false, 0, 2) } });
+self_.onmessage({ data: { chunk: framed(keyframe, true, 9, true, true) } });
+check(built[0].chunks.length === beforeOrphan + 1,
+      "the whole frame behind it was decoded");
+
+console.log("and what arrived is reported back once a second");
+// The host's own send queue read empty while this end was receiving
+// thirty-six of every sixty frames sent. An empty queue proves the bytes were
+// handed to SCTP, not that they turned up; only this end knows that.
+const tallies = () => sent.filter((m) => m.tally).length;
+const talliedBefore = tallies();
+await refresh(2);
+check(tallies() === talliedBefore, "not on every refresh");
+clock += 1200;
+self_.onmessage({ data: { tick: true } });
+await new Promise((go) => globalThis.setTimeout(go, 0));
+const tally = sent.filter((m) => m.tally).pop();
+check(tallies() === talliedBefore + 1 && tally, "but once the second is up");
+check(typeof tally.tally.got === "number"
+      && typeof tally.tally.shown === "number",
+      "saying how many arrived and how many were painted");
 
 console.log("every combination worth asking is asked, one at a time");
 // iOS Safari refused both start codes and the parameter sets with nothing

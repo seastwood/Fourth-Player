@@ -83,11 +83,13 @@ print("and a guest that has just asked gets a keyframe it can start from")
 # this happens once, when somebody switches their own decoder on, and a
 # decoder with nothing to decode against shows nothing at all. Refusing this
 # one refuses the whole feature.
-spot = video.find("def _on_picture_asked")
-block = video[spot:spot + 900]
+spot = video.find("want = text.lower() in")
+block = video[spot:video.find("def ", spot)]
 check("force_keyframe()" in block, "a keyframe is forced when frames are asked for")
 check("request_keyframe" not in block,
-      "not offered to the bucket that exists to refuse repeated asking")
+      "not offered to the bucket that exists to refuse repeated asking -- that "
+      "bucket is for a guest that has lost the picture, and a guest that has "
+      "never had it cannot wait behind one")
 
 print("and a channel that is not keeping up skips on purpose")
 # The host produced 600 frames in 10 seconds with every gap at 16.7ms and the
@@ -121,24 +123,74 @@ check("BITRATE_CALM" in video,
 
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
-check('struct.pack("<BQ"' in video,
-      "each piece says what it is: flags and the capture time")
+check('struct.pack("<BQHH"' in video,
+      "each piece says what it is: flags, the capture time, which piece it "
+      "is and how many there are")
 check("flags |= 2" in video and "flags |= 4" in video,
       "which piece starts a frame and which ends it")
+check("pieces = max(1," in video,
+      "and the count is worked out from the frame, not guessed")
 
 print("and the far end puts them back together")
 worker = open(os.path.join(ROOT, "web", "frames.js"), encoding="utf-8").read()
+paint = open(os.path.join(ROOT, "web", "paint.js"), encoding="utf-8").read()
 check("const FIRST = 2, LAST = 4;" in worker, "reading the same two flags")
 check("getBigUint64(1, true)" in worker, "and the same little-endian stamp")
+check("getUint16(9, true)" in worker and "getUint16(11, true)" in worker,
+      "and the piece number and count that follow it")
+check("new Uint8Array(buffer, 13)" in worker,
+      "with the body starting after all thirteen header bytes")
 check("building.parts.push(body)" in worker, "the pieces are collected")
 check("if (!(flags & LAST)) return;" in worker,
       "and nothing is decoded until the last one arrives")
 
+print("a frame with a piece missing is dropped rather than decoded")
+# The channel has a packet lifetime now, so pieces can go missing: a
+# concatenated head and tail is not a frame, and feeding one to the decoder is
+# how a stall becomes corruption.
+check("FRAME_LIFETIME_MS" in video,
+      "the host gives each piece a lifetime instead of retransmitting for ever")
+check("max-packet-lifetime" in video, "on the picture channel itself")
+check("ordered=(boolean)true, max-packet-lifetime" in video,
+      "still ordered, so the only thing to cope with is a missing piece")
+check("index !== building.next" in worker, "a gap in the numbering is noticed")
+check("building.next !== building.pieces" in worker,
+      "and so is a frame that ends early")
+check("function lostFrame" in worker, "both drop the frame whole")
+check('self.postMessage({ ask: "key" })' in worker,
+      "and ask for a keyframe, since everything after a dropped frame decodes "
+      "against something that never arrived")
+check("ASK_KEY_EVERY" in worker,
+      "not once per lost frame: a host answering all of them spends the whole "
+      "bitrate on recovery")
+check('text.lower() == "key"' in video, "which the host takes")
+check("self.stage.request_keyframe" in video, "through the rate limiter")
+
+print("and the browser says what actually reached it")
+# The host's own send queue read empty while the browser was receiving
+# thirty-six of every sixty frames sent. An empty queue proves the bytes were
+# handed to SCTP, not that they arrived; only the far end knows that.
+check("function tell(" in worker, "the worker counts what arrived")
+check("TELL_EVERY" in worker, "once a second, not once a frame")
+check("tally" in worker and "tally" in paint,
+      "and the page puts it on the channel, which the worker cannot reach")
+check("_take_picture_report" in video, "the host reads it")
+check("frames_arriving" in video, "as a share of what it sent")
+check("FRAMES_ARRIVING_LOW" in video and "FRAMES_ARRIVING_GOOD" in video,
+      "and steers the encoder by it")
+check("def _arriving" in video,
+      "by the worst-off guest, since the encoder is shared")
+check("def note_arrivals" in video,
+      "stepping at most once per report, so one bad second does not walk the "
+      "encoder to the floor")
+check("_said_blind" in video,
+      "and a queue depth that cannot be read says so, because a signal that "
+      "silently reads zero looks like a link that is keeping up")
+
 print("nothing anywhere still reaches for a transform")
 for name, text in (("the host", video),
                    ("the worker", worker),
-                   ("the page", open(os.path.join(ROOT, "web", "paint.js"),
-                                     encoding="utf-8").read())):
+                   ("the page", paint)):
     check("RtpScriptTransform" not in text and "onrtctransform" not in text,
           "%s has none" % name)
 
