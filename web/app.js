@@ -8609,6 +8609,8 @@ function streamFields() {
     pace_frames: Boolean(el("stream-pace") && el("stream-pace").checked),
     oversample: Boolean(el("stream-oversample")
                         && el("stream-oversample").checked),
+    test_pattern: Boolean(el("stream-testpattern")
+                          && el("stream-testpattern").checked),
   };
 }
 
@@ -8635,6 +8637,7 @@ function paintStreamValues() {
       && Boolean(want.virtual_display) === Boolean(streamNow.virtual_display)
       && Boolean(want.pace_frames) === Boolean(streamNow.pace_frames)
       && Boolean(want.oversample) === Boolean(streamNow.oversample)
+      && Boolean(want.test_pattern) === Boolean(streamNow.test_pattern)
       && String(want.monitor) === String(streamNow.monitor || "")
       // Width only counts while the exact boxes are in play; off a virtual
       // display it is not sent at all and the named size decides.
@@ -8818,6 +8821,8 @@ function paintScreens(state) {
     pace.disabled = Boolean(over && over.checked);
   }
   if (over) over.checked = Boolean(state.oversample);
+  const pattern = el("stream-testpattern");
+  if (pattern) pattern.checked = Boolean(state.test_pattern);
   // The exact size boxes only mean anything on a display made in software.
   const customRow = el("stream-custom-row");
   if (customRow) {
@@ -8947,6 +8952,7 @@ function wireStream() {
   for (const id of ["stream-size", "stream-fps", "stream-codec",
                     "stream-virtual", "stream-screen",
                     "stream-pace", "stream-oversample",
+                    "stream-testpattern",
                     "stream-width", "stream-height"]) {
     const node = el(id);
     if (!node) continue;

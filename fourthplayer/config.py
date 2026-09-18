@@ -113,6 +113,19 @@ class Config:
     # turns the pacing on by itself.
     oversample: bool = False
 
+    # Send a moving test pattern instead of the screen.
+    #
+    # The one measurement nobody can argue with. A test pattern is generated
+    # with exact timestamps and exact contents: if the picture is smooth with
+    # this on, everything from the encoder to the guest's eye is fine and the
+    # fault is in the capture; if it is not, the capture was never the
+    # problem. Every other experiment here has had to reason around an
+    # instrument, and this one does not -- the judgement is somebody watching
+    # a ball move.
+    #
+    # Off, obviously. It replaces the picture.
+    test_pattern: bool = False
+
     match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device

@@ -1015,6 +1015,36 @@ class Stage:
         self.source_name = source_element
         log.info("capturing with %s", source_element)
 
+        # Or not the screen at all.
+        #
+        # Every experiment about the smoothness of this picture has had to
+        # reason around an instrument: a marker bit that arrives twice per
+        # frame, a timeline that is even because it comes from a counter, a
+        # clock read from a Python probe that the GIL can delay. This one has
+        # no instrument in it. videotestsrc generates frames with exact
+        # contents at exact times, so if the picture is smooth with this on,
+        # everything from the encoder to the guest's eye is sound and the
+        # fault is in the capture -- and if it is not smooth, the capture was
+        # never the problem and neither was anything I have changed today.
+        #
+        # animation-mode=running-time so the ball moves by the clock rather
+        # than by frame number: a pattern that advances one step per frame
+        # looks perfectly smooth no matter how unevenly the frames are timed,
+        # which would make this test agree with everything and prove nothing.
+        if getattr(cfg, "test_pattern", False):
+            source_line = ("videotestsrc name=capture is-live=true "
+                           "pattern=ball animation-mode=running-time "
+                           "background-color=0xff101010")
+            # The D3D11 and CUDA converters take frames the GPU already holds
+            # and this one is made on the CPU, so it needs putting there.
+            if "d3d11" in converter:
+                source_line += " ! d3d11upload"
+            elif "cuda" in converter:
+                source_line += " ! cudaupload"
+            self._pointer_property = None
+            self.source_name = "videotestsrc"
+            log.warning("sending a test pattern instead of the screen")
+
         # A screen of our own, if one was asked for and this machine can make
         # one. Made at exactly the size being sent, so the capture is the
         # picture and nothing is scaled: the whole point of it is the case
@@ -1073,6 +1103,11 @@ class Stage:
         # and raised NameError, which took the capture down with it -- and
         # py_compile cannot see a name that is only missing at runtime.
         self._chosen_monitor = chosen
+        # A test pattern has no monitor, and monitor-handle= on a videotestsrc
+        # is a pipeline that will not build -- which on this host means no
+        # capture at all rather than a diagnostic anybody can read.
+        if getattr(cfg, "test_pattern", False):
+            chosen = None
         if chosen is not None:
             # By handle rather than index: an index is a position in a list,
             # and adding or removing a screen renumbers it -- which making a
