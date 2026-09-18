@@ -52,13 +52,30 @@ except Exception as exc:
 
 print("and oversampling turns pacing on rather than meaning something else")
 spot = video.index("oversample = bool(")
-block = video[spot:spot + 600]
+block = video[spot:spot + 1400]
 check("or oversample" in block,
-      "pace is true whenever oversample is, in the host")
+      "pace is true whenever oversample is still wanted, in the host")
 check('framerate={cfg.fps * 2}/1' in video,
       "the capture is asked for twice the rate when oversampling")
 check('"! videorate drop-only=true " if pace else ""' in video,
       "and the videorate is there only when something wants it")
+
+print("and two settings that cannot both be had do not both happen")
+# Oversampling captures at twice the rate and needs the videorate to bring it
+# back down; true time exists to stop a videorate putting the timestamps back
+# on a grid. Both set produced "! caps(120) ! caps(60)" with nothing between,
+# which gstreamer will not build -- and a host with no capture cannot give
+# anybody video. It was a dead host reached by ticking two boxes.
+check("if self._true_time and oversample:" in video,
+      "the pair is noticed")
+check("oversample = False" in video,
+      "and one of them gives way, with a line saying which and why")
+check("if (oversample and pace) else \"\"" in video,
+      "and the caps are never emitted without the element that follows them")
+
+print("a description that will not build says what it was")
+check("would not build, so there is no capture" in video,
+      "at a level somebody will see, with the whole description")
 
 print("the pipeline still names the sent rate last, whatever the switches say")
 order = [video.find("{oversampling}"), video.find("{pacing}"),

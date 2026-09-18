@@ -1151,10 +1151,24 @@ class Stage:
         # back on a grid, which is exactly what the stamping is undoing. So
         # true time wins and the pacing goes.
         self._true_time = bool(getattr(cfg, "true_time", False))
+        if self._true_time and oversample:
+            # These two cannot both be had. Oversampling captures at twice
+            # the rate and needs the videorate to bring it back down; true
+            # time exists to stop a videorate putting the timestamps back on
+            # a grid. Setting both produced a pipeline that asked for 120 and
+            # then 60 with nothing in between to convert, which gstreamer
+            # would not build at all -- and a host whose capture will not
+            # build cannot give anybody video.
+            log.warning("capturing twice as often needs the pacing, and "
+                        "stamping frames on arrival turns the pacing off; "
+                        "keeping the timestamps and dropping the oversampling")
+            oversample = False
         pace = ((bool(getattr(cfg, "pace_frames", True)) or oversample)
                 and not self._true_time)
+        # Only ever with something between it and the filter below. Two caps
+        # filters back to back is not a pipeline.
         oversampling = (f"! video/x-raw(ANY),framerate={cfg.fps * 2}/1 "
-                        if oversample else "")
+                        if (oversample and pace) else "")
         pacing = "! videorate drop-only=true " if pace else ""
         if self._true_time:
             log.info("frames will be stamped when they arrive, not when they "
@@ -1319,7 +1333,17 @@ class Stage:
         if with_audio:
             description += self._audio_description
         log.debug("pipeline: %s", description)
-        self.pipeline = Gst.parse_launch(description)
+        try:
+            self.pipeline = Gst.parse_launch(description)
+        except Exception:
+            # Said at a level somebody will see. A description that will not
+            # build leaves this host with no capture and every guest met by
+            # "the host could not start your video" -- and until now the only
+            # thing in the log was gstreamer's own one-line complaint, which
+            # names an element without saying what was around it.
+            log.error("this pipeline would not build, so there is no capture: "
+                      "%s", description)
+            raise
         self.encoder = self.pipeline.get_by_name("enc")
         self.vsink = self.pipeline.get_by_name("vsink")
         self.fsink = self.pipeline.get_by_name("fsink")
