@@ -9114,8 +9114,20 @@ let paintKeyAsks = 0;
 const PAINT_RECOVERIES = 3;
 let paintRecoveries = 0;
 
-/* Said once per dry spell rather than every four seconds. */
+/* Said once per dry spell rather than every four seconds, and timed so that
+   waiting has an end. Long enough that an ordinary stall -- a keyframe being
+   fetched, a moment of congestion -- is ridden out without the picture
+   changing hands, short enough that nobody sits in front of a black screen
+   wondering whether it is coming back. */
+const PAINT_STARVE_MS = 12000;
 let paintSaidStarved = false;
+let paintStarvedAt = 0;
+
+function starvedFor() {
+  const now = Date.now();
+  if (!paintStarvedAt) paintStarvedAt = now;
+  return now - paintStarvedAt;
+}
 
 function watchThePainting() {
   if (paintWatch) clearTimeout(paintWatch);
@@ -9148,19 +9160,34 @@ function watchThePainting() {
     // whole cycle repeated every few seconds. Four faults' worth of log lines
     // and all of them downstream of this one judgement.
     //
-    // A stream that has stopped arriving is the link or the host. Wait for it
-    // and say so, for as long as it takes: the guest chose this way of
-    // drawing and switching them off it is not this watchdog's to decide.
+    // A stream that has stopped arriving is the link or the host, so wait --
+    // but not for ever, and not at all if the channel it would arrive on has
+    // gone. Waiting for ever was the correction to blaming the decoder and it
+    // overshot: the association errored, the host stopped sending on the
+    // media line because this page had asked for whole frames, and the page
+    // sat patiently in front of a black screen with both routes silent. A
+    // picture by the other route beats no picture, always.
     if (painter.starving()) {
-      if (!paintSaidStarved) {
-        paintSaidStarved = true;
-        report("nothing is arriving on the picture channel; waiting rather "
-               + "than blaming the decoder");
+      const dead = !pictureChannel || pictureChannel.readyState !== "open";
+      if (!dead && starvedFor() < PAINT_STARVE_MS) {
+        if (!paintSaidStarved) {
+          paintSaidStarved = true;
+          report("nothing is arriving on the picture channel; waiting rather "
+                 + "than blaming the decoder");
+        }
+        watchThePainting();
+        return;
       }
-      watchThePainting();
+      report(dead ? "the picture channel has gone, so the picture goes back "
+                    + "on the video track"
+                  : "nothing has arrived for "
+                    + Math.round(starvedFor() / 1000) + "s, so the picture "
+                    + "goes back on the video track");
+      giveUpPainting();
       return;
     }
     paintSaidStarved = false;
+    paintStarvedAt = 0;
     if (painter.waitingForKey() && paintKeyAsks < PAINT_KEY_ASKS) {
       paintKeyAsks += 1;
       report("frames are arriving but none is a keyframe yet; asking again ("

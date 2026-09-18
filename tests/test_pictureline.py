@@ -197,6 +197,16 @@ check("def _ceiling" in video,
       "guest watching the media track is not capped for somebody else's sake")
 check("def apply_ceiling" in video,
       "and brought down at once rather than eased")
+# An association that has errored carries nothing ever again, and the media
+# line is silent on purpose while the data channel is working -- so both are
+# silent and the guest has a black screen with no way to say so. That is what
+# "changing it back down does not fix the black screen" was.
+check("SCTP association went into error state" in video
+      or '"sctp" in str(debug' in video,
+      "a failed association puts the picture back on the media line at once, "
+      "without waiting for the browser to notice and ask")
+check("self.frames_wanted = False\n            log.warning" in video,
+      "by the host's own hand, because the guest cannot tell it")
 check("self.stage.apply_ceiling()" in video,
       "the moment a guest asks for them -- the adaptive path walks down a "
       "quarter at a time on evidence that arrives once a second, and the "

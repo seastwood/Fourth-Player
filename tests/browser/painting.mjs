@@ -497,6 +497,17 @@ check(app.includes("if (painter.starving()) {"),
 check(app.indexOf("if (painter.starving()) {")
       < app.indexOf("const more = paintNextSpelling();"),
       "before it would have walked to the next spelling of the codec");
+// But waiting for ever is the other way to leave somebody staring at black.
+// The association errored, the host stopped sending on the media line because
+// this page had asked for whole frames, and the page waited patiently with
+// both routes silent. A picture by the other route beats no picture, always.
+check(app.includes('pictureChannel.readyState !== "open"'),
+      "a channel that has gone is not something to wait for");
+check(app.includes("PAINT_STARVE_MS"),
+      "and even an open one is only waited on for so long");
+check(app.includes("giveUpPainting();\n      return;\n    }\n    paintSaidStarved"),
+      "past which the picture goes back on the video track rather than "
+      + "staying black");
 
 console.log("\nthe presentation clock holds a frame for what the link owes it");
 // moonlight-web's FramePacer, adopted whole. Every number here is the control

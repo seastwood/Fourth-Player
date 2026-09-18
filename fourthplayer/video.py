@@ -354,7 +354,17 @@ FRAMES_ARRIVING_GOOD = 0.97
 # it is generous enough that nothing below it is a compromise at the sizes
 # this streams. Above it, nobody gets a picture at all, which is worse than
 # anybody's idea of a quality setting.
-DATA_CHANNEL_CEILING_KBPS = 20000
+#
+# Twenty thousand was the first number and it was too high: the association
+# went into an error state twice at that setting -- "Could not write to
+# resource ... SCTP association went into error state" -- after backing up
+# around 470 kB at 13.6 Mb/s. An association that errors is gone for good, and
+# a guest whose data channel is gone while the media line is deliberately
+# silent has a black screen and no way to say so. Eight is comfortably under
+# where it has been seen to break, and a picture at eight beats no picture at
+# twenty. Anybody who wants the whole of a fast link should be watching the
+# media track, which is what RTP is for.
+DATA_CHANNEL_CEILING_KBPS = 8000
 
 # What the encoder is allowed to do about a link that cannot carry what it is
 # being given.
@@ -3270,6 +3280,18 @@ class Peer:
         """An error inside this guest's pipeline, and nobody else's."""
         err, debug = message.parse_error()
         log.warning("peer %s: %s (%s)", self.id, err.message, debug)
+        # An association that has errored carries nothing ever again, and the
+        # media line has been carrying nothing on purpose while it worked. If
+        # both are silent the guest has a black screen and no way to say so,
+        # which is exactly what was reported. So the picture goes back on the
+        # line that still exists, at once, without waiting for the browser to
+        # notice and ask.
+        if self.frames_wanted and "sctp" in str(debug or "").lower():
+            self.frames_wanted = False
+            log.warning("peer %s: the picture channel's association has "
+                        "failed, so the picture goes back on the media line",
+                        self.id)
+            self.stage.force_keyframe()
         if self.on_broken is not None:
             self.stage.loop.call_soon_threadsafe(self.on_broken, err.message)
 
