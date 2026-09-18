@@ -496,6 +496,7 @@ class VirtualDisplay:
         # ordinary thing to have.
         self.monitor_index = None
         self.monitor_handle = None
+        self.device_name = ""
 
     def _open_handle(self):
         """Open the driver. True if it is there and would talk to us."""
@@ -642,6 +643,11 @@ class VirtualDisplay:
                 # adding a screen.
                 mine = ([m for m in right if m[1] not in before] or right)[0]
                 self.monitor_index, self.monitor_handle = mine[0], mine[1]
+                # Kept, not just logged: a handle is renumbered by the next
+                # screen to appear and the device name is not, so this is what
+                # anything asking Windows about the screen afterwards -- its
+                # refresh rate, say -- has to use.
+                self.device_name = mine[5]
                 log.info("the virtual monitor is screen %d (%s), %dx%d",
                          mine[0], mine[5], mine[2], mine[3])
                 return True
@@ -745,6 +751,7 @@ class VirtualDisplay:
         self._guid = None
         self.width = self.height = self.fps = 0
         self.monitor_index = self.monitor_handle = None
+        self.device_name = ""
 
     def __enter__(self):
         return self

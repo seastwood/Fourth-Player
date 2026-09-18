@@ -1385,7 +1385,37 @@ class Stage:
         if not getattr(self.cfg, "match_refresh", True):
             return
         if self.vdisplay is not None:
-            return          # made at the right rate already
+            # It was asked for at the right rate. That is not the same as
+            # running at it: the driver is free to attach the monitor at a
+            # mode of its own, and this host then captures a screen refreshing
+            # at one rate while asking the encoder for another -- which is a
+            # beat, and beats are what a pulse is made of.
+            #
+            # Checked rather than assumed, and said either way, because "made
+            # at 60" was written here as a reason not to look.
+            try:
+                name = self.vdisplay.device_name
+                hz = vdisplay.current_refresh(name) if name else None
+                wanted = int(self.cfg.fps)
+                if hz is None:
+                    log.info("the virtual screen will not say what rate it "
+                             "is running at")
+                elif hz == wanted:
+                    log.info("the virtual screen is running at %dHz, which is "
+                             "what is being sent", hz)
+                else:
+                    log.warning("the virtual screen is running at %dHz while "
+                                "%d frames a second are being sent: every "
+                                "%.1f seconds one frame has nowhere to go, "
+                                "which is a stutter on a beat",
+                                hz, wanted,
+                                1.0 / abs(hz - wanted) if hz != wanted else 0)
+                    if vdisplay.set_refresh(name, wanted):
+                        log.info("the virtual screen was moved to %dHz", wanted)
+            except Exception:
+                log.debug("could not check the virtual screen's rate",
+                          exc_info=True)
+            return
         try:
             wanted = int(self.cfg.fps)
             device = chosen[5] if chosen else None
