@@ -8660,6 +8660,39 @@ function stopPainting(why) {
 }
 
 let paintStarting = false;
+let paintPaused = false;            // put down because the page went away
+
+/* A page that is not on screen is not a page that cannot draw.
+ *
+ * Backgrounding a tab stops its animation frames, and browsers take hardware
+ * decoders back from tabs nobody is looking at. Both of those reach the
+ * painter as "it stopped", and after a few of those it concluded this
+ * browser could not do it and handed the picture back to WebRTC -- so
+ * minimising and returning meant choosing the setting again every time.
+ *
+ * So going away is a pause, not a failure: the painter is put down, the host
+ * is told to stop sending frames, and coming back starts it again with every
+ * counter reset. Nothing is judged while nobody is watching. */
+function watchTheTab() {
+  if (typeof document === "undefined" || !document.addEventListener) return;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (painter) {
+        paintPaused = true;
+        report("the page went away; putting the drawing down until it is back");
+        stopPainting(null);
+      }
+      return;
+    }
+    if (!paintPaused) return;
+    paintPaused = false;
+    paintTried = 0;
+    paintKeyAsks = 0;
+    paintRecoveries = 0;
+    paintGaveUp = false;
+    startPainting();
+  });
+}
 let paintTried = 0;                 // which spelling of the codec is next
 let paintGaveUp = false;            // this connection could not, but the
                                     // choice is still the choice
@@ -8699,6 +8732,10 @@ function watchThePainting() {
   paintWatch = setTimeout(() => {
     paintWatch = 0;
     if (!painter) return;
+    if (typeof document !== "undefined" && document.hidden) {
+      watchThePainting();                     // ask again when it is back
+      return;
+    }
     if (painter.painted()) return;              // something is on the canvas
     // Frames arriving with no keyframe among them is not a decoder that
     // cannot work: it is a decoder with nothing to start from. Walking to
@@ -8899,6 +8936,13 @@ async function startPainting() {
     // browser cannot do it and hand the picture back. Reported as switching
     // itself to WebRTC while WebCodecs was working, which is exactly what it
     // would have looked like.
+    if (typeof document !== "undefined" && document.hidden) {
+      // Whatever went wrong went wrong while nobody was looking. The
+      // visibility handler puts this back when the page returns.
+      paintPaused = true;
+      stopPainting(null);
+      return;
+    }
     if (painter && painter.painted() && paintRecoveries < PAINT_RECOVERIES) {
       paintRecoveries += 1;
       report("the drawing stopped after working; starting it again ("
@@ -9724,6 +9768,7 @@ function wireStream() {
     paintPaintMethod();
     painting.addEventListener("change", () => setPaintMethod(painting.value));
   }
+  watchTheTab();
   const smoothing = el("stream-smooth");
   if (smoothing) {
     paintSmoothing();

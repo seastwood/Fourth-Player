@@ -94,6 +94,19 @@ check(app.includes("if (painter) painter.peek();"),
       "and the watchdog asks for the numbers when it is armed, without "
       + "emptying them");
 
+console.log("a page that is not on screen is not a page that cannot draw");
+// Backgrounding a tab stops its animation frames, and browsers take hardware
+// decoders back from tabs nobody is looking at. Both reached the painter as
+// "it stopped", and after a few of those it concluded the browser could not
+// do it -- so minimising and coming back meant choosing the setting again
+// every time.
+check(app.includes("function watchTheTab"), "the page notices going away");
+check(app.includes("paintPaused = true"), "and puts the drawing down");
+check(app.includes("document.hidden") && app.includes("watchThePainting();"),
+      "the deadline waits rather than judging while nobody is watching");
+check(app.includes("paintRecoveries = 0;\n    paintGaveUp = false;\n    startPainting();"),
+      "and coming back starts it again with every counter reset");
+
 console.log("and how many frames to hold is the viewer's to choose");
 // The one real trade in drawing it here: every frame held is a frame of
 // delay, and every frame held is a hiccup absorbed. Moonlight calls the same
