@@ -104,12 +104,13 @@ check(!menu.includes("Point where I touch"),
       "the old name is gone");
 check(/data-cursor="absolute">\s*<strong>Trackpad<\/strong>/.test(menu),
       "the absolute one is called what it behaves like: a trackpad");
-check(menu.includes("stops at the edges"),
-      "and says the thing that actually distinguishes it");
+check(!menu.includes("stops at the edges"),
+      "with no paragraph under it: the menu opens over the picture somebody "
+      + "is trying to look at");
 check(/data-cursor="relative">\s*<strong>Trackpad for games<\/strong>/.test(menu),
       "and the relative one says who it is for");
-check(menu.includes("keeps turning past the edges"),
-      "and why, which is the same distinction from the other side");
+check(!/<span>/.test(menu),
+      "neither entry carries a description at all");
 
 console.log("\nit is chosen from a list, not toggled blindly");
 // The button used to change the mode on a press and hold: invisible until

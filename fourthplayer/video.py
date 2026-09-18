@@ -2118,6 +2118,26 @@ class Stage:
                      "%d uneven (a frame should be %.1fms)"
                      % (stamps[len(stamps) // 2] * 1000, stamps[-1] * 1000,
                         ragged, nominal * 1000))
+        # A rate that does not match the timestamps is not untidy, it is
+        # wrong. Every frame is stamped one frame-interval after the last, so
+        # producing 64 a second while claiming 60 describes 1.06 seconds of
+        # video for every second that really passes -- and whoever is watching
+        # it falls further behind for as long as it goes on, in hitches.
+        # Nothing about the picture looks wrong on this end.
+        rate = len(gaps) / total if total else 0
+        asked = max(1, int(self.cfg.fps))
+        if rate and abs(rate - asked) / asked > 0.02:
+            self._off_rate = getattr(self, "_off_rate", 0) + 1
+            if self._off_rate in (1, 10, 100):
+                log.warning("the capture is producing %.1f frames a second "
+                            "while every one of them is stamped as %d -- the "
+                            "timeline runs %.0f%% %s than real time, which a "
+                            "guest sees as a stutter. %s",
+                            rate, asked, abs(rate - asked) / asked * 100,
+                            "slow" if rate > asked else "fast",
+                            "Turn 'Even out the frame rate' on."
+                            if not getattr(self.cfg, "pace_frames", True)
+                            else "Something is overriding the pacing.")
         log.info("%s%s", said, self._grab_report())
 
     def _forward(self, sink, kind):
