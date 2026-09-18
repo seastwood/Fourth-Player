@@ -2746,6 +2746,7 @@ class Peer:
             self._take_picture_report(text)
             return
         want = text.lower() in ("1", "on", "yes", "true")
+        was = getattr(self, "frames_wanted", False)
         self.frames_wanted = want
         # A fresh start knows nothing about the link, and the share left over
         # from the last one would otherwise hold the encoder down -- or, worse,
@@ -2759,6 +2760,13 @@ class Peer:
             self.stage.apply_ceiling()
             log.info("peer %s: forcing a keyframe, because a decoder that has "
                      "just started has nothing to decode against", self.id)
+            self.stage.force_keyframe()
+        elif was:
+            # The media line has been carrying nothing while this guest drew
+            # its own picture, so the browser's decoder is starting from a gap
+            # rather than from the last frame it saw.
+            log.info("peer %s: forcing a keyframe, because the media line is "
+                     "carrying the picture again", self.id)
             self.stage.force_keyframe()
 
     def _take_picture_report(self, text):
@@ -3137,6 +3145,22 @@ class Peer:
         """Take one encoded packet from the capture."""
         src = self._sources.get(kind)
         if src is None or self.webrtc is None:
+            return
+        # Not the picture twice.
+        #
+        # A guest drawing its own picture is being sent every frame down the
+        # data channel, and was being sent the same picture again as RTP on
+        # the media line it is no longer watching. Two full copies of the
+        # stream to one guest: at the top of the quality setting that is
+        # 62500 kb/s each way, 125 Mb/s to one browser, and the browser
+        # decoding both -- once into an element holding nothing but the sound,
+        # once in the worker. It is the reason the data channel had no room to
+        # work in, and it cost twice the bandwidth to produce a worse picture.
+        #
+        # The line stays open and carries nothing, so switching back is the
+        # same instant switch it always was -- with a keyframe, because a
+        # receiver that has had a gap has nothing to decode against.
+        if kind == "video" and getattr(self, "frames_wanted", False):
             return
         # The caps were stated when the source was made and are not changed
         # here: renegotiating mid-stream on a cosmetic difference would

@@ -64,6 +64,12 @@ try {
       dock.classList.toggle("has-keys", lift !== 0);
       deskLift = lift;
       document.documentElement.style.setProperty("--desk-lift", lift + "px");
+      // The page measures the picture's box once and remembers it until
+      // something moves -- reading it forces a layout, and it is read on
+      // every mouse movement. This harness moves the strip by hand, which the
+      // page never does (it goes through deskPaintKeys or the viewport
+      // handler, both of which forget), so it says so here.
+      forgetTheBox();
       for (const z of [1, 2, 3, 4]) {
         for (const v of [0, 0.25, 0.5, 0.75, 1]) {
           zoom = z; cursorU = 0.5; cursorV = v;

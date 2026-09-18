@@ -63,11 +63,14 @@ if not node:
 
 HARNESS = "\n".join(lift(name) for name in
                     ("panRoom", "panTowards", "streamSize", "pictureBox",
-                     "applyZoom", "paintAfterZoom", "cursorFollow")) + """
+                     "takeTheBox", "forgetTheBox", "applyZoom",
+                     "paintAfterZoom", "cursorFollow")) + """
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, cursorU = 0.5, cursorV = 0.5;
 let DRIVING = false, INSET = 0;
 let streamShape = null;
+let measured = null, insetCache = null;
+let lastTransform = null, lastTransformOn = null;
 function cursorDriving() { return DRIVING; }
 function bottomInset() { return INSET; }
 function paintZoom() {}
@@ -106,6 +109,10 @@ function place(ask) {
   cursorV = ask.v;
   panX = 0;
   panY = 0;
+  // The page measures once and remembers until something moves; this harness
+  // changes the screen's shape between cases by hand, which the page never
+  // does, so it says so.
+  forgetTheBox();
   cursorFollow();
   const pic = pictureBox();
   return {
@@ -306,8 +313,21 @@ check("return paintAfterZoom();" in lift("applyZoom"),
       "applyZoom settles the numbers and hands them on to be painted")
 check("video.style.transform" in lift("paintAfterZoom"),
       "the picture is moved by a transform, so the stream is untouched")
-check("videoWidth" in lift("pictureBox"),
+check("videoWidth" in lift("streamSize"),
       "and the picture's own shape is read from the stream, not assumed")
+# Measuring forces the browser to finish laying the page out, and this is read
+# on the input path -- every mouse movement under a pointer lock, hundreds a
+# second from a gaming mouse, on the same thread as the animation frame that
+# tells the worker when to paint.
+check("if (measured) return measured;" in lift("pictureBox"),
+      "the measurement is taken once and remembered, rather than on every "
+      "mouse movement")
+check("requestAnimationFrame(forgetTheBox)" in lift("pictureBox"),
+      "and thrown away on the next frame, so a mutation nobody announced "
+      "costs a frame rather than lasting for ever")
+check("how !== lastTransform" in lift("paintAfterZoom"),
+      "and an unchanged transform is not written, because the write is what "
+      "makes the next read a relayout")
 
 print("the chips stay on top of a picture that has been made bigger")
 # An untransformed video is a plain block and paints underneath everything

@@ -2694,7 +2694,45 @@ let zoom = 1, panX = 0, panY = 0, dragged = false;
  * picture and into the element's own black background, which is where the
  * black down the sides of a zoomed picture came from, and it is why keeping
  * the pointer in the middle drifted off as soon as the zoom was not 1. */
+/* The last measurement, kept until something can have changed it.
+ *
+ * Reading offsetWidth forces the browser to finish laying the page out, and
+ * this is read on the input path: every mouse movement under a pointer lock
+ * asks where the picture is, and a gaming mouse reports hundreds of times a
+ * second. Worse, cursorFollow reads it and then *writes* a transform, so the
+ * next read has to flush that write -- read, write, read, write, hundreds of
+ * times a second, on the same thread as the animation frame that tells the
+ * worker when to paint. A late animation frame is a late paint, which is
+ * exactly the jitter this was chasing, and it only showed up while somebody
+ * was moving the mouse.
+ *
+ * A transform does not change the layout box, so the cache survives the write
+ * that caused the thrash. What does change it -- the viewport, the keyboard,
+ * a notice, the stream's own shape -- all go through the ResizeObserver or
+ * one of the handlers that forgets this.
+ */
+let measured = null;
+let insetCache = null;
+
+function forgetTheBox() { measured = null; insetCache = null; }
+
 function pictureBox() {
+  if (measured) return measured;
+  measured = takeTheBox();
+  // A backstop, so a measurement can never be stale by more than a frame.
+  //
+  // The handlers that forget this cover everything known to move the picture,
+  // and "everything known to" is exactly the kind of claim that quietly stops
+  // being true. Nothing on a screen changes faster than a frame anyway, so
+  // throwing the measurement away on the next one costs one layout per frame
+  // and bounds the damage from a mutation nobody thought to announce.
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(forgetTheBox);
+  }
+  return measured;
+}
+
+function takeTheBox() {
   const box = { width: video.offsetWidth, height: video.offsetHeight };
   // The stream's own shape, from whichever of the two knows it.
   //
@@ -2799,15 +2837,34 @@ function applyZoom() {
 
 /* Put the numbers on the screen. Split out only so the driving path above can
    reach it without repeating itself. */
+let lastTransform = null, lastTransformOn = null;
+
 function paintAfterZoom() {
   const how = (zoom === ZOOM_MIN && !panX && !panY)
     ? "" : "translate(" + panX + "px, " + panY + "px) scale(" + zoom + ")";
-  video.style.transform = how;
-  // The canvas is the same picture in the same place, so it moves with it.
-  // Without this, pinching and dragging over the picture would move an
-  // element nobody can see while the picture itself sat still.
+  // Only when it has actually changed.
+  //
+  // Assigning a style invalidates layout whether or not the value differs,
+  // and the very next mouse movement reads the picture's box -- so an
+  // unchanged transform written on every pointer event is a forced relayout
+  // on every pointer event, at whatever rate the mouse reports. Which is
+  // hundreds a second for a gaming mouse, on the same thread as the animation
+  // frame that tells the worker when to paint.
+  // The canvas is replaced whenever the painter starts -- a canvas can only
+  // be handed to a worker once -- so the element is part of what "unchanged"
+  // means. Without that a fresh canvas keeps whatever transform it was born
+  // with, which is how a picture ends up somewhere nobody put it.
   const canvas = paintCanvas();
-  if (canvas) canvas.style.transform = how;
+  if (how !== lastTransform || canvas !== lastTransformOn) {
+    lastTransform = how;
+    lastTransformOn = canvas;
+    video.style.transform = how;
+    if (canvas) canvas.style.transform = how;
+  }
+  // The canvas is the same picture in the same place, so it moves with it --
+  // done just above, inside the same guard. Without it, pinching and dragging
+  // over the picture would move an element nobody can see while the picture
+  // itself sat still.
   paintZoom();
 }
 
@@ -3241,7 +3298,7 @@ if (el("zoom-btn") && el("zoom-range")) {
    known until the stream says what size it is -- nor after it changes, which
    is what a codec renegotiation does. `resize` on a <video> means its
    *stream* changed size, not its box, so this cannot chase its own tail. */
-const reshaped = () => { fitPicture(); applyZoom(); };
+const reshaped = () => { forgetTheBox(); fitPicture(); applyZoom(); };
 video.addEventListener("loadedmetadata", reshaped);
 video.addEventListener("resize", reshaped);
 window.addEventListener("resize", reshaped);
@@ -5680,7 +5737,9 @@ function deskPaintKeys() {
   // video element, and the pointer's geometry is measured from that.
   stage.classList.toggle("driving", cursorDriving());
   // The keyboard's buttons decide where the black stops, and they have just
-  // appeared, gone, or moved with the keyboard.
+  // appeared, gone, or moved with the keyboard. Both of those are layout, so
+  // the remembered measurement goes with them.
+  forgetTheBox();
   fitPicture();
   // Whether the picture may slide inside its own letterboxing changes with
   // that same answer, so the moment it changes the picture has to be clamped
@@ -5930,6 +5989,11 @@ function deskWatchViewport() {
     const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     deskLift = deskHeld && deskKeyboardUp() ? Math.round(covered) : 0;
     document.documentElement.style.setProperty("--desk-lift", deskLift + "px");
+    // The strip moves rather than resizes, and a ResizeObserver says nothing
+    // about a move -- so this is the one place that knows the measurement is
+    // stale while the keyboard is sliding.
+    forgetTheBox();
+    fitPicture();
     // The picture has less room than it had a moment ago, so where it may sit
     // has changed. Without this the keyboard slides up over the bottom of the
     // game and the picture stays exactly where it was, underneath it.
@@ -5958,6 +6022,12 @@ function deskWatchViewport() {
 let deskLift = 0;
 
 function bottomInset() {
+  if (insetCache !== null) return insetCache;
+  insetCache = takeTheInset();
+  return insetCache;
+}
+
+function takeTheInset() {
   // Measured from the strip, which is what actually covers the bottom of the
   // picture now -- the keys and the buttons are both inside it, so asking
   // either one on its own would miss whichever is taller.
@@ -8741,6 +8811,7 @@ function watchThePictureBox() {
       // be a loop. The chips and the buttons are what decide how far the
       // black may reach, and they are laid out independently of the picture,
       // so measuring them when they change settles in one pass.
+      forgetTheBox();
       if (entries.some((entry) => entry.target !== video)) fitPicture();
       fitPainted();
     });
@@ -8778,6 +8849,7 @@ function watchThePictureBox() {
  */
 function fitPicture() {
   if (!stage || !video) return;
+  forgetTheBox();
   const style = document.documentElement.style;
 
   // Nothing taken off, and read back: `had` is the box the picture would get
@@ -9154,6 +9226,7 @@ async function startPainting() {
   painter.whenShaped((shape) => {
     if (!shape || !shape.width || !shape.height) return;
     streamShape = { width: shape.width, height: shape.height };
+    forgetTheBox();
     fitPicture();
     fitPainted();
     applyZoom();

@@ -166,6 +166,22 @@ check("ASK_KEY_EVERY" in worker,
 check('text.lower() == "key"' in video, "which the host takes")
 check("self.stage.request_keyframe" in video, "through the rate limiter")
 
+print("a guest drawing its own picture is not sent it twice")
+# It was. Every frame went down the data channel *and* the same picture went
+# out as RTP on the media line the guest had stopped watching -- two full
+# copies of the stream to one browser, 125 Mb/s at the top of the quality
+# setting, and the browser decoding both. Twice the bandwidth to produce a
+# worse picture, and it is why the data channel had no room to work in.
+spot = video.find("    def push(self, kind, buffer, caps):")
+block = video[spot:video.find("src.emit(\"push-buffer\"", spot)]
+check('if kind == "video" and getattr(self, "frames_wanted", False)' in block,
+      "the media line carries nothing while the data channel is carrying it")
+check("return" in block.split('frames_wanted", False)')[-1][:40],
+      "and it is a return, not a smaller push")
+check("carrying the picture again" in video and "elif was:" in video,
+      "switching back forces a keyframe, because a receiver that has had a "
+      "gap has nothing to decode against")
+
 print("a data channel is not an RTP stream, and is not asked to be")
 # The quality slider at its top built the pipeline at 62500 kb/s and the
 # guest's screen went black: SCTP is reliable, ordered and single-threaded
