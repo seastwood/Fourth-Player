@@ -115,6 +115,18 @@ try:
 finally:
     tray_module._ask = was_ask
 
+print("and the tray reaches that decision on startup")
+# The check that guards this used to be `not tray.host.reachable()`, which
+# skipped start() whenever a host was already up -- and a host already up is
+# exactly what a deploy leaves behind. start() is the only place that compares
+# builds, so the one path that needed it never reached it.
+trayfile = open(os.path.join(ROOT, "fourthplayer", "tray.py"),
+                encoding="utf-8").read()
+check("if launch and not tray.host.reachable():" not in trayfile,
+      "start() is not skipped because something is already answering")
+check("    if launch:\n        threading.Thread(target=tray.host.start"
+      in trayfile, "it is always asked, and decides for itself")
+
 print("and the host tells anybody who asks")
 server = open(os.path.join(ROOT, "fourthplayer", "server.py"),
               encoding="utf-8").read()

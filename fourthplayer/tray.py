@@ -602,7 +602,17 @@ def run(launch=True):
     if sys.platform != "win32":
         backends.append(_run_appindicator)
 
-    if launch and not tray.host.reachable():
+    # Unconditionally, rather than only when nothing is answering.
+    #
+    # The check used to be `not tray.host.reachable()`, which skipped start()
+    # entirely whenever a host was already up -- and a host that is already up
+    # is precisely the case a deploy produces on Windows, where ending the
+    # scheduled task ends this icon and orphans the host it started. start()
+    # is the only place that compares builds, so the one path that needed it
+    # was the one path that never reached it. It returns "already running" in
+    # a few milliseconds when the build matches, so there is nothing to save
+    # by guessing beforehand.
+    if launch:
         threading.Thread(target=tray.host.start, name="tray-launch",
                          daemon=True).start()
 
