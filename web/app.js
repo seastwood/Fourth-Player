@@ -907,6 +907,13 @@ async function answer(message) {
   // explanation, which is exactly how this failed from outside the network.
   armMediaTimeout();
 
+  // Kept because it is the only place the agreed codec parameters are
+  // certainly written down. A receiver's getParameters() came back empty, and
+  // getStats' sdpFmtpLine came back empty too -- so the page fell back to
+  // constrained baseline at level 3.1 and configured a decoder for a ceiling
+  // far below the 1440p60 it was about to be handed. That is what "Decoder
+  // failure" was.
+  lastSdp = String(message.sdp || "");
   // Whatever was reading the old receiver is reading something that is about
   // to be thrown away. It is started again when the new track arrives.
   stopPainting("");
@@ -8393,9 +8400,30 @@ function paintCanvas() { return el("painted"); }
    rather than assumed: the host offers two and the browser picks, and a
    decoder configured for the wrong one does not start. */
 let lastCodec = { mime: "", fmtp: "" };
+let lastSdp = "";
+
+/* What the offer says the video is. The SDP is the agreement itself, so when
+   the browser's own accessors come back empty this is not a fallback -- it is
+   the primary source that happens to need reading. */
+function codecFromSdp() {
+  if (!lastSdp) return null;
+  const video = lastSdp.indexOf("m=video");
+  if (video < 0) return null;
+  const next = lastSdp.indexOf("\nm=", video + 1);
+  const block = lastSdp.slice(video, next < 0 ? undefined : next);
+  const rtpmap = /a=rtpmap:(\d+) (H264|H265|AV1)\//i.exec(block);
+  if (!rtpmap) return null;
+  const fmtp = new RegExp("a=fmtp:" + rtpmap[1] + " ([^\\r\\n]*)").exec(block);
+  return {
+    mime: "video/" + rtpmap[2].toUpperCase(),
+    fmtp: fmtp ? fmtp[1] : "",
+  };
+}
 
 function videoCodecNow() {
-  if (!pc || !pc.getReceivers) return lastCodec;
+  const offered = codecFromSdp();
+  if (offered && offered.fmtp) return offered;
+  if (!pc || !pc.getReceivers) return offered || lastCodec;
   for (const receiver of pc.getReceivers()) {
     if (!receiver.track || receiver.track.kind !== "video") continue;
     try {
@@ -8409,9 +8437,10 @@ function videoCodecNow() {
     } catch (_) { /* older browser */ }
   }
   // Nothing from the receiver, which is normal early on and on some browsers
-  // is normal for ever. Whatever the statistics last said is better than
-  // giving up.
-  return lastCodec;
+  // is normal for ever. Whatever the statistics last said, or the offer, is
+  // better than giving up.
+  if (lastCodec.mime) return lastCodec;
+  return offered || lastCodec;
 }
 
 function videoReceiver() {
@@ -8425,8 +8454,37 @@ function videoReceiver() {
 /* Back to the browser's own element. Called on switching away, on a
    renegotiation, and on anything going wrong -- there has to be exactly one
    way back or a failed experiment is a black screen. */
+let wholeStream = null;             // what the element had before we took it
+
+/* Hand the <video> element the sound and nothing else, so it releases the
+   decoder it is holding for the picture. */
+function keepAudioOnly() {
+  if (!video || !video.srcObject || wholeStream) return;
+  const whole = video.srcObject;
+  let sound = [];
+  try { sound = whole.getAudioTracks ? whole.getAudioTracks() : []; } catch (_) {}
+  wholeStream = whole;
+  try {
+    video.srcObject = new MediaStream(sound);
+    startPlayback();
+  } catch (_) {
+    // A browser that will not take a stream built by hand keeps the one it
+    // has; a decoder too many is a worse outcome than a wasted attempt, but
+    // not worse than no sound.
+    video.srcObject = whole;
+    wholeStream = null;
+  }
+}
+
+function giveTheVideoBack() {
+  if (!video || !wholeStream) return;
+  try { video.srcObject = wholeStream; startPlayback(); } catch (_) {}
+  wholeStream = null;
+}
+
 function stopPainting(why) {
   if (painter) { painter.stop(); painter = null; }
+  giveTheVideoBack();
   const canvas = paintCanvas();
   if (canvas) canvas.hidden = true;
   if (video) video.hidden = false;
@@ -8487,6 +8545,19 @@ async function startPainting() {
   }
   canvas.hidden = false;
   if (video) video.hidden = true;
+  // And the <video> element gives up its decoder.
+  //
+  // iOS allows very few video decoders at once -- few enough that one is a
+  // realistic number -- and hiding the element does not release the one it
+  // holds. So a page that has just built a second decoder for the same
+  // stream is asking for one more than the device will give, and what comes
+  // back is a decoder that configures, accepts a frame and then reports
+  // "Decoder failure" with nothing else to say. Exactly what happened.
+  //
+  // The audio tracks stay: they are in the same MediaStream and the element
+  // is what plays them, so this hands it a stream with the video removed
+  // rather than nothing at all.
+  keepAudioOnly();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
   // A decoder that has just started has nothing to work from until a keyframe
   // arrives, and the browser will not ask for one on our behalf any more --

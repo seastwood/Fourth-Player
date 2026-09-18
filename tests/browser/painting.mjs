@@ -76,6 +76,38 @@ check(app.includes("lastCodec = { mime: codec.mimeType"),
 check(app.includes("return lastCodec;"),
       "and used when the receiver will not say");
 
+console.log("the codec is read from the offer, which is the agreement itself");
+// A receiver's getParameters() came back empty and so did getStats'
+// sdpFmtpLine, so the page fell back to constrained baseline at level 3.1 --
+// and configured a decoder for a ceiling far below the 1440p60 it was about
+// to be handed. That is what "Decoder failure" was.
+check(app.includes("function codecFromSdp"), "the offer is parsed");
+check(app.includes("lastSdp = String(message.sdp"), "and kept when it arrives");
+check(app.indexOf("const offered = codecFromSdp()")
+      < app.indexOf("if (!pc || !pc.getReceivers)"),
+      "and asked before the browser's own accessors, not after them");
+
+console.log("and the level asked for is a ceiling, so a high one is offered too");
+const low = paint.codecCandidates("video/H264", "profile-level-id=42e01f");
+check(low.length === 2 && low[1] === "avc1.42E034",
+      "the same profile at 5.2 follows the negotiated one: " + low.join(", "));
+const high = paint.codecCandidates("video/H264", "profile-level-id=4D0033");
+check(high[0] === "avc1.4D0033" && high[1] === "avc1.4D0034",
+      "main profile keeps its profile bytes and raises only the level: "
+      + high.join(", "));
+
+console.log("\nand the video element gives up its decoder while we hold one");
+// iOS allows very few video decoders at once, few enough that one is a
+// realistic number, and hiding the element does not release the one it holds.
+check(app.includes("function keepAudioOnly"),
+      "the element is handed the sound and nothing else");
+check(app.includes("getAudioTracks"), "the audio tracks are kept, not dropped");
+check(app.includes("function giveTheVideoBack"), "and it is given back");
+check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
+      "on the way out, before the canvas is hidden");
+check(app.includes("video.srcObject = whole;"),
+      "a browser that refuses a hand-built stream keeps the one it had");
+
 console.log("the canvas and the video are never both showing");
 check(app.includes("canvas.hidden = false") && app.includes("video.hidden = true"),
       "starting hides the video");

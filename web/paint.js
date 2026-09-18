@@ -113,9 +113,19 @@ function codecCandidates(mime, fmtp) {
 
   if (kind.indexOf("h264") >= 0) {
     const id = field("profile-level-id", "42E01F").toUpperCase();
-    // The negotiated one first, then constrained baseline at 3.1 -- what a
-    // browser means when it says nothing.
-    return id === "42E01F" ? ["avc1.42E01F"] : ["avc1." + id, "avc1.42E01F"];
+    const out = ["avc1." + id];
+    // The same profile at a much higher level, second.
+    //
+    // This is the fix for a decoder that accepts a keyframe and then reports
+    // "Decoder failure": the level in a codec string is a *ceiling*, and a
+    // decoder told 3.1 and handed 1440p60 is being handed something outside
+    // what it agreed to. A decoder configured above the stream decodes it
+    // perfectly well, so asking for 5.2 costs nothing and covers every size
+    // this host can send. 0x34 is level 5.2.
+    const high = id.slice(0, 4) + "34";
+    if (high !== id) out.push("avc1." + high);
+    if (out.indexOf("avc1.42E01F") < 0) out.push("avc1.42E01F");
+    return out;
   }
 
   if (kind.indexOf("h265") >= 0 || kind.indexOf("hevc") >= 0) {
