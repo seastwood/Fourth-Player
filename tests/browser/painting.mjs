@@ -60,6 +60,7 @@ for (const word of ["WebRTC", "WebCodecs", "video element", "canvas"]) {
 const methods = app.slice(app.indexOf("const PAINT_METHODS = ["),
                           app.indexOf("function paintMethodById"));
 const labels = [...methods.matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+const workerSrc = worker;
 check(labels.length >= 2, `found ${labels.length} labels`);
 for (const one of labels) {
   check(/WebRTC|WebCodecs/.test(one),
@@ -83,9 +84,23 @@ check(/PAINT_PROVE_MS = (\d+)/.test(app), "and it is a named number");
 check(Number(app.match(/PAINT_PROVE_MS = (\d+)/)[1]) <= 6000,
       "short enough that nobody sits in front of a black screen wondering");
 check(app.includes("painter.painted()"), "the painter is asked, not the canvas");
-check(paintFile.includes("painted() { return Boolean(last && last.ever); }"),
-      "answered from what the worker counted, not by measuring the canvas -- "
-      + "an untouched one is 300x150 and would have said yes");
+check(paintFile.includes("painted() { return ever || Boolean(last && last.ever); }"),
+      "answered from what the worker said, not by measuring the canvas -- an "
+      + "untouched one is 300x150 and would have said yes");
+check(workerSrc.includes("self.postMessage({ painted: true })"),
+      "and the worker says it the moment it happens, not when next asked: a "
+      + "deadline reached before the first report had nothing to read");
+check(app.includes("if (painter) painter.report();"),
+      "and the watchdog asks for the numbers when it is armed");
+
+console.log("and the two methods are named after what does the work");
+// "Browser" and "this page" said who to blame, which is not a distinction
+// anybody can act on: both run in the browser and both are this page.
+check(app.includes('label: "WebRTC (default)"'), "WebRTC");
+check(app.includes('label: "WebCodecs"'), "and WebCodecs");
+check(readFileSync(new URL("../../web/setup.js", import.meta.url), "utf8")
+        .includes('{ browser: "WebRTC", here: "WebCodecs" }'),
+      "and the setup page says the same two words");
 check(app.includes("there is nothing else to try"),
       "when the spellings run out it says so");
 // It used to call setPaintMethod("browser") here, which writes the choice

@@ -280,10 +280,7 @@ function fillPicture(stream, policies) {
   if (draw) {
     const ways = Array.isArray(stream.draw_ways)
       ? stream.draw_ways : ["browser", "here"];
-    const named = {
-      browser: "the browser (WebRTC into a video element)",
-      here: "the page itself (WebCodecs onto a canvas)",
-    };
+    const named = { browser: "WebRTC", here: "WebCodecs" };
     const built = JSON.stringify(ways);
     if (draw.dataset.built !== built) {
       draw.innerHTML = "";

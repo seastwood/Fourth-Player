@@ -8386,7 +8386,7 @@ const PAINT_KEY = "fp:paint-method";
 const PAINT_METHODS = [
   {
     id: "browser",
-    label: "Browser — WebRTC into a video element (default)",
+    label: "WebRTC (default)",
     why: "WebRTC decodes the stream and a <video> element draws it. Every "
        + "browser can do this and it uses the least of the machine, but "
        + "WebRTC's jitter buffer decides when each frame is shown and keeps "
@@ -8395,11 +8395,12 @@ const PAINT_METHODS = [
   },
   {
     id: "here",
-    label: "This page — WebCodecs onto a canvas",
-    why: "The encoded frames are taken before WebRTC can draw them, decoded "
-       + "with WebCodecs, and painted on a canvas on a schedule this page "
-       + "chooses. More work for the machine, and the timing of every frame "
-       + "is ours. H.264 always; H.265 and AV1 where the browser says it can.",
+    label: "WebCodecs",
+    why: "The encoded frames are taken before WebRTC can draw them, then "
+       + "decoded and painted on a canvas in a worker, on a schedule this "
+       + "page chooses. More work for the machine, and the timing of every "
+       + "frame is ours. H.264 always; H.265 and AV1 where the browser says "
+       + "it can.",
     ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
   },
 ];
@@ -8603,6 +8604,11 @@ const PAINT_PROVE_MS = 4000;
 
 function watchThePainting() {
   if (paintWatch) clearTimeout(paintWatch);
+  // Ask now, so there is an answer to judge by when the deadline comes. The
+  // painter's counters come from the worker and arrive a message later; the
+  // deadline was being reached with nothing to read but the absence of a
+  // reply, which is not the same as nothing having been painted.
+  if (painter) painter.report();
   paintWatch = setTimeout(() => {
     paintWatch = 0;
     if (!painter) return;

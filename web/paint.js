@@ -351,6 +351,7 @@ function canPaintDirectly() {
 function makePainter(canvas, say) {
   let worker = null, running = false, mine = canvas;
   let last = null;                       // the worker's last set of counters
+  let ever = false;                      // it has painted at least once
   let onGone = null;
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
@@ -414,6 +415,7 @@ function makePainter(canvas, say) {
           }
           return;
         }
+        if (m.painted) { ever = true; return; }
         if (m.note) { say(m.note); return; }
         if (m.stats) { last = m.stats; return; }
         if (m.failed) {
@@ -438,6 +440,7 @@ function makePainter(canvas, say) {
     stop() {
       running = false;
       last = null;
+      ever = false;
       if (worker) {
         try { worker.postMessage({ stop: true }); } catch (_) {}
         try { worker.terminate(); } catch (_) {}
@@ -462,7 +465,7 @@ function makePainter(canvas, say) {
               + " too late to matter, " + last.reserve + "ms reserve");
     },
 
-    painted() { return Boolean(last && last.ever); },
+    painted() { return ever || Boolean(last && last.ever); },
     drawnLately() { return last ? last.drawn : 0; },
   };
 }

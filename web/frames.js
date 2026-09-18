@@ -60,7 +60,13 @@ function draw(frame) {
   try {
     state.context.drawImage(frame, 0, 0);
     state.drawn += 1;
-    state.ever = true;
+    if (!state.ever) {
+      state.ever = true;
+      // Said the moment it happens rather than waiting to be asked. Whether
+      // anything has been painted is what decides the fallback, and a
+      // deadline that arrives before the first report has nothing to read.
+      self.postMessage({ painted: true });
+    }
   } catch (_) { /* the canvas went away */ }
   frame.close();
 }
