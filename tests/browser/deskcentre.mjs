@@ -84,8 +84,20 @@ try {
             fits: pic.height * z <= (strip.bottom - strip.top) + 1,
             off: Math.round(pointer - middle),
             inset: Math.round(inset),
-            room: Math.round(Math.max(0,
-              (pic.height * z - (strip.bottom - strip.top)) / 2)),
+            // How far the picture may move, by the same rule applyZoom uses.
+            //
+            // Half the overhang where it overhangs -- it has to go on
+            // covering the screen -- and, for somebody driving a zoomed
+            // picture that does not overhang, half the slack instead: it may
+            // slide inside its own letterboxing, because the black it moves
+            // through was already on the screen. That second half is why the
+            // pointer now stays in the middle up and down on an upright
+            // phone, where before the picture sat still and only the pointer
+            // moved. At 1x nothing slides: the whole picture is visible and
+            // there is nothing to centre on.
+            room: Math.round(pic.height * z > strip.bottom - strip.top
+              ? (pic.height * z - (strip.bottom - strip.top)) / 2
+              : (z > 1 ? ((strip.bottom - strip.top) - pic.height * z) / 2 : 0)),
             wanted: Math.round(Math.abs((v - 0.5) * pic.height * z)),
           });
         }

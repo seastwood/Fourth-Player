@@ -2683,12 +2683,34 @@ function pictureBox() {
   return { width: w * fit, height: h * fit, box };
 }
 
-/* How far the picture may be moved along one axis: half of however much it
-   overhangs what can be seen of it, and nothing at all when it does not
-   overhang -- a picture narrower than the screen it is on has no slack, and
-   letting it be dragged anyway would move the game off into the black. */
-function panRoom(size, seen, level) {
-  return Math.max(0, (size * level - seen) / 2);
+/* How far the picture may be moved along one axis.
+
+   When it overhangs what can be seen, half the overhang: it has to go on
+   covering the screen, and being able to drag the game off into the letterbox
+   black is a way to lose it.
+
+   When it does not overhang, nothing -- unless somebody is driving the
+   pointer, in which case half the *slack* instead. That second case is the
+   whole of "the cursor stays centred horizontally but not vertically". An
+   upright phone shows a 16:9 picture as a strip about a quarter of the height
+   of the screen: full width, so there is room to move sideways the moment it
+   is zoomed at all, and no overhang vertically until about three and a half
+   times zoom. So the view followed the pointer across and sat still up and
+   down, which is exactly what that reads like on the glass.
+
+   Letting it slide inside the box costs nothing. The black it moves through is
+   the letterboxing, which was already on the screen above and below it, and
+   moving the picture only decides which side of it that black is on. The limit
+   is still that the picture stays wholly on the screen -- half the slack is
+   precisely the point where its edge reaches the edge of what can be seen.
+
+   Only while driving, and only while zoomed. A guest watching at 1x can see
+   the whole picture already, and a picture that slid about inside its own
+   letterbox as the pointer moved would be a wobble with nothing gained. */
+function panRoom(size, seen, level, slide) {
+  const over = size * level - seen;
+  if (over > 0) return over / 2;
+  return slide ? -over / 2 : 0;
 }
 
 /* Where the picture has to sit for the point being zoomed towards to stay
@@ -2721,40 +2743,18 @@ function applyZoom() {
   const seen = Math.max(0, picture.box.height - inset);
   const middle = -inset / 2;
 
-  // How far the picture may move along each axis.
+  // How far the picture may move along each axis, and whether it may move at
+  // all where it does not overhang. panRoom has the reasoning; the short of it
+  // is that a picture being driven may slide inside its own letterboxing so
+  // the pointer can stay in the middle, and one merely being watched may not.
   //
-  // When it overhangs what can be seen, it must keep covering it, and the
-  // room is half the overhang -- that is panRoom, and it is the whole story
-  // for somebody just looking at a game.
-  //
-  // While somebody is driving it is not. An upright phone shows a 16:9
-  // picture as a strip about a quarter of the height of the screen, so the
-  // picture does not overhang at all until roughly three and a half times
-  // zoom -- there is no room, the picture cannot move, and a pointer near the
-  // top of the game therefore sits near the top of the screen with the view
-  // unable to follow it. Which is exactly what "it sits too high" is.
-  //
-  // So while driving, a picture *smaller* than the strip may slide about
-  // inside it, by half the slack. It costs nothing: the black it moves
-  // through is the letterboxing, which was already on the screen above and
-  // below it. Moving it only decides which side of the picture that black is.
-  // The same limits whether somebody is driving or looking, and the reason is
-  // worth writing down because it was briefly otherwise.
-  //
-  // Keeping the pointer in the middle and stopping at the picture's edge are
-  // the same rule while the picture is bigger than what can be seen. Where
-  // they disagree -- at the edges, and on an upright phone where a 16:9
-  // picture is shorter than the screen at any ordinary zoom -- the edge wins.
-  // Letting the pointer stay in the middle there means dragging the picture
-  // off its own edge and filling the space with black, and black is worse
-  // than a pointer that is no longer quite in the middle.
-  //
-  // So: centred while there is room to move, and once there is not, the
-  // picture holds still and the pointer walks on towards the edge by itself.
-  // When the picture is smaller than what can be seen there is no room at
-  // all, and it simply sits in the middle of it.
-  const maxX = panRoom(picture.width, picture.box.width, zoom);
-  const maxY = panRoom(picture.height, seen, zoom);
+  // Where keeping the pointer centred and stopping at the picture's edge
+  // disagree -- which is at the edges, once the picture has slid as far as it
+  // can -- the edge wins. The picture holds still and the pointer walks on
+  // towards the corner by itself, which is the only way to reach one.
+  const slide = zoom > ZOOM_MIN && cursorDriving();
+  const maxX = panRoom(picture.width, picture.box.width, zoom, slide);
+  const maxY = panRoom(picture.height, seen, zoom, slide);
   panX = Math.max(-maxX, Math.min(maxX, panX));
   panY = Math.max(middle - maxY, Math.min(middle + maxY, panY));
   return paintAfterZoom();
@@ -5638,6 +5638,12 @@ function deskPaintKeys() {
   // picture, which is right for watching and wrong for this: it resizes the
   // video element, and the pointer's geometry is measured from that.
   stage.classList.toggle("driving", cursorDriving());
+  // Whether the picture may slide inside its own letterboxing changes with
+  // that same answer, so the moment it changes the picture has to be clamped
+  // again. Without this, putting the pointer down left the picture wherever
+  // the last thing it followed had pushed it, sitting off-centre in the black
+  // until something else happened to ask for a zoom.
+  applyZoom();
   const row = el("desk-keys");
   const up = deskKeyboardUp();
   const bar = el("desk-bar");

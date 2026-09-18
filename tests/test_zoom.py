@@ -61,18 +61,64 @@ if not node:
     print("SKIPPED: node is not installed, so the browser half cannot be run.")
     sys.exit(0)
 
-HARNESS = lift("panRoom") + "\n" + lift("panTowards") + "\n" + """
+HARNESS = "\n".join(lift(name) for name in
+                    ("panRoom", "panTowards", "pictureBox", "applyZoom",
+                     "paintAfterZoom", "cursorFollow")) + """
+const ZOOM_MIN = 1, ZOOM_MAX = 4;
+let zoom = 1, panX = 0, panY = 0, cursorU = 0.5, cursorV = 0.5;
+let DRIVING = false, INSET = 0;
+function cursorDriving() { return DRIVING; }
+function bottomInset() { return INSET; }
+function paintZoom() {}
+function paintCanvas() { return null; }
+const video = { offsetWidth: 0, offsetHeight: 0,
+                videoWidth: 2560, videoHeight: 1440, style: {} };
+
+/* Where the pointer actually lands on the glass, and where the picture's own
+   edges end up, for a guest at (u, v) on a screen of a given shape.
+
+   Worked out from the transform rather than from the numbers that produced
+   it: `translate(pan) scale(zoom)` about the middle of the element puts a
+   point at fraction u of the picture at `box/2 + (u - 0.5) * pic * zoom +
+   pan`. Checking the pan against itself would pass however wrong the rule
+   was. */
+function place(ask) {
+  video.offsetWidth = ask.box[0];
+  video.offsetHeight = ask.box[1];
+  DRIVING = Boolean(ask.driving);
+  INSET = ask.inset || 0;
+  zoom = ask.zoom;
+  cursorU = ask.u;
+  cursorV = ask.v;
+  panX = 0;
+  panY = 0;
+  cursorFollow();
+  const pic = pictureBox();
+  return {
+    x: video.offsetWidth / 2 + (cursorU - 0.5) * pic.width * zoom + panX,
+    y: video.offsetHeight / 2 + (cursorV - 0.5) * pic.height * zoom + panY,
+    top: video.offsetHeight / 2 - pic.height * zoom / 2 + panY,
+    bottom: video.offsetHeight / 2 + pic.height * zoom / 2 + panY,
+    left: video.offsetWidth / 2 - pic.width * zoom / 2 + panX,
+    right: video.offsetWidth / 2 + pic.width * zoom / 2 + panX,
+  };
+}
+
 const ask = JSON.parse(require("fs").readFileSync(0, "utf8"));
 process.stdout.write(JSON.stringify({
   rooms: ask.rooms.map(([size, seen, level]) => panRoom(size, seen, level)),
+  slid: (ask.slid || []).map(([size, seen, level]) => panRoom(size, seen, level, true)),
   pans: ask.pans.map(([pan, towards, ratio]) => panTowards(pan, towards, ratio)),
+  places: (ask.places || []).map(place),
 }));
 """
 
 
-def run(rooms, pans):
+def run(rooms, pans, slid=(), places=()):
     done = subprocess.run([node, "-e", HARNESS],
-                          input=json.dumps({"rooms": rooms, "pans": pans}),
+                          input=json.dumps({"rooms": rooms, "pans": pans,
+                                            "slid": list(slid),
+                                            "places": list(places)}),
                           capture_output=True, text=True)
     if done.returncode != 0:
         raise AssertionError(done.stderr[:500])
@@ -84,12 +130,28 @@ def run(rooms, pans):
 WIDE, TALL = 800.0, 600.0
 PICTURE_H = 450.0
 
+# An upright phone, where the bug this section is about lives: a 16:9 picture
+# across the full width of a screen more than twice as tall as it is wide, so
+# the picture is a strip with a great deal of black above and below it.
+PHONE = [390.0, 844.0]
+
 answer = run(
     rooms=[[WIDE, WIDE, 1], [WIDE, WIDE, 2], [WIDE, WIDE, 4],
            [PICTURE_H, TALL, 1], [PICTURE_H, TALL, 1.33], [PICTURE_H, TALL, 2]],
-    pans=[[0, 0, 2], [100, 0, 2], [100, 0, 0.5], [0, 200, 2], [50, -120, 1.5]])
+    slid=[[PICTURE_H, TALL, 1], [PICTURE_H, TALL, 2], [WIDE, WIDE, 2]],
+    pans=[[0, 0, 2], [100, 0, 2], [100, 0, 0.5], [0, 200, 2], [50, -120, 1.5]],
+    places=[{"box": PHONE, "zoom": 2, "u": u, "v": v, "driving": driving,
+             "inset": inset}
+            for (u, v, driving, inset) in
+            ((0.25, 0.25, True, 0), (0.25, 0.75, True, 0),
+             (0.5, 0.5, True, 0), (0.25, 0.0, True, 0), (0.25, 1.0, True, 0),
+             (0.25, 0.25, False, 0), (0.25, 0.5, True, 400))]
+           + [{"box": PHONE, "zoom": 1, "u": 0.25, "v": v, "driving": True,
+               "inset": 0} for v in (0.25, 0.75)])
 rooms = answer["rooms"]
 pans = answer["pans"]
+slid = answer["slid"]
+places = answer["places"]
 
 print("a picture that fits cannot be dragged at all")
 check(rooms[0] == 0, "at 1x across, there is no slack: %r" % rooms[0])
@@ -106,6 +168,59 @@ check(rooms[4] == 0,
       "a letterboxed picture grown to the screen still has no slack: %r" % rooms[4])
 check(abs(rooms[5] - (PICTURE_H * 2 - TALL) / 2) < 1e-9,
       "and past that, only what actually hangs over: %r" % rooms[5])
+
+print("a picture being driven may slide inside its own letterboxing")
+# "the cursor stays centered horizontally when zoomed in, but not vertically".
+# An upright phone shows the picture full width and letterboxed, so sideways
+# it overhangs the moment it is zoomed and up and down it does not overhang
+# until about three and a half times. The view therefore followed the pointer
+# across and sat still up and down. Half the slack is exactly the point at
+# which the picture's own edge reaches the edge of the screen, so it can be
+# given away without ever showing black where picture should be.
+check(slid[0] == (TALL - PICTURE_H) / 2,
+      "half the slack, where before there was nothing: %r" % slid[0])
+check(slid[1] == rooms[5],
+      "while a picture that overhangs is bounded by the overhang exactly as "
+      "before -- the slack rule is for the case where there is no overhang at "
+      "all: %r" % slid[1])
+check(slid[2] == rooms[1],
+      "and across, where an upright phone never had a problem: %r" % slid[2])
+
+print("so the pointer sits in the middle both ways, not just across")
+middleX, middleY = PHONE[0] / 2, PHONE[1] / 2
+for (label, at) in (("above the middle", places[0]),
+                    ("below it", places[1]),
+                    ("in it", places[2])):
+    check(abs(at["x"] - middleX) < 0.5,
+          "across, with the pointer %s: %.1f against %.1f"
+          % (label, at["x"], middleX))
+    check(abs(at["y"] - middleY) < 0.5,
+          "and up and down, which is the half that did not: %.1f against %.1f"
+          % (at["y"], middleY))
+
+print("and never far enough to show black where the picture should be")
+for (label, at) in (("at the very top", places[3]),
+                    ("at the very bottom", places[4])):
+    check(at["top"] >= -0.5 and at["bottom"] <= PHONE[1] + 0.5,
+          "the picture stays on the screen with the pointer %s: %.0f..%.0f of "
+          "0..%.0f" % (label, at["top"], at["bottom"], PHONE[1]))
+
+print("with the keyboard up it stays inside what is left of the screen")
+seen = PHONE[1] - 400
+at = places[6]
+check(at["top"] >= -0.5 and at["bottom"] <= seen + 0.5,
+      "inside the strip above the keyboard: %.0f..%.0f of 0..%.0f"
+      % (at["top"], at["bottom"], seen))
+
+print("nobody who is only watching has the picture move under them")
+check(abs(places[5]["y"] - middleY) > 1,
+      "somebody watching rather than driving gets the old behaviour, with the "
+      "picture sitting still and the pointer wherever it is: %.1f against a "
+      "middle of %.1f" % (places[5]["y"], middleY))
+still = [places[7], places[8]]
+check(abs(still[0]["top"] - still[1]["top"]) < 1e-9,
+      "and at 1x the picture does not move however the pointer does: %.1f "
+      "against %.1f" % (still[0]["top"], still[1]["top"]))
 
 print("zooming towards the middle keeps the middle where it is")
 check(pans[0] == 0, "nothing offset stays nothing: %r" % pans[0])
