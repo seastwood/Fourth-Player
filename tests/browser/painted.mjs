@@ -147,6 +147,15 @@ check(workerSrc.includes("captureMs - state.lastPts"),
       + "about where zero is or how fast a second passes");
 check(workerSrc.includes("if (state.nextAt < now) state.nextAt = now;"),
       "and never into the past, which is what let a queue drain in one turn");
+// Painting the first frame the instant it arrives leaves nothing in hand, so
+// the next frame to be late is a gap on the screen. Measured with no slack:
+// 16ms typical and a worst of 55, eight paints in a hundred off the beat.
+check(workerSrc.includes("state.nextAt = now + gap * START_DEPTH;"),
+      "the first frame waits, and the rest inherit that slack");
+check(/START_DEPTH = (\d+)/.test(workerSrc), "by a named number of frames");
+const slack = Number(workerSrc.match(/START_DEPTH = (\d+)/)[1]);
+check(slack >= 2 && slack <= 5,
+      `${slack} frames: enough to absorb a hiccup, few enough to stay a game`);
 check(workerSrc.includes("state.waiting.length > DEPTH_WANT * 3"),
       "frames are dropped only when genuinely behind, not whenever the next "
       + "one happens to be due");
