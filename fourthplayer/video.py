@@ -2247,13 +2247,20 @@ class Stage:
     def _floor(self):
         """The worst picture worth sending, rather than the smallest number.
 
-        A share of what was asked for as well as an absolute, because 1500
-        kb/s is a fair floor at 720p and a smear at 1440p. Never above the
-        ceiling, or the floor would raise the rate.
+        A share as well as an absolute, because 1500 kb/s is a fair floor at
+        720p and a smear at 1440p.
+
+        A share of the *ceiling* rather than of the setting, which is not a
+        detail. With a setting of 62500 and a data channel's ceiling of 8000,
+        fifteen percent of the setting is 9375 -- above the ceiling -- so the
+        floor clamped to the ceiling, floor and ceiling became the same
+        number, and the rate could not be stepped down at all. A controller
+        that cannot back off is how an association gets driven into an error
+        state, which is the fault this ceiling was lowered to prevent.
         """
-        asked = max(1, int(self.cfg.bitrate_kbps))
-        return min(self._ceiling(),
-                   max(BITRATE_FLOOR_KBPS, int(asked * BITRATE_FLOOR_SHARE)))
+        roof = self._ceiling()
+        return min(roof, max(BITRATE_FLOOR_KBPS,
+                             int(roof * BITRATE_FLOOR_SHARE)))
 
     def _set_rate(self, down, why):
         """Move the encoder's bitrate one step, and say why."""

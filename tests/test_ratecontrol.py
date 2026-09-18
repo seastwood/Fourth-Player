@@ -125,10 +125,25 @@ for _ in range(100):
     stage._ease_the_rate(stage.frame_queue_limit() + 1)
 check(stage._rate_now >= video.BITRATE_FLOOR_KBPS,
       "never below the absolute floor: %d" % stage._rate_now)
-check(stage._rate_now >= 62500 * video.BITRATE_FLOOR_SHARE * 0.99,
-      "nor below a share of what was asked for, because 1500 kb/s is fair at "
-      "720p and a smear at 1440p: %d against the 400 this used to reach"
+check(stage._rate_now >= stage._ceiling() * video.BITRATE_FLOOR_SHARE * 0.99,
+      "nor below a share of the ceiling, because 1500 kb/s is fair at 720p "
+      "and a smear at 1440p: %d against the 400 this used to reach"
       % stage._rate_now)
+
+print("and the floor never meets the ceiling, or it could not back off at all")
+# A share of the *setting* rather than of the ceiling made them equal: 15% of
+# 62500 is 9375, above a data channel's ceiling of 8000, so the floor clamped
+# to the ceiling and the rate could not be stepped down at all. A controller
+# that cannot back off is how an association is driven into an error state,
+# which is the fault the low ceiling exists to prevent.
+tight = a_stage(kbps=62500)
+check(tight._floor() < tight._ceiling(),
+      "a high setting with a data channel's low ceiling still leaves room: "
+      "floor %d, ceiling %d" % (tight._floor(), tight._ceiling()))
+roomy = a_stage(kbps=62500, guests=[FakePeer(frames=False)])
+check(roomy._floor() < roomy._ceiling(),
+      "and so does a guest on the media track: floor %d, ceiling %d"
+      % (roomy._floor(), roomy._ceiling()))
 
 print("and it settles below where the channel broke rather than oscillating")
 # Without this it climbs 15% at a time until the data channel backs up, stalls
@@ -138,7 +153,9 @@ print("and it settles below where the channel broke rather than oscillating")
 stage = a_stage()
 # Below the ceiling, so the cap this learns is the thing being tested rather
 # than the ceiling standing in for it.
-broke = 12000
+# Inside the range the ceiling allows, so what is being tested is the cap this
+# learns rather than the ceiling standing in for it.
+broke = int(stage._ceiling() * 0.75)
 stage._rate_now = broke
 stage._rate_stepped = 0.0
 stage._ease_the_rate(stage.frame_queue_limit() + 1)
@@ -163,7 +180,7 @@ stage = a_stage()
 stage._rate_now = stage._ceiling()
 stage._rate_stepped = 0.0
 stage._ease_the_rate(stage.frame_queue_limit() + 1)
-stage._rate_now = 12000
+stage._rate_now = int(stage._ceiling() * 0.75)
 stage._rate_stepped = 0.0
 stage._ease_the_rate(stage.frame_queue_limit() + 1)
 for _ in range(400):
