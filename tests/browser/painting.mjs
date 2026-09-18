@@ -60,6 +60,22 @@ for (const spot of ["painter.start(receiver, codec)", "if (!codec)",
 check((app.match(/setPaintMethod\("browser"\)/g) || []).length >= 3,
       "a failed experiment is never a black screen");
 
+console.log("a codec not known yet is not the same as one that cannot work");
+// The first real attempt at this failed here: a receiver's getParameters()
+// came back with no codecs a second into the connection, the page read that
+// as "unknown", and it put the viewer back on the browser -- so choosing the
+// option appeared to do nothing at all.
+check(app.includes("if (shape.mime) {"),
+      "a known codec that is not H.264 switches back and says so");
+check(app.includes("waiting to draw here"),
+      "one that is not known yet waits instead");
+check(app.includes('if (paintMethod === "here" && !painter) startPainting()'),
+      "and the watchdog keeps trying, so the choice starts when it can");
+check(app.includes("lastCodec = { mime: codec.mimeType"),
+      "the codec is remembered from the statistics, which always carry it");
+check(app.includes("return lastCodec;"),
+      "and used when the receiver will not say");
+
 console.log("the canvas and the video are never both showing");
 check(app.includes("canvas.hidden = false") && app.includes("video.hidden = true"),
       "starting hides the video");

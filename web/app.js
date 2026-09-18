@@ -3650,10 +3650,21 @@ async function watchMedia() {
   let picture = null;
   let path = null;
   try {
-    (await pc.getStats()).forEach((r) => {
+    const stats = await pc.getStats();
+    stats.forEach((r) => {
       if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")) {
         bytes += r.bytesReceived || 0;
         picture = r;
+        // Kept for whoever needs to configure a decoder. A receiver's
+        // getParameters() is the obvious place to ask and it came back empty
+        // on the first attempt here -- reported as the stream being
+        // "unknown" -- while the stats have carried it all along.
+        if (r.codecId) {
+          const codec = stats.get ? stats.get(r.codecId) : null;
+          if (codec && codec.mimeType) {
+            lastCodec = { mime: codec.mimeType, fmtp: codec.sdpFmtpLine || "" };
+          }
+        }
       }
       // The pair actually carrying the media. Its round trip time is the
       // ping that matters here -- the one the buttons travel over -- and it
@@ -3667,6 +3678,9 @@ async function watchMedia() {
   // Before the branches below, every one of which returns.
   noteFreezes(picture);
   tellAboutTheRate(picture);
+  // Chosen but not started: a codec that was not known when the track
+  // arrived, or a receiver that was not ready. Cheap to ask again.
+  if (paintMethod === "here" && !painter) startPainting();
   tellAboutSound();
   tellAboutTheShape();
   tellAboutThePicture();
@@ -8364,14 +8378,17 @@ function savedPaintMethod() {
 
 let paintMethod = savedPaintMethod();
 let painter = null;
+let paintWaitedSaid = false;
 
 function paintCanvas() { return el("painted"); }
 
 /* Which codec this connection actually agreed on, read from the receiver
    rather than assumed: the host offers two and the browser picks, and a
    decoder configured for the wrong one does not start. */
+let lastCodec = { mime: "", fmtp: "" };
+
 function videoCodecNow() {
-  if (!pc || !pc.getReceivers) return { mime: "", fmtp: "" };
+  if (!pc || !pc.getReceivers) return lastCodec;
   for (const receiver of pc.getReceivers()) {
     if (!receiver.track || receiver.track.kind !== "video") continue;
     try {
@@ -8384,7 +8401,10 @@ function videoCodecNow() {
       }
     } catch (_) { /* older browser */ }
   }
-  return { mime: "", fmtp: "" };
+  // Nothing from the receiver, which is normal early on and on some browsers
+  // is normal for ever. Whatever the statistics last said is better than
+  // giving up.
+  return lastCodec;
 }
 
 function videoReceiver() {
@@ -8419,14 +8439,28 @@ function startPainting() {
   const shape = videoCodecNow();
   const codec = codecFrom(shape.mime, shape.fmtp);
   if (!codec) {
-    // H.265 is deliberately not attempted -- see paint.js. Saying so beats a
-    // black picture, and staying on the browser beats both.
-    showToast("Drawing it here needs H.264; this stream is "
-              + (shape.mime || "something else"));
-    report("not drawing here: the stream is " + (shape.mime || "unknown"));
-    setPaintMethod("browser");
+    // Two different cases and they must not be treated alike.
+    //
+    // A stream that is H.265 cannot be drawn here at all -- see paint.js for
+    // why its codec string is not guessed at -- and that is worth saying and
+    // switching back for.
+    //
+    // A stream whose codec is simply not known *yet* is the ordinary state
+    // of a connection a second old, and the first attempt at this failed
+    // exactly there. Overriding somebody's choice because the answer had not
+    // arrived is the wrong thing: the watchdog tries again every couple of
+    // seconds, so the choice stands and it starts when it can.
+    if (shape.mime) {
+      showToast("Drawing it here needs H.264; this stream is " + shape.mime);
+      report("not drawing here: the stream is " + shape.mime);
+      setPaintMethod("browser");
+    } else if (!paintWaitedSaid) {
+      paintWaitedSaid = true;
+      report("waiting to draw here: the codec is not known yet");
+    }
     return;
   }
+  paintWaitedSaid = false;
   painter = makePainter(canvas, report);
   if (!painter.start(receiver, codec)) {
     painter = null;
