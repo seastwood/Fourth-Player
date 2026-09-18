@@ -488,14 +488,20 @@ console.log("\nthe timer takes over whenever the beats stop, not only if none ca
 // available to a page that had never sent an animation frame and to no other.
 check(!worker.includes("if (!state.ticked && !state.timer) pump();"),
       "the fallback is no longer for a page that never started beating");
-check(worker.includes("quietBeats()"),
-      "it asks whether the beats have stopped, which a page that stops "
-      + "beating answers the same way as one that never began");
+// moonlight-web's worker has no animation frames at all -- "rendering is
+// driven by decoder output" -- and pays in phase: a paint landing at an
+// arbitrary point in the refresh cycle is shown at the next one, so evenly
+// spaced paints are not evenly spaced pictures. Both, then: the beat leads
+// and the timer is a whole refresh behind it, so a healthy beat always finds
+// the frame already painted and a stopped one costs a refresh, not a hang.
+check(worker.includes("if (!state.timer) pump();"),
+      "the timer is armed whatever the beats are doing");
+check(worker.includes("next.due + refresh - performance.now()"),
+      "a whole refresh behind the deadline, so it does not race the beat and "
+      + "win half the time -- which would be paints landing mid-refresh, the "
+      + "unevenness the beats were brought in to remove");
 check(worker.includes("const BEAT_GAP_MS"),
-      "with a named gap, longer than a refresh at any rate a screen runs at");
-check(worker.includes("if (state.timer) { clearTimeout(state.timer); state.timer = 0; }"),
-      "and the beats coming back put the timer away, or the same queue is "
-      + "painted twice a frame");
+      "with a sweep for a queue nothing has armed a timer for");
 
 console.log("\na window behind another window has not gone away");
 // Chrome on a Mac calls a window hidden whenever it is occluded -- another

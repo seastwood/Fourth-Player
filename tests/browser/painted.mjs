@@ -267,11 +267,10 @@ check(workerSrc.includes("function refreshEvery()"),
       "the refresh is still measured, since 60Hz, 120Hz and 59.94 are all real");
 check(paintSrc.includes("requestAnimationFrame(beat)"),
       "and the page is what tells it, because only the page can see a refresh");
-check(workerSrc.includes("if (!state.timer && quietBeats()) pump();"),
-      "with a timer as the fallback for a page that stops sending them, where "
-      + "a picture that keeps moving beats one that stops -- and for a page "
-      + "that stops as much as one that never started, which is the throttled "
-      + "window this was blind to");
+check(workerSrc.includes("if (!state.timer) pump();"),
+      "with a timer armed whatever the beats are doing, a whole refresh "
+      + "behind them, so a page that stops sending them loses a refresh "
+      + "rather than the picture");
 
 // Presentation is FIFO. A queued frame is early, not stale: the queue *is*
 // the reserve. Painting "the newest frame that is due" and closing the rest
@@ -283,9 +282,17 @@ check(workerSrc.includes("draw(state.waiting.shift().frame)"),
       "the head is what is painted, in order");
 check(/QUEUE_CAP = (\d+)/.test(workerSrc), "with a named memory bound");
 const cap = Number(workerSrc.match(/QUEUE_CAP = (\d+)/)[1]);
-check(cap >= 4 && cap <= 10,
-      cap + " frames: clear of the deepest reserve, so it cannot drop what it "
-      + "just decided to hold");
+// A memory bound and nothing else. Six -- moonlight-web's -- is right for a
+// renderer driven by decoder output, where the queue never grows. Here the
+// queue *is* the reserve and a burst after any hiccup fills it, so six was
+// throwing away eleven percent of the picture beside a host sending a
+// flawless sixty a second. Latency is bounded by time in tick() instead,
+// which is the right rule and does not care how deep the queue is.
+check(cap >= 20,
+      cap + " frames: a memory bound rather than a latency one, since the "
+      + "latency is bounded by how overdue the head is");
+check(workerSrc.includes("now - state.waiting[0].due > slipped"),
+      "which is the rule that actually keeps it current");
 check(workerSrc.includes("state.waiting.length > QUEUE_CAP"),
       "and that is the only reason a frame is dropped");
 check(workerSrc.includes("state.early += 1")

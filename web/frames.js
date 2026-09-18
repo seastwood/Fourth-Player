@@ -228,7 +228,15 @@ function draw(frame) {
     // stream can be perfect at all of those and still be painted unevenly,
     // and that is what "it feels like it is skipping" means.
     const at = performance.now();
-    if (state.lastDraw) state.shown.push(at - state.lastDraw);
+    if (state.lastDraw) {
+      state.shown.push(at - state.lastDraw);
+      // Bounded, because only a *report* empties it and a report is the page
+      // asking -- which a throttled page stops doing. Left unbounded it grows
+      // at sixty a second for as long as nobody asks, and the answer to
+      // "works for a while and then degrades" is never something that grows.
+      // Ten seconds of paints is more than enough to describe a cadence.
+      if (state.shown.length > 600) state.shown.shift();
+    }
     state.lastDraw = at;
     if (!state.ever) {
       state.ever = true;
@@ -295,23 +303,16 @@ function tell(at) {
   } });
 }
 
-/* How long the animation frames may be silent before the timer takes over.
+/* How often to look for a queue that nothing has armed a timer for.
  *
- * Longer than a refresh at any rate a screen runs at, so an ordinary frame
- * boundary is never mistaken for a page that has stopped sending them. */
+ * A backstop to the backstop: pump() re-arms itself only while something is
+ * queued, so a moment with an empty queue ends the chain, and the frame that
+ * arrives next is what starts it again. This covers the case where that
+ * frame's arrival and the timer's expiry cross. */
 const BEAT_GAP_MS = 100;
-
-function quietBeats() {
-  if (!state.lastBeat) return true;      // none yet, so nothing to wait for
-  return performance.now() - state.lastBeat > BEAT_GAP_MS;
-}
 
 function tick() {
   state.ticks += 1;
-  // The animation frames are back, so the timer standing in for them is not
-  // wanted -- two things painting the same queue is two paints per frame and
-  // one of them wasted.
-  if (state.timer) { clearTimeout(state.timer); state.timer = 0; }
   // Only to the memory bound, oldest first.
   //
   // A queued frame is early, not stale: the queue *is* the reserve. This used
@@ -379,7 +380,13 @@ function pump() {
   }
   if (!state.waiting.length) return;
   const next = state.waiting[0];
-  const wait = next.due - performance.now();
+  // A whole refresh behind the deadline, because this is the backstop and the
+  // animation frame is what should have painted it. Firing at the deadline
+  // itself would race the beat and win about half the time, which is a paint
+  // landing mid-refresh -- exactly the unevenness the beats were brought in
+  // to remove.
+  const refresh = refreshEvery() || 1000 / 60;
+  const wait = next.due + refresh - performance.now();
   if (wait > LIMITS.SLACK_MS) {
     state.timer = setTimeout(pump, wait);
     return;
@@ -407,7 +414,7 @@ function pump() {
  * has stopped beating and has nothing queued right now must still be ready
  * the moment something does arrive. */
 setInterval(() => {
-  if (!state.timer && state.waiting.length && quietBeats()) pump();
+  if (!state.timer && state.waiting.length) pump();
 }, BEAT_GAP_MS);
 
 /* How deep the queue of frames waiting to be shown may get.
@@ -425,7 +432,20 @@ setInterval(() => {
  * is that an open-loop clock drifts against the arrivals, and the clamp that
  * stopped it scheduling into the past collapsed the schedule when it did.
  */
-const QUEUE_CAP = 6;
+/* A memory bound and nothing else.
+ *
+ * Six was moonlight-web's, and it is right for a renderer driven by decoder
+ * output: the queue never grows because every frame is drawn as it arrives.
+ * Here the queue *is* the reserve, and a burst after any hiccup fills it --
+ * so six was throwing away eleven percent of the picture on this link, logged
+ * as "56 too late to matter" beside a host sending a flawless sixty a second.
+ *
+ * Latency is bounded by time instead, in tick(): while the head should
+ * already have been shown by more than a refresh, it is dropped. That is the
+ * right rule and it does not care how deep the queue is, so this can be what
+ * it says it is -- the point past which frames are costing memory rather than
+ * buying smoothness. Half a second of them at sixty a second. */
+const QUEUE_CAP = 30;
 
 /* The Smoothing setting, in frames, as the page last said. Three is the
    default and gives moonlight-web's 25ms cap. */
@@ -459,7 +479,22 @@ function decoded(frame) {
   // all, and the picture simply held still. Measured: 244 refreshes in eleven
   // seconds where sixty a second is 660, with a 1050ms gap between two paints
   // in the middle of it.
-  if (!state.timer && quietBeats()) pump();
+  // The timer is always armed, not only when the beats have stopped.
+  //
+  // moonlight-web's worker has no animation frames at all -- "rendering is
+  // driven by decoder output" -- and pays for that in phase: a paint that
+  // lands at an arbitrary point in the refresh cycle is shown at the next
+  // one, so evenly spaced paints are not evenly spaced pictures. Animation
+  // frames fix that and are worth keeping. They are also at the mercy of the
+  // browser: Chrome throttles them in a window it thinks is occluded, and
+  // this Mac's window is called occluded often.
+  //
+  // So both, with the animation frame leading and the timer a whole refresh
+  // behind it. When the beats are healthy the timer always finds the frame
+  // already painted and costs nothing. When they stop, the picture is one
+  // refresh late instead of stopped, which is the difference between a
+  // wobble and a hang.
+  if (!state.timer) pump();
 }
 
 function buildDecoder(codec, description, latency) {
