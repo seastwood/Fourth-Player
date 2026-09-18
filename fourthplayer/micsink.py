@@ -24,6 +24,7 @@ a live microphone from somebody's room onto this machine.
 """
 import logging
 import sys
+import time
 
 log = logging.getLogger(__name__)
 
@@ -40,14 +41,50 @@ def where(cfg):
     return (getattr(cfg, "guest_mic_device", "") or "").strip()
 
 
-def sinks(gst):
+# How long a list of audio outputs is worth before it is asked for again.
+#
+# Asking is not free and is not local: starting a GstDeviceMonitor drives the
+# platform's device enumeration -- WASAPI on Windows -- on the machine that is
+# at that moment capturing the sound it enumerates. The setup page refreshes
+# every five seconds and used to ask twice a refresh, once for the list and
+# once for the suggestion drawn from it. Reported as opening the setup page
+# making the stream freeze over and over, which is exactly the shape: a stall
+# every five seconds for as long as the page is open.
+#
+# It also ran on the event loop, so the pause was not only the audio device's
+# -- it was every guest's signalling and data channel too.
+#
+# Twenty seconds is chosen against what it costs to be wrong. A cable plugged
+# in while the page is open takes up to that long to appear in the list, which
+# is a short wait; the alternative was a stutter in everybody's picture.
+SINKS_TTL = 20.0
+
+_sinks_cache = (0.0, None)
+
+
+def forget_sinks():
+    """Ask the machine again next time. For after something has changed."""
+    global _sinks_cache
+    _sinks_cache = (0.0, None)
+
+
+def sinks(gst, now=None):
     """Every audio output this machine has, as (display name, device id).
 
     The id is what the sink element wants, and it is not the display name:
     wasapi2sink takes a strid, pulsesink takes a node name. Both are read from
     the device monitor rather than guessed at.
+
+    Remembered for SINKS_TTL, because this is asked for on a timer by a page
+    that is only ever drawing a dropdown.
     """
+    global _sinks_cache
+    stamp = time.monotonic() if now is None else now
+    when, remembered = _sinks_cache
+    if remembered is not None and stamp - when < SINKS_TTL:
+        return list(remembered)
     found = []
+    monitor = None
     try:
         monitor = gst.DeviceMonitor.new()
         monitor.add_filter("Audio/Sink", None)
@@ -66,9 +103,19 @@ def sinks(gst):
                         ident = value
                         break
             found.append((device.get_display_name(), ident))
-        monitor.stop()
     except Exception as exc:
         log.debug("could not list the audio outputs: %s", exc)
+    finally:
+        # Stopped whatever happened. A monitor left running holds a
+        # notification client registered with the platform, and one per
+        # refresh of a page somebody leaves open is a slow leak into the
+        # audio subsystem this host depends on.
+        if monitor is not None:
+            try:
+                monitor.stop()
+            except Exception:
+                pass
+    _sinks_cache = (stamp, list(found))
     return found
 
 
@@ -89,6 +136,9 @@ def suggest(gst):
     # In 16 Ch" and a plain "Speakers" endpoint, and for one person talking
     # the sixteen-channel one is the wrong half of a right answer.
     best, rank = "", (len(CABLE_HINTS), 1)
+    # Through the cached list: this is asked for beside it, on the same
+    # refresh, and enumerating the machine's audio devices twice to draw one
+    # dropdown was half of the stall it used to cause.
     for name, _ident in sinks(gst):
         low = (name or "").lower()
         for index, hint in enumerate(CABLE_HINTS):
