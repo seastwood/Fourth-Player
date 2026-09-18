@@ -7148,6 +7148,10 @@ function noteZoom(vv) {
 }
 
 function fitStage() {
+  // Whatever the picture's box becomes, the canvas follows it. Done here
+  // because this is the one function that runs on every reason the stage
+  // changes shape.
+  requestAnimationFrame(fitPainted);
   const vv = window.visualViewport;
   if (!vv) return;                       // the dvh fallback in the CSS applies
   noteZoom(vv);
@@ -8484,6 +8488,29 @@ function videoReceiver() {
 /* Back to the browser's own element. Called on switching away, on a
    renegotiation, and on anything going wrong -- there has to be exactly one
    way back or a failed experiment is a black screen. */
+/* The canvas exactly over the video, rather than over the stage.
+ *
+ * The stage is more than the picture: on a phone the on-screen controller
+ * has the bottom of it, so the <video> element is only the upper part. A
+ * canvas stretched over the whole stage and told to letterbox its contents
+ * centres the picture in the *stage* -- which puts it lower than the video
+ * was and slides it under the controller. Reported exactly that way.
+ *
+ * So the element's own box is measured and copied. Cheap, and it has to
+ * happen whenever the stage is relaid out, which is what fitStage already
+ * does on every viewport change. */
+function fitPainted() {
+  const canvas = paintCanvas();
+  if (!canvas || !canvas.classList.contains("over") || !video) return;
+  const mine = video.getBoundingClientRect();
+  const theirs = (canvas.offsetParent || video.parentNode)
+    .getBoundingClientRect();
+  canvas.style.top = (mine.top - theirs.top) + "px";
+  canvas.style.left = (mine.left - theirs.left) + "px";
+  canvas.style.width = mine.width + "px";
+  canvas.style.height = mine.height + "px";
+}
+
 let wholeStream = null;             // what the element had before we took it
 
 /* Hand the <video> element the sound and nothing else, so it releases the
@@ -8515,9 +8542,26 @@ function giveTheVideoBack() {
 function stopPainting(why) {
   if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
   if (painter) { painter.stop(); painter = null; }
+  // And take the transform off the receiver.
+  //
+  // Terminating the worker is not enough: while a transform is attached,
+  // every frame goes to it and none is written back, so the browser's own
+  // decoder is starved whether anything is reading or not. Leaving it there
+  // meant switching back to the browser gave a permanently black picture --
+  // reported exactly that way, and it was the last thing anybody would look
+  // for, because nothing about the browser's own path had changed.
+  const receiver = videoReceiver();
+  if (receiver && "transform" in receiver) {
+    try { receiver.transform = null; } catch (_) { /* older browser */ }
+  }
   giveTheVideoBack();
   const canvas = paintCanvas();
-  if (canvas) { canvas.hidden = true; canvas.classList.remove("over"); }
+  if (canvas) {
+    canvas.hidden = true;
+    canvas.classList.remove("over");
+    canvas.style.top = canvas.style.left = "";
+    canvas.style.width = canvas.style.height = "";
+  }
   if (video) video.hidden = false;
   if (why) report("the browser is drawing the picture again: " + why);
 }
@@ -8669,6 +8713,7 @@ async function startPainting() {
   // where it was, showing black with its video track removed, and the canvas
   // is laid over it and takes no pointer events at all.
   if (canvas) canvas.classList.add("over");
+  fitPainted();
   paintAfterZoom();
   // And the <video> element gives up its decoder.
   //

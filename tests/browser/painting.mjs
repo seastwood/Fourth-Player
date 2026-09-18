@@ -14,6 +14,7 @@ const app = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
 const paint = require("../../web/paint.js");
 const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
+const css2 = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
 
 let bad = 0;
 const check = (cond, what) => {
@@ -163,6 +164,37 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
+console.log("switching back gives the receiver its transform back");
+// Terminating the worker is not enough: while a transform is attached every
+// frame goes to it and none is written back, so the browser's own decoder is
+// starved whether anything is reading or not. Leaving it there made the
+// browser option a permanently black picture -- and it was the last place
+// anybody would look, since nothing about that path had changed.
+check(app.includes("receiver.transform = null"),
+      "the transform is taken off on the way out");
+const stopBody = app.slice(app.indexOf("function stopPainting"),
+                           app.indexOf("function startPainting"));
+check(stopBody.indexOf("receiver.transform = null")
+      < stopBody.indexOf("giveTheVideoBack()"),
+      "before the stream is handed back, so nothing is starved in between");
+
+console.log("and the canvas is put where the video is, not where the stage is");
+// The stage is more than the picture: the on-screen controller has the bottom
+// of it on a phone, so a canvas stretched over the whole stage centres the
+// picture lower than the video was and slides it under the controller.
+check(app.includes("function fitPainted"), "the video's own box is measured");
+check(app.includes("video.getBoundingClientRect()")
+      && app.includes("canvas.style.width = mine.width"),
+      "and copied onto the canvas in pixels");
+const fitBody = app.slice(app.indexOf("function fitStage"),
+                          app.indexOf("function fitStage") + 800);
+check(fitBody.includes("fitPainted"),
+      "re-measured by fitStage, which runs on every reason the stage moves");
+const overRule = css2.slice(css2.indexOf("#painted.over {"),
+                            css2.indexOf("}", css2.indexOf("#painted.over {")));
+check(overRule.indexOf("width: 100%") < 0,
+      "and the rule does not stretch it over the stage any more");
+
 console.log("the canvas goes over the video, never instead of it");
 // Everything that reads the picture reads the <video> element: twenty-odd
 // pointer, wheel and gesture handlers, the zoom's geometry, and
@@ -174,7 +206,7 @@ check(!app.includes("video.hidden = true"),
       "the video element is never hidden while painting");
 check(app.includes('canvas.classList.add("over")'), "the canvas is laid over it");
 check(app.includes('canvas.classList.remove("over")'), "and taken off again");
-const css = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
+const css = css2;
 const over = css.slice(css.indexOf("#painted.over {"),
                        css.indexOf("}", css.indexOf("#painted.over {")));
 check(over.includes("position: absolute"), "positioned over the stage");
