@@ -89,6 +89,20 @@ check("force_keyframe()" in block, "a keyframe is forced when frames are asked f
 check("request_keyframe" not in block,
       "not offered to the bucket that exists to refuse repeated asking")
 
+print("and a channel that is not keeping up skips on purpose")
+# The host produced 600 frames in 10 seconds with every gap at 16.7ms and the
+# browser reported receiving 36 a second of it. Nothing is lost in flight on
+# an ordered reliable channel, which leaves the send queue: one that has
+# grown to megabytes is not being drained, and everything added to it after
+# that is latency rather than picture.
+check("buffered_amount" in video, "the queue depth is read")
+check("FRAME_QUEUE_LIMIT" in video, "against a named limit")
+check("and not key" in video,
+      "and a keyframe is never the one skipped, since everything after it "
+      "depends on it")
+check("frames_skipped" in video, "the skipping is counted")
+check("bytes behind" in video, "and said, so this is visible next time")
+
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
 check('struct.pack("<BQ"' in video,

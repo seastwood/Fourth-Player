@@ -311,6 +311,13 @@ SOURCES = (
 
 
 # The ways Windows can be asked for the screen, and what to call them.
+# How far behind the picture channel may get before frames are skipped
+# rather than added to a queue nobody is draining. A megabyte is about three
+# seconds of picture at the rates this sends: long past the point where
+# anything in it is worth showing.
+FRAME_QUEUE_LIMIT = 1024 * 1024
+
+
 CAPTURE_APIS = {
     "dxgi": "Desktop Duplication",
     "wgc": "Windows Graphics Capture",
@@ -2306,6 +2313,7 @@ class Peer:
         self.frame_channel = None
         self.frames_wanted = False
         self._said_shut = False
+        self.frames_skipped = 0
         self.on_input = None          # set by the session; called with raw bytes
         self.on_desk = None           # ditto, for keyboard and mouse messages
         self.on_dead = None           # called when the media connection is over
@@ -2525,9 +2533,42 @@ class Peer:
                          channel.props.ready_state.value_nick)
             return
         self._said_shut = False
+
+        # Whether the channel is keeping up at all.
+        #
+        # The host produces a perfect stream -- 600 frames in 10 seconds,
+        # every gap 16.7ms -- and the browser reported receiving 36 a second
+        # of it. Frames were going missing between the two, and the only
+        # thing between them is this channel: reliable and ordered, so
+        # nothing is lost in flight, which leaves the send queue. A queue
+        # that has grown to megabytes is one that is not being drained, and
+        # everything added to it from then on is latency rather than picture.
+        #
+        # So when it is that far behind, frames that are not keyframes are
+        # skipped deliberately and counted. Dropping the right frames on
+        # purpose is always better than losing arbitrary ones by accident,
+        # and a keyframe is never the right one to drop: everything after it
+        # depends on it.
+        try:
+            waiting = int(channel.props.buffered_amount)
+        except Exception:
+            waiting = 0
+        if waiting > FRAME_QUEUE_LIMIT and not key:
+            self.frames_skipped += 1
+            if self.frames_skipped in (1, 100, 1000):
+                log.warning("peer %s: the picture channel is %d bytes behind, "
+                            "so frames are being skipped (%d so far)",
+                            self.id, waiting, self.frames_skipped)
+            return
+
         # Well under the 256KB a browser will take, so one frame is a few
         # messages rather than one that might be refused.
         limit = 60000
+        self._sent_frames = getattr(self, "_sent_frames", 0) + 1
+        if self._sent_frames % 600 == 0:
+            log.info("peer %s: the picture channel has sent %d frames and is "
+                     "%d bytes behind, having skipped %d",
+                     self.id, self._sent_frames, waiting, self.frames_skipped)
         total = len(data)
         at = 0
         while at < total:
