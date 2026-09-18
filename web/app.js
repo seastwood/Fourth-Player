@@ -8483,6 +8483,7 @@ function giveTheVideoBack() {
 }
 
 function stopPainting(why) {
+  if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
   if (painter) { painter.stop(); painter = null; }
   giveTheVideoBack();
   const canvas = paintCanvas();
@@ -8492,6 +8493,51 @@ function stopPainting(why) {
 }
 
 let paintStarting = false;
+let paintTried = 0;                 // which spelling of the codec is next
+let paintWatch = 0;                 // the timer that gives up on a black canvas
+
+/* A remembered choice that does not work must not cost the picture.
+ *
+ * This was the complaint: the option is stored per browser, so a page that
+ * had it on came up black on every load with nothing to be done from the
+ * chair. isConfigSupported saying yes is not the same as a decoder that
+ * works -- on iOS it says yes and then fails -- so the only honest test is
+ * whether anything was painted, and the only safe answer is to go back. */
+const PAINT_PROVE_MS = 4000;
+
+function watchThePainting() {
+  if (paintWatch) clearTimeout(paintWatch);
+  paintWatch = setTimeout(() => {
+    paintWatch = 0;
+    if (!painter) return;
+    if (painter.painted()) return;              // something is on the canvas
+    const more = paintNextSpelling();
+    if (more) {
+      report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
+             + "s; trying " + more);
+      restartPainting();
+    } else {
+      report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
+             + "s and there is nothing else to try");
+      showToast("Drawing it here produced no picture; back to the browser");
+      setPaintMethod("browser");
+    }
+  }, PAINT_PROVE_MS);
+}
+
+/* The next spelling in the list, or "" when they are exhausted. */
+function paintNextSpelling() {
+  const shape = videoCodecNow();
+  const all = codecCandidates(shape.mime, shape.fmtp);
+  paintTried += 1;
+  return paintTried < all.length ? all[paintTried] : "";
+}
+
+function restartPainting() {
+  if (painter) { painter.stop(); painter = null; }
+  giveTheVideoBack();
+  startPainting();
+}
 
 async function startPainting() {
   if (paintMethod !== "here" || painter || paintStarting) return;
@@ -8509,8 +8555,15 @@ async function startPainting() {
   // seconds, so the flag is what stops four of them racing.
   paintStarting = true;
   let codec = "";
-  try { codec = await pickCodec(shape.mime, shape.fmtp); }
-  finally { paintStarting = false; }
+  try {
+    // Past the first attempt this is not a question for the browser any
+    // more: it already said yes to something that then failed, so the list
+    // is walked in order rather than asked about again.
+    const all = codecCandidates(shape.mime, shape.fmtp);
+    codec = paintTried > 0
+      ? (paintTried < all.length ? all[paintTried] : "")
+      : await pickCodec(shape.mime, shape.fmtp);
+  } finally { paintStarting = false; }
   if (painter || paintMethod !== "here") return;   // changed while asking
   if (!codec) {
     // Two different cases and they must not be treated alike.
@@ -8559,6 +8612,7 @@ async function startPainting() {
   // rather than nothing at all.
   keepAudioOnly();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
+  watchThePainting();
   // A decoder that has just started has nothing to work from until a keyframe
   // arrives, and the browser will not ask for one on our behalf any more --
   // nothing is feeding its decoder to notice. With keyframes sent only on
@@ -8600,6 +8654,10 @@ function paintPaintMethod() {
 
 function setPaintMethod(id) {
   const found = paintMethodById(id);
+  // Choosing it by hand is a fresh start: the list of spellings is walked
+  // again from the top rather than continuing where a previous attempt gave
+  // up, which would make the second try of the day start at the end.
+  paintTried = 0;
   paintMethod = found.ok() ? found.id : PAINT_METHODS[0].id;
   savePaintMethod();
   paintPaintMethod();

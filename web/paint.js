@@ -258,6 +258,7 @@ function makePainter(canvas, say) {
   let fed = 0, out = 0, drawn = 0, refused = 0, skipped = 0;
   let started = false;                   // a keyframe has been seen
   let shape = "";                        // what the bitstream turned out to be
+  let ever = false;                      // anything painted, ever
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -270,6 +271,7 @@ function makePainter(canvas, say) {
     try {
       context.drawImage(frame, 0, 0);
       drawn += 1;
+      ever = true;
     } catch (_) { /* the canvas went away with the page */ }
     frame.close();
   }
@@ -426,6 +428,7 @@ function makePainter(canvas, say) {
       pacer.forget();
       started = false;
       shape = "";
+      ever = false;
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
@@ -440,9 +443,12 @@ function makePainter(canvas, say) {
       fed = 0; out = 0; drawn = 0; refused = 0; skipped = 0;
       return said;
     },
-    /* The canvas as it stands, for whoever wants to know whether anything has
-       ever been painted on it at all. */
-    painted() { return canvas.width > 16 && canvas.height > 16; },
+    /* Whether anything has ever actually been painted.
+       Remembered rather than read off the canvas: an untouched canvas is
+       300x150 by default, so measuring it would have said yes about a
+       surface nothing had ever drawn on -- which is precisely the state this
+       is meant to detect. */
+    painted() { return ever; },
   };
 }
 

@@ -13,6 +13,7 @@ const require = createRequire(import.meta.url);
 const app = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
 const paint = require("../../web/paint.js");
+const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
 
 let bad = 0;
 const check = (cond, what) => {
@@ -50,6 +51,30 @@ check(app.includes("found.ok() ? found.id : PAINT_METHODS[0].id"),
       "a remembered method that will not work falls back to the browser");
 check(app.includes("option.disabled = !one.ok()"),
       "and is shown disabled rather than silently missing");
+
+console.log("a remembered choice that does not work gives the picture back");
+// The complaint: the option is stored per browser, so a page that had it on
+// came up black on every load with nothing to be done from the chair.
+// isConfigSupported saying yes is not the same as a decoder that works -- on
+// iOS it says yes and then fails -- so the only honest test is whether
+// anything was painted.
+check(app.includes("PAINT_PROVE_MS"), "there is a deadline to show something");
+check(/PAINT_PROVE_MS = (\d+)/.test(app), "and it is a named number");
+check(Number(app.match(/PAINT_PROVE_MS = (\d+)/)[1]) <= 6000,
+      "short enough that nobody sits in front of a black screen wondering");
+check(app.includes("painter.painted()"), "the painter is asked, not the canvas");
+check(paintFile.includes("painted() { return ever; }"),
+      "and it remembers rather than measuring the canvas -- an untouched one "
+      + "is 300x150 and would have answered yes");
+check(app.includes('setPaintMethod("browser")')
+      && app.includes("there is nothing else to try"),
+      "when the spellings run out it goes back and says so");
+
+console.log("and a failure walks the list rather than giving up on the first");
+check(app.includes("function paintNextSpelling"), "there is a next one");
+check(app.includes("paintTried += 1"), "the attempts advance");
+check(app.includes("paintTried = 0"),
+      "and choosing it by hand starts from the top again");
 
 console.log("there is exactly one way back to the browser's element");
 check(app.includes("function stopPainting"), "stopPainting exists");
@@ -127,7 +152,7 @@ console.log("nothing is fed to the decoder before the first keyframe");
 // every connection was a stream of invisible errors and whether the decoder
 // recovered was luck. It was a black screen with "drawing the picture here"
 // in the log and no way to tell which of four things had gone wrong.
-const paintSrc = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
+const paintSrc = paintFile;
 check(paintSrc.includes("if (!key) { skipped += 1; return; }"),
       "deltas before the first keyframe are counted and dropped");
 check(paintSrc.includes("started = true"), "and the gate opens on a keyframe");
@@ -177,7 +202,6 @@ check(paint.codecCandidates("video/VP8", "").length === 0,
       "and a codec nobody here handles offers nothing rather than a guess");
 
 console.log("\nand nothing is attempted that the browser has not agreed to");
-const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
 check(paintFile.includes("VideoDecoder.isConfigSupported"),
       "the browser is asked which spelling it will take");
 check(paintFile.includes("answer.supported"), "and its answer is believed");
