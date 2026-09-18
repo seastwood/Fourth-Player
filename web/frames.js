@@ -148,12 +148,38 @@ void main() { colour = texture(picture, uv); }`);
   gl.uniform1i(gl.getUniformLocation(program, "picture"), 0);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
+  // The texture's storage, allocated once per size and written into after.
+  //
+  // This used texImage2D every frame, which does not upload into a texture --
+  // it *reallocates* one. At 2560x1600 that is sixteen megabytes of GPU
+  // memory allocated and released sixty times a second, a gigabyte a second
+  // through the driver's allocator, for a picture whose size has not changed
+  // since it started. Allocators answer that by fragmenting and then
+  // compacting, and a compaction is a stall -- which is the bad hang every
+  // twenty seconds or so that the media path never shows, because a <video>
+  // element is composited and never goes near WebGL.
+  //
+  // texSubImage2D writes into the storage that is already there. Same
+  // upload, same conversion, no allocation.
+  let texW = 0, texH = 0, viewW = 0, viewH = 0;
+
   return {
     what: "webgl",
     paint(frame) {
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE,
-                    frame);
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (w !== texW || h !== texH) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA,
+                      gl.UNSIGNED_BYTE, null);
+        texW = w;
+        texH = h;
+      }
+      if (canvas.width !== viewW || canvas.height !== viewH) {
+        viewW = canvas.width;
+        viewH = canvas.height;
+        gl.viewport(0, 0, viewW, viewH);
+      }
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                       frame);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
   };

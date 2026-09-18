@@ -199,6 +199,21 @@ check(workerSrc.includes("function tick()"),
 // back-pressure", and prefers a GL renderer for it.
 check(workerSrc.includes("function makeGlPainter"),
       "there is a GL painter, which does not block that way");
+// texImage2D does not upload into a texture, it *reallocates* one. At
+// 2560x1600 that is sixteen megabytes of GPU memory allocated and released
+// sixty times a second -- a gigabyte a second through the driver's allocator,
+// for a picture whose size has not changed since it started. Allocators
+// answer that by fragmenting and then compacting, and a compaction is a
+// stall: the bad hang every twenty seconds that the media path never shows,
+// because a <video> element is composited and never goes near WebGL.
+check(workerSrc.includes("gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0"),
+      "and it writes into the texture it already has, every frame");
+const painting = workerSrc.slice(workerSrc.indexOf('what: "webgl"'),
+                                 workerSrc.indexOf('what: "webgl"') + 700);
+check(!painting.includes("gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA"),
+      "rather than allocating a new one for each");
+check(workerSrc.includes("if (w !== texW || h !== texH)"),
+      "allocating only when the picture's size actually changes");
 check(workerSrc.includes("gl.getContext") === false
       && workerSrc.includes('getContext("webgl2"'),
       "asked for first");
