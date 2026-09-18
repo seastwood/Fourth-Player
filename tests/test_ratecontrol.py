@@ -90,6 +90,7 @@ def a_stage(kbps=62500, guests=None):
     it._rate_now = None
     it._rate_calm = 0
     it._rate_stepped = 0.0
+    it._rate_broke = None
     return it
 
 
@@ -128,6 +129,49 @@ check(stage._rate_now >= 62500 * video.BITRATE_FLOOR_SHARE * 0.99,
       "nor below a share of what was asked for, because 1500 kb/s is fair at "
       "720p and a smear at 1440p: %d against the 400 this used to reach"
       % stage._rate_now)
+
+print("and it settles below where the channel broke rather than oscillating")
+# Without this it climbs 15% at a time until the data channel backs up, stalls
+# for a few seconds while the queue drains, falls 25%, and climbs straight
+# back into the same wall -- every excursion over the top a freeze somebody is
+# watching, every twenty seconds, for ever. Measured breaking at 13652 kb/s.
+stage = a_stage()
+# Below the ceiling, so the cap this learns is the thing being tested rather
+# than the ceiling standing in for it.
+broke = 12000
+stage._rate_now = broke
+stage._rate_stepped = 0.0
+stage._ease_the_rate(stage.frame_queue_limit() + 1)
+check(stage._rate_broke == broke,
+      "the rate that broke it is remembered: %s" % stage._rate_broke)
+# A minute of nothing going wrong, which is far longer than the climb needs.
+for _ in range(60):
+    stage._rate_stepped = 0.0
+    stage.note_arrivals()
+check(stage._rate_now < broke * 1.05,
+      "and a minute of calm does not walk back into it: %d against the %d "
+      "that broke" % (stage._rate_now, broke))
+check(stage._rate_now > stage._floor()
+      and stage._rate_now > broke * 0.85,
+      "while settling just under where it broke rather than near the floor: "
+      "%d, with a floor of %d" % (stage._rate_now, stage._floor()))
+
+print("but a link that has genuinely improved is tried again")
+# The memory fades while things are going well, or one bad minute holds the
+# picture down for the rest of the session.
+stage = a_stage()
+stage._rate_now = stage._ceiling()
+stage._rate_stepped = 0.0
+stage._ease_the_rate(stage.frame_queue_limit() + 1)
+stage._rate_now = 12000
+stage._rate_stepped = 0.0
+stage._ease_the_rate(stage.frame_queue_limit() + 1)
+for _ in range(400):
+    stage._rate_stepped = 0.0
+    stage.note_arrivals()
+check(stage._rate_broke is None,
+      "the memory is gone after several minutes of nothing going wrong, "
+      "because one bad patch must not hold the picture down all session")
 
 print("a browser that restarts is not a browser losing frames")
 peer = video.Peer.__new__(video.Peer)

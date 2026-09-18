@@ -479,6 +479,25 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
+console.log("\nnothing arriving is not a decoder that cannot decode");
+// This is what the flashing was. The rate controller climbed until the data
+// channel backed up, frames stopped for a few seconds, and the watchdog read
+// the silence as "this browser cannot handle the stream" -- so it walked the
+// codec spellings, ran out, and handed the picture back to WebRTC. Which
+// resumed the media line, which showed black until a keyframe, at which point
+// the page started the painter again and the cycle repeated every few
+// seconds.
+check(paintFile.includes("starving()"),
+      "the painter can say that nothing has arrived at all");
+check(paintFile.includes("return Boolean(last && !last.handed);"),
+      "which is what nothing handed over means, and says nothing whatever "
+      + "about the decoder");
+check(app.includes("if (painter.starving()) {"),
+      "and the watchdog waits rather than blaming it");
+check(app.indexOf("if (painter.starving()) {")
+      < app.indexOf("const more = paintNextSpelling();"),
+      "before it would have walked to the next spelling of the codec");
+
 console.log("\nthe presentation clock holds a frame for what the link owes it");
 // moonlight-web's FramePacer, adopted whole. Every number here is the control
 // law rather than a running decoder, which is the point of it being

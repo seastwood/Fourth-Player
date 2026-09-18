@@ -693,6 +693,13 @@ function makePainter(canvas, say) {
     waitingForKey() {
       return Boolean(last && last.handed > 0 && !last.keyed);
     },
+    /* Nothing has arrived at all since the last look. That is the link or the
+       host, and it says nothing whatever about whether this browser can
+       decode the stream -- so it must not be answered by walking to the next
+       spelling of the codec and then giving up having never been tested. */
+    starving() {
+      return Boolean(last && !last.handed);
+    },
     drawnLately() { return last ? last.drawn : 0; },
   };
 }

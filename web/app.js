@@ -9114,6 +9114,9 @@ let paintKeyAsks = 0;
 const PAINT_RECOVERIES = 3;
 let paintRecoveries = 0;
 
+/* Said once per dry spell rather than every four seconds. */
+let paintSaidStarved = false;
+
 function watchThePainting() {
   if (paintWatch) clearTimeout(paintWatch);
   // Ask now, so there is an answer to judge by when the deadline comes. The
@@ -9134,6 +9137,30 @@ function watchThePainting() {
     // the next spelling of the codec would answer a question nobody asked,
     // and then give up having never tried. So ask again and wait again, a
     // bounded number of times.
+    // Nothing arriving at all is not a decoder that cannot decode.
+    //
+    // This is what the flashing was. The rate controller climbed until the
+    // data channel backed up, frames stopped for a few seconds, and this
+    // watchdog read the silence as "this browser cannot handle the stream" --
+    // so it walked the codec spellings, ran out, and handed the picture back
+    // to WebRTC. Which resumed the media line, which showed black until a
+    // keyframe, at which point the page started the painter again and the
+    // whole cycle repeated every few seconds. Four faults' worth of log lines
+    // and all of them downstream of this one judgement.
+    //
+    // A stream that has stopped arriving is the link or the host. Wait for it
+    // and say so, for as long as it takes: the guest chose this way of
+    // drawing and switching them off it is not this watchdog's to decide.
+    if (painter.starving()) {
+      if (!paintSaidStarved) {
+        paintSaidStarved = true;
+        report("nothing is arriving on the picture channel; waiting rather "
+               + "than blaming the decoder");
+      }
+      watchThePainting();
+      return;
+    }
+    paintSaidStarved = false;
     if (painter.waitingForKey() && paintKeyAsks < PAINT_KEY_ASKS) {
       paintKeyAsks += 1;
       report("frames are arriving but none is a keyframe yet; asking again ("

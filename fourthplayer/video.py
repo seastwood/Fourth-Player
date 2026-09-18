@@ -386,6 +386,24 @@ BITRATE_FLOOR_SHARE = 0.15
 # controller whose own output feeds its input needs a clock between the two.
 BITRATE_STEP_SECONDS = 1.0
 
+# How much of a rate that backed the channel up is worth trying again, and how
+# fast that memory fades.
+#
+# Without it the controller oscillates rather than settles: it climbs 15% at a
+# time until the data channel backs up, stalls for a few seconds while the
+# queue drains, falls 25%, and climbs straight back into the same wall. Every
+# excursion over the top is a freeze somebody is watching. Measured: it broke
+# at 13652 kb/s -- "480829 bytes are waiting to be sent" -- and went round
+# again every twenty seconds.
+#
+# So the rate that broke it is remembered and the climb stops below it, and
+# the memory fades -- a fifth of a percent per calm report, which is minutes
+# of nothing going wrong before it will try that high again. Slow on purpose:
+# each probe that turns out to be wrong costs a stall somebody is watching,
+# and a steady picture is worth more than the last few percent of a link.
+BITRATE_PROBE_SHARE = 0.9
+BITRATE_PROBE_FADE = 1.002
+
 
 CAPTURE_APIS = {
     "dxgi": "Desktop Duplication",
@@ -1013,6 +1031,7 @@ class Stage:
         self._rate_now = None
         self._rate_calm = 0
         self._rate_stepped = 0.0
+        self._rate_broke = None
         self._last_pts = Gst.CLOCK_TIME_NONE
         self._gaps = []
         self._stamps = []
@@ -2111,6 +2130,10 @@ class Stage:
         limit = self.frame_queue_limit()
         if behind > limit:
             self._rate_calm = 0
+            # Where it broke, so the climb can stop below it rather than
+            # walking into the same wall every twenty seconds.
+            now = self._rate_now or self._ceiling()
+            self._rate_broke = min(self._rate_broke or now, now)
             self._set_rate(down=True,
                            why="%d bytes are waiting to be sent and %d is the "
                                "most worth keeping" % (behind, limit))
@@ -2143,6 +2166,13 @@ class Stage:
             # oscillates for ever.
             return
         self._rate_calm += 1
+        # A calm report is also evidence that whatever broke it may not any
+        # more, so the memory of that fades -- slowly, and only while things
+        # are going well.
+        if self._rate_broke:
+            self._rate_broke = int(self._rate_broke * BITRATE_PROBE_FADE)
+            if self._rate_broke >= self._ceiling():
+                self._rate_broke = None
         if self._rate_calm < BITRATE_CALM:
             return
         self._rate_calm = 0
@@ -2233,6 +2263,13 @@ class Stage:
         if down:
             want = max(floor, int(self._rate_now * BITRATE_DOWN))
         else:
+            # Never climb back into a rate that has been seen to break this
+            # channel. Only on the way up: capping the step that *discovered*
+            # it would make the fall deeper than the quarter it is meant to be.
+            if self._rate_broke:
+                asked = max(floor,
+                            min(asked,
+                                int(self._rate_broke * BITRATE_PROBE_SHARE)))
             if self._rate_now >= asked:
                 return
             want = min(asked, int(self._rate_now * BITRATE_UP) + 1)
