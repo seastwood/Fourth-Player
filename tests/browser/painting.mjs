@@ -399,6 +399,20 @@ check(early > 0, "a frame on the fastest path is held: " + early.toFixed(1) + "m
 const already = jittery.hold(42 * 16.7, 42 * 16.7 + 40);
 check(already === 0, "one that is already late goes out now");
 
+console.log("\nand one early frame does not poison the baseline for ever");
+// This was the stutter. The baseline was the fastest frame ever seen, kept
+// for the life of the connection, so a single early arrival made everything
+// afterwards look late -- the reserve sat pinned at its maximum, holding
+// every frame for most of a frame interval and releasing late ones at once.
+// "25ms reserve" in every window, on a link with nothing wrong with it.
+const poisoned = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
+                                   WINDOW: 120 });
+poisoned.hold(0, 0);                       // one frame with no transit at all
+for (let i = 1; i < 200; i += 1) poisoned.hold(i * 33.3, i * 33.3 + 20);
+check(poisoned.reserve() === 0,
+      "a steady link after one freak arrival reserves nothing: "
+      + poisoned.reserve().toFixed(1));
+
 console.log("\nand the reserve is capped, because a reserve is latency");
 const wild = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
                                WINDOW: 120 });

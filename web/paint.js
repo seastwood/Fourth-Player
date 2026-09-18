@@ -45,38 +45,46 @@ const PACE = {
 
 function makePacer(limits) {
   const c = limits || PACE;
+  // Raw transits, not excesses. The difference matters and cost a round: the
+  // baseline used to be the fastest frame *ever seen*, kept for the life of
+  // the connection, so one early arrival at the start made every frame
+  // afterwards look late -- and the reserve sat pinned at its maximum,
+  // holding every frame for most of a frame interval and releasing the late
+  // ones immediately. That is a stutter manufactured by the thing meant to
+  // remove one, and the report said so plainly: "25ms reserve", every window.
+  //
+  // So the window holds what actually arrived, the baseline is the fastest
+  // within it, and both move on. The comment above always said "recent" and
+  // now the code does too.
   const seen = [];
-  let base = null;                       // the fastest transit seen lately
+
+  function spread() {
+    const sorted = seen.slice().sort((a, b) => a - b);
+    const at = Math.min(sorted.length - 1,
+                        Math.floor(sorted.length * c.QUANTILE));
+    return { base: sorted[0], tail: sorted[at] };
+  }
 
   return {
     /* Given when a frame was captured and when it arrived, how long to hold
        it. Returns 0 to draw it now. */
     hold(captureMs, nowMs) {
       const transit = nowMs - captureMs;
-      if (base === null || transit < base) base = transit;
-      const excess = transit - base;
-      seen.push(excess);
+      seen.push(transit);
       if (seen.length > c.WINDOW) seen.shift();
       // Not enough to have an opinion yet: drawing immediately is the old
       // behaviour and the right default before anything is known.
       if (seen.length < 10) return 0;
-      const sorted = seen.slice().sort((a, b) => a - b);
-      const at = Math.min(sorted.length - 1,
-                          Math.floor(sorted.length * c.QUANTILE));
-      const reserve = Math.min(c.MAX_MS, sorted[at]);
-      const wait = reserve - excess;
+      const { base, tail } = spread();
+      const reserve = Math.min(c.MAX_MS, tail - base);
+      const wait = reserve - (transit - base);
       return wait > c.SLACK_MS ? wait : 0;
     },
-    /* The fastest path can only improve as the link settles, and a baseline
-       that only ever falls would make every later frame look late for ever.
-       Forgetting it periodically is what keeps the reserve honest. */
-    forget() { base = null; seen.length = 0; },
+    forget() { seen.length = 0; },
     reserve() {
       if (seen.length < 10) return 0;
-      const sorted = seen.slice().sort((a, b) => a - b);
-      const at = Math.min(sorted.length - 1,
-                          Math.floor(sorted.length * c.QUANTILE));
-      return Math.min(c.MAX_MS, sorted[at]);
+      const { base, tail } = spread();
+      return Math.min(c.MAX_MS, tail - base);
     },
   };
 }
