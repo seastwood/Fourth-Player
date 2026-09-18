@@ -796,6 +796,20 @@
           </div>
           <p class="footnote">Only affects your own pointer. Applies to a mouse
              and to dragging on a touchscreen alike.</p>
+          <div class="acct-row">
+            <label class="tune-label" for="desk-raw">Mouse input</label>
+            <select id="desk-raw" class="chip"
+                    aria-label="Whether your own machine smooths the mouse">
+              <option value="0">Like this machine</option>
+              <option value="1">Raw, for games</option>
+            </select>
+          </div>
+          <p class="footnote">Raw sends the mouse exactly as the hardware
+             reports it, with none of this machine&rsquo;s acceleration, which
+             is what a game aiming expects &mdash; the console applies its own.
+             It changes how fast the pointer feels, so set the speed above to
+             taste after switching. Not every browser offers it; Safari does
+             not, and falls back.</p>
         </section>
 
         <section class="acct-block" id="session-reshare" hidden>

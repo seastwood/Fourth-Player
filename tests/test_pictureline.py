@@ -123,9 +123,9 @@ check("BITRATE_CALM" in video,
 
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
-check('struct.pack("<BQHH"' in video,
+check('struct.pack("<BQHHI"' in video,
       "each piece says what it is: flags, the capture time, which piece it "
-      "is and how many there are")
+      "is, how many there are, and the host's own number for the frame")
 check("flags |= 2" in video and "flags |= 4" in video,
       "which piece starts a frame and which ends it")
 check("pieces = max(1," in video,
@@ -138,8 +138,9 @@ check("const FIRST = 2, LAST = 4;" in worker, "reading the same two flags")
 check("getBigUint64(1, true)" in worker, "and the same little-endian stamp")
 check("getUint16(9, true)" in worker and "getUint16(11, true)" in worker,
       "and the piece number and count that follow it")
-check("new Uint8Array(buffer, 13)" in worker,
-      "with the body starting after all thirteen header bytes")
+check("getUint32(13, true)" in worker, "and the frame's number after those")
+check("new Uint8Array(buffer, 17)" in worker,
+      "with the body starting after all seventeen header bytes")
 check("building.parts.push(body)" in worker, "the pieces are collected")
 check("if (!(flags & LAST)) return;" in worker,
       "and nothing is decoded until the last one arrives")
@@ -217,12 +218,10 @@ check("frames_arriving" in video, "as a share of what it sent")
 # window that straddled a few frames read as 69% arriving on a LAN with
 # nothing wrong. It walked the encoder from 62 Mb/s to 1.5 on a link carrying
 # everything.
-check('report.get("total")' in video and "state.gotAll" in worker,
-      "from running totals rather than a window against a window, because "
-      "the two ends' seconds are not the same second")
-check("_shortfall" in video,
-      "compared as how much the gap between the totals grew, which cancels "
-      "whatever the windows do with their edges")
+check('report.get("seq")' in video and "seq: state.lastSeq" in worker,
+      "against the host's own numbering, so there is no origin to agree "
+      "about -- see tests/test_ratecontrol.py for the two versions of this "
+      "that compared numbers meaning different things, and what they cost")
 check("FRAMES_ARRIVING_LOW" in video and "FRAMES_ARRIVING_GOOD" in video,
       "and steers the encoder by it")
 check("def _arriving" in video,

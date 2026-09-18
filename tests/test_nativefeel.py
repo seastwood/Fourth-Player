@@ -36,10 +36,22 @@ def check(ok, what):
 app = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
 win = open(os.path.join(ROOT, "fourthplayer", "windesk.py"), encoding="utf-8").read()
 
-print("the browser is asked for movement nothing has smoothed")
+page = open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()
+
+print("the browser can be asked for movement nothing has smoothed")
 check("unadjustedMovement: true" in app,
-      "the pointer lock asks for the raw motion, which is what a game reading "
-      "raw input gets locally")
+      "the pointer lock can ask for the raw motion, which is what a game "
+      "reading raw input gets locally")
+# Offered rather than imposed. Raw counts arrive in the mouse's own units
+# instead of the pixels the accelerated ones use, so turning it on changes how
+# fast the pointer feels -- sometimes a lot, and it was reported as the cursor
+# feeling funky. The speed setting beside it is what puts that back.
+check('id="desk-raw"' in page, "and it is the guest's choice, in the page")
+check("function wantsRawMouse" in app and 'RAW_KEY' in app,
+      "remembered per browser, like the speed beside it")
+check("if (wantsRawMouse()) {" in app,
+      "and asked for only when it has been chosen, so nobody's pointer "
+      "changes under them")
 # Safari rejects the request rather than ignoring the option, so asking and
 # not handling the rejection is asking for no pointer lock at all.
 spot = app.index("function deskCapture()")

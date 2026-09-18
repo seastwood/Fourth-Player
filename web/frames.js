@@ -46,6 +46,7 @@ const state = {
   handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
   lost: 0,
   gotAll: 0, shownAll: 0, toldAt: 0, toldGot: 0, toldShown: 0,
+  lastSeq: 0,
   ever: false,
   saidDraw: false,
   saidFirst: false,
@@ -255,11 +256,12 @@ function tell(at) {
   state.toldGot = state.gotAll;
   state.toldShown = state.shownAll;
   self.postMessage({ tally: {
-    // The running total is what the host compares against, not `got`: the
-    // two ends' seconds are not the same second, and comparing a window here
-    // against a window there read as 69% arriving on a LAN carrying
-    // everything. Totals cancel whatever the windows do with their edges.
-    total: state.gotAll,
+    // The host's own number for the last frame that arrived, and how many
+    // arrived since the last word. The host knows how many it sent between
+    // those two numbers, so the two counts mean the same thing -- which is
+    // the third attempt at this and the first that is true. See
+    // _take_picture_report for the two that were not.
+    seq: state.lastSeq,
     got, shown,
     reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
   } });
@@ -587,13 +589,19 @@ function chunk(buffer) {
   const stamp = Number(view.getBigUint64(1, true));
   const index = view.getUint16(9, true);
   const pieces = view.getUint16(11, true);
-  const body = new Uint8Array(buffer, 13);
+  // The host's own number for this frame. Both ends talk about it rather than
+  // about their own counts: a worker is rebuilt whenever the painter restarts
+  // and its totals go back to zero, and comparing that against a host counter
+  // that never restarts reported thousands of frames missing at once and
+  // slammed the encoder to its floor. There is no origin to agree about here.
+  const seq = view.getUint32(13, true);
+  const body = new Uint8Array(buffer, 17);
   if (flags & FIRST) {
     // A frame already under construction when the next one starts means the
     // tail of that one never arrived.
     if (building) lostFrame("its last piece never came");
     building = { key: (flags & 1) !== 0, stamp, parts: [], size: 0,
-                 next: 0, pieces };
+                 next: 0, pieces, seq };
   }
   if (!building) return;                 // a tail with no head: wait for one
   if (index !== building.next || stamp !== building.stamp) {
@@ -616,6 +624,7 @@ function chunk(buffer) {
   building = null;
   state.handed += 1;
   state.gotAll += 1;
+  state.lastSeq = made.seq;
   // Once per connection, not once per report: the counters are zeroed every
   // window, so this was announcing a first frame every twelve seconds.
   if (!state.saidFirst) {

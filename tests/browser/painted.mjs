@@ -106,14 +106,20 @@ const pps = [0x68, 0xce, 0x3c, 0x80];
 const idr = [0x65, 0x88, 0x84, 0x21];
 const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
                                  0, 0, 1, ...idr]).buffer;
+let framedSeq = 0;
 const framed = (bytes, key, stamp, first, last, index = 0, pieces = 1) => {
-  const out = new Uint8Array(13 + bytes.byteLength);
+  const out = new Uint8Array(17 + bytes.byteLength);
   const view = new DataView(out.buffer);
   view.setUint8(0, (key ? 1 : 0) | (first ? 2 : 0) | (last ? 4 : 0));
   view.setBigUint64(1, BigInt(stamp), true);
   view.setUint16(9, index, true);
   view.setUint16(11, pieces, true);
-  out.set(new Uint8Array(bytes), 13);
+  // The host's own number for the frame. Every piece of one frame carries the
+  // same number, which is what lets the far end report progress in numbers
+  // the host assigned rather than in a count of its own.
+  if (first) framedSeq += 1;
+  view.setUint32(13, framedSeq, true);
+  out.set(new Uint8Array(bytes), 17);
   return out.buffer;
 };
 self_.onmessage({ data: { chunk: framed(keyframe, true, 0, true, true) } });
@@ -366,8 +372,10 @@ await new Promise((go) => globalThis.setTimeout(go, 0));
 const tally = sent.filter((m) => m.tally).pop();
 check(tallies() === talliedBefore + 1 && tally, "but once the second is up");
 check(typeof tally.tally.got === "number"
-      && typeof tally.tally.shown === "number",
-      "saying how many arrived and how many were painted");
+      && typeof tally.tally.shown === "number"
+      && typeof tally.tally.seq === "number",
+      "saying how many arrived, how many were painted, and which of the "
+      + "host's frames was the last to turn up");
 
 console.log("every combination worth asking is asked, one at a time");
 // iOS Safari refused both start codes and the parameter sets with nothing

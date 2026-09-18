@@ -5245,6 +5245,30 @@ function deskButtonsAllUp() {
   deskSend(out);
 }
 
+/* Whether to ask for the mouse before this machine has had its way with it.
+ *
+ * Remembered per browser, like the speed beside it, and off by default. Raw
+ * motion is the right answer for aiming -- the host applies its own
+ * acceleration, so an already-accelerated number is a curve applied twice and
+ * a pointer that does not go where it is sent. It is not the right answer for
+ * everybody: raw counts come in the mouse's own units rather than in the
+ * pixels the accelerated ones use, so turning it on changes how fast the
+ * pointer feels, sometimes a lot. Reported, fairly, as the cursor feeling
+ * funky. So it is offered rather than imposed, with the speed setting next to
+ * it to put back what it changes. */
+const RAW_KEY = "fp:raw-mouse";
+
+function wantsRawMouse() {
+  try { return localStorage.getItem(RAW_KEY) === "1"; } catch (_) { return false; }
+}
+
+function setRawMouse(on) {
+  try { localStorage.setItem(RAW_KEY, on ? "1" : "0"); } catch (_) {}
+  // Takes effect on the next capture: a lock's options cannot be changed
+  // while it is held, and dropping the pointer to apply a setting is worse
+  // than the setting arriving a moment later.
+}
+
 function deskCapture() {
   if (!deskHeld || deskCaptured()) return;
   if (!video.requestPointerLock) return;
@@ -5264,10 +5288,12 @@ function deskCapture() {
   // so a plain lock is asked for when that happens. The difference is not
   // subtle on a mouse and matters most to exactly the people who asked.
   let ask = null;
-  try {
-    ask = video.requestPointerLock({ unadjustedMovement: true });
-  } catch (_) {
-    ask = null;
+  if (wantsRawMouse()) {
+    try {
+      ask = video.requestPointerLock({ unadjustedMovement: true });
+    } catch (_) {
+      ask = null;
+    }
   }
   if (ask && ask.catch) {
     ask.catch(() => {
@@ -8651,6 +8677,16 @@ if (el("desk-speed")) {
   el("desk-speed").addEventListener("change", (event) => {
     setDeskSpeed(event.target.value);
     el("desk-speed").value = String(deskSpeed);
+  });
+}
+
+if (el("desk-raw")) {
+  el("desk-raw").value = wantsRawMouse() ? "1" : "0";
+  el("desk-raw").addEventListener("change", (event) => {
+    setRawMouse(event.target.value === "1");
+    if (deskHeld && deskCaptured()) {
+      showToast("Raw mouse applies the next time you take the pointer");
+    }
   });
 }
 

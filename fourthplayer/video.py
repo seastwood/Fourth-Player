@@ -357,16 +357,34 @@ FRAMES_ARRIVING_GOOD = 0.97
 DATA_CHANNEL_CEILING_KBPS = 20000
 
 # What the encoder is allowed to do about a link that cannot carry what it is
-# being given. Down quickly, up slowly, and never below something watchable.
-BITRATE_FLOOR_KBPS = 400
-BITRATE_DOWN = 0.75          # a quarter off, when the queue will not drain
-BITRATE_UP = 1.08            # eight percent back, per quiet spell
-BITRATE_CALM = 3             # guest reports -- seconds -- of quiet before
-                             # it climbs a step. Each step is a reconfiguration
-                             # of a running NVENC, which is not free, and this
-                             # was once counted in frames: forty of them, so a
-                             # link behaving itself was asked to change its
-                             # mind every seven hundred milliseconds for ever.
+# being given.
+#
+# Every number here has been wrong once, and the way it was wrong is worth
+# keeping: this controller walked a 62 Mb/s link down to 400 kb/s on a LAN and
+# left it there, and both paths looked terrible because the encoder is shared.
+# A controller that can do that is worse than none, so the shape is now:
+# evidence it can trust, one step per second at most in either direction, a
+# floor that is still a picture, and a climb fast enough to undo a mistake.
+BITRATE_DOWN = 0.75          # a quarter off, when the evidence says to
+BITRATE_UP = 1.15            # and fifteen percent back, per calm report
+BITRATE_CALM = 2             # reports of quiet before it climbs a step
+
+# Never below this fraction of what was asked for, nor this in absolute terms.
+#
+# 400 kb/s was the floor and it is not a picture at any size this streams --
+# it is a smear that happens to move. A floor is meant to be the worst
+# watchable answer, not the smallest number the arithmetic can reach.
+BITRATE_FLOOR_KBPS = 1500
+BITRATE_FLOOR_SHARE = 0.15
+
+# The shortest gap between two steps down, whatever triggered them.
+#
+# Without it the queue-depth path fired per frame: the limit it compares
+# against is derived from the rate, so lowering the rate lowered the limit,
+# so the same backlog looked worse again. Measured: 1708 -> 1281 -> 960 ->
+# 720 -> 540 -> 405 -> 400 inside one second, from one momentary backlog. A
+# controller whose own output feeds its input needs a clock between the two.
+BITRATE_STEP_SECONDS = 1.0
 
 
 CAPTURE_APIS = {
@@ -994,6 +1012,7 @@ class Stage:
         # What the encoder is being run at, as against what was asked for.
         self._rate_now = None
         self._rate_calm = 0
+        self._rate_stepped = 0.0
         self._last_pts = Gst.CLOCK_TIME_NONE
         self._gaps = []
         self._stamps = []
@@ -2056,8 +2075,17 @@ class Stage:
         return Gst.FlowReturn.OK
 
     def frame_queue_limit(self):
-        """How many bytes may sit in a send queue before frames are skipped."""
-        rate = max(1, int(self._rate_now or self.cfg.bitrate_kbps))
+        """How many bytes may sit in a send queue before frames are skipped.
+
+        From what was *asked* for, never from what is being sent right now.
+        This used to read `self._rate_now`, which is the number this limit
+        exists to control: lowering the rate lowered the limit, so the same
+        backlog looked worse, so it lowered the rate again. One momentary
+        backlog of 44843 bytes took it 1708 -> 1281 -> 960 -> 720 -> 540 ->
+        405 -> 400 inside a single second. A controller whose output feeds its
+        own input has to be broken somewhere, and this is the somewhere.
+        """
+        rate = max(1, int(self.cfg.bitrate_kbps))
         return int(rate * 1000 / 8 * FRAME_QUEUE_SECONDS)
 
     def _ease_the_rate(self, behind):
@@ -2176,16 +2204,34 @@ class Stage:
                   if getattr(peer, "frames_wanted", False)]
         return min(shares) if shares else 1.0
 
+    def _floor(self):
+        """The worst picture worth sending, rather than the smallest number.
+
+        A share of what was asked for as well as an absolute, because 1500
+        kb/s is a fair floor at 720p and a smear at 1440p. Never above the
+        ceiling, or the floor would raise the rate.
+        """
+        asked = max(1, int(self.cfg.bitrate_kbps))
+        return min(self._ceiling(),
+                   max(BITRATE_FLOOR_KBPS, int(asked * BITRATE_FLOOR_SHARE)))
+
     def _set_rate(self, down, why):
         """Move the encoder's bitrate one step, and say why."""
         encoder = self.encoder
         if encoder is None:
             return
-        asked = max(BITRATE_FLOOR_KBPS, self._ceiling())
+        floor = self._floor()
+        asked = max(floor, self._ceiling())
         if self._rate_now is None:
             self._rate_now = asked
+        # One step a second at most, whatever asked for it. Without this the
+        # queue-depth path fired per frame and took the rate to the floor in
+        # under a second on one momentary backlog.
+        now = time.monotonic()
+        if down and now - self._rate_stepped < BITRATE_STEP_SECONDS:
+            return
         if down:
-            want = max(BITRATE_FLOOR_KBPS, int(self._rate_now * BITRATE_DOWN))
+            want = max(floor, int(self._rate_now * BITRATE_DOWN))
         else:
             if self._rate_now >= asked:
                 return
@@ -2203,6 +2249,7 @@ class Stage:
                  else "keeping up, so giving some back",
                  self._rate_now, want, why)
         self._rate_now = want
+        self._rate_stepped = now
 
     def _note_gap(self, kind):
         """Say so when this host stops producing, rather than only suspecting it.
@@ -2522,9 +2569,8 @@ class Peer:
         self._said_shut = False
         self.frames_skipped = 0
         self._sent_frames = 0
-        self._reported_at = 0
         self._reports = 0
-        self._shortfall = 0
+        self._reported_seq = None
         # What fraction of the frames sent to this guest reach it. Unknown
         # until it says so, and "all of them" is the honest starting guess:
         # nothing has gone wrong yet.
@@ -2752,8 +2798,7 @@ class Peer:
         # from the last one would otherwise hold the encoder down -- or, worse,
         # let it climb on a report that predates this decoder.
         self.frames_arriving = 1.0
-        self._reported_at = self._sent_frames
-        self._shortfall = 0
+        self._reported_seq = None
         log.info("peer %s: %s sending whole frames down the picture channel",
                  self.id, "started" if want else "stopped")
         if want:
@@ -2772,26 +2817,32 @@ class Peer:
     def _take_picture_report(self, text):
         """What the browser says it actually received.
 
-        The only honest measure of the link there is. The host's own send
-        queue read zero bytes behind while the browser was receiving
-        thirty-six of every sixty frames sent, because an empty queue proves
-        the bytes were handed to SCTP, not that they arrived. This end knows
-        what it sent; only that end knows what turned up.
+        The third version of this, and the first that compares two numbers
+        that mean the same thing. Both of the others were wrong in a way that
+        did real damage, because what they feed is the encoder:
 
-        Counted as a running shortfall rather than a per-window ratio, which
-        is the second version of this and the correct one. The first compared
-        "what the browser saw in its last second" against "what this end sent
-        between its last two reports", and those are not the same second: the
-        report's own travel time moves the boundary, so a window that happened
-        to straddle a few frames read as 69% arriving on a LAN with nothing
-        wrong at all. That is not a cosmetic error -- it walked the encoder
-        from 62 Mb/s down to 1.5 on a link that was carrying everything.
+        The first compared "frames the browser saw in its last second" against
+        "frames this end sent between its last two reports". Those are not the
+        same second -- the report's own travel time moves the boundary -- so a
+        window that straddled a few frames read as 69% on a LAN carrying
+        everything, and the rate walked from 62 Mb/s to 1.5.
 
-        The shortfall cancels it. Both ends count from the beginning, and what
-        is compared is how much the gap between the two totals *grew* between
-        one report and the next. Whatever the windows do with their edges, a
-        frame that arrives is counted on both sides eventually, so a stable
-        gap means nothing is being lost however ragged the reporting.
+        The second compared running totals, on the reasoning that totals
+        cancel whatever the windows do. They do -- if both sides count from
+        the same beginning. The browser's worker is rebuilt whenever the
+        painter restarts and its total goes back to zero, while this end keeps
+        counting, so the first report after a restart claimed thousands of
+        frames missing at once and slammed the encoder to the floor. The log
+        read "the browser is 7836 frames behind what was sent, 7836 more than
+        last time out of 60 sent (0% arriving)", which is not a link problem
+        being reported, it is a counter being compared with a different
+        counter.
+
+        So every frame carries a number this end assigned, and the browser
+        reports the last one it saw along with how many it received since its
+        previous report. Both numbers are the host's, so there is no origin to
+        agree about and nothing to reset: a restart shows up as a sequence
+        this end recognises, and is re-anchored rather than believed.
         """
         try:
             report = json.loads(text)
@@ -2799,26 +2850,26 @@ class Peer:
             log.debug("peer %s sent something unreadable up the picture "
                       "channel: %r", self.id, text[:120])
             return
-        got = int(report.get("total") or 0)
-        if not got:
-            # A browser too old to send a total. Nothing to compare, and a
-            # guess here is what the last version of this was.
+        if "seq" not in report:
+            return                      # a browser too old to number them
+        seq = int(report.get("seq") or 0)
+        got = int(report.get("got") or 0)
+        last = self._reported_seq
+        self._reported_seq = seq
+        if last is None or seq < last:
+            return                      # first report, or a restart: anchor only
+        expected = seq - last
+        # More than a couple of seconds of frames between two reports means
+        # the reports themselves stopped, not that the picture did.
+        if expected <= 0 or expected > 600:
             return
-        sent = self._sent_frames
-        since = sent - self._reported_at
-        missing = max(0, sent - got)
-        lost = max(0, missing - self._shortfall)
-        self._reported_at = sent
-        self._shortfall = missing
-        if since <= 0:
-            return
-        self.frames_arriving = max(0.0, min(1.0, 1.0 - lost / float(since)))
+        self.frames_arriving = max(0.0, min(1.0, got / float(expected)))
         self._reports += 1
         if self._reports % 10 == 1 or self.frames_arriving < FRAMES_ARRIVING_LOW:
-            log.info("peer %s: the browser is %d frames behind what was sent, "
-                     "%d more than last time out of %d sent (%.0f%% arriving), "
-                     "painted %d, with %dms in hand",
-                     self.id, missing, lost, since, self.frames_arriving * 100,
+            log.info("peer %s: the browser received %d of the %d frames sent "
+                     "since its last word (%.0f%%), painted %d, with %dms in "
+                     "hand", self.id, got, expected,
+                     self.frames_arriving * 100,
                      int(report.get("shown") or 0),
                      int(report.get("reserve") or 0))
         self.stage.note_arrivals()
@@ -2911,7 +2962,8 @@ class Peer:
                 flags |= 2
             if end >= total:
                 flags |= 4
-            head = struct.pack("<BQHH", flags, int(stamp), index, pieces)
+            head = struct.pack("<BQHHI", flags, int(stamp), index, pieces,
+                               self._sent_frames & 0xFFFFFFFF)
             chunk = head + data[at:end]
             channel.emit("send-data", GLib.Bytes.new(chunk))
             at = end
