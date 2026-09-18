@@ -107,7 +107,8 @@ const idr = [0x65, 0x88, 0x84, 0x21];
 const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
                                  0, 0, 1, ...idr]).buffer;
 let framedSeq = 0;
-const framed = (bytes, key, stamp, first, last, index = 0, pieces = 1) => {
+const framed = (bytes, key, stamp, first, last, index = 0, pieces = 1,
+                seq = 0) => {
   const out = new Uint8Array(17 + bytes.byteLength);
   const view = new DataView(out.buffer);
   view.setUint8(0, (key ? 1 : 0) | (first ? 2 : 0) | (last ? 4 : 0));
@@ -117,8 +118,12 @@ const framed = (bytes, key, stamp, first, last, index = 0, pieces = 1) => {
   // The host's own number for the frame. Every piece of one frame carries the
   // same number, which is what lets the far end report progress in numbers
   // the host assigned rather than in a count of its own.
-  if (first) framedSeq += 1;
-  view.setUint32(13, framedSeq, true);
+  // Numbered by the first piece, unless the caller says which frame this is:
+  // on an unordered channel the last piece can arrive before the first, and
+  // then "the first piece starts a new frame" is not true of the wire.
+  if (seq) framedSeq = seq;
+  else if (first) framedSeq += 1;
+  view.setUint32(13, seq || framedSeq, true);
   out.set(new Uint8Array(bytes), 17);
   return out.buffer;
 };
@@ -359,28 +364,40 @@ const rebuilt = new Uint8Array(built[0].chunks[fedBefore].data);
 check(rebuilt.length === half.length,
       `put back to its full length: ${rebuilt.length} of ${half.length}`);
 
-console.log("a frame with a piece missing is dropped, not decoded");
-// The channel gives each piece a lifetime now rather than retransmitting it
-// for ever while everything behind it waits, so pieces can go missing. A head
-// and a tail concatenated is not a frame: feeding one to the decoder turns a
-// stall into corruption that lasts until the next keyframe, and with an
-// infinite GOP there is no next one unless somebody asks.
+console.log("a frame with a piece missing does not hold up the ones behind it");
+// The channel is unordered now: an ordered one holds every frame behind a
+// lost packet until SCTP's one-second minimum timeout expires, which the
+// guest's own page measured as pieces stopping for 1073ms while its animation
+// frames carried on at 18ms. So pieces of different frames interleave and the
+// pieces of one frame arrive in any order, and a frame that cannot be
+// completed must be given up rather than waited on for ever.
 const beforeHole = built[0].chunks.length;
 const askedBefore = sent.filter((m) => m.ask === "key").length;
+clock += 1000;                          // past the limit on asking
+// A frame that will never be complete: one piece of three.
 self_.onmessage({ data: { chunk: framed(head, true, 7, true, false, 0, 3) } });
-// Piece 1 never arrives; piece 2 does.
-self_.onmessage({ data: { chunk: framed(tail, true, 7, false, true, 2, 3) } });
 check(built[0].chunks.length === beforeHole,
-      "nothing was decoded from the pieces that did arrive");
-check(sent.filter((m) => m.ask === "key").length === askedBefore + 1,
-      "and a keyframe was asked for");
+      "an incomplete frame decodes nothing");
+// And a whole frame behind it, which must not be held hostage to it.
+self_.onmessage({ data: { chunk: framed(keyframe, true, 8, true, true) } });
+check(built[0].chunks.length === beforeHole,
+      "nor does the one behind it, while the first might still arrive");
+clock += 400;                           // past PATCH_MS
+await refresh(1);                       // a tick drains it
+check(built[0].chunks.length === beforeHole + 1,
+      "but once it plainly is not coming, the one behind it goes in");
+check(sent.filter((m) => m.ask === "key").length > askedBefore,
+      "and a keyframe was asked for, because everything after a dropped "
+      + "frame decodes against something that never arrived");
 
-console.log("a frame that is never finished does not swallow the next one");
-const beforeOrphan = built[0].chunks.length;
-self_.onmessage({ data: { chunk: framed(head, true, 8, true, false, 0, 2) } });
-self_.onmessage({ data: { chunk: framed(keyframe, true, 9, true, true) } });
-check(built[0].chunks.length === beforeOrphan + 1,
-      "the whole frame behind it was decoded");
+console.log("and pieces of one frame may arrive in any order");
+const backwards = built[0].chunks.length;
+const pair = framedSeq + 1;
+self_.onmessage({ data: { chunk: framed(tail, true, 9, false, true, 1, 2, pair) } });
+check(built[0].chunks.length === backwards, "the last piece alone is not a frame");
+self_.onmessage({ data: { chunk: framed(head, true, 9, true, false, 0, 2, pair) } });
+check(built[0].chunks.length === backwards + 1,
+      "and the first one completes it, arriving second");
 
 console.log("and what arrived is reported back once a second");
 // The host's own send queue read empty while this end was receiving
@@ -401,27 +418,21 @@ check(typeof tally.tally.got === "number"
       "saying how many arrived, how many were painted, and which of the "
       + "host's frames was the last to turn up");
 
-console.log("a gap in the host's numbering waits for a keyframe");
-// The host drops to the next keyframe under congestion rather than punching a
-// hole -- a WebCodecs decoder answers a missing reference with `Decoding
-// error` and stops, which tears the whole picture down. This is the half that
-// does not depend on the host having remembered to: the frame numbers are on
-// the wire, so a gap is visible from here.
+console.log("a gap in the host's numbering ends the run until a keyframe");
+// Frames must reach the decoder in order -- each is decoded against the one
+// before -- so a frame that cannot be completed is not merely skipped. It
+// ends the run, and nothing is fed until a keyframe restarts it.
 const beforeGap = built[0].chunks.length;
-const askedGap = sent.filter((m) => m.ask === "key").length;
-// Past the rate limit on asking, which an earlier case in this file has just
-// spent. Asking is deliberately throttled: a host answering every request
-// spends the whole bitrate on recovery.
 clock += 1000;
 framedSeq += 5;                        // five frames that never arrived
 self_.onmessage({ data: { chunk: framed(deltaFrame, false, 20, true, true) } });
+clock += 400;
+await refresh(1);
 check(built[0].chunks.length === beforeGap,
       "the frame after the gap is not fed to the decoder");
-check(sent.filter((m) => m.ask === "key").length > askedGap,
-      "and a keyframe is asked for");
 self_.onmessage({ data: { chunk: framed(deltaFrame, false, 21, true, true) } });
 check(built[0].chunks.length === beforeGap,
-      "nor is the one after that, until a keyframe comes");
+      "nor is the one after that");
 self_.onmessage({ data: { chunk: framed(keyframe, true, 22, true, true) } });
 check(built[0].chunks.length === beforeGap + 1,
       "and the keyframe restarts it");

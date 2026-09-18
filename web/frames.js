@@ -313,6 +313,12 @@ const BEAT_GAP_MS = 100;
 
 function tick() {
   state.ticks += 1;
+  // Give up on a frame that is holding the rest back, even when nothing new
+  // is arriving to notice it. drain() is otherwise only reached by a piece
+  // turning up, so a stall that begins with a half-built frame would wait for
+  // the stall to end before deciding the frame was lost -- which is the wrong
+  // way round.
+  if (building.size) drain();
   // Only to the memory bound, oldest first.
   //
   // A queued frame is early, not stale: the queue *is* the reserve. This used
@@ -656,7 +662,25 @@ function close() {
  * against something that never arrived.
  */
 const FIRST = 2, LAST = 4;
-let building = null;
+
+/* Frames being put back together, by the host's number for them.
+ *
+ * The channel is unordered, so pieces of different frames interleave and the
+ * pieces of one frame arrive in any order. Each one says which frame it
+ * belongs to, which piece it is and how many there are, which is everything
+ * needed to do this without the channel keeping anything in sequence -- and
+ * not keeping things in sequence is the whole point: an ordered stream holds
+ * every frame behind a lost packet until SCTP's one-second timeout expires,
+ * which was a full second of frozen picture per lost packet.
+ */
+const building = new Map();            // seq -> { key, stamp, pieces, parts }
+let wantSeq = 0;                       // the next frame to hand over
+
+/* How long a frame may be incomplete while newer ones are ready.
+ *
+ * The same figure the host abandons a piece after: past it, the piece is not
+ * coming, and holding the frames behind it is the very thing being fixed. */
+const PATCH_MS = 180;
 
 /* Ask for a keyframe, but not once per lost frame: on a link losing pieces
    steadily that is a request per frame, and a host answering all of them
@@ -666,16 +690,15 @@ let building = null;
 let askedKeyAt = 0;
 const ASK_KEY_EVERY = 400;
 
-function lostFrame(why) {
-  building = null;
+function askForKey(why) {
   state.lost += 1;
   const at = (typeof performance !== "undefined") ? performance.now() : Date.now();
   if (at - askedKeyAt < ASK_KEY_EVERY) return;
   askedKeyAt = at;
   self.postMessage({ ask: "key" });
   if (state.lost <= 3 || state.lost % 200 === 0) {
-    say("a frame arrived with a hole in it (" + why + "), so it was dropped "
-        + "and a keyframe asked for; " + state.lost + " so far");
+    say("a frame could not be put back together (" + why + "), so it was "
+        + "dropped and a keyframe asked for; " + state.lost + " so far");
   }
 }
 
@@ -688,68 +711,88 @@ function chunk(buffer) {
   // The host's own number for this frame. Both ends talk about it rather than
   // about their own counts: a worker is rebuilt whenever the painter restarts
   // and its totals go back to zero, and comparing that against a host counter
-  // that never restarts reported thousands of frames missing at once and
-  // slammed the encoder to its floor. There is no origin to agree about here.
+  // that never restarts reported thousands of frames missing at once.
   const seq = view.getUint32(13, true);
   const body = new Uint8Array(buffer, 17);
-  if (flags & FIRST) {
-    // A frame already under construction when the next one starts means the
-    // tail of that one never arrived.
-    if (building) lostFrame("its last piece never came");
-    building = { key: (flags & 1) !== 0, stamp, parts: [], size: 0,
-                 next: 0, pieces, seq };
+
+  if (!wantSeq || seq < wantSeq - 300) wantSeq = seq;   // first, or a restart
+  if (seq < wantSeq) return;                            // already given up on
+
+  let made = building.get(seq);
+  if (!made) {
+    made = { key: (flags & 1) !== 0, stamp, pieces: pieces || 1,
+             parts: new Array(pieces || 1), have: 0,
+             at: (typeof performance !== "undefined") ? performance.now()
+                                                      : Date.now() };
+    building.set(seq, made);
   }
-  if (!building) return;                 // a tail with no head: wait for one
-  if (index !== building.next || stamp !== building.stamp) {
-    lostFrame("piece " + building.next + " of " + building.pieces
-              + " never came");
-    return;
+  if (flags & FIRST) made.key = (flags & 1) !== 0;
+  if (!made.parts[index]) {
+    made.parts[index] = body;
+    made.have += 1;
+    made.size = (made.size || 0) + body.length;
   }
-  building.next += 1;
-  building.parts.push(body);
-  building.size += body.length;
-  if (!(flags & LAST)) return;
-  if (building.next !== building.pieces) {
-    lostFrame("it ended after " + building.next + " of " + building.pieces);
-    return;
+  drain();
+}
+
+/* Hand over every frame that is ready, oldest first, and give up on one that
+   is holding the rest back. Frames must reach the decoder in order -- it is
+   decoding each against the one before -- so a frame that cannot be completed
+   is not merely skipped, it ends the run until a keyframe. */
+function drain() {
+  const now = (typeof performance !== "undefined") ? performance.now() : Date.now();
+  for (;;) {
+    const made = building.get(wantSeq);
+    if (made && made.have === made.pieces) {
+      building.delete(wantSeq);
+      wantSeq += 1;
+      hand(made);
+      continue;
+    }
+    // Not ready. Wait, unless something newer has been waiting long enough
+    // that this one is plainly not coming.
+    let newest = -1;
+    building.forEach((one, at) => { if (at > newest) newest = at; });
+    const stuck = made ? now - made.at : 0;
+    if (newest > wantSeq && (stuck > PATCH_MS || !made)) {
+      askForKey(made ? "only " + made.have + " of " + made.pieces
+                       + " pieces came" : "it never started");
+      building.delete(wantSeq);
+      wantSeq += 1;
+      state.gaps += 1;
+      state.awaitKey = true;
+      continue;
+    }
+    break;
   }
-  const whole = new Uint8Array(building.size);
+  // Anything far in the past is never being asked for again.
+  building.forEach((one, at) => {
+    if (at < wantSeq || now - one.at > PATCH_MS * 10) building.delete(at);
+  });
+}
+
+function hand(made) {
+  const whole = new Uint8Array(made.size);
   let at = 0;
-  for (const part of building.parts) { whole.set(part, at); at += part.length; }
-  const made = building;
-  building = null;
+  for (const part of made.parts) {
+    if (!part) continue;
+    whole.set(part, at);
+    at += part.length;
+  }
   state.handed += 1;
   state.gotAll += 1;
-  // A gap in the host's own numbering means frames went missing before they
-  // ever reached this channel -- the host dropping them under congestion, or
-  // a whole frame lost. Either way the next frame references a picture this
-  // decoder has never seen, and a WebCodecs decoder answers that with
-  // `Decoding error` and stops. So nothing is fed until a keyframe, and one
-  // is asked for. The host drops to a keyframe itself now; this is the half
-  // that does not depend on it having remembered to.
-  if (made.seq && state.lastSeq && made.seq > state.lastSeq + 1) {
-    const missed = made.seq - state.lastSeq - 1;
-    state.lastSeq = made.seq;
-    if (!made.key) {
-      state.gaps += 1;
-      if (!state.awaitKey) {
-        state.awaitKey = true;
-        lostFrame(missed + " frame(s) never reached this channel");
-      }
-      return;
-    }
-  }
-  state.lastSeq = made.seq;
-  if (state.awaitKey) {
-    if (!made.key) return;
-    state.awaitKey = false;
-    say("a keyframe arrived, so decoding resumes");
-  }
+  state.lastSeq = Math.max(state.lastSeq, 0);
   // Once per connection, not once per report: the counters are zeroed every
   // window, so this was announcing a first frame every twelve seconds.
   if (!state.saidFirst) {
     state.saidFirst = true;
     say("the first encoded frame arrived here");
+  }
+  state.lastSeq = wantSeq - 1;
+  if (state.awaitKey) {
+    if (!made.key) return;             // nothing to decode against yet
+    state.awaitKey = false;
+    say("a keyframe arrived, so decoding resumes");
   }
   take(made.key ? "key" : "delta", made.stamp, whole.buffer);
 }
@@ -885,7 +928,7 @@ self.onmessage = (event) => {
     return;
   }
   if (m.chunk) { chunk(m.chunk); return; }
-  if (m.stop) { close(); building = null; }
+  if (m.stop) { close(); building.clear(); wantSeq = 0; }
 };
 
 // Last, so nothing can be sent before the handlers above exist.

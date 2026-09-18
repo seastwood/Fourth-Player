@@ -2792,25 +2792,27 @@ class Peer:
         # itself. Created for every guest and used by the ones that ask -- an
         # empty channel costs a few bytes of SDP.
         #
-        # Ordered, but only worth retransmitting for a moment.
+        # Unordered, and worth retransmitting only for a moment.
         #
-        # It was ordered *and* fully reliable, on the reasoning that a frame
-        # with a hole in it is not a frame. That is true and it was still the
-        # wrong trade. Fully reliable SCTP will retransmit a lost chunk for as
-        # long as it takes, and everything behind it waits -- so on a link
-        # that drops a packet now and then, one loss stops the picture dead
-        # and then delivers a pile of frames that are all far too old to show.
-        # That is exactly what was described: "getting stuck for milliseconds
-        # and missing frames entirely until it comes back".
+        # It was ordered, on the reasoning that the pieces of a frame arrive
+        # in order and the browser then has only to notice a missing one. That
+        # is true and it cost a full second of picture every time a single
+        # packet went astray. SCTP's minimum retransmission timeout is one
+        # second, a lost packet with little traffic behind it gets no fast
+        # retransmit, and an *ordered* stream holds everything behind it until
+        # the retransmission lands. Measured from the guest's own page: pieces
+        # stopped arriving for 1073ms while its animation frames carried on at
+        # 18ms, and not one frame was lost -- they all turned up at once when
+        # the timeout expired. Three losses in a row is three seconds of that,
+        # which is what "sometimes they happen 3 times in a row" is.
         #
-        # With a lifetime, a chunk that cannot be delivered in time is
-        # abandoned, and SCTP tells the far end to skip past it. Ordered is
-        # kept so that the pieces of a frame still arrive in order and the
-        # only thing the browser has to cope with is a missing one, which it
-        # notices from the piece numbers and answers by dropping that frame
-        # and asking for a keyframe. One dropped frame beats a stall.
+        # Unordered, a lost piece delays its own frame and nothing else.
+        # Everything else keeps being delivered while SCTP recovers it. The
+        # browser already has what it needs to put them back together in any
+        # order: every piece carries which frame it belongs to, which piece it
+        # is, and how many there are.
         video_options = Gst.Structure.new_from_string(
-            "options, ordered=(boolean)true, max-packet-lifetime=(int)%d"
+            "options, ordered=(boolean)false, max-packet-lifetime=(int)%d"
             % FRAME_LIFETIME_MS)
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
                                               video_options)

@@ -153,9 +153,10 @@ check("getUint16(9, true)" in worker and "getUint16(11, true)" in worker,
 check("getUint32(13, true)" in worker, "and the frame's number after those")
 check("new Uint8Array(buffer, 17)" in worker,
       "with the body starting after all seventeen header bytes")
-check("building.parts.push(body)" in worker, "the pieces are collected")
-check("if (!(flags & LAST)) return;" in worker,
-      "and nothing is decoded until the last one arrives")
+check("made.parts[index] = body" in worker,
+      "the pieces are collected, each into its own place")
+check("made.have === made.pieces" in worker,
+      "and nothing is decoded until all of them have arrived")
 
 print("a frame with a piece missing is dropped rather than decoded")
 # The channel has a packet lifetime now, so pieces can go missing: a
@@ -164,12 +165,21 @@ print("a frame with a piece missing is dropped rather than decoded")
 check("FRAME_LIFETIME_MS" in video,
       "the host gives each piece a lifetime instead of retransmitting for ever")
 check("max-packet-lifetime" in video, "on the picture channel itself")
-check("ordered=(boolean)true, max-packet-lifetime" in video,
-      "still ordered, so the only thing to cope with is a missing piece")
-check("index !== building.next" in worker, "a gap in the numbering is noticed")
-check("building.next !== building.pieces" in worker,
-      "and so is a frame that ends early")
-check("function lostFrame" in worker, "both drop the frame whole")
+check("ordered=(boolean)false, max-packet-lifetime" in video,
+      "and unordered, which is the whole of it: an ordered stream holds every "
+      "frame behind a lost packet until SCTP's one-second minimum timeout "
+      "expires. Measured on the guest's own page -- pieces stopped arriving "
+      "for 1073ms while its animation frames carried on at 18ms, and not one "
+      "frame was lost; they all turned up at once when the timeout fired")
+check("made.have === made.pieces" in worker,
+      "so pieces are collected by which frame they belong to, in any order")
+check("wantSeq" in worker,
+      "and handed to the decoder in the host's order, which is the order it "
+      "decodes them against each other in")
+check("PATCH_MS" in worker,
+      "with a frame that cannot be completed given up rather than waited on "
+      "for ever, once something newer is ready")
+check("function askForKey" in worker, "the frame is dropped whole")
 check('self.postMessage({ ask: "key" })' in worker,
       "and ask for a keyframe, since everything after a dropped frame decodes "
       "against something that never arrived")
@@ -225,10 +235,10 @@ check("self.stage.apply_ceiling()" in video,
       "channel fails in twenty")
 
 print("and the browser can see such a gap for itself")
-check("made.seq > state.lastSeq + 1" in worker,
-      "the host's numbering is on the wire, so a gap is visible from there "
-      "-- which does not depend on the host having remembered to drop to a "
-      "keyframe itself")
+check("state.gaps += 1" in worker,
+      "the host's numbering is on the wire, so a frame that never completes "
+      "is visible from there -- which does not depend on the host having "
+      "remembered to drop to a keyframe itself")
 check("state.awaitKey" in worker,
       "and nothing is fed to the decoder until a keyframe comes")
 
