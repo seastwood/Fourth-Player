@@ -133,7 +133,8 @@ onError(new Error("Decoder failure"));
 check(built.length === 2, "a failure builds a second decoder, it does not stop");
 const now = built[1].config;
 check(now && now.description, "and configures it with a description");
-check(now.codec === "avc1.42E01F", "keeping the codec that was agreed");
+check(now.codec === "avc1.42E028",
+      "and a codec string read out of the SPS, not the SDP: " + now.codec);
 const desc = Array.from(new Uint8Array(now.description));
 check(desc[0] === 1 && desc[4] === 0xff && desc[5] === 0xe1,
       "a well-formed avcC: version 1, four-byte lengths, one SPS ("

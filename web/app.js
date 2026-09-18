@@ -8740,13 +8740,21 @@ function paintPaintMethod() {
       }
       box.dataset.built = built;
     }
-    box.value = paintChoice;
+    // What is actually drawing, not what was asked for.
+    //
+    // The two differ when a method was chosen and could not run, and showing
+    // the choice then meant the dropdown said WebCodecs while the browser was
+    // plainly doing the drawing. A control that disagrees with the screen is
+    // worse than one that forgets. What was asked for is not lost -- it is in
+    // the note below, and it is what a reload tries again.
+    box.value = (paintGaveUp && paintMethod === "here")
+      ? PAINT_METHODS[0].id : paintChoice;
   }
   const note = el("stream-paint-note");
   if (note) {
     note.textContent = (paintGaveUp && paintMethod === "here")
-      ? "Chosen, but this browser produced no picture with it, so the browser "
-        + "is drawing it for now. Reloading tries again."
+      ? "You asked for the page to draw it and this browser produced no "
+        + "picture, so the browser is drawing it. Reloading tries again."
       : paintMethodById(paintMethod).why;
     note.classList.toggle("warn", paintGaveUp && paintMethod === "here");
   }

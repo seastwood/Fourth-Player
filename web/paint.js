@@ -478,6 +478,16 @@ function makePainter(canvas, say) {
       try { description = avcDescription(lastKey); } catch (_) {}
       if (!description) return false;
       const keyframe = lastKey;
+      // The codec string comes out of the SPS this time, not out of the SDP.
+      //
+      // Bytes 1, 2 and 3 of an avcC box *are* the profile, the compatibility
+      // flags and the level, copied from the SPS, and a decoder handed a
+      // description will compare the two. The SDP's profile-level-id is what
+      // the two ends agreed to send; the SPS is what the encoder actually
+      // produced. When those differ the decoder is right to refuse, and
+      // everything here has been negotiating with the wrong one of them.
+      const exact = "avc1." + [description[1], description[2], description[3]]
+        .map((b) => (b < 16 ? "0" : "") + b.toString(16).toUpperCase()).join("");
       try {
         if (decoder && decoder.state !== "closed") decoder.close();
       } catch (_) {}
@@ -489,8 +499,9 @@ function makePainter(canvas, say) {
             this.stop();
           },
         });
-        decoder.configure({ codec: codecNow, description,
+        decoder.configure({ codec: exact, description,
                             optimizeForLatency: true });
+        codecNow = exact;
       } catch (err) {
         say("the parameter sets were refused as well: "
             + (err && err.message ? err.message : "no reason given"));
@@ -499,7 +510,8 @@ function makePainter(canvas, say) {
       feedAs = "avcc";
       started = false;
       say("that decoder would not take frames separated by start codes; "
-          + "handing it the parameter sets up front instead");
+          + "handing it the parameter sets up front instead, as " + exact
+          + " (read out of the stream, not the SDP)");
       // The new decoder needs a keyframe and the next one may be seconds
       // away, so it gets the one that is already in hand.
       this.take("key", 0, keyframe);
