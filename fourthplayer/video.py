@@ -335,6 +335,58 @@ def _cuda_converter():
     return _SW
 
 
+# How often a keyframe is sent when nothing has asked for one.
+#
+# Periodic keyframes are for a stream nobody can talk back on -- broadcast,
+# recording, anything somebody might seek in. This is neither: every guest has
+# a feedback channel and uses it, and a guest who loses the picture asks for a
+# keyframe within a frame or two of noticing (see `_on_upstream`, and the
+# "asked for a keyframe after losing the picture" line in the log).
+#
+# The cost of sending them anyway is not just bandwidth. Under CBR the encoder
+# must fit an IDR inside its VBV window, so the frames after one are starved
+# to pay for it: quality drops, recovers, drops again, on a fixed beat. At
+# 144fps with the old interval of two seconds that beat was every 288 frames,
+# and it is exactly what "the video pulses" describes.
+#
+# So: no periodic keyframe where the encoder can be told that (-1 on NVENC),
+# and a long one where it cannot. The config's keyframe_interval still wins if
+# somebody sets it, and a guest who needs a keyframe still gets one on asking.
+KEYFRAME_FALLBACK_SECONDS = 10
+
+
+def keyframe_gap(element, settings, fps, wanted=0):
+    """Frames between unrequested keyframes, for this particular encoder.
+
+    Encoders disagree about both the name of the property and whether it can
+    be told "never": NVENC takes -1, x264's key-int-max reads 0 as "pick one
+    for me" rather than as never, and the VA encoders cap the number. So the
+    element is asked what it will take rather than being handed a value that
+    may make the pipeline refuse to start.
+    """
+    if wanted:
+        return wanted                       # explicitly configured; not ours
+    name = None
+    for candidate in ("gop-size", "key-int-max"):
+        if "%s={keyint}" % candidate in settings:
+            name = candidate
+            break
+    far = max(1, int(fps) * KEYFRAME_FALLBACK_SECONDS)
+    if name is None:
+        return far
+    try:
+        made = Gst.ElementFactory.make(element)
+        spec = made.find_property(name) if made is not None else None
+    except Exception:
+        spec = None
+    if spec is None:
+        return far
+    if getattr(spec, "minimum", 0) == -1:
+        return -1                           # never, until somebody asks
+    top = getattr(spec, "maximum", far)
+    return max(1, min(far, int(top)))
+
+
 def pick_encoder(codec, allow_hardware=True):
     """The best encoder for this codec on this machine, or None.
 
@@ -797,7 +849,6 @@ class Stage:
         self._stalls = {}
         self._said_stall = {}
 
-        keyint = cfg.keyframe_interval or max(1, cfg.fps * 2)
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
         cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
         hevc = self.codec in ("h265", "hevc")
@@ -818,6 +869,13 @@ class Stage:
             raise RuntimeError("this machine has no encoder for %s"
                                % ("H.265" if hevc else "H.264"))
         element, kind, converter, settings = chosen
+        # After the encoder is known, because what it will accept here is not
+        # the same from one to the next. See keyframe_gap.
+        keyint = keyframe_gap(element, settings, cfg.fps,
+                              cfg.keyframe_interval)
+        log.info("keyframes: %s", "only when a guest asks" if keyint == -1
+                 else "every %d frames (%.1fs), and whenever a guest asks"
+                      % (keyint, keyint / max(1, cfg.fps)))
         self.encoder_name = element
         self.encoder_kind = kind
         if kind == "software" and cfg.hardware_encode:
