@@ -8569,6 +8569,12 @@ function stopPainting(why) {
     try { receiver.transform = null; } catch (_) { /* older browser */ }
   }
   giveTheVideoBack();
+  // And ask for a keyframe, or the picture stays black until one happens to
+  // come along. The browser's own decoder has had nothing for as long as the
+  // transform was attached, so it has no reference frame to decode against,
+  // and with keyframes sent only on request nothing will ask on its behalf.
+  // Reported as switching back needing a page refresh.
+  askHostForKeyframe();
   const canvas = paintCanvas();
   if (canvas) {
     canvas.hidden = true;
@@ -8607,32 +8613,37 @@ function watchThePainting() {
              + "s; trying " + more);
       tryAnotherSpelling(more);
     } else {
-      // Given up on, and *not* unchosen.
-      //
-      // This used to call setPaintMethod("browser"), which writes the
-      // choice down -- so a failed attempt silently replaced what somebody
-      // had picked, and choosing it again after a reload was the only way to
-      // find out whether anything had changed. Reported, fairly, as it
-      // setting itself back for no reason.
-      //
-      // So the choice stands and only this connection gives up. A reload or
-      // a fresh media connection tries again, which is what somebody
-      // iterating on it wants, and nothing retries in a loop in between.
-      paintGaveUp = true;
-      // What is drawing is the browser, so that is what the mode now is. The
-      // choice lives on in paintChoice and in storage.
-      paintMethod = PAINT_METHODS[0].id;
-      report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
-             + "s and there is nothing else to try; the browser is drawing it "
-             + "for now, and the choice is kept");
-      showNotice("<b>Drawing it on this page produced no picture.</b><br>"
-                 + "The browser is drawing it instead for now. Everything "
-                 + "that was tried is in the host's log. Your choice is kept "
-                 + "&mdash; reloading tries again.", true);
-      stopPainting("");
-      paintPaintMethod();
+      giveUpPainting();
     }
   }, PAINT_PROVE_MS);
+}
+
+/* One way out, wherever the giving up was noticed. */
+function giveUpPainting() {
+    // Given up on, and *not* unchosen.
+    //
+    // This used to call setPaintMethod("browser"), which writes the
+    // choice down -- so a failed attempt silently replaced what somebody
+    // had picked, and choosing it again after a reload was the only way to
+    // find out whether anything had changed. Reported, fairly, as it
+    // setting itself back for no reason.
+    //
+    // So the choice stands and only this connection gives up. A reload or
+    // a fresh media connection tries again, which is what somebody
+    // iterating on it wants, and nothing retries in a loop in between.
+    paintGaveUp = true;
+    // What is drawing is the browser, so that is what the mode now is. The
+    // choice lives on in paintChoice and in storage.
+    paintMethod = PAINT_METHODS[0].id;
+    report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
+           + "s and there is nothing else to try; the browser is drawing it "
+           + "for now, and the choice is kept");
+    showNotice("<b>Drawing it on this page produced no picture.</b><br>"
+               + "The browser is drawing it instead for now. Everything "
+               + "that was tried is in the host's log. Your choice is kept "
+               + "&mdash; reloading tries again.", true);
+    stopPainting("");
+    paintPaintMethod();
 }
 
 /* The next spelling in the list, or "" when they are exhausted. */
@@ -8747,6 +8758,15 @@ async function startPainting() {
   keepAudioOnly();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
   watchThePainting();
+  // If the worker gives up on its own -- a decoder that will not run, a
+  // transform the browser refuses -- that is the same situation as nothing
+  // being painted, and it goes through the one place that handles it.
+  painter.whenGone(() => {
+    if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
+    const more = paintNextSpelling();
+    if (more) tryAnotherSpelling(more);
+    else giveUpPainting();
+  });
   // A decoder that has just started has nothing to work from until a keyframe
   // arrives, and the browser will not ask for one on our behalf any more --
   // nothing is feeding its decoder to notice. With keyframes sent only on

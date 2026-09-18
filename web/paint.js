@@ -340,339 +340,130 @@ function canPaintDirectly() {
             && "createEncodedStreams" in RTCRtpReceiver.prototype));
 }
 
-/* Everything with a lifetime: the worker, the decoder, the queue and the
-   timers. One at a time, and stop() has to leave nothing running -- a decoder
-   left open holds a hardware decode session, and a page that renegotiates
-   four times would run out of them. */
+/* The page's half of it: start the worker, give it the canvas, and relay.
+ *
+ * Almost nothing happens here on purpose. The decoder, the pacing and the
+ * painting are all in the worker now -- see frames.js for why -- so this
+ * chooses the codec, hands over a canvas the worker can draw on, and carries
+ * what the worker says back to whoever is listening. A frame is never
+ * touched on this thread.
+ */
 function makePainter(canvas, say) {
-  let worker = null, decoder = null, pacer = makePacer(PACE);
-  let waiting = [];                      // decoded frames not yet drawn
-  let timer = 0, running = false;
-  // Four counters, because four different things go wrong and they look
-  // identical from a chair: nothing arriving, nothing decoding, nothing
-  // drawing, or nothing visible. The first attempt at this was a black
-  // screen with a cheerful "drawing the picture here" in the log and no way
-  // to tell which of the four it was.
-  let fed = 0, out = 0, drawn = 0, refused = 0, skipped = 0;
-  let started = false;                   // a keyframe has been seen
-  let shape = "";                        // what the bitstream turned out to be
-  let ever = false;                      // anything painted, ever
-  // How frames are handed over, and what is needed to change our mind.
-  // "annexb" is the format WebRTC delivers and what a decoder with no
-  // description expects; "avcc" is what WebKit wants instead. The last
-  // keyframe is kept because it carries the parameter sets the description is
-  // built from, and because the new decoder needs a keyframe to start on.
-  let feedAs = "annexb";
-  let codecNow = "";
-  let lastKey = null;
-  let arrived = false;                   // any frame has reached us at all
-  let handed = 0, handedWas = 0;         // what the transform gave the worker
-  const context = canvas.getContext("2d", { alpha: false,
-                                            desynchronized: true });
+  let worker = null, running = false, mine = canvas;
+  let last = null;                       // the worker's last set of counters
+  let onGone = null;
 
-  function draw(frame) {
-    if (canvas.width !== frame.displayWidth
-        || canvas.height !== frame.displayHeight) {
-      canvas.width = frame.displayWidth;
-      canvas.height = frame.displayHeight;
-    }
-    try {
-      context.drawImage(frame, 0, 0);
-      drawn += 1;
-      ever = true;
-    } catch (_) { /* the canvas went away with the page */ }
-    frame.close();
-  }
-
-  function pump() {
-    timer = 0;
-    while (waiting.length) {
-      const next = waiting[0];
-      const wait = next.due - performance.now();
-      if (wait > PACE.SLACK_MS) {
-        timer = setTimeout(pump, wait);
-        return;
-      }
-      waiting.shift();
-      draw(next.frame);
-    }
-  }
-
-  function decoded(frame) {
-    out += 1;
-    // The capture moment, in milliseconds. A VideoFrame's timestamp comes
-    // from the RTP timestamp, which is the host's own capture clock at 90kHz
-    // -- so the difference between two of them is real elapsed time at the
-    // host even though the two machines' clocks are not synchronised. A
-    // difference is all the pacing needs.
-    const captured = (frame.timestamp || 0) / 1000;
-    const now = performance.now();
-    const wait = pacer.hold(captured, now);
-    if (wait <= 0) {
-      if (waiting.length) { waiting.push({ frame, due: now }); pump(); }
-      else draw(frame);
-      return;
-    }
-    waiting.push({ frame, due: now + wait });
-    if (!timer) pump();
+  /* A canvas can only be handed to a worker once, so each attempt gets a
+     fresh one. The element keeps its id, its classes and its place, because
+     the page positions it by all three. */
+  function freshCanvas() {
+    const old = document.getElementById("painted");
+    if (!old || !old.parentNode) return old;
+    const made = document.createElement("canvas");
+    made.id = old.id;
+    made.className = old.className;
+    made.hidden = old.hidden;
+    made.style.cssText = old.style.cssText;
+    old.parentNode.replaceChild(made, old);
+    return made;
   }
 
   return {
-    /* One encoded frame, from whichever of the two routes brought it.
-     *
-     * Everything before the first keyframe is thrown away rather than fed.
-     * A decoder handed a delta frame with nothing to apply it to raises on
-     * the spot, and the exception was being swallowed -- so the first second
-     * of every connection was a stream of errors nobody could see, and
-     * whether the decoder ever recovered was luck. Waiting is correct and it
-     * is also what makes the counters mean something. */
-    take(type, timestamp, data) {
-      if (!arrived) {
-        arrived = true;
-        say("the first encoded frame arrived here");
-      }
-      if (!decoder || decoder.state !== "configured") return;
-      const key = type === "key";
-      if (!started) {
-        if (!key) { skipped += 1; return; }
-        started = true;
-      }
-      let bytes = data;
-      try {
-        const shaped = toAnnexB(data instanceof ArrayBuffer ? data
-                                : data.buffer || data);
-        bytes = shaped.data;
-        if (shape === "") {
-          shape = shaped.shape;
-          say("the encoded frames are " + shape);
-        }
-        if (key) lastKey = bytes;
-        if (feedAs === "avcc") bytes = toLengthPrefixed(bytes);
-      } catch (_) { /* pass it through as it came */ }
-      try {
-        decoder.decode(new EncodedVideoChunk({
-          type: key ? "key" : "delta",
-          timestamp: timestamp,
-          data: bytes,
-        }));
-        fed += 1;
-      } catch (err) {
-        refused += 1;
-        // A decoder that has given up stays given up, and there is no point
-        // feeding it for the rest of the session.
-        if (decoder.state !== "configured") {
-          say("the decoder stopped accepting frames: "
-              + (err && err.message ? err.message : "no reason given"));
-          this.stop();
-        }
-      }
-    },
-
-    /* Hand the parameter sets over as a description and length-prefix the
-       frames, which is what iOS Safari wants and what it will not say. True
-       if the switch was made. */
-    tryAvcc() {
-      if (feedAs !== "annexb") return false;
-      if (codecNow.indexOf("avc1.") !== 0) return false;   // H.264 only
-      if (!lastKey) return false;
-      let description = null;
-      try { description = avcDescription(lastKey); } catch (_) {}
-      if (!description) return false;
-      const keyframe = lastKey;
-      // The codec string comes out of the SPS this time, not out of the SDP.
-      //
-      // Bytes 1, 2 and 3 of an avcC box *are* the profile, the compatibility
-      // flags and the level, copied from the SPS, and a decoder handed a
-      // description will compare the two. The SDP's profile-level-id is what
-      // the two ends agreed to send; the SPS is what the encoder actually
-      // produced. When those differ the decoder is right to refuse, and
-      // everything here has been negotiating with the wrong one of them.
-      const exact = "avc1." + [description[1], description[2], description[3]]
-        .map((b) => (b < 16 ? "0" : "") + b.toString(16).toUpperCase()).join("");
-      try {
-        if (decoder && decoder.state !== "closed") decoder.close();
-      } catch (_) {}
-      try {
-        decoder = new VideoDecoder({
-          output: decoded,
-          error: (err) => {
-            say("the direct decoder stopped: " + (err && err.message));
-            this.stop();
-          },
-        });
-        decoder.configure({ codec: exact, description,
-                            optimizeForLatency: true });
-        codecNow = exact;
-      } catch (err) {
-        say("the parameter sets were refused as well: "
-            + (err && err.message ? err.message : "no reason given"));
-        return false;
-      }
-      feedAs = "avcc";
-      started = false;
-      say("that decoder would not take frames separated by start codes; "
-          + "handing it the parameter sets up front instead, as " + exact
-          + " (read out of the stream, not the SDP)");
-      // The new decoder needs a keyframe and the next one may be seconds
-      // away, so it gets the one that is already in hand.
-      this.take("key", 0, keyframe);
-      return true;
-    },
-
-    /* Try another spelling of the codec without touching the transform.
-     *
-     * Restarting the whole painter for this was wrong and the counters said
-     * so: every retry read "0 fed to the decoder" while megabytes arrived.
-     * A receiver's transform is attached once; taking the worker away and
-     * attaching another to the same receiver left nothing delivering frames
-     * at all, so the second and third attempts were guaranteed to fail
-     * whatever was wrong with the first. Only the decoder is rebuilt now. */
-    useCodec(codec) {
-      if (!codec) return false;
-      try {
-        if (decoder && decoder.state !== "closed") decoder.close();
-      } catch (_) {}
-      try {
-        decoder = new VideoDecoder({
-          output: decoded,
-          error: (err) => {
-            if (this.tryAvcc()) return;
-            say("the direct decoder stopped: " + (err && err.message));
-            this.stop();
-          },
-        });
-        decoder.configure({ codec, optimizeForLatency: true });
-        codecNow = codec;
-        feedAs = "annexb";
-        started = false;
-        return true;
-      } catch (err) {
-        say("this browser would not start a decoder for " + codec);
-        return false;
-      }
-    },
-
     start(receiver, codec) {
       if (running) return false;
+      if (typeof OffscreenCanvas === "undefined"
+          || !HTMLCanvasElement.prototype.transferControlToOffscreen) {
+        say("this browser cannot hand a canvas to a worker");
+        return false;
+      }
+      mine = freshCanvas();
+      let surface = null;
       try {
-        decoder = new VideoDecoder({
-          output: decoded,
-          error: (err) => {
-            // One more thing to try before giving up, and it is the thing
-            // WebKit actually wants. See avcDescription.
-            if (this.tryAvcc()) return;
-            say("the direct decoder stopped: " + (err && err.message));
-            this.stop();
-          },
-        });
-        codecNow = codec;
-        // No description, which means Annex B -- the format WebRTC hands out
-        // for H.264. A description here would mean AVCC and every frame would
-        // be rejected as malformed.
-        decoder.configure({ codec, optimizeForLatency: true });
+        surface = mine.transferControlToOffscreen();
       } catch (err) {
-        say("this browser would not start a decoder for " + codec);
+        say("this browser would not hand over the canvas: "
+            + ((err && err.message) || "no reason given"));
         return false;
       }
       worker = new Worker("/static/frames.js");
-      const mine = worker;
+      const it = worker;
       worker.onerror = (err) => {
         say("the frame worker would not load: "
             + ((err && err.message) || "no reason given"));
         this.stop();
+        if (onGone) onGone();
       };
       worker.onmessage = (event) => {
-        const m = event.data;
-        // The worker says when its handler is in place. Attaching the
-        // transform before that is a race whose losing side is silence: the
-        // event fires, nothing is listening, and no frame ever arrives.
-        if (m && m.ready) {
+        const m = event.data || {};
+        if (m.ready) {
+          it.postMessage({ start: { canvas: surface, codec } }, [surface]);
           try {
             if (typeof RTCRtpScriptTransform !== "undefined") {
-              receiver.transform = new RTCRtpScriptTransform(mine, {});
-              // Said because the alternative was a silence with three
-              // possible causes: the worker never loaded, it loaded and was
-              // never told, or it was told and no frame ever came. Each
-              // needs a different fix and they looked identical.
+              receiver.transform = new RTCRtpScriptTransform(it, {});
               say("the frame worker is ready and the transform is attached");
+            } else {
+              say("this browser has no transform to attach");
+              this.stop();
+              if (onGone) onGone();
             }
           } catch (err) {
             say("this browser would not take the transform: "
-                + (err && err.message ? err.message : "no reason given"));
+                + ((err && err.message) || "no reason given"));
             this.stop();
+            if (onGone) onGone();
           }
           return;
         }
-        if (typeof m.n === "number") handed = m.n;
-        this.take(m.type, m.timestamp, m.bytes);
-      };
-      try {
-        if (typeof RTCRtpScriptTransform === "undefined") {
-          const streams = receiver.createEncodedStreams();
-          // The older shape: no worker involved, so the frames are read here
-          // and handed to the same decoder.
-          const reader = streams.readable.getReader();
-          const pull = () => reader.read().then(({ done, value }) => {
-            if (done) return;
-            this.take(value.type, value.timestamp, value.data);
-            pull();
-          }).catch(() => {});
-          pull();
+        if (m.note) { say(m.note); return; }
+        if (m.stats) { last = m.stats; return; }
+        if (m.failed) {
+          say(m.failed);
+          this.stop();
+          if (onGone) onGone();
         }
-      } catch (err) {
-        say("this browser would not hand over the encoded frames");
-        this.stop();
-        return false;
-      }
+      };
       running = true;
       return true;
     },
+
+    /* Another spelling of the codec, without disturbing the transform. */
+    useCodec(codec) {
+      if (!worker || !codec) return false;
+      worker.postMessage({ codec });
+      return true;
+    },
+
+    whenGone(fn) { onGone = fn; },
+
     stop() {
       running = false;
-      if (timer) { clearTimeout(timer); timer = 0; }
-      for (const one of waiting) { try { one.frame.close(); } catch (_) {} }
-      waiting = [];
-      if (decoder) {
-        try { if (decoder.state !== "closed") decoder.close(); } catch (_) {}
-        decoder = null;
+      last = null;
+      if (worker) {
+        try { worker.postMessage({ stop: true }); } catch (_) {}
+        try { worker.terminate(); } catch (_) {}
+        worker = null;
       }
-      if (worker) { try { worker.terminate(); } catch (_) {} worker = null; }
-      pacer.forget();
-      started = false;
-      shape = "";
-      ever = false;
-      feedAs = "annexb";
-      lastKey = null;
-      codecNow = "";
-      arrived = false;
-      handed = 0;
-      handedWas = 0;
+      // A canvas that was handed to a worker cannot be drawn on here again,
+      // so it is replaced with a plain one ready for the next attempt.
+      try { freshCanvas(); } catch (_) {}
     },
+
     running() { return running; },
-    /* Counted rather than guessed at, in the same spirit as everything else
-       here: if this is not better, the numbers should say so. */
-    /* Said out loud rather than kept, because a black screen with no numbers
-       beside it is exactly what this cost the first time. */
+
+    /* Asked of the worker, answered from its previous reply. One window of
+       lag, and the alternative is making every caller wait on a message. */
     report() {
-      const gave = handed - handedWas;
-      handedWas = handed;
-      const said = ("drawing here: " + gave + " handed over by the transform, "
-                    + fed + " fed to the decoder, " + out
-                    + " came out, " + drawn + " painted, " + refused
-                    + " refused, " + skipped + " before the first keyframe, "
-                    + Math.round(pacer.reserve()) + "ms reserve");
-      fed = 0; out = 0; drawn = 0; refused = 0; skipped = 0;
-      return said;
+      if (worker) { try { worker.postMessage({ report: true }); } catch (_) {} }
+      if (!last) return "drawing here: nothing said yet";
+      return ("drawing here: " + last.handed + " handed over by the transform, "
+              + last.fed + " fed to the decoder, " + last.out + " came out, "
+              + last.drawn + " painted, " + last.refused + " refused, "
+              + last.skipped + " before the first keyframe, " + last.stale
+              + " too late to matter, " + last.reserve + "ms reserve");
     },
-    /* Whether anything has ever actually been painted.
-       Remembered rather than read off the canvas: an untouched canvas is
-       300x150 by default, so measuring it would have said yes about a
-       surface nothing had ever drawn on -- which is precisely the state this
-       is meant to detect. */
-    painted() { return ever; },
-    /* Frames painted since the last report, for saying on screen how this is
-       going without anybody having to read a log on another machine. */
-    drawnLately() { return drawn; },
+
+    painted() { return Boolean(last && last.ever); },
+    drawnLately() { return last ? last.drawn : 0; },
   };
 }
 

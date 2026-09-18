@@ -1,55 +1,268 @@
-/* The worker half of taking encoded video out of WebRTC.
+/* Everything about the picture, on a thread of its own.
  *
- * A browser will not hand a page the encoded frames on a media track from the
- * main thread: Safari's RTCRtpScriptTransform takes a Worker and nothing else,
- * and Chrome's newer builds agree. So this exists to be that worker, and it is
- * deliberately almost empty -- it reads frames and posts them on. Decoding
- * happens where the canvas is.
+ * This started as a courier: it read the encoded frames and posted them to
+ * the page, which decoded and drew them. That was the wrong shape and the
+ * counters said so -- around twenty frames a second reached the canvas out of
+ * sixty sent, with the decoder and the painting both reporting themselves
+ * perfectly healthy, because the work they were doing was queued behind
+ * everything else the page does: pad polling, pointer handling, the desk,
+ * layout. A 1440p frame drawn on the main thread sixty times a second is not
+ * something to ask of it while a game is being played through it.
  *
- * Nothing is written back to `writable`. That is the point rather than an
- * omission: what is not written back never reaches the browser's own decoder
- * and its jitter buffer, which is the machinery being replaced. The <video>
- * element goes black, and the canvas beside it is what anybody sees.
+ * moonlight-web, which this is modelled on, decodes and renders in the worker
+ * and never posts a frame anywhere. Here that is better still: the transform
+ * already delivers into this worker, so with the decoder and the canvas here
+ * too, a frame is never copied out of this thread at all -- it arrives,
+ * decodes and is painted without the page being involved.
+ *
+ * The page keeps what only it can do: choosing the codec, deciding what to do
+ * when this cannot work, and putting the numbers on screen.
  */
-/* Registered before anything is told this worker exists.
+importScripts("/static/paint.js");
+
+const LIMITS = PACE;
+
+/* How deep the decoder's own queue may get before frames are thrown away.
  *
- * `new Worker()` returns before the worker's script has run, and attaching a
- * transform to a receiver on the next line is a race: if the rtctransform
- * event fires before this handler is set, it is simply lost, and the page sits
- * there having been handed no frames at all. Measured exactly that way -- "0
- * fed to the decoder" over ten seconds while twenty megabytes arrived. So the
- * page waits for the "ready" below before it attaches anything. */
-self.onrtctransform = (event) => {
-  const transformer = event.transformer;
-  const reader = transformer.readable.getReader();
+ * A decoder that has fallen behind does not catch up by being given more:
+ * every frame handed to a saturated decoder is latency that somebody watching
+ * will feel and never see the end of. Keyframes are never dropped -- dropping
+ * one costs everything until the next. */
+const QUEUE_MAX = 6;
 
-  let count = 0;
-  const pump = () => reader.read().then(({ done, value }) => {
-    if (done) return;
-    const frame = value;
-    count += 1;
-    const data = frame.data;
-    // Copied out of the frame, not referenced: the frame is recycled the
-    // moment this returns and a detached ArrayBuffer arrives as an empty
-    // picture with no error anywhere.
-    const bytes = new Uint8Array(data.byteLength);
-    bytes.set(new Uint8Array(data));
-    self.postMessage({
-      bytes: bytes.buffer,
-      timestamp: frame.timestamp,
-      type: frame.type || "delta",
-      at: performance.now(),
-      // How many the transform has handed *this worker*, so the page can
-      // tell a transform that is delivering slowly from a page that is
-      // losing what it was given. Those are different faults and the
-      // counters on the other side cannot see the difference.
-      n: count,
-    }, [bytes.buffer]);
-    pump();
-  }).catch(() => { /* the connection went away */ });
-
-  pump();
+const state = {
+  decoder: null,
+  canvas: null,
+  context: null,
+  pacer: null,
+  codec: "",
+  feedAs: "annexb",
+  lastKey: null,
+  started: false,
+  shape: "",
+  waiting: [],
+  timer: 0,
+  handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
+  ever: false,
 };
 
-// Last, so it cannot be sent before the handler above exists.
+function say(text) { self.postMessage({ note: text }); }
+
+function draw(frame) {
+  const canvas = state.canvas;
+  if (!canvas) { frame.close(); return; }
+  if (canvas.width !== frame.displayWidth
+      || canvas.height !== frame.displayHeight) {
+    canvas.width = frame.displayWidth;
+    canvas.height = frame.displayHeight;
+  }
+  try {
+    state.context.drawImage(frame, 0, 0);
+    state.drawn += 1;
+    state.ever = true;
+  } catch (_) { /* the canvas went away */ }
+  frame.close();
+}
+
+function pump() {
+  state.timer = 0;
+  while (state.waiting.length) {
+    // Drop to the latest. A frame that was due while the thread was busy is
+    // not worth drawing once a newer one exists: it costs a paint and shows
+    // somebody a picture they have already been shown the successor of.
+    while (state.waiting.length > 1
+           && state.waiting[1].due <= performance.now()) {
+      state.waiting.shift().frame.close();
+      state.stale += 1;
+    }
+    const next = state.waiting[0];
+    const wait = next.due - performance.now();
+    if (wait > LIMITS.SLACK_MS) {
+      state.timer = setTimeout(pump, wait);
+      return;
+    }
+    state.waiting.shift();
+    draw(next.frame);
+  }
+}
+
+function decoded(frame) {
+  state.out += 1;
+  const captured = (frame.timestamp || 0) / 1000;
+  const now = performance.now();
+  const wait = state.pacer.hold(captured, now);
+  state.waiting.push({ frame, due: now + (wait > 0 ? wait : 0) });
+  if (!state.timer) pump();
+}
+
+function buildDecoder(codec, description) {
+  const config = { codec, optimizeForLatency: true };
+  if (description) config.description = description;
+  const decoder = new VideoDecoder({
+    output: decoded,
+    error: (err) => {
+      if (tryAvcc()) return;
+      self.postMessage({
+        failed: "the decoder stopped: "
+                + ((err && err.message) || "no reason given"),
+      });
+      close();
+    },
+  });
+  decoder.configure(config);
+  return decoder;
+}
+
+/* The parameter sets up front and length-prefixed frames, which is what
+   WebKit wants and will not say. See avcDescription in paint.js. */
+function tryAvcc() {
+  if (state.feedAs !== "annexb") return false;
+  if (state.codec.indexOf("avc1.") !== 0) return false;
+  if (!state.lastKey) return false;
+  let description = null;
+  try { description = avcDescription(state.lastKey); } catch (_) {}
+  if (!description) return false;
+  // Bytes 1 to 3 of an avcC box are the profile, compatibility flags and
+  // level as the *encoder* wrote them. The SDP says what the two ends agreed
+  // to send, which is not always the same thing, and a decoder handed a
+  // description compares the two.
+  const exact = "avc1." + [description[1], description[2], description[3]]
+    .map((b) => (b < 16 ? "0" : "") + b.toString(16).toUpperCase()).join("");
+  const keyframe = state.lastKey;
+  try {
+    if (state.decoder && state.decoder.state !== "closed") state.decoder.close();
+  } catch (_) {}
+  try {
+    state.decoder = buildDecoder(exact, description);
+  } catch (err) {
+    self.postMessage({
+      failed: "the parameter sets were refused as well: "
+              + ((err && err.message) || "no reason given"),
+    });
+    return false;
+  }
+  state.codec = exact;
+  state.feedAs = "avcc";
+  state.started = false;
+  say("that decoder would not take frames separated by start codes; handing "
+      + "it the parameter sets up front instead, as " + exact
+      + " (read out of the stream, not the SDP)");
+  take("key", 0, keyframe);
+  return true;
+}
+
+function take(type, timestamp, data) {
+  const decoder = state.decoder;
+  if (!decoder || decoder.state !== "configured") return;
+  const key = type === "key";
+  if (!state.started) {
+    if (!key) { state.skipped += 1; return; }
+    state.started = true;
+  }
+  let bytes = data;
+  try {
+    const shaped = toAnnexB(data instanceof ArrayBuffer ? data
+                            : data.buffer || data);
+    bytes = shaped.data;
+    if (state.shape === "") {
+      state.shape = shaped.shape;
+      say("the encoded frames are " + state.shape);
+    }
+    if (key) state.lastKey = bytes;
+    if (state.feedAs === "avcc") bytes = toLengthPrefixed(bytes);
+  } catch (_) { /* hand it over as it came */ }
+  // A saturated decoder is not helped by more. Keyframes always go in:
+  // dropping one costs every frame until the next.
+  if (!key && decoder.decodeQueueSize >= QUEUE_MAX) {
+    state.refused += 1;
+    return;
+  }
+  try {
+    decoder.decode(new EncodedVideoChunk({
+      type: key ? "key" : "delta", timestamp, data: bytes,
+    }));
+    state.fed += 1;
+  } catch (err) {
+    state.refused += 1;
+  }
+}
+
+function close() {
+  if (state.timer) { clearTimeout(state.timer); state.timer = 0; }
+  for (const one of state.waiting) { try { one.frame.close(); } catch (_) {} }
+  state.waiting = [];
+  try {
+    if (state.decoder && state.decoder.state !== "closed") state.decoder.close();
+  } catch (_) {}
+  state.decoder = null;
+}
+
+self.onrtctransform = (event) => {
+  const reader = event.transformer.readable.getReader();
+  const pull = () => reader.read().then(({ done, value }) => {
+    if (done) return;
+    state.handed += 1;
+    if (state.handed === 1) say("the first encoded frame arrived here");
+    const data = value.data;
+    // Copied because the frame is recycled the moment this returns.
+    const bytes = new Uint8Array(data.byteLength);
+    bytes.set(new Uint8Array(data));
+    take(value.type || "delta", value.timestamp, bytes.buffer);
+    pull();
+  }).catch(() => { /* the connection went away */ });
+  pull();
+};
+
+self.onmessage = (event) => {
+  const m = event.data || {};
+  if (m.start) {
+    state.canvas = m.start.canvas;
+    state.context = state.canvas.getContext("2d", { alpha: false,
+                                                    desynchronized: true });
+    state.pacer = makePacer(LIMITS);
+    state.codec = m.start.codec;
+    try {
+      state.decoder = buildDecoder(state.codec, null);
+    } catch (err) {
+      self.postMessage({
+        failed: "no decoder would start for " + state.codec,
+      });
+      return;
+    }
+    self.postMessage({ started: true });
+    return;
+  }
+  if (m.codec) {
+    // Another spelling, on the transform that is already delivering.
+    close();
+    state.codec = m.codec;
+    state.feedAs = "annexb";
+    state.started = false;
+    try {
+      state.decoder = buildDecoder(state.codec, null);
+    } catch (err) {
+      self.postMessage({ failed: "no decoder would start for " + m.codec });
+      return;
+    }
+    self.postMessage({ started: true });
+    return;
+  }
+  if (m.report) {
+    self.postMessage({
+      stats: {
+        handed: state.handed, fed: state.fed, out: state.out,
+        drawn: state.drawn, refused: state.refused,
+        skipped: state.skipped, stale: state.stale,
+        reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
+        ever: state.ever,
+      },
+    });
+    state.handed = state.fed = state.out = state.drawn = 0;
+    state.refused = state.skipped = state.stale = 0;
+    return;
+  }
+  if (m.stop) { close(); }
+};
+
+// Last, so nothing can be sent before the handlers above exist.
 self.postMessage({ ready: true });

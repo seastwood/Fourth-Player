@@ -1,16 +1,15 @@
 /* The decode-to-canvas path, run rather than read.
 
-   This exists because of one line in the log:
+   It lives in a worker now (see web/frames.js for why: about twenty frames a
+   second reached the canvas out of sixty while the decoder and the painting
+   both reported themselves healthy, because their work was queued behind
+   everything else the page does). So this drives the worker, with a fake
+   decoder and a fake canvas, through the real code.
 
-     drawing here: 85 fed to the decoder, 84 came out, 0 painted, 0 refused
-
-   Eighty-four frames came out of the decoder and none reached the canvas. The
-   cause was a counter whose declaration had been removed while the line that
-   incremented it stayed -- and reading an undeclared name throws, inside a
-   decoder output callback, where WebCodecs swallows it. So every frame
-   decoded, none was ever drawn, and nothing anywhere said why.
-
-   Reading the file would not have caught that. Running it does. */
+   This test exists because of one line in the log -- "84 came out, 0
+   painted" -- caused by a counter whose declaration had been removed while
+   the line incrementing it stayed. Reading the file would not have caught
+   that. Running it does. */
 import { readFileSync } from "node:fs";
 
 let bad = 0;
@@ -19,24 +18,27 @@ const check = (cond, what) => {
   if (!cond) bad += 1;
 };
 
-/* The smallest browser that can run paint.js. */
+const paintSrc = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
+const workerSrc = readFileSync(new URL("../../web/frames.js", import.meta.url), "utf8");
+
+/* The smallest worker that can run frames.js. */
 let clock = 1000;
-const said = [];
+const sent = [];              // what the worker posted to the page
 let output = null, onError = null;
 let painted = 0, closed = 0;
-
 const built = [];
+
 class FakeDecoder {
   constructor(o) {
-    output = o.output; onError = o.error; this.state = "unconfigured";
-    this.config = null; this.chunks = [];
+    output = o.output; onError = o.error;
+    this.state = "unconfigured"; this.config = null; this.chunks = [];
+    this.decodeQueueSize = 0;
     built.push(this);
   }
   configure(c) { this.state = "configured"; this.config = c; }
   decode(chunk) { this.chunks.push(chunk); }
   close() { this.state = "closed"; }
 }
-FakeDecoder.isConfigSupported = async () => ({ supported: true });
 
 class FakeFrame {
   constructor(timestamp) {
@@ -47,124 +49,134 @@ class FakeFrame {
   close() { closed += 1; }
 }
 
-const world = {
-  performance: { now: () => clock },
-  VideoDecoder: FakeDecoder,
-  VideoFrame: FakeFrame,
-  EncodedVideoChunk: class { constructor(o) { Object.assign(this, o); } },
-  RTCRtpScriptTransform: class { constructor() {} },
-  Worker: class { constructor() { this.onmessage = null; } terminate() {} },
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, 0),
-  clearTimeout: (id) => globalThis.clearTimeout(id),
-};
-
-const src = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
-const names = Object.keys(world);
-const mod = { exports: {} };
-new Function("module", "exports", ...names, src)(
-  mod, mod.exports, ...names.map((n) => world[n]));
-const paint = mod.exports;
-
 const canvas = {
   width: 300, height: 150,
   getContext: () => ({ drawImage: () => { painted += 1; } }),
 };
 
-const painter = paint.makePainter(canvas, (t) => said.push(t));
+const world = {
+  performance: { now: () => clock },
+  VideoDecoder: FakeDecoder,
+  VideoFrame: FakeFrame,
+  EncodedVideoChunk: class { constructor(o) { Object.assign(this, o); } },
+  setTimeout: (fn, ms) => globalThis.setTimeout(fn, 0),
+  clearTimeout: (id) => globalThis.clearTimeout(id),
+};
 
-console.log("a frame that comes out of the decoder reaches the canvas");
-painter.start({ transform: null }, "avc1.42E01F");
-check(output !== null, "the decoder was built and its output taken");
-output(new FakeFrame(0));
-check(painted === 1, `one frame out, ${painted} painted`);
-check(painter.painted() === true, "and the painter knows it has painted");
-check(closed === 1, "the frame was closed, so the decoder gets its buffer back");
+const self_ = {
+  postMessage: (m) => sent.push(m),
+  importScripts: () => {},
+  onmessage: null,
+  onrtctransform: null,
+};
+// paint.js first, as importScripts does in the worker, so makePacer and the
+// bitstream helpers are in scope exactly as they are there.
+const names = Object.keys(world);
+const boot = new Function("self", ...names, `
+  ${paintSrc}
+  self.importScripts = () => {};
+  const PACE_ = PACE;
+  ${workerSrc.replace('importScripts("/static/paint.js");', "")}
+  return { PACE: PACE_ };
+`);
+boot(self_, ...names.map((n) => world[n]));
 
-console.log("and a run of them, with the canvas resized to the picture");
-for (let i = 1; i <= 30; i += 1) {
-  clock += 16.7;
-  output(new FakeFrame(i * 16700));
-}
-check(painted === 31, `31 frames in, ${painted} painted`);
-check(canvas.width === 1280 && canvas.height === 720,
-      `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
+console.log("the worker says it is ready before anything else");
+check(sent.length === 1 && sent[0].ready === true,
+      "one ready message and nothing before it");
 
-console.log("the report names every stage, including the one before us");
-const line = painter.report();
-check(/painted/.test(line) && /came out/.test(line),
-      "it says what came out and what was painted: " + line);
-// The counters could not tell a transform delivering slowly from a page
-// losing what it was given, and those are different faults: 188 fed and 185
-// painted looks perfect until you notice the stream was sending 60 a second
-// and only 21 ever arrived.
-check(/handed over by the transform/.test(line),
-      "and how many the transform handed over in the first place");
-check(typeof painter.drawnLately === "function",
-      "and the painted rate can be read for saying on screen");
+console.log("and builds a decoder when the page hands over a canvas");
+sent.length = 0;
+self_.onmessage({ data: { start: { canvas, codec: "avc1.42E01F" } } });
+check(built.length === 1, "a decoder was built");
+check(built[0].config && built[0].config.description === undefined,
+      "with no description, which means start codes");
+check(sent.some((m) => m.started), "and it says it started");
 
-console.log("stopping leaves nothing behind");
-painter.stop();
-check(painter.painted() === false, "and forgets that it ever painted");
-check(painter.running() === false, "and is not running");
-
-console.log("a decoder that fails says so through the painter, not into the void");
-said.length = 0;
-const second = paint.makePainter(canvas, (t) => said.push(t));
-second.start({ transform: null }, "avc1.42E01F");
-onError(new Error("Decoder failure"));
-check(said.some((t) => /decoder/i.test(t)),
-      "the failure is reported: " + (said[0] || "nothing"));
-
-console.log("\na decoder that refuses start codes is given the parameter sets");
-// iOS Safari configures for Annex B, accepts one frame and reports "Decoder
-// failure" -- against every spelling of the codec, so it is not the profile
-// or the level. WebKit wants what an mp4 carries: the parameter sets up
-// front as a description, and each frame length-prefixed.
-built.length = 0;
-said.length = 0;
-const third = paint.makePainter(canvas, (t) => said.push(t));
-third.start({ transform: null }, "avc1.42E01F");
-check(built.length === 1 && built[0].config
-      && built[0].config.description === undefined,
-      "it starts with no description, which means start codes");
-
-// A real keyframe: SPS, PPS, IDR.
+console.log("a frame fed in reaches the canvas");
 const sps = [0x67, 0x42, 0xe0, 0x28, 0xaa, 0xbb];
 const pps = [0x68, 0xce, 0x3c, 0x80];
 const idr = [0x65, 0x88, 0x84, 0x21];
 const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
                                  0, 0, 1, ...idr]).buffer;
-third.take("key", 0, keyframe);
-check(built[0].chunks.length === 1, "the keyframe is fed as it came");
+self_.onrtctransform({
+  transformer: {
+    readable: {
+      getReader: () => {
+        let done = false;
+        return {
+          read: () => Promise.resolve(done
+            ? { done: true }
+            : (done = true, { done: false,
+                              value: { data: keyframe, timestamp: 0,
+                                       type: "key" } })),
+        };
+      },
+    },
+  },
+});
 
+await new Promise((go) => globalThis.setTimeout(go, 20));
+check(built[0].chunks.length === 1, "the keyframe was fed to the decoder");
+output(new FakeFrame(0));
+check(painted === 1, `one frame out, ${painted} painted`);
+check(closed === 1, "and the frame was closed, so its buffer goes back");
+
+console.log("a run of them, with the canvas resized to the picture");
+for (let i = 1; i <= 30; i += 1) {
+  clock += 16.7;
+  output(new FakeFrame(i * 16700));
+}
+check(painted === 31, `31 out, ${painted} painted`);
+check(canvas.width === 1280 && canvas.height === 720,
+      `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
+
+console.log("the counters name every stage, including the one before us");
+sent.length = 0;
+self_.onmessage({ data: { report: true } });
+const stats = (sent.find((m) => m.stats) || {}).stats;
+check(stats, "a report came back");
+check(stats.handed === 1, `what the transform handed over: ${stats.handed}`);
+check(stats.drawn === 31, `and what was painted: ${stats.drawn}`);
+check(stats.ever === true, "and that something has been painted at all");
+
+console.log("a saturated decoder is not given more, but keyframes still go in");
+built[0].decodeQueueSize = 99;
+const before = built[0].chunks.length;
+self_.onmessage({ data: { report: true } });        // clear the counters
+// A delta is refused...
+const deltaFrame = new Uint8Array([0, 0, 0, 1, 0x41, 1, 2, 3]).buffer;
+self_.onrtctransform({
+  transformer: { readable: { getReader: () => {
+    let n = 0;
+    return { read: () => Promise.resolve(n++ ? { done: true }
+      : { done: false, value: { data: deltaFrame, timestamp: 1,
+                                type: "delta" } }) };
+  } } },
+});
+await new Promise((go) => globalThis.setTimeout(go, 20));
+check(built[0].chunks.length === before,
+      "a delta is dropped while the decoder is behind");
+
+console.log("a decoder that fails is given the parameter sets instead");
+sent.length = 0;
 onError(new Error("Decoder failure"));
-check(built.length === 2, "a failure builds a second decoder, it does not stop");
+check(built.length === 2, "a second decoder was built rather than giving up");
 const now = built[1].config;
-check(now && now.description, "and configures it with a description");
-check(now.codec === "avc1.42E028",
-      "and a codec string read out of the SPS, not the SDP: " + now.codec);
+check(now && now.description, "with a description this time");
 const desc = Array.from(new Uint8Array(now.description));
 check(desc[0] === 1 && desc[4] === 0xff && desc[5] === 0xe1,
-      "a well-formed avcC: version 1, four-byte lengths, one SPS ("
-      + desc.slice(0, 6).map((b) => b.toString(16)).join(" ") + ")");
-check(desc[1] === 0x42 && desc[3] === 0x28,
-      "with the profile and level read out of the SPS itself");
-
+      "a well-formed avcC: " + desc.slice(0, 6).map((b) => b.toString(16)).join(" "));
+check(now.codec === "avc1.42E028",
+      "and a codec string read out of the SPS, not the SDP: " + now.codec);
 check(built[1].chunks.length === 1,
-      "the keyframe already in hand is replayed, so it need not wait for the next");
+      "the keyframe in hand is replayed, so it need not wait for the next");
 const replayed = new Uint8Array(built[1].chunks[0].data);
-check(replayed[0] === 0 && replayed[1] === 0 && replayed[2] === 0
-      && replayed[3] === 6,
-      "and it is length-prefixed now, not start-coded: "
+check(replayed[3] === 6 && replayed[0] === 0,
+      "length-prefixed now, not start-coded: "
       + Array.from(replayed.slice(0, 5)).join(","));
-check(said.some((t) => /parameter sets up front/.test(t)),
-      "and it says what it did: " + (said.find((t) => /parameter/.test(t)) || ""));
-
-console.log("\nand it does not try that twice, or on a codec it cannot build one for");
-check(third.tryAvcc() === false, "once switched, there is nothing else to try");
-const fourth = paint.makePainter(canvas, () => {});
-fourth.start({ transform: null }, "hvc1.1.6.L93.B0");
-check(fourth.tryAvcc() === false, "and H.265 is left alone");
+check(sent.some((m) => m.note && /parameter sets up front/.test(m.note)),
+      "and it says what it did");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

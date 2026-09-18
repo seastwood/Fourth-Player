@@ -15,6 +15,10 @@ const page = readFileSync(new URL("../../web/index.html", import.meta.url), "utf
 const paint = require("../../web/paint.js");
 const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
 const css2 = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
+const worker = readFileSync(new URL("../../web/frames.js", import.meta.url), "utf8");
+const stopBody = app.slice(app.indexOf("function stopPainting"),
+                           app.indexOf("function startPainting"));
+const stopBodyFor = (what) => stopBody.includes(what);
 
 let bad = 0;
 const check = (cond, what) => {
@@ -79,9 +83,9 @@ check(/PAINT_PROVE_MS = (\d+)/.test(app), "and it is a named number");
 check(Number(app.match(/PAINT_PROVE_MS = (\d+)/)[1]) <= 6000,
       "short enough that nobody sits in front of a black screen wondering");
 check(app.includes("painter.painted()"), "the painter is asked, not the canvas");
-check(paintFile.includes("painted() { return ever; }"),
-      "and it remembers rather than measuring the canvas -- an untouched one "
-      + "is 300x150 and would have answered yes");
+check(paintFile.includes("painted() { return Boolean(last && last.ever); }"),
+      "answered from what the worker counted, not by measuring the canvas -- "
+      + "an untouched one is 300x150 and would have said yes");
 check(app.includes("there is nothing else to try"),
       "when the spellings run out it says so");
 // It used to call setPaintMethod("browser") here, which writes the choice
@@ -179,6 +183,34 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
+console.log("switching back asks for a keyframe, or it stays black");
+// The browser's own decoder has had nothing for as long as the transform was
+// attached, so it has no reference frame to decode against -- and with
+// keyframes sent only on request, nothing asks on its behalf. Reported as
+// switching back needing a page refresh.
+check(stopBodyFor("askHostForKeyframe()"),
+      "stopPainting asks the host for one");
+
+console.log("and the decoding, pacing and painting all happen off this thread");
+// About twenty frames a second reached the canvas out of sixty, with the
+// decoder and the painting both reporting themselves healthy, because their
+// work was queued behind everything else the page does. A 1440p frame drawn
+// on the main thread sixty times a second is not something to ask of a page
+// a game is being played through.
+check(worker.includes("new VideoDecoder"), "the decoder is in the worker");
+check(worker.includes("drawImage"), "and so is the painting");
+check(worker.includes("makePacer"), "and the pacing");
+check(worker.includes('importScripts("/static/paint.js")'),
+      "sharing one copy of the pacing and the bitstream code, not two");
+check(paintFile.includes("transferControlToOffscreen"),
+      "the canvas is handed over once");
+check(paintFile.includes("function freshCanvas"),
+      "and replaced each attempt, because it can only be handed over once");
+check(worker.includes("decodeQueueSize >= QUEUE_MAX"),
+      "a saturated decoder is not given more");
+check(worker.includes("state.stale += 1"),
+      "and a frame with a newer one behind it is dropped rather than painted");
+
 console.log("switching back gives the receiver its transform back");
 // Terminating the worker is not enough: while a transform is attached every
 // frame goes to it and none is written back, so the browser's own decoder is
@@ -187,8 +219,7 @@ console.log("switching back gives the receiver its transform back");
 // anybody would look, since nothing about that path had changed.
 check(app.includes("receiver.transform = null"),
       "the transform is taken off on the way out");
-const stopBody = app.slice(app.indexOf("function stopPainting"),
-                           app.indexOf("function startPainting"));
+
 check(stopBody.indexOf("receiver.transform = null")
       < stopBody.indexOf("giveTheVideoBack()"),
       "before the stream is handed back, so nothing is starved in between");
@@ -251,16 +282,16 @@ console.log("nothing is fed to the decoder before the first keyframe");
 // recovered was luck. It was a black screen with "drawing the picture here"
 // in the log and no way to tell which of four things had gone wrong.
 const paintSrc = paintFile;
-check(paintSrc.includes("if (!key) { skipped += 1; return; }"),
+check(worker.includes("state.skipped += 1"),
       "deltas before the first keyframe are counted and dropped");
-check(paintSrc.includes("started = true"), "and the gate opens on a keyframe");
-check(paintSrc.includes("started = false"), "and closes again on stop");
+check(worker.includes("state.started = true"), "and the gate opens on a keyframe");
+check(worker.includes("state.started = false"), "and closes again on a retry");
 
 console.log("and every stage of it is counted, because they fail alike");
-for (const one of ["fed", "out", "drawn", "refused", "skipped"]) {
-  check(new RegExp("\\b" + one + "\\b").test(paintSrc), `${one} is counted`);
+for (const one of ["fed", "out", "drawn", "refused", "skipped", "handed"]) {
+  check(new RegExp("\\b" + one + "\\b").test(worker), `${one} is counted`);
 }
-check(paintSrc.includes("came out") && paintSrc.includes("painted"),
+check(paintFile.includes("came out") && paintFile.includes("painted"),
       "the report distinguishes decoded from painted");
 check(app.includes("painter.report()"), "and the page says it out loud");
 check(app.includes('painter ? "webrtc counted "'),
@@ -335,13 +366,12 @@ console.log("\nand the transform is not attached before the worker can hear it")
 // arrived. new Worker() returns before the worker's script has run, so
 // attaching a transform on the next line races its own handler -- and the
 // losing side is silence.
-const frames = readFileSync(new URL("../../web/frames.js", import.meta.url), "utf8");
-check(frames.indexOf("self.onrtctransform") < frames.indexOf("ready: true"),
+check(worker.indexOf("self.onrtctransform") < worker.indexOf("ready: true"),
       "the worker registers its handler before it says it is ready");
-check(paintFile.includes("if (m && m.ready)"),
+check(paintFile.includes("if (m.ready)"),
       "and the page waits for that before attaching anything");
-check(paintFile.indexOf("new RTCRtpScriptTransform(mine")
-      > paintFile.indexOf("if (m && m.ready)"),
+check(paintFile.indexOf("new RTCRtpScriptTransform(it")
+      > paintFile.indexOf("if (m.ready)"),
       "the transform is attached inside that, not beside it");
 
 console.log("\nthe pacing holds the early frames and releases the late ones");
