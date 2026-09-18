@@ -58,7 +58,7 @@ for guard in ("CLOCK_TIME_NONE", "return None", "except Exception"):
 
 print("and it turns the pacing off, because they undo each other")
 spot = video.index("self._true_time = bool(")
-block = video[spot:spot + 300]
+block = video[spot:spot + 1200]
 check("not self._true_time" in block,
       "pace is false whenever true_time is: a videorate would put the "
       "stamps straight back on a grid")
