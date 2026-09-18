@@ -66,9 +66,20 @@ check(app.includes("painter.painted()"), "the painter is asked, not the canvas")
 check(paintFile.includes("painted() { return ever; }"),
       "and it remembers rather than measuring the canvas -- an untouched one "
       + "is 300x150 and would have answered yes");
-check(app.includes('setPaintMethod("browser")')
-      && app.includes("there is nothing else to try"),
-      "when the spellings run out it goes back and says so");
+check(app.includes("there is nothing else to try"),
+      "when the spellings run out it says so");
+// It used to call setPaintMethod("browser") here, which writes the choice
+// down -- so a failed attempt silently replaced what somebody had picked.
+check(app.includes("paintGaveUp = true"),
+      "and gives up on this connection rather than unchoosing the method");
+check(app.slice(app.indexOf("there is nothing else to try") - 400,
+                app.indexOf("there is nothing else to try") + 400)
+         .indexOf('setPaintMethod("browser")') < 0,
+      "the remembered choice is not overwritten by a failure");
+check(app.includes("if (paintGaveUp) return;"),
+      "and nothing retries in a loop in between");
+check(app.includes("paintGaveUp = false;\n  paintTried = 0;"),
+      "a fresh media connection is a fresh chance");
 
 console.log("and a failure walks the list rather than giving up on the first");
 check(app.includes("function paintNextSpelling"), "there is a next one");

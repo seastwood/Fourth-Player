@@ -914,6 +914,11 @@ async function answer(message) {
   // far below the 1440p60 it was about to be handed. That is what "Decoder
   // failure" was.
   lastSdp = String(message.sdp || "");
+  // A new connection is a new chance: whatever went wrong on the last one
+  // may have been the connection rather than the browser, and the spellings
+  // are walked again from the top.
+  paintGaveUp = false;
+  paintTried = 0;
   // Whatever was reading the old receiver is reading something that is about
   // to be thrown away. It is started again when the new track arrives.
   stopPainting("");
@@ -8500,6 +8505,8 @@ function stopPainting(why) {
 
 let paintStarting = false;
 let paintTried = 0;                 // which spelling of the codec is next
+let paintGaveUp = false;            // this connection could not, but the
+                                    // choice is still the choice
 let paintWatch = 0;                 // the timer that gives up on a black canvas
 
 /* A remembered choice that does not work must not cost the picture.
@@ -8523,10 +8530,25 @@ function watchThePainting() {
              + "s; trying " + more);
       restartPainting();
     } else {
+      // Given up on, and *not* unchosen.
+      //
+      // This used to call setPaintMethod("browser"), which writes the
+      // choice down -- so a failed attempt silently replaced what somebody
+      // had picked, and choosing it again after a reload was the only way to
+      // find out whether anything had changed. Reported, fairly, as it
+      // setting itself back for no reason.
+      //
+      // So the choice stands and only this connection gives up. A reload or
+      // a fresh media connection tries again, which is what somebody
+      // iterating on it wants, and nothing retries in a loop in between.
+      paintGaveUp = true;
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
-             + "s and there is nothing else to try");
-      showToast("Drawing it here produced no picture; back to the browser");
-      setPaintMethod("browser");
+             + "s and there is nothing else to try; the browser is drawing it "
+             + "for now, and the choice is kept");
+      showToast("Drawing it here produced no picture — the browser is drawing "
+                + "it for now");
+      stopPainting("");
+      paintPaintMethod();
     }
   }, PAINT_PROVE_MS);
 }
@@ -8547,6 +8569,7 @@ function restartPainting() {
 
 async function startPainting() {
   if (paintMethod !== "here" || painter || paintStarting) return;
+  if (paintGaveUp) return;          // already tried everything on this one
   if (!paintMethodById("here").ok()) {
     setPaintMethod("browser");
     showToast("This browser cannot draw the picture itself");
@@ -8664,7 +8687,13 @@ function paintPaintMethod() {
     box.value = paintMethod;
   }
   const note = el("stream-paint-note");
-  if (note) note.textContent = paintMethodById(paintMethod).why;
+  if (note) {
+    note.textContent = (paintGaveUp && paintMethod === "here")
+      ? "Chosen, but this browser produced no picture with it, so the browser "
+        + "is drawing it for now. Reloading tries again."
+      : paintMethodById(paintMethod).why;
+    note.classList.toggle("warn", paintGaveUp && paintMethod === "here");
+  }
 }
 
 function setPaintMethod(id) {
@@ -8673,6 +8702,7 @@ function setPaintMethod(id) {
   // again from the top rather than continuing where a previous attempt gave
   // up, which would make the second try of the day start at the end.
   paintTried = 0;
+  paintGaveUp = false;
   paintMethod = found.ok() ? found.id : PAINT_METHODS[0].id;
   savePaintMethod();
   paintPaintMethod();
