@@ -41,50 +41,52 @@ const PACE = {
   SLACK_MS: 2,       // present now rather than arm a timer for less than this
   QUANTILE: 0.95,    // cover the late tail, not the mean
   WINDOW: 120,       // arrivals remembered, about two seconds at 60fps
+  EASE: 0.05,        // how fast the playout clock follows the target
 };
 
 function makePacer(limits) {
   const c = limits || PACE;
-  // Raw transits, not excesses. The difference matters and cost a round: the
-  // baseline used to be the fastest frame *ever seen*, kept for the life of
-  // the connection, so one early arrival at the start made every frame
-  // afterwards look late -- and the reserve sat pinned at its maximum,
-  // holding every frame for most of a frame interval and releasing the late
-  // ones immediately. That is a stutter manufactured by the thing meant to
-  // remove one, and the report said so plainly: "25ms reserve", every window.
-  //
-  // So the window holds what actually arrived, the baseline is the fastest
-  // within it, and both move on. The comment above always said "recent" and
-  // now the code does too.
+  // Recent transits -- when a frame arrived, against when it was captured.
+  // The two clocks have unrelated origins and that is fine: only the
+  // differences are ever used.
   const seen = [];
+  // The one number that decides smoothness: how far behind the capture clock
+  // the picture is shown. Presentation time is capture time plus this, so an
+  // evenly captured stream is an evenly shown one however unevenly it
+  // arrived -- which is the whole job, and is not what asking "how long
+  // should I hold this particular frame" achieves. That produced a schedule
+  // as ragged as the arrivals it was meant to smooth.
+  let offset = null;
 
-  function spread() {
+  function target() {
     const sorted = seen.slice().sort((a, b) => a - b);
     const at = Math.min(sorted.length - 1,
                         Math.floor(sorted.length * c.QUANTILE));
-    return { base: sorted[0], tail: sorted[at] };
+    // The fastest path, plus enough to cover the late tail: a frame that
+    // takes the quickest route waits, one that took the slowest does not.
+    return sorted[0] + Math.min(c.MAX_MS, sorted[at] - sorted[0]);
   }
 
   return {
-    /* Given when a frame was captured and when it arrived, how long to hold
-       it. Returns 0 to draw it now. */
-    hold(captureMs, nowMs) {
+    /* When this frame should be shown, on the same clock `nowMs` is on. */
+    due(captureMs, nowMs) {
       const transit = nowMs - captureMs;
       seen.push(transit);
       if (seen.length > c.WINDOW) seen.shift();
-      // Not enough to have an opinion yet: drawing immediately is the old
-      // behaviour and the right default before anything is known.
-      if (seen.length < 10) return 0;
-      const { base, tail } = spread();
-      const reserve = Math.min(c.MAX_MS, tail - base);
-      const wait = reserve - (transit - base);
-      return wait > c.SLACK_MS ? wait : 0;
+      if (offset === null) offset = transit;
+      if (seen.length >= 10) {
+        // Eased rather than snapped. A playout clock that jumps is a stutter
+        // of its own, and nothing here is urgent: the target moves slowly
+        // because it is a quantile over a couple of seconds of arrivals.
+        offset += (target() - offset) * c.EASE;
+      }
+      return captureMs + offset;
     },
-    forget() { seen.length = 0; },
+    forget() { seen.length = 0; offset = null; },
     reserve() {
       if (seen.length < 10) return 0;
-      const { base, tail } = spread();
-      return Math.min(c.MAX_MS, tail - base);
+      const sorted = seen.slice().sort((a, b) => a - b);
+      return Math.round(offset - sorted[0]);
     },
   };
 }

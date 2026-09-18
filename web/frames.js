@@ -127,8 +127,11 @@ function decoded(frame) {
   state.drew = state.drew || false;
   const captured = (frame.timestamp || 0) / 1000;
   const now = performance.now();
-  const wait = state.pacer.hold(captured, now);
-  state.waiting.push({ frame, due: now + (wait > 0 ? wait : 0) });
+  // An absolute moment, not a delay. The capture clock is even, so a
+  // schedule built on it is even too, whatever the network did on the way --
+  // which is the difference between a picture that plays and one that
+  // arrives.
+  state.waiting.push({ frame, due: state.pacer.due(captured, now) });
   if (!state.timer) pump();
 }
 

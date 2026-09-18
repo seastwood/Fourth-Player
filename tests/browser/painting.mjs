@@ -391,49 +391,52 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
-console.log("\nthe pacing holds the early frames and releases the late ones");
-const pacer = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
-                                WINDOW: 120 });
-// Twenty frames on the fast path, so a baseline exists and the tail is flat.
-for (let i = 0; i < 20; i += 1) pacer.hold(i * 16.7, i * 16.7 + 10);
-check(pacer.reserve() === 0,
-      "a link with no jitter reserves nothing: " + pacer.reserve());
-check(pacer.hold(20 * 16.7, 20 * 16.7 + 10) === 0,
-      "and holds nothing back");
+console.log("\nthe pacing turns ragged arrival into an even schedule");
+// The job is not "how long should I hold this frame" -- that produced a
+// schedule as ragged as the arrivals it was meant to smooth. It is a playout
+// clock: show each frame at its capture time plus one offset. The capture
+// clock is even, so the schedule is even, whatever the network did.
+const L = { MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95, WINDOW: 120, EASE: 0.05 };
 
-// Now a late tail: one frame in five arrives 20ms behind the fastest.
-const jittery = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
-                                  WINDOW: 120 });
-for (let i = 0; i < 40; i += 1) {
-  jittery.hold(i * 16.7, i * 16.7 + 10 + (i % 5 === 0 ? 20 : 0));
+const bursty = paint.makePacer(L);
+const shown = [];
+for (let i = 0; i < 200; i += 1) {
+  const captured = i * 33.3;
+  // Frames arrive in pairs: one quickly, the next 18ms behind it.
+  shown.push(bursty.due(captured, captured + 10 + (i % 2 ? 0 : 18)));
 }
-check(jittery.reserve() > 0,
-      "a link with a late tail reserves something: " + jittery.reserve().toFixed(1));
-const early = jittery.hold(41 * 16.7, 41 * 16.7 + 10);
-check(early > 0, "a frame on the fastest path is held: " + early.toFixed(1) + "ms");
-const already = jittery.hold(42 * 16.7, 42 * 16.7 + 40);
-check(already === 0, "one that is already late goes out now");
+const gaps = [];
+for (let i = 1; i < shown.length; i += 1) gaps.push(shown[i] - shown[i - 1]);
+const settled = gaps.slice(100);
+const tightest = Math.min(...settled), widest = Math.max(...settled);
+check(Math.abs(widest - tightest) < 0.01,
+      `every gap the same: ${tightest.toFixed(1)}ms to ${widest.toFixed(1)}ms`);
+check(Math.abs(tightest - 33.3) < 0.01,
+      "and it is the capture interval, not something invented");
+check(bursty.reserve() >= 15 && bursty.reserve() <= 25,
+      `paid for with ${bursty.reserve()}ms of delay, which is the burst`);
 
-console.log("\nand one early frame does not poison the baseline for ever");
-// This was the stutter. The baseline was the fastest frame ever seen, kept
-// for the life of the connection, so a single early arrival made everything
-// afterwards look late -- the reserve sat pinned at its maximum, holding
-// every frame for most of a frame interval and releasing late ones at once.
-// "25ms reserve" in every window, on a link with nothing wrong with it.
-const poisoned = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
-                                   WINDOW: 120 });
-poisoned.hold(0, 0);                       // one frame with no transit at all
-for (let i = 1; i < 200; i += 1) poisoned.hold(i * 33.3, i * 33.3 + 20);
-check(poisoned.reserve() === 0,
-      "a steady link after one freak arrival reserves nothing: "
-      + poisoned.reserve().toFixed(1));
+console.log("\na clean link is not made to wait for nothing");
+const clean = paint.makePacer(L);
+for (let i = 0; i < 200; i += 1) clean.due(i * 33.3, i * 33.3 + 10);
+check(clean.reserve() <= 1,
+      `nothing reserved on a link with no jitter: ${clean.reserve()}ms`);
 
 console.log("\nand the reserve is capped, because a reserve is latency");
-const wild = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
-                               WINDOW: 120 });
-for (let i = 0; i < 40; i += 1) wild.hold(i * 16.7, i * 16.7 + 10 + (i % 2) * 400);
-check(wild.reserve() <= 25,
-      "a link jittering by 400ms still reserves at most 25: " + wild.reserve());
+const wild = paint.makePacer(L);
+for (let i = 0; i < 300; i += 1) {
+  wild.due(i * 33.3, i * 33.3 + 10 + (i % 2) * 400);
+}
+check(wild.reserve() <= L.MAX_MS + 1,
+      `a link jittering by 400ms still reserves at most ${L.MAX_MS}: `
+      + wild.reserve());
+
+console.log("\nand one early frame does not poison it for ever");
+const poisoned = paint.makePacer(L);
+poisoned.due(0, 0);
+for (let i = 1; i < 300; i += 1) poisoned.due(i * 33.3, i * 33.3 + 20);
+check(poisoned.reserve() <= 2,
+      `a steady link after one freak arrival settles: ${poisoned.reserve()}ms`);
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
