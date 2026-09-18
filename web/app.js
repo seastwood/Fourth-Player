@@ -8619,6 +8619,9 @@ function watchThePainting() {
       // a fresh media connection tries again, which is what somebody
       // iterating on it wants, and nothing retries in a loop in between.
       paintGaveUp = true;
+      // What is drawing is the browser, so that is what the mode now is. The
+      // choice lives on in paintChoice and in storage.
+      paintMethod = PAINT_METHODS[0].id;
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
              + "s and there is nothing else to try; the browser is drawing it "
              + "for now, and the choice is kept");
@@ -8774,21 +8777,18 @@ function hostPrefersDrawing(id) {
     ? id : PAINT_METHODS[0].id;
   if (next === hostDrawWith) { paintPaintMethod(); return; }
   hostDrawWith = next;
-  if (paintChoice) { paintPaintMethod(); return; }   // theirs wins
+  // A viewer who has chosen keeps their choice; one who never has moves with
+  // the host, and the dropdown then shows the mode they have been moved to,
+  // which is the whole point of it showing what is in force.
+  if (paintChoice) { paintPaintMethod(); return; }
   setPaintMethod("");
 }
 
 function paintPaintMethod() {
   const box = el("stream-paint");
   if (box) {
-    const built = "follow:" + hostDrawWith;
-    if (box.dataset.built !== built) {
+    if (box.dataset.built !== "1") {
       box.innerHTML = "";
-      const follow = document.createElement("option");
-      follow.value = "";
-      follow.textContent = "Follow the host — "
-        + paintMethodById(hostDrawWith).label.replace(" (default)", "");
-      box.appendChild(follow);
       for (const one of PAINT_METHODS) {
         const option = document.createElement("option");
         option.value = one.id;
@@ -8797,25 +8797,27 @@ function paintPaintMethod() {
         option.disabled = !one.ok();
         box.appendChild(option);
       }
-      box.dataset.built = built;
+      box.dataset.built = "1";
     }
-    // What is actually drawing, not what was asked for.
+    // Always the mode that is actually in force.
     //
-    // The two differ when a method was chosen and could not run, and showing
-    // the choice then meant the dropdown said WebCodecs while the browser was
-    // plainly doing the drawing. A control that disagrees with the screen is
-    // worse than one that forgets. What was asked for is not lost -- it is in
-    // the note below, and it is what a reload tries again.
-    box.value = (paintGaveUp && paintMethod === "here")
-      ? PAINT_METHODS[0].id : paintChoice;
+    // This had three meanings at once and was, fairly, called genuinely
+    // confusing: it showed the choice, or "follow the host", or the fallback,
+    // depending on how it got there -- so the one question anybody asks of it
+    // ("which is it doing?") was the one it could not answer. There is no
+    // "follow the host" entry any more either; the host's setting decides
+    // what a browser that has never chosen starts with, and after that this
+    // says what is happening. The preference is still remembered, and it is
+    // still what a reload tries again.
+    box.value = paintMethod;
   }
   const note = el("stream-paint-note");
   if (note) {
-    note.textContent = (paintGaveUp && paintMethod === "here")
+    note.textContent = (paintGaveUp && paintChoice === "here")
       ? "You asked for the page to draw it and this browser produced no "
         + "picture, so the browser is drawing it. Reloading tries again."
       : paintMethodById(paintMethod).why;
-    note.classList.toggle("warn", paintGaveUp && paintMethod === "here");
+    note.classList.toggle("warn", paintGaveUp && paintChoice === "here");
   }
 }
 

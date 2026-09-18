@@ -31,6 +31,21 @@ check(app.indexOf('id: "browser"') < app.indexOf('id: "here"'),
 check(page.includes('<select id="stream-paint">'),
       "the page offers it as a dropdown");
 
+console.log("and it always shows the mode that is in force");
+// It had three meanings at once -- the choice, "follow the host", or the
+// fallback, depending on how it got there -- so the one question anybody
+// asks of it could not be answered by it.
+check(app.includes("box.value = paintMethod;"),
+      "the effective mode is what is selected");
+check(!app.includes('follow.value = ""'),
+      "there is no 'follow the host' entry to disagree with the screen");
+const gaveUp = app.slice(app.indexOf("paintGaveUp = true"),
+                         app.indexOf("paintGaveUp = true") + 400);
+check(gaveUp.includes("paintMethod = PAINT_METHODS[0].id"),
+      "giving up makes the browser the mode, because it is what is drawing");
+check(app.includes('paintGaveUp && paintChoice === "here"'),
+      "while the note still speaks for what was asked for");
+
 console.log("and every option names what actually does the drawing");
 // "The browser" and "this page" said who to blame and nothing about how,
 // which is the part worth knowing when two are being compared -- and the
