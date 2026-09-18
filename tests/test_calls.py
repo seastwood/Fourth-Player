@@ -28,8 +28,11 @@ def check(cond, msg):
         fails.append(msg)
 
 
+# Every script the page loads, because a name defined in one and called in
+# another is not a missing definition -- they share one global scope. paint.js
+# is the second way of drawing the picture and app.js calls into it.
 sources = {name: open(os.path.join(WEB, name)).read()
-           for name in ("app.js", "frame.js")}
+           for name in ("app.js", "frame.js", "paint.js")}
 everything = "\n".join(sources.values())
 
 # Anything the browser, the language or the test harness provides. A name here
@@ -46,7 +49,12 @@ PROVIDED = {
     "fetch", "setTimeout", "setInterval", "clearTimeout", "clearInterval",
     "requestAnimationFrame", "cancelAnimationFrame", "alert", "confirm",
     "WebSocket", "RTCPeerConnection", "RTCRtpReceiver", "MediaStream",
-    "IntersectionObserver",
+    "IntersectionObserver", "Worker",
+    # WebCodecs and the encoded transform, for the second way of drawing the
+    # picture. Every one of these is also feature-detected before it is used
+    # -- see canPaintDirectly -- because a browser without them has to fall
+    # back rather than throw.
+    "VideoDecoder", "VideoFrame", "EncodedVideoChunk", "RTCRtpScriptTransform",
     "AbortController", "Event", "CustomEvent", "URL", "URLSearchParams",
     "Blob", "FileReader", "Image", "Audio", "getComputedStyle", "matchMedia",
     "reportError",

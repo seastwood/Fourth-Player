@@ -173,10 +173,11 @@ def layer(selector):
     return int(found.group(1)) if found else None
 
 
-video_rule = re.search(r"\nvideo \{(.*?)\n\}", css, re.S)
+video_rule = re.search(r"\nvideo(?:, #painted)? \{(.*?)\n\}", css, re.S)
 check(bool(video_rule) and "position: relative" in video_rule.group(1),
       "the video is positioned, so its z-index means something")
-check(layer("\nvideo") == 0, "and states where it paints: %s" % layer("\nvideo"))
+check(layer("\nvideo, #painted") == 0,
+      "and states where it paints: %s" % layer("\nvideo, #painted"))
 for name, selector in (("the chips", ".hud"), ("the on-screen pad", ".touch"),
                        ("the game list", ".browser"),
                        ("the controls panel", ".pads")):
