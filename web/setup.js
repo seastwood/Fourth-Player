@@ -260,6 +260,24 @@ function fillPicture(stream, policies) {
     // and never hidden, or "cannot" and "gone" look the same.
     virtual.disabled = !stream.can_virtual_display;
   }
+  // Oversampling needs the pacing to mean anything: without a videorate to
+  // bring the rate back down, capturing twice as often just sends twice as
+  // many frames. So ticking it ticks the other and holds it there.
+  const pace = el("set-pace");
+  const over = el("set-oversample");
+  if (pace) {
+    pace.checked = Boolean(stream.pace_frames) || Boolean(stream.oversample);
+    pace.disabled = Boolean(stream.oversample);
+  }
+  if (over) over.checked = Boolean(stream.oversample);
+  const paceNote = el("pace-note");
+  if (paceNote) {
+    paceNote.textContent = stream.oversample
+      ? "grabbing twice per sent frame and sending the fresher of each pair"
+      : stream.pace_frames
+        ? "holding the capture to the frame rate above"
+        : "sending frames exactly as the screen hands them over";
+  }
   const virtualNote = el("virtual-note");
   if (virtualNote) {
     const desk = stream.desktop || [];
@@ -506,6 +524,8 @@ const ACTIONS = {
       // because bool("off") is true at the other end.
       audio: Boolean(el("set-audio") && el("set-audio").checked),
       virtual_display: Boolean(el("set-virtual") && el("set-virtual").checked),
+      pace_frames: Boolean(el("set-pace") && el("set-pace").checked),
+      oversample: Boolean(el("set-oversample") && el("set-oversample").checked),
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
       guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",

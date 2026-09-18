@@ -8606,6 +8606,9 @@ function streamFields() {
     queue_ms: Number(el("stream-queue").value),
     cpb_ms: Number(el("stream-cpb").value),
     codec: el("stream-codec").value,
+    pace_frames: Boolean(el("stream-pace") && el("stream-pace").checked),
+    oversample: Boolean(el("stream-oversample")
+                        && el("stream-oversample").checked),
   };
 }
 
@@ -8630,6 +8633,8 @@ function paintStreamValues() {
       && want.height === streamNow.height
       && want.codec === streamNow.codec
       && Boolean(want.virtual_display) === Boolean(streamNow.virtual_display)
+      && Boolean(want.pace_frames) === Boolean(streamNow.pace_frames)
+      && Boolean(want.oversample) === Boolean(streamNow.oversample)
       && String(want.monitor) === String(streamNow.monitor || "")
       // Width only counts while the exact boxes are in play; off a virtual
       // display it is not sent at all and the named size decides.
@@ -8802,6 +8807,17 @@ function paintScreens(state) {
     virtual.checked = Boolean(state.virtual_display);
     virtual.disabled = !state.can_virtual_display;
   }
+  // Oversampling needs the pacing, so the page says so rather than letting
+  // somebody set a pair that quietly means something else: capturing twice
+  // as often with nothing to bring the rate back down just sends twice as
+  // many frames.
+  const pace = el("stream-pace");
+  const over = el("stream-oversample");
+  if (pace) {
+    pace.checked = Boolean(state.pace_frames) || Boolean(state.oversample);
+    pace.disabled = Boolean(over && over.checked);
+  }
+  if (over) over.checked = Boolean(state.oversample);
   // The exact size boxes only mean anything on a display made in software.
   const customRow = el("stream-custom-row");
   if (customRow) {
@@ -8930,10 +8946,20 @@ function wireStream() {
   // something else was touched.
   for (const id of ["stream-size", "stream-fps", "stream-codec",
                     "stream-virtual", "stream-screen",
+                    "stream-pace", "stream-oversample",
                     "stream-width", "stream-height"]) {
     const node = el(id);
     if (!node) continue;
     node.addEventListener("change", paintStreamValues);
+    if (id === "stream-oversample") {
+      node.addEventListener("change", () => {
+        const pace = el("stream-pace");
+        if (!pace) return;
+        if (node.checked) pace.checked = true;
+        pace.disabled = node.checked;
+        paintStreamValues();
+      });
+    }
     // Typing in a number box is `input`, not `change`: `change` waits for the
     // field to be left, so the button would stay dead while somebody looked
     // straight at the number they had just typed.

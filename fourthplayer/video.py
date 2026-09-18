@@ -1086,12 +1086,38 @@ class Stage:
                         "sending the usual one", wanted,
                         ", ".join(m[5] for m in vdisplay.monitors()) or "none")
 
+        # Capturing, and whether anything holds the rate of it.
+        #
+        # Three shapes come out of two switches:
+        #
+        #   neither    the capture's own rate, named by the filter below and
+        #              not kept by anything. What this was before today.
+        #   pacing     a videorate behind the capture, dropping whatever
+        #              arrived too early for its slot.
+        #   both       the capture asked for twice the rate, and the videorate
+        #              choosing the fresher of each pair.
+        #
+        # Oversampling turns pacing on by itself: without something to bring
+        # the rate back down, capturing twice as often just sends twice as
+        # many frames.
+        oversample = bool(getattr(cfg, "oversample", False))
+        pace = bool(getattr(cfg, "pace_frames", True)) or oversample
+        oversampling = (f"! video/x-raw(ANY),framerate={cfg.fps * 2}/1 "
+                        if oversample else "")
+        pacing = "! videorate drop-only=true " if pace else ""
+        log.info("frames: captured at %d/s%s, sent at %d/s",
+                 cfg.fps * 2 if oversample else cfg.fps,
+                 " and paced" if pace else " with nothing holding the rate",
+                 cfg.fps)
+
         description = (
             # The pointer is off while nobody is driving: a mouse cursor
             # sitting over a game is noise, and there is nothing to point
             # with. Stage.show_pointer turns it on for as long as somebody
             # holds the desk -- see there for why it cannot simply be left on.
             f"{source_line.format(display=cfg.display)} "
+            f"{oversampling}"
+            f"{pacing}"
             # The frame rate below is a *claim* without this. A caps filter
             # says what the pictures are, not when they arrive, and the
             # desktop captures do not pace themselves to it: measured on this
@@ -1108,7 +1134,6 @@ class Stage:
             # for most of its life. Dropping needs no frame held back either,
             # so this costs no delay -- it only ever discards something that
             # arrived too early for its slot.
-            f"! videorate drop-only=true "
             # (ANY) matters and is not decoration. This filter exists to pin
             # the frame rate and nothing else, but `video/x-raw` on its own
             # also says "in system memory" -- which is true of ximagesrc and

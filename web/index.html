@@ -855,6 +855,27 @@
         <p class="footnote" id="stream-virtual-note">Makes a display in
            software at the size being sent, so nothing is scaled. Turning it
            off removes it, and any left over from before.</p>
+        <!-- The two switches behind how frames are timed. Both are here
+             rather than buried in the host's config because the only way to
+             know which suits a machine is to watch the picture while
+             changing it, and that is done from here. -->
+        <div class="acct-row">
+          <label class="tune-label" for="stream-pace">Even out the frame
+             rate</label>
+          <input id="stream-pace" type="checkbox" class="chip">
+        </div>
+        <p class="footnote" id="stream-pace-note">Holds the capture to the
+           frame rate above, dropping anything that arrives too early. Off
+           sends frames exactly as the screen hands them over.</p>
+        <div class="acct-row">
+          <label class="tune-label" for="stream-oversample">Capture twice as
+             often</label>
+          <input id="stream-oversample" type="checkbox" class="chip">
+        </div>
+        <p class="footnote" id="stream-oversample-note">Grabs the screen at
+           twice the frame rate and sends the fresher of each pair, so a frame
+           is never as stale. Costs a second capture per frame sent, and turns
+           the setting above on by itself.</p>
         <!-- Any size at all, but only on a virtual display. The named sizes
              above exist because the capture is a real screen and those are
              the shapes real screens come in; a display made in software has

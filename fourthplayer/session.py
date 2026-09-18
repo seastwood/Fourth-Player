@@ -2718,6 +2718,8 @@ class LiveSession:
             "codec": cfg.codec,
             "audio": bool(cfg.audio),
             "virtual_display": bool(cfg.virtual_display),
+            "pace_frames": bool(getattr(cfg, "pace_frames", True)),
+            "oversample": bool(getattr(cfg, "oversample", False)),
             # Whether one could be made here at all, so the page can offer the
             # switch where it means something and explain itself where it does
             # not. A switch that silently does nothing is worse than no switch.
@@ -2831,7 +2833,7 @@ class LiveSession:
             if want_mic != str(getattr(self.cfg, "guest_mic_device", "") or ""):
                 changes["guest_mic_device"] = want_mic
 
-        for flag in ("audio", "virtual_display"):
+        for flag in ("audio", "virtual_display", "pace_frames", "oversample"):
             if flag not in asked:
                 continue
             want = asked[flag]

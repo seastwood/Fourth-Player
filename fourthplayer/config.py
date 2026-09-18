@@ -90,6 +90,29 @@ class Config:
     #
     # Off for somebody whose console screen is also a desk they work at and
     # who would rather it were left alone.
+    # Whether a videorate sits behind the capture, holding the frame rate.
+    #
+    # On, because a caps filter names a frame rate and does not keep one: the
+    # desktop captures deliver when the desktop gives them something, and
+    # measured here that was 137 frames a second against 120 asked for. Off is
+    # for finding out whether the pacing is helping this machine or hurting
+    # it, which is not a question anybody should have to rebuild a host to ask.
+    pace_frames: bool = True
+
+    # Capture twice as often as the guests are sent.
+    #
+    # The capture stamps frames on an even grid and delivers them at uneven
+    # real times -- measured at 30% of frames grabbed nowhere near the
+    # interval their timestamp claimed. Sampling twice as often halves how
+    # stale the frame chosen for each slot can be, because there are two to
+    # choose from rather than one.
+    #
+    # It costs a second capture and convert per sent frame, and it needs the
+    # pacing to be any use at all: without a videorate to bring the rate back
+    # down, capturing twice as often simply sends twice as many frames. So it
+    # turns the pacing on by itself.
+    oversample: bool = False
+
     match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device
