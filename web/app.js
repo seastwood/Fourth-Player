@@ -5247,8 +5247,9 @@ function paintCursorMode() {
   if (button) {
     button.classList.toggle("is-relative", relative);
     button.title = relative
-      ? "Pointer moves like a trackpad. Tap to change."
-      : "Pointer goes where you touch. Tap to change.";
+      ? "Trackpad for games: dragging turns, past the edges. Tap to change."
+      : "Trackpad: dragging moves the pointer, stopping at the edges. "
+        + "Tap to change.";
   }
   const menu = el("cursor-menu");
   if (!menu) return;

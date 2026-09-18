@@ -90,6 +90,27 @@ check(/Math\.max\(0, Math\.min\(1, cursorU \+ du\)\)/.test(move),
       "and the clamping is still there for the absolute one, which does have "
       + "edges");
 
+
+/* The names, which is the part somebody reads.
+ *
+ * "Point where I touch" described neither mode: nothing jumps to where a
+ * finger lands, both are dragged about, and the difference is what is sent
+ * and therefore whether the pointer can leave the edge of the picture. It
+ * was reported, fairly, as not making sense. */
+const markup = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
+const menu = markup.slice(markup.indexOf('id="cursor-menu"'),
+                          markup.indexOf('id="desk-kb"'));
+check(!menu.includes("Point where I touch"),
+      "the old name is gone");
+check(/data-cursor="absolute">\s*<strong>Trackpad<\/strong>/.test(menu),
+      "the absolute one is called what it behaves like: a trackpad");
+check(menu.includes("stops at the edges"),
+      "and says the thing that actually distinguishes it");
+check(/data-cursor="relative">\s*<strong>Trackpad for games<\/strong>/.test(menu),
+      "and the relative one says who it is for");
+check(menu.includes("keeps turning past the edges"),
+      "and why, which is the same distinction from the other side");
+
 console.log("\nit is chosen from a list, not toggled blindly");
 // The button used to change the mode on a press and hold: invisible until
 // somebody found it by accident, and then silent about what it had become.
