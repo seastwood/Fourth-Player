@@ -517,6 +517,10 @@ function makePainter(canvas, say) {
               + " too late to matter, " + last.reserve + "ms reserve, canvas "
               + (last.size || "?")
               + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
+              + (last.ticks
+                 ? "; " + last.starved + " of " + last.ticks
+                   + " refreshes had nothing to paint"
+                 : "")
               + (last.shown
                  ? "; painted every " + last.shown.typical + "ms typical, "
                    + "worst " + last.shown.worst + "ms, " + last.shown.off

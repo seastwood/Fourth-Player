@@ -54,6 +54,8 @@ const state = {
   lastPts: null,
   nextAt: null,
   ticked: false,
+  ticks: 0,
+  starved: 0,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -130,7 +132,17 @@ function draw(frame) {
  * frame on the display's own cadence instead of near it.
  */
 function tick() {
-  if (!state.waiting.length) return;
+  state.ticks += 1;
+  if (!state.waiting.length) {
+    // Nothing to paint. A refresh with an empty queue and a refresh where
+    // the next frame is simply not due yet are different things, and only
+    // the first is a hole in the picture: it means nothing arrived in time,
+    // which is the network or the host rather than anything here. Counted
+    // because a 209ms gap between paints has two possible causes and they
+    // want opposite fixes.
+    state.starved += 1;
+    return;
+  }
   while (state.waiting.length > DEPTH_WANT * 3) {
     state.waiting.shift().frame.close();
     state.stale += 1;
@@ -503,11 +515,14 @@ self.onmessage = (event) => {
                            : "none",
         drawFails: state.drawFails,
         shown: shownSpread(),
+        ticks: state.ticks,
+        starved: state.starved,
       },
     });
     state.handed = state.fed = state.out = state.drawn = 0;
     state.refused = state.skipped = state.stale = 0;
     state.drawFails = 0;
+    state.ticks = state.starved = 0;
     return;
   }
   if (m.tick) { state.ticked = true; tick(); return; }
