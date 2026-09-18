@@ -3686,6 +3686,24 @@ function tellAboutTheRate(picture) {
     // fair thing to say about a diagnostic that only the host can see.
     const mine = painter.drawnLately() / span;
     report(painter.report() + " over " + span.toFixed(0) + "s");
+    // Where the two actually are, whenever they could disagree. Four bugs in
+    // a row have come from the canvas and the video disagreeing about a box
+    // -- its position, its identity, its size, and the coordinate space it
+    // was measured in -- and every one of them was argued about instead of
+    // being read off the page.
+    const drawnOn = paintCanvas();
+    if (drawnOn && zoom > ZOOM_MIN + 0.001) {
+      const one = video.getBoundingClientRect();
+      const two = drawnOn.getBoundingClientRect();
+      const box = (r) => Math.round(r.left) + "," + Math.round(r.top) + " "
+        + Math.round(r.width) + "x" + Math.round(r.height);
+      report("zoomed " + zoom.toFixed(2) + ": the video is at " + box(one)
+             + " and the canvas at " + box(two)
+             + (Math.abs(one.left - two.left) < 1
+                && Math.abs(one.top - two.top) < 1
+                && Math.abs(one.width - two.width) < 1 ? " (the same)"
+                                                       : " (NOT the same)"));
+    }
     const want = (streamNow && Number(streamNow.fps)) || 0;
     if (want && mine < want * 0.75) {
       showNotice("<b>Drawing " + mine.toFixed(0) + " of " + want
