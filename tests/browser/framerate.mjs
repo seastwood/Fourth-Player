@@ -39,6 +39,7 @@ const body = app.slice(app.indexOf("const RATE_EVERY_MS"),
 const said = [];
 const make = new Function("said", `
   let Date_now = 0;
+  let painter = null;
   const report = (t) => said.push(t);
   const Date = { now: () => Date_now };
   ${body}
@@ -58,6 +59,14 @@ check(/drawing 45\.0 frames a second/.test(said[0]),
       "the drawn rate is what it says: " + said[0]);
 check(/60\.0 arrived/.test(said[0]), "and the arrived rate beside it");
 check(/15\.0 thrown away/.test(said[0]), "and what was discarded");
+
+console.log("\nand it says whose counters these are when they are not the picture");
+// While the page draws the frames itself, WebRTC's decoder is not the one
+// anybody is looking at. Reporting its numbers unlabelled would have one
+// method quietly reporting the other's performance.
+check(/^drawing /.test(said[0]), "plain when WebRTC is drawing: " + said[0]);
+check(app.includes('painter ? "webrtc counted "'),
+      "and labelled as WebRTC's own when it is not");
 
 console.log("\nand it says nothing before it has a window to speak about");
 said.length = 0;

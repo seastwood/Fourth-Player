@@ -8363,7 +8363,7 @@ const PAINT_METHODS = [
     why: "The encoded frames are taken before WebRTC can draw them, decoded "
        + "with WebCodecs, and painted on a canvas on a schedule this page "
        + "chooses. More work for the machine, and the timing of every frame "
-       + "is ours. H.264 only.",
+       + "is ours. H.264 always; H.265 and AV1 where the browser says it can.",
     ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
   },
 ];
@@ -8433,8 +8433,10 @@ function stopPainting(why) {
   if (why) report("the browser is drawing the picture again: " + why);
 }
 
-function startPainting() {
-  if (paintMethod !== "here" || painter) return;
+let paintStarting = false;
+
+async function startPainting() {
+  if (paintMethod !== "here" || painter || paintStarting) return;
   if (!paintMethodById("here").ok()) {
     setPaintMethod("browser");
     showToast("This browser cannot draw the picture itself");
@@ -8444,7 +8446,14 @@ function startPainting() {
   const canvas = paintCanvas();
   if (!receiver || !canvas) return;          // no media yet; on track arrival
   const shape = videoCodecNow();
-  const codec = codecFrom(shape.mime, shape.fmtp);
+  // Asked of the browser rather than constructed and hoped for -- see
+  // pickCodec. It is a promise, and the watchdog calls this every couple of
+  // seconds, so the flag is what stops four of them racing.
+  paintStarting = true;
+  let codec = "";
+  try { codec = await pickCodec(shape.mime, shape.fmtp); }
+  finally { paintStarting = false; }
+  if (painter || paintMethod !== "here") return;   // changed while asking
   if (!codec) {
     // Two different cases and they must not be treated alike.
     //
@@ -8458,8 +8467,10 @@ function startPainting() {
     // arrived is the wrong thing: the watchdog tries again every couple of
     // seconds, so the choice stands and it starts when it can.
     if (shape.mime) {
-      showToast("Drawing it here needs H.264; this stream is " + shape.mime);
-      report("not drawing here: the stream is " + shape.mime);
+      showToast("This browser will not decode " + shape.mime + " here");
+      report("not drawing here: this browser will not decode " + shape.mime
+             + " (tried " + (codecCandidates(shape.mime, shape.fmtp).join(", ")
+                             || "nothing") + ")");
       setPaintMethod("browser");
     } else if (!paintWaitedSaid) {
       paintWaitedSaid = true;

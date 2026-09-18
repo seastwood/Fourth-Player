@@ -84,22 +84,94 @@ function makePacer(limits) {
 /* What to tell WebCodecs this stream is.
  *
  * The codec string has to match the stream or the decoder refuses to
- * configure, and the profile is not guessable: it is in the fmtp line the
- * host and the browser agreed on. H.264's profile-level-id is already the
- * three bytes avc1 wants, in the same order, which is the one convenient
- * accident in this area.
+ * configure, and none of it is guessable: the profile and level are in the
+ * fmtp line the host and the browser agreed on, and the *spelling* of them
+ * differs per codec in ways that are easy to get subtly wrong.
  *
- * H.265 is not attempted. Its codec string is assembled from half a dozen
- * fields in a different order and getting it wrong is a decoder that will not
- * start, which here means a black picture rather than a message. The <video>
- * element handles H.265 perfectly well and that is where it stays. */
-function codecFrom(mime, fmtp) {
+ * H.264 is the one convenient accident in this area: profile-level-id is
+ * already the three bytes avc1 wants, in the same order.
+ *
+ * H.265 is not. Its string is assembled from profile space, profile, a
+ * compatibility mask, a tier letter, a level and a constraint byte, in an
+ * order that is not the order they appear in the fmtp, and the mask is a
+ * bit-reversal of a field nobody writes down. It was left out for that
+ * reason, and leaving it out was the wrong call: a wrong string is a decoder
+ * that will not configure, which is *reported* rather than silent, and
+ * asking the browser is free.
+ *
+ * So instead of constructing one string and hoping, this offers a short
+ * ordered list of plausible spellings and asks the browser which it will
+ * take. Nothing is attempted that the browser has not already agreed to.
+ * AV1 is here for the same reason, ready for a host that sends it. */
+function codecCandidates(mime, fmtp) {
   const kind = String(mime || "").toLowerCase();
-  if (kind.indexOf("h264") < 0) return "";
-  const found = /profile-level-id=([0-9a-fA-F]{6})/.exec(String(fmtp || ""));
-  // Constrained baseline at level 3.1 is what a browser offers when it says
-  // nothing, and a stream with no fmtp at all is that by convention.
-  return "avc1." + (found ? found[1].toUpperCase() : "42E01F");
+  const line = String(fmtp || "");
+  const field = (name, fallback) => {
+    const found = new RegExp(name + "=([0-9a-fA-F]+)").exec(line);
+    return found ? found[1] : fallback;
+  };
+
+  if (kind.indexOf("h264") >= 0) {
+    const id = field("profile-level-id", "42E01F").toUpperCase();
+    // The negotiated one first, then constrained baseline at 3.1 -- what a
+    // browser means when it says nothing.
+    return id === "42E01F" ? ["avc1.42E01F"] : ["avc1." + id, "avc1.42E01F"];
+  }
+
+  if (kind.indexOf("h265") >= 0 || kind.indexOf("hevc") >= 0) {
+    const profile = parseInt(field("profile-id", "1"), 10) || 1;
+    const tier = (parseInt(field("tier-flag", "0"), 10) || 0) ? "H" : "L";
+    const level = parseInt(field("level-id", "93"), 10) || 93;
+    // The compatibility mask is a bit-reversed field and in practice only two
+    // values are ever seen: 6 for Main, 4 for Main 10. Both are offered
+    // rather than reasoned about, and both spellings of the container with
+    // them -- hvc1 is what Safari documents, hev1 is what some builds take.
+    const masks = profile === 2 ? ["4", "6"] : ["6", "4"];
+    const out = [];
+    for (const box of ["hvc1", "hev1"]) {
+      for (const mask of masks) {
+        out.push(box + "." + profile + "." + mask + "." + tier + level + ".B0");
+      }
+    }
+    return out;
+  }
+
+  if (kind.indexOf("av1") >= 0) {
+    // av01.<profile>.<level><tier>.<depth>. The fmtp carries profile and
+    // level-idx as decimals; the level is two digits and the tier is M or H.
+    const profile = parseInt(field("profile", "0"), 10) || 0;
+    const level = parseInt(field("level-idx", "8"), 10) || 8;
+    const tier = (parseInt(field("tier", "0"), 10) || 0) ? "H" : "M";
+    const two = (level < 10 ? "0" : "") + level;
+    return ["av01." + profile + "." + two + tier + ".08",
+            "av01.0.08M.08"];
+  }
+
+  return [];
+}
+
+/* The first spelling this browser will actually accept, or "".
+ *
+ * isConfigSupported is the whole point: it turns a list of guesses into one
+ * answer from the only authority there is, before a decoder is built and
+ * before anything can go black. */
+async function pickCodec(mime, fmtp) {
+  if (typeof VideoDecoder === "undefined"
+      || typeof VideoDecoder.isConfigSupported !== "function") {
+    // No way to ask. H.264 is the one that can be spelled from the fmtp
+    // without inference, so it is the only one attempted blind.
+    const blind = codecCandidates(mime, fmtp);
+    return (blind.length && blind[0].indexOf("avc1.") === 0) ? blind[0] : "";
+  }
+  for (const codec of codecCandidates(mime, fmtp)) {
+    try {
+      const answer = await VideoDecoder.isConfigSupported({
+        codec, optimizeForLatency: true,
+      });
+      if (answer && answer.supported) return codec;
+    } catch (_) { /* not this one */ }
+  }
+  return "";
 }
 
 function canPaintDirectly() {
@@ -290,5 +362,5 @@ function makePainter(canvas, say) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { makePacer, codecFrom, PACE };
+  module.exports = { makePacer, codecCandidates, pickCodec, PACE };
 }

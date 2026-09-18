@@ -111,15 +111,47 @@ check(app.includes("painter.report()"), "and the page says it out loud");
 check(app.includes('painter ? "webrtc counted "'),
       "with WebRTC's own numbers labelled as its own, not as the picture");
 
-console.log("\nthe codec string is read from the connection, not guessed");
-check(paint.codecFrom("video/H264", "profile-level-id=640c1f;packetization-mode=1")
-      === "avc1.640C1F", "H.264 takes profile-level-id straight from the fmtp");
-check(paint.codecFrom("video/H264", "") === "avc1.42E01F",
-      "with no fmtp it is constrained baseline, which is the convention");
-check(paint.codecFrom("video/H265", "profile-id=1;level-id=93") === "",
-      "H.265 is refused rather than guessed at -- a wrong string is a black "
-      + "picture with no message");
-check(paint.codecFrom("", "") === "", "and so is nothing at all");
+console.log("\nthe codec string is asked of the browser, not constructed and hoped for");
+// H.265 was left out of this path because its string is assembled from a
+// profile space, a profile, a bit-reversed compatibility mask, a tier letter,
+// a level and a constraint byte, in an order that is not the order they
+// appear in the fmtp. That was the wrong call: a wrong string is a decoder
+// that refuses to configure, which is reported rather than silent, and
+// isConfigSupported makes asking free.
+const h264 = paint.codecCandidates("video/H264", "profile-level-id=640c1f");
+check(h264[0] === "avc1.640C1F",
+      "H.264 offers the negotiated profile first: " + h264[0]);
+check(h264.indexOf("avc1.42E01F") > 0,
+      "with constrained baseline behind it, which is what silence means");
+
+const main = paint.codecCandidates("video/H265",
+                                   "profile-id=1;tier-flag=0;level-id=120");
+check(main.length >= 4, `H.265 offers several spellings: ${main.length}`);
+check(main[0] === "hvc1.1.6.L120.B0", "Main at the level agreed: " + main[0]);
+check(main.some((c) => c.indexOf("hev1.") === 0),
+      "and hev1 as well as hvc1, since builds disagree about which they take");
+
+const ten = paint.codecCandidates("video/H265",
+                                  "profile-id=2;tier-flag=1;level-id=93");
+check(ten[0] === "hvc1.2.4.H93.B0",
+      "Main 10 leads with mask 4 and the high tier: " + ten[0]);
+check(ten[0].indexOf(".H") > 0, "tier-flag=1 is the high tier, not the level");
+
+const av1 = paint.codecCandidates("video/AV1", "profile=0;level-idx=13;tier=0");
+check(av1[0] === "av01.0.13M.08", "AV1 is spelled too, ready for a host that "
+      + "sends it: " + av1[0]);
+
+check(paint.codecCandidates("video/VP8", "").length === 0,
+      "and a codec nobody here handles offers nothing rather than a guess");
+
+console.log("\nand nothing is attempted that the browser has not agreed to");
+const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
+check(paintFile.includes("VideoDecoder.isConfigSupported"),
+      "the browser is asked which spelling it will take");
+check(paintFile.includes("answer.supported"), "and its answer is believed");
+check(app.includes("await pickCodec"), "the page waits for that answer");
+check(app.includes("paintStarting"),
+      "with a guard, because the watchdog calls this every couple of seconds");
 
 console.log("\nthe pacing holds the early frames and releases the late ones");
 const pacer = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
