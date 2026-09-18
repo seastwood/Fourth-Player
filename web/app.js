@@ -8329,18 +8329,20 @@ const PAINT_KEY = "fp:paint-method";
 const PAINT_METHODS = [
   {
     id: "browser",
-    label: "The browser (default)",
-    why: "The <video> element decodes and draws it. Every browser can do "
-       + "this, it uses the least of the machine, and the browser decides "
-       + "when each frame is shown.",
+    label: "Browser — WebRTC into a video element (default)",
+    why: "WebRTC decodes the stream and a <video> element draws it. Every "
+       + "browser can do this and it uses the least of the machine, but "
+       + "WebRTC's jitter buffer decides when each frame is shown and keeps "
+       + "adjusting that, which is what a video call wants.",
     ok: () => true,
   },
   {
     id: "here",
-    label: "Draw it on this page",
-    why: "Decodes the frames here and draws them on a canvas, so the moment "
-       + "each one is shown is ours to choose rather than the browser's. "
-       + "Costs more of the machine. H.264 only.",
+    label: "This page — WebCodecs onto a canvas",
+    why: "The encoded frames are taken before WebRTC can draw them, decoded "
+       + "with WebCodecs, and painted on a canvas on a schedule this page "
+       + "chooses. More work for the machine, and the timing of every frame "
+       + "is ours. H.264 only.",
     ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
   },
 ];

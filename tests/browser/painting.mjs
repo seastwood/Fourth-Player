@@ -29,6 +29,22 @@ check(app.indexOf('id: "browser"') < app.indexOf('id: "here"'),
 check(page.includes('<select id="stream-paint">'),
       "the page offers it as a dropdown");
 
+console.log("and every option names what actually does the drawing");
+// "The browser" and "this page" said who to blame and nothing about how,
+// which is the part worth knowing when two are being compared -- and the
+// next method added will be another combination of the same technologies.
+for (const word of ["WebRTC", "WebCodecs", "video element", "canvas"]) {
+  check(app.includes(word), `a label or its note names ${word}`);
+}
+const methods = app.slice(app.indexOf("const PAINT_METHODS = ["),
+                          app.indexOf("function paintMethodById"));
+const labels = [...methods.matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+check(labels.length >= 2, `found ${labels.length} labels`);
+for (const one of labels) {
+  check(/WebRTC|WebCodecs/.test(one),
+        `"${one}" says which technology draws it`);
+}
+
 console.log("a method this browser cannot do is not chosen for it");
 check(app.includes("found.ok() ? found.id : PAINT_METHODS[0].id"),
       "a remembered method that will not work falls back to the browser");
