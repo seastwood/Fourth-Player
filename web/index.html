@@ -873,6 +873,17 @@
           <input id="stream-oversample" type="checkbox" class="chip">
         </div>
         <div class="acct-row">
+          <label class="tune-label" for="stream-truetime">Time frames when
+             they arrive</label>
+          <input id="stream-truetime" type="checkbox" class="chip">
+        </div>
+        <p class="footnote">The screen is grabbed at uneven moments and
+           labelled as though it were even, so motion speeds up and slows down
+           even when every frame arrives. This labels each frame with the
+           moment it was really taken, which is what a native streaming client
+           does. It turns the two settings above off, because they put the
+           labels back on a grid.</p>
+        <div class="acct-row">
           <label class="tune-label" for="stream-testpattern">Send a test
              pattern</label>
           <input id="stream-testpattern" type="checkbox" class="chip">

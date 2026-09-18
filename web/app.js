@@ -8653,6 +8653,8 @@ function streamFields() {
                         && el("stream-oversample").checked),
     test_pattern: Boolean(el("stream-testpattern")
                           && el("stream-testpattern").checked),
+    true_time: Boolean(el("stream-truetime")
+                       && el("stream-truetime").checked),
   };
 }
 
@@ -8680,6 +8682,7 @@ function paintStreamValues() {
       && Boolean(want.pace_frames) === Boolean(streamNow.pace_frames)
       && Boolean(want.oversample) === Boolean(streamNow.oversample)
       && Boolean(want.test_pattern) === Boolean(streamNow.test_pattern)
+      && Boolean(want.true_time) === Boolean(streamNow.true_time)
       && String(want.monitor) === String(streamNow.monitor || "")
       // Width only counts while the exact boxes are in play; off a virtual
       // display it is not sent at all and the named size decides.
@@ -8865,6 +8868,15 @@ function paintScreens(state) {
   if (over) over.checked = Boolean(state.oversample);
   const pattern = el("stream-testpattern");
   if (pattern) pattern.checked = Boolean(state.test_pattern);
+  // Stamping on arrival and pacing are opposites: one puts the labels back
+  // on the grid the other is taking them off. The page shows that rather
+  // than letting somebody set a pair that quietly cancels out.
+  const truetime = el("stream-truetime");
+  if (truetime) truetime.checked = Boolean(state.true_time);
+  if (pace && Boolean(state.true_time)) {
+    pace.checked = false;
+    pace.disabled = true;
+  }
   // The exact size boxes only mean anything on a display made in software.
   const customRow = el("stream-custom-row");
   if (customRow) {
@@ -8994,7 +9006,7 @@ function wireStream() {
   for (const id of ["stream-size", "stream-fps", "stream-codec",
                     "stream-virtual", "stream-screen",
                     "stream-pace", "stream-oversample",
-                    "stream-testpattern",
+                    "stream-testpattern", "stream-truetime",
                     "stream-width", "stream-height"]) {
     const node = el(id);
     if (!node) continue;

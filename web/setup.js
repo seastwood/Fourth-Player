@@ -272,6 +272,9 @@ function fillPicture(stream, policies) {
   if (over) over.checked = Boolean(stream.oversample);
   const pattern = el("set-testpattern");
   if (pattern) pattern.checked = Boolean(stream.test_pattern);
+  const truetime = el("set-truetime");
+  if (truetime) truetime.checked = Boolean(stream.true_time);
+  if (pace && stream.true_time) { pace.checked = false; pace.disabled = true; }
   const paceNote = el("pace-note");
   if (paceNote) {
     paceNote.textContent = stream.oversample
@@ -530,6 +533,7 @@ const ACTIONS = {
       oversample: Boolean(el("set-oversample") && el("set-oversample").checked),
       test_pattern: Boolean(el("set-testpattern")
                             && el("set-testpattern").checked),
+      true_time: Boolean(el("set-truetime") && el("set-truetime").checked),
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
       guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",

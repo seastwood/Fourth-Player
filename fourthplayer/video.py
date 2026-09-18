@@ -1145,10 +1145,19 @@ class Stage:
         # the rate back down, capturing twice as often just sends twice as
         # many frames.
         oversample = bool(getattr(cfg, "oversample", False))
-        pace = bool(getattr(cfg, "pace_frames", True)) or oversample
+        # Stamping frames when they arrive and then pacing them is the two
+        # halves of this cancelling out: a videorate exists to put timestamps
+        # back on a grid, which is exactly what the stamping is undoing. So
+        # true time wins and the pacing goes.
+        self._true_time = bool(getattr(cfg, "true_time", False))
+        pace = ((bool(getattr(cfg, "pace_frames", True)) or oversample)
+                and not self._true_time)
         oversampling = (f"! video/x-raw(ANY),framerate={cfg.fps * 2}/1 "
                         if oversample else "")
         pacing = "! videorate drop-only=true " if pace else ""
+        if self._true_time:
+            log.info("frames will be stamped when they arrive, not when they "
+                     "were due; nothing is holding the rate")
         log.info("frames: captured at %d/s%s, sent at %d/s",
                  cfg.fps * 2 if oversample else cfg.fps,
                  " and paced" if pace else " with nothing holding the rate",
@@ -1928,7 +1937,17 @@ class Stage:
         if last:
             self._grabbed.append(now - last)
         try:
-            pts = info.get_buffer().pts
+            buffer = info.get_buffer()
+            if getattr(self, "_true_time", False):
+                # The stamp this frame should have had. A pad probe can write
+                # it -- checked on the machine, because PyGObject exposes no
+                # make_writable and a buffer that refused the change would
+                # leave the grid in place with nothing saying so.
+                when = self._running_time()
+                if when is not None:
+                    buffer.pts = when
+                    buffer.dts = Gst.CLOCK_TIME_NONE
+            pts = buffer.pts
         except Exception:
             return Gst.PadProbeReturn.OK
         was, self._grab_pts = self._grab_pts, pts
@@ -1936,6 +1955,20 @@ class Stage:
                 and pts > was):
             self._grab_stamps.append((pts - was) / float(Gst.SECOND))
         return Gst.PadProbeReturn.OK
+
+    def _running_time(self):
+        """Where this pipeline's clock is now, or None before it is running."""
+        try:
+            clock = self.pipeline.get_pipeline_clock()
+            base = self.pipeline.get_base_time()
+            if clock is None or base == Gst.CLOCK_TIME_NONE:
+                return None
+            now = clock.get_time()
+            if now == Gst.CLOCK_TIME_NONE or now < base:
+                return None
+            return now - base
+        except Exception:
+            return None
 
     def _grab_report(self):
         """What the capture did, or "" if it has not been watched."""

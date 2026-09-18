@@ -2721,6 +2721,7 @@ class LiveSession:
             "pace_frames": bool(getattr(cfg, "pace_frames", True)),
             "oversample": bool(getattr(cfg, "oversample", False)),
             "test_pattern": bool(getattr(cfg, "test_pattern", False)),
+            "true_time": bool(getattr(cfg, "true_time", False)),
             # Whether one could be made here at all, so the page can offer the
             # switch where it means something and explain itself where it does
             # not. A switch that silently does nothing is worse than no switch.
@@ -2835,7 +2836,7 @@ class LiveSession:
                 changes["guest_mic_device"] = want_mic
 
         for flag in ("audio", "virtual_display", "pace_frames", "oversample",
-                     "test_pattern"):
+                     "test_pattern", "true_time"):
             if flag not in asked:
                 continue
             want = asked[flag]

@@ -126,6 +126,27 @@ class Config:
     # Off, obviously. It replaces the picture.
     test_pattern: bool = False
 
+    # Timestamp each frame when it really arrives, not when it was due.
+    #
+    # The capture element stamps on a grid: frame n is n/fps, exactly, and
+    # do-timestamp=true does not change it because the element does its own.
+    # Measured here at 60fps, the desktop was grabbed 676 times in ten seconds
+    # -- 67.6 a second, at intervals 168 of which were nowhere near 16.7ms --
+    # and every one of them was stamped as though it had arrived on the beat.
+    #
+    # A browser draws by those stamps. So it draws evenly spaced frames whose
+    # contents advanced by uneven amounts, which is motion that speeds up and
+    # slows down while every counter at both ends reads perfect. It is the
+    # last measurable difference between this and a native client, which
+    # timestamps a frame by when it was actually captured.
+    #
+    # With this on the frames are stamped from the clock in a pad probe, and
+    # the pacing is left off: a videorate would put them straight back on a
+    # grid, which is the thing being undone. More frames then arrive than the
+    # guest's screen can show, and their stamps say exactly when each was
+    # true, so the browser has a real choice for every refresh.
+    true_time: bool = False
+
     match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device
