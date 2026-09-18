@@ -169,6 +169,19 @@ check(workerSrc.includes("state.nextAt = now + gap * START_DEPTH;"),
 // and still not smooth means.
 check(workerSrc.includes("function tick()"),
       "the worker paints one frame per animation frame");
+// A frame is shown for one refresh or two; there is no showing one for one
+// and a half. A schedule in fractions of a refresh drifts through the
+// boundary, and each crossing shows one frame twice and skips the next --
+// 45 paints in 670 off the beat on a game, none on a test pattern whose
+// capture intervals are exact.
+check(workerSrc.includes("Math.round(gap / refresh)"),
+      "the schedule is rounded to whole refreshes");
+check(workerSrc.includes("function refreshEvery()"),
+      "and the refresh is measured, since 60Hz, 120Hz and 59.94 are all real");
+check(workerSrc.includes("gap = Math.max(GAP_MIN, gap - step)")
+      && workerSrc.includes("const step = refresh > 0 ? refresh"),
+      "and the depth correction moves by a whole refresh, not a fraction of "
+      + "one, which would put the drift straight back");
 check(readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8")
         .includes("requestAnimationFrame(beat)"),
       "and the page is what tells it, because only the page can see a refresh");

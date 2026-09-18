@@ -519,7 +519,8 @@ function makePainter(canvas, say) {
               + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
               + (last.ticks
                  ? "; " + last.starved + " of " + last.ticks
-                   + " refreshes had nothing to paint"
+                   + " refreshes had nothing to paint (a refresh is "
+                   + (last.refresh || "?") + "ms)"
                  : "")
               + (last.shown
                  ? "; painted every " + last.shown.typical + "ms typical, "

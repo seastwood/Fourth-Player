@@ -56,6 +56,8 @@ const state = {
   ticked: false,
   ticks: 0,
   starved: 0,
+  beats: [],
+  lastBeat: 0,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -215,6 +217,13 @@ const GAP_MIN = 4, GAP_MAX = 250;       // a sane frame interval, in ms
 const DEPTH_WANT = 2;                   // frames in hand, ideally
 const START_DEPTH = 3;                  // frames of slack to begin with
 
+/* The display's own interval, learnt from the ticks. */
+function refreshEvery() {
+  if (state.beats.length < 12) return 0;
+  const sorted = state.beats.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 function schedule(captureMs) {
   const now = performance.now();
   let gap = 1000 / 60;
@@ -222,6 +231,24 @@ function schedule(captureMs) {
     gap = Math.min(GAP_MAX, Math.max(GAP_MIN, captureMs - state.lastPts));
   }
   state.lastPts = captureMs;
+  // Rounded to whole refreshes, which is what frame pacing means.
+  //
+  // A frame is shown for one refresh or two or three; there is no such thing
+  // as showing one for one and a half. So a schedule in fractions of a
+  // refresh is a schedule that cannot be kept: it drifts through the
+  // boundary, and each time it crosses, one frame is shown twice and the
+  // next is skipped. Measured on a game, with nothing starving and every
+  // frame in hand: 45 paints in 670 off the beat. The test pattern, whose
+  // capture intervals are exact, had none.
+  //
+  // Rounding also settles the correction below. Nudging a fractional gap by
+  // a tenth of a frame moved the phase a little every time; nudging a whole
+  // refresh moves it once and stops.
+  const refresh = refreshEvery();
+  if (refresh > 0) {
+    const steps = Math.max(1, Math.round(gap / refresh));
+    gap = steps * refresh;
+  }
   if (state.nextAt === null) {
     // The first frame waits, and everything after it inherits that slack.
     //
@@ -238,11 +265,11 @@ function schedule(captureMs) {
     state.nextAt = now + gap * START_DEPTH;
     return state.nextAt;
   }
-  // Behind or ahead, nudged by at most a tenth of a frame each time.
+  // Behind or ahead, by a whole refresh or not at all.
   const deep = state.waiting.length;
-  const nudge = gap * 0.1;
-  if (deep > DEPTH_WANT) gap -= nudge;
-  else if (deep === 0) gap += nudge;
+  const step = refresh > 0 ? refresh : gap * 0.1;
+  if (deep > DEPTH_WANT * 2) gap = Math.max(GAP_MIN, gap - step);
+  else if (deep === 0) gap += step;
   state.nextAt += gap;
   // Never schedule into the past, or everything after it arrives already
   // late and the queue drains in one burst -- which is the fault this
@@ -517,6 +544,7 @@ self.onmessage = (event) => {
         shown: shownSpread(),
         ticks: state.ticks,
         starved: state.starved,
+        refresh: Math.round(refreshEvery() * 10) / 10,
       },
     });
     state.handed = state.fed = state.out = state.drawn = 0;
@@ -525,7 +553,22 @@ self.onmessage = (event) => {
     state.ticks = state.starved = 0;
     return;
   }
-  if (m.tick) { state.ticked = true; tick(); return; }
+  if (m.tick) {
+    state.ticked = true;
+    // The interval between refreshes, measured rather than assumed: 60Hz,
+    // 120Hz and 59.94 are all in the field and only the display knows.
+    const at = performance.now();
+    if (state.lastBeat) {
+      const beat = at - state.lastBeat;
+      if (beat > 2 && beat < 80) {
+        state.beats.push(beat);
+        if (state.beats.length > 60) state.beats.shift();
+      }
+    }
+    state.lastBeat = at;
+    tick();
+    return;
+  }
   if (m.chunk) { chunk(m.chunk); return; }
   if (m.stop) { close(); building = null; }
 };
