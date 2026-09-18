@@ -3684,19 +3684,46 @@ function startWatchdog() {
  * jitterBufferTarget is the current name for this; playoutDelayHint is the
  * older one and takes seconds, not milliseconds. Browsers that have neither
  * are left as they are, which is what they did before. */
+let jitterWanted = 0;
+let jitterSaid = "";
+
 function holdVideoBack(ms) {
-  if (!pc || !(ms > 0)) return;
+  if (!(ms > 0)) return;
+  jitterWanted = ms;
+  if (!pc) return;
+  let how = "";
   try {
     pc.getReceivers().forEach((receiver) => {
       const kind = receiver.track ? receiver.track.kind : "";
       if (kind && kind !== "video") return;
       if ("jitterBufferTarget" in receiver) {
-        try { receiver.jitterBufferTarget = ms; } catch (_) {}
+        try {
+          receiver.jitterBufferTarget = ms;
+          // Read back. It is a hint, and a browser is free to clamp it or
+          // ignore it, which is not the same as having applied it.
+          const got = receiver.jitterBufferTarget;
+          how = (got === ms) ? "jitterBufferTarget"
+                             : "jitterBufferTarget, clamped to " + got + "ms";
+        } catch (err) { how = "jitterBufferTarget refused it"; }
       } else if ("playoutDelayHint" in receiver) {
-        try { receiver.playoutDelayHint = ms / 1000; } catch (_) {}
+        try {
+          receiver.playoutDelayHint = ms / 1000;
+          how = "playoutDelayHint";
+        } catch (err) { how = "playoutDelayHint refused it"; }
+      } else {
+        how = "nothing: this browser offers no control over it";
       }
     });
   } catch (_) { /* an old browser: it plays as it always did */ }
+  // Said once per answer rather than every time, and said at all because the
+  // alternative is what happened: a setting was raised, nothing changed, and
+  // there was no way to tell whether it had not been applied or had not
+  // helped. Those want opposite next moves.
+  const note = ms + "ms via " + (how || "no video receiver yet");
+  if (note !== jitterSaid) {
+    jitterSaid = note;
+    report("holding video back " + note);
+  }
 }
 
 /* ---- the pad ---- */
@@ -8818,6 +8845,12 @@ function paintScreens(state) {
 
 function paintStream(state) {
   streamNow = state;
+  // The buffer is a live property of the receiver, not something baked into
+  // the connection, and this is the only place the page hears that it
+  // changed. Without this, raising it did nothing until the next
+  // renegotiation -- so it looked like a setting that does not work, which
+  // is a worse thing to have than one that is merely hard to tune.
+  if (state && Number(state.jitter_ms) > 0) holdVideoBack(Number(state.jitter_ms));
   const size = el("stream-size");
   if (size && Array.isArray(state.sizes)) {
     size.innerHTML = "";
