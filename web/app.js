@@ -876,6 +876,7 @@ async function answer(message) {
       clearRenewTimer();
       renewals = 0;
       lastBytes = -1;
+      lastDrawn = 0;
       connectedAt = Date.now();          // it now has to prove it carries something
       stalledSince = 0;
       mediaFresh = false;
@@ -3505,6 +3506,7 @@ const STALL_LIMIT_MS = 6000;
    it gave up only when the connection was *not* connected, and this one is. */
 const SILENT_LIMIT_MS = 9000;
 let lastBytes = -1, stalledSince = 0, watchdogTimer = null, connectedAt = 0;
+let lastDrawn = 0;               // pieces off the picture channel, ever
 
 /* A freeze is counted by the browser and by nobody else. The host knows what
  * it sent; it cannot see a picture that stopped for a third of a second and
@@ -3933,6 +3935,26 @@ async function watchMedia() {
   tellAboutThePicture();
   reportHealth(picture, path);
 
+  // A connection carrying the picture down the data channel is alive, and its
+  // media track is silent on purpose.
+  //
+  // This check watched video bytes on the media track and nothing else. The
+  // host now sends none of those to a guest drawing its own picture -- it was
+  // sending the picture twice -- so the check saw silence, called the
+  // connection dead, and rebuilt it. Every ten seconds, for ever. The black
+  // screening and the freezes were a renegotiation each time, and the rebuilt
+  // connection worked perfectly until the next one.
+  const drawn = (painter && painter.arrived) ? painter.arrived() : 0;
+  if (drawn > lastDrawn) {
+    lastDrawn = drawn;
+    lastBytes = Math.max(lastBytes, 0);
+    stalledSince = 0;
+    connectedAt = 0;
+    mediaFresh = true;
+    setLink("ok");
+    clearMediaFailure();
+    return;
+  }
   if (bytes > lastBytes) {
     lastBytes = bytes;
     stalledSince = 0;
@@ -3956,6 +3978,10 @@ async function watchMedia() {
        opened its data channel so the buttons still worked, and carried no
        video -- and nothing was watching for a connection that never starts, as
        opposed to one that stops. */
+    // Arriving by the other route, and only while that route is actually in
+    // use: a page that has since gone back to the media track must still be
+    // able to notice a connection that never carried anything.
+    if (lastDrawn && painter) return;
     if (connectedAt && Date.now() - connectedAt >= SILENT_LIMIT_MS) {
       connectedAt = 0;
       mediaFresh = false;

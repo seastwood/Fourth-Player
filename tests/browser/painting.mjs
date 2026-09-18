@@ -479,6 +479,28 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
+console.log("\na silent media track is not a dead connection");
+// The page judged the connection alive by video bytes on the media track, and
+// the host now deliberately sends none of those to a guest drawing its own
+// picture -- it was sending the picture twice. So the check saw silence,
+// called the connection dead, and rebuilt it. Every ten seconds, for ever:
+// the repeated black screening and freezes were a renegotiation each time,
+// and the rebuilt connection worked perfectly until the next one.
+check(paintFile.includes("arrived() { return chunks; }"),
+      "the painter says how much has come off the picture channel");
+check(paintFile.includes("chunks += 1;"),
+      "counted as the pieces arrive, so the answer needs no round trip to "
+      + "the worker");
+check(app.includes("const drawn = (painter && painter.arrived)"),
+      "and the media watchdog asks it");
+check(app.indexOf("if (drawn > lastDrawn) {")
+      < app.indexOf("if (bytes > lastBytes) {"),
+      "before it judges anything by bytes that are not being sent");
+check(app.includes("if (lastDrawn && painter) return;"),
+      "including the never-carried-anything case -- and only while that "
+      + "route is in use, or a page back on the media track could never "
+      + "notice a connection that carries nothing");
+
 console.log("\nnothing arriving is not a decoder that cannot decode");
 // This is what the flashing was. The rate controller climbed until the data
 // channel backed up, frames stopped for a few seconds, and the watchdog read

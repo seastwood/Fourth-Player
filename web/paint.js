@@ -489,6 +489,7 @@ function makePainter(canvas, say) {
   let carrying = null, letting = null;   // the channel, and how to stop reading
   let beating = 0;                       // the animation-frame loop
   let onGone = null, onShape = null;
+  let chunks = 0;                        // pieces off the channel, ever
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
      fresh one. The element keeps its id, its classes and its place, because
@@ -592,6 +593,11 @@ function makePainter(canvas, say) {
       const onPictureChunk = (event) => {
         const data = event.data;
         if (!worker || !(data instanceof ArrayBuffer)) return;
+        // Counted here rather than asked of the worker, because what needs it
+        // is the page's own check on whether this connection is alive, and
+        // that has to be answerable without waiting for a message to come
+        // back. See `arrived`.
+        chunks += 1;
         // Transferred rather than copied: it is this page's last contact with
         // the bytes, and the worker is the only thing that reads them.
         worker.postMessage({ chunk: data }, [data]);
@@ -701,6 +707,15 @@ function makePainter(canvas, say) {
       return Boolean(last && !last.handed);
     },
     drawnLately() { return last ? last.drawn : 0; },
+    /* How much has come off the picture channel, ever.
+     *
+     * The page's liveness check used to watch video bytes on the media track,
+     * and the host now deliberately sends none of those to a guest drawing
+     * its own picture -- it was sending the picture twice. So the check saw
+     * silence, called the connection dead and rebuilt it, every ten seconds,
+     * for ever: the black screening and the freezes were a renegotiation each
+     * time. This is the other place a working connection shows itself. */
+    arrived() { return chunks; },
   };
 }
 
