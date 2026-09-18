@@ -8608,6 +8608,14 @@ let paintWatch = 0;                 // the timer that gives up on a black canvas
  * whether anything was painted, and the only safe answer is to go back. */
 const PAINT_PROVE_MS = 4000;
 
+/* How many times to ask again for a keyframe before treating the silence as
+   a decoder that will not work. Each ask costs the room a keyframe, so this
+   is small; three is long enough to ride out a host that is rate-limiting
+   them and short enough that a real failure is still found in a few
+   seconds. */
+const PAINT_KEY_ASKS = 3;
+let paintKeyAsks = 0;
+
 function watchThePainting() {
   if (paintWatch) clearTimeout(paintWatch);
   // Ask now, so there is an answer to judge by when the deadline comes. The
@@ -8619,6 +8627,19 @@ function watchThePainting() {
     paintWatch = 0;
     if (!painter) return;
     if (painter.painted()) return;              // something is on the canvas
+    // Frames arriving with no keyframe among them is not a decoder that
+    // cannot work: it is a decoder with nothing to start from. Walking to
+    // the next spelling of the codec would answer a question nobody asked,
+    // and then give up having never tried. So ask again and wait again, a
+    // bounded number of times.
+    if (painter.waitingForKey() && paintKeyAsks < PAINT_KEY_ASKS) {
+      paintKeyAsks += 1;
+      report("frames are arriving but none is a keyframe yet; asking again ("
+             + paintKeyAsks + " of " + PAINT_KEY_ASKS + ")");
+      askHostForKeyframe();
+      watchThePainting();
+      return;
+    }
     const more = paintNextSpelling();
     if (more) {
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
@@ -8879,6 +8900,7 @@ function setPaintMethod(id) {
   // up, which would make the second try of the day start at the end.
   paintTried = 0;
   paintGaveUp = false;
+  paintKeyAsks = 0;
   paintChoice = (id && PAINT_METHODS.some((one) => one.id === id)) ? id : "";
   paintMethod = wantedPaintMethod();
   savePaintMethod();

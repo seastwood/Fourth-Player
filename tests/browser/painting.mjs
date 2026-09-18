@@ -135,6 +135,21 @@ check(paintFile.includes("useCodec(codec)"),
       "the painter rebuilds only the decoder");
 check(app.includes("painter.useCodec(codec)"), "and the page asks it to");
 
+console.log("waiting for a keyframe is not the same as failing");
+// Frames arrived, nothing was painted, and it walked the codec list and gave
+// up -- having never had anything it could decode. With keyframes sent only
+// on request, a decoder that has just started has nothing to decode against
+// until one is asked for and granted.
+check(paintFile.includes("waitingForKey()"),
+      "the painter can say it is waiting rather than failing");
+check(workerSrc.includes("keyed: state.started"),
+      "which the worker knows, because it is the one that sees the frames");
+check(app.includes("painter.waitingForKey() && paintKeyAsks < PAINT_KEY_ASKS"),
+      "and the watchdog asks again instead of moving on");
+check(/PAINT_KEY_ASKS = (\d+)/.test(app), "a bounded number of times");
+check(Number(app.match(/PAINT_KEY_ASKS = (\d+)/)[1]) <= 5,
+      "few enough that a real failure is still found in seconds");
+
 console.log("and a failure walks the list rather than giving up on the first");
 check(app.includes("function paintNextSpelling"), "there is a next one");
 check(app.includes("paintTried += 1"), "the attempts advance");

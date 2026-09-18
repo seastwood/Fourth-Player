@@ -344,6 +344,11 @@ self.onmessage = (event) => {
         handed: state.handed, fed: state.fed, out: state.out,
         drawn: state.drawn, refused: state.refused,
         skipped: state.skipped, stale: state.stale,
+        // Whether a keyframe has been seen at all. Frames arriving and
+        // nothing being painted is two different situations: a decoder that
+        // will not work, and a decoder that has not been given anything it
+        // can start from. They want opposite answers.
+        keyed: state.started,
         reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
         ever: state.ever,
       },

@@ -2415,7 +2415,9 @@ class Peer:
         log.info("peer %s: %s sending whole frames down the picture channel",
                  self.id, "started" if want else "stopped")
         if want:
-            self.stage.request_keyframe("%s (its own decoder)" % self.id)
+            log.info("peer %s: forcing a keyframe, because a decoder that has "
+                     "just started has nothing to decode against", self.id)
+            self.stage.force_keyframe()
 
     def send_frame(self, data, key, stamp):
         """One encoded frame to a guest that asked for them.

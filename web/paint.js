@@ -501,6 +501,11 @@ function makePainter(canvas, say) {
     },
 
     painted() { return ever || Boolean(last && last.ever); },
+    /* Frames are arriving and none has been a keyframe yet, so there is
+       nothing to decode against and nothing is wrong. */
+    waitingForKey() {
+      return Boolean(last && last.handed > 0 && !last.keyed);
+    },
     drawnLately() { return last ? last.drawn : 0; },
   };
 }

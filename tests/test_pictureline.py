@@ -64,6 +64,18 @@ check("_said_shut" in video,
       "and a channel that is not open says so once, rather than sixty times "
       "a second or not at all")
 
+print("and a guest that has just asked gets a keyframe it can start from")
+# Through force_keyframe, not the rate-limited path. That bucket exists
+# because guests losing the picture ask faster than keyframes can fix it;
+# this happens once, when somebody switches their own decoder on, and a
+# decoder with nothing to decode against shows nothing at all. Refusing this
+# one refuses the whole feature.
+spot = video.find("def _on_picture_asked")
+block = video[spot:spot + 900]
+check("force_keyframe()" in block, "a keyframe is forced when frames are asked for")
+check("request_keyframe" not in block,
+      "not offered to the bucket that exists to refuse repeated asking")
+
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
 check('struct.pack("<BQ"' in video,
