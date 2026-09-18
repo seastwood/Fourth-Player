@@ -143,7 +143,7 @@ check(app.includes("paintTried = 0"),
 
 console.log("there is exactly one way back to the browser's element");
 check(app.includes("function stopPainting"), "stopPainting exists");
-for (const spot of ["painter.start(receiver, codec)", "if (!codec)",
+for (const spot of ["painter.start(pictureChannel, codec)", "if (!codec)",
                     "!paintMethodById(\"here\").ok()"]) {
   check(app.includes(spot), "every failure goes through it (" + spot + ")");
 }
@@ -198,89 +198,33 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
-console.log("switching to it rebuilds the connection too, for the same reason");
+console.log("the frames come down a data channel, not off the media track");
+// Taking them off the track needed an encoded transform, and a transform
+// wants a receiver that has not started, delivers nothing when attached to
+// one that has, and leaves the receiver delivering nothing for ever once
+// removed. The client this is modelled on carries whole frames on a data
+// channel instead. So does this.
+check(app.includes('event.channel.label === "picture"'),
+      "the page takes a channel called picture");
+check(paintFile.includes('channel.send("on")'),
+      "and asks for frames only once there is a decoder for them");
+check(paintFile.includes('carrying.send("off")'),
+      "and says when to stop, so nothing is sent into nothing");
+check(!paintFile.includes("RTCRtpScriptTransform"),
+      "no transform anywhere in it");
+check(!app.includes("receiver.transform"),
+      "and none left in the page either");
+
+console.log("which makes leaving it free");
 // "the frame worker is ready and the transform is attached" and then no first
 // frame, ever. A transform attached to a receiver already carrying a picture
 // delivers nothing; the same receiver on a fresh connection delivers at once.
 // It is part of how a receiver is set up rather than something it will take
 // mid-flight, which is the mirror of why leaving has to rebuild as well.
-const setBody = app.slice(app.indexOf("function setPaintMethod"),
-                          app.indexOf("function setPaintMethod") + 1600);
-check(setBody.includes("renewSoon(0, true)"),
-      "choosing WebCodecs on a running connection asks for a fresh one");
-check(setBody.includes("lastBytes > 0"),
-      "and one that has never carried anything is started in place, since "
-      + "there is nothing to rebuild");
-
-console.log("switching back rebuilds the connection, because nothing less works");
-// Measured after switching back: "0.0 frames a second (0.0 arrived)" and the
-// element pausing itself over and over. WebRTC's receiver had stopped
-// delivering to its own decoder and setting receiver.transform to null did
-// not undo that -- a receiver that has had a transform taken off it cannot be
-// relied on again.
-check(stopBodyFor("renewSoon(0, true)"),
-      "a fresh media connection is asked for");
-check(stopBodyFor("if (was) {"),
-      "but only when this page was really drawing, so an ordinary "
-      + "renegotiation does not recurse into another one");
-
-console.log("switching back asks for a keyframe, or it stays black");
-// The browser's own decoder has had nothing for as long as the transform was
-// attached, so it has no reference frame to decode against -- and with
-// keyframes sent only on request, nothing asks on its behalf. Reported as
-// switching back needing a page refresh.
-check(stopBodyFor("receiver.transform = null"),
-      "and the transform comes off first, whatever else follows");
-
-console.log("and the decoding, pacing and painting all happen off this thread");
-// About twenty frames a second reached the canvas out of sixty, with the
-// decoder and the painting both reporting themselves healthy, because their
-// work was queued behind everything else the page does. A 1440p frame drawn
-// on the main thread sixty times a second is not something to ask of a page
-// a game is being played through.
-check(worker.includes("new VideoDecoder"), "the decoder is in the worker");
-check(worker.includes("drawImage"), "and so is the painting");
-check(worker.includes("makePacer"), "and the pacing");
-check(worker.includes('importScripts("/static/paint.js")'),
-      "sharing one copy of the pacing and the bitstream code, not two");
-check(paintFile.includes("transferControlToOffscreen"),
-      "the canvas is handed over once");
-check(paintFile.includes("function freshCanvas"),
-      "and replaced each attempt, because it can only be handed over once");
-check(worker.includes("decodeQueueSize >= QUEUE_MAX"),
-      "a saturated decoder is not given more");
-check(worker.includes("state.stale += 1"),
-      "and a frame with a newer one behind it is dropped rather than painted");
-
-console.log("switching back gives the receiver its transform back");
-// Terminating the worker is not enough: while a transform is attached every
-// frame goes to it and none is written back, so the browser's own decoder is
-// starved whether anything is reading or not. Leaving it there made the
-// browser option a permanently black picture -- and it was the last place
-// anybody would look, since nothing about that path had changed.
-check(app.includes("receiver.transform = null"),
-      "the transform is taken off on the way out");
-
-check(stopBody.indexOf("receiver.transform = null")
-      < stopBody.indexOf("giveTheVideoBack()"),
-      "before the stream is handed back, so nothing is starved in between");
-
-console.log("the canvas that is shown is the one that was handed over");
-// start() replaces the element -- a canvas can only be given to a worker
-// once -- so anything done to the old reference afterwards is done to a node
-// no longer in the page. The visible canvas was never unhidden: a black
-// rectangle over a video element whose picture had been taken away.
-const startBody = app.slice(app.indexOf("async function startPainting"),
-                            app.indexOf("function askHostForKeyframe"));
-check(startBody.includes("const drawnOn = paintCanvas();"),
-      "the element is read again after start()");
-check(startBody.indexOf("drawnOn.hidden = false")
-      > startBody.indexOf("painter.start(receiver, codec)"),
-      "and it is the one that is shown");
-check(startBody.indexOf("canvas.hidden = false")
-      < startBody.indexOf("painter.start(receiver, codec)"),
-      "while the handover gets a canvas that is already visible, which is one "
-      + "less thing for a browser to decline to composite");
+check(!stopBody.includes("renewSoon"),
+      "no fresh media connection is needed on the way out");
+check(stopBody.includes("Nothing to undo on the receiver"),
+      "because the media track never knew about any of it");
 
 console.log("and the canvas is put where the video is, not where the stage is");
 // The stage is more than the picture: the on-screen controller has the bottom
@@ -428,9 +372,9 @@ check(worker.indexOf("self.onrtctransform") < worker.indexOf("ready: true"),
       "the worker registers its handler before it says it is ready");
 check(paintFile.includes("if (m.ready)"),
       "and the page waits for that before attaching anything");
-check(paintFile.indexOf("new RTCRtpScriptTransform(it")
-      > paintFile.indexOf("if (m.ready)"),
-      "the transform is attached inside that, not beside it");
+check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started)"),
+      "and the host is asked for frames only once the decoder exists, so "
+      + "none arrive before there is anything to decode them");
 
 console.log("\nthe pacing holds the early frames and releases the late ones");
 const pacer = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,

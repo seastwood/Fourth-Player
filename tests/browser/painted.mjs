@@ -99,24 +99,15 @@ const pps = [0x68, 0xce, 0x3c, 0x80];
 const idr = [0x65, 0x88, 0x84, 0x21];
 const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
                                  0, 0, 1, ...idr]).buffer;
-self_.onrtctransform({
-  transformer: {
-    readable: {
-      getReader: () => {
-        let done = false;
-        return {
-          read: () => Promise.resolve(done
-            ? { done: true }
-            : (done = true, { done: false,
-                              value: { data: keyframe, timestamp: 0,
-                                       type: "key" } })),
-        };
-      },
-    },
-  },
-});
-
-await new Promise((go) => globalThis.setTimeout(go, 20));
+const framed = (bytes, key, stamp, first, last) => {
+  const out = new Uint8Array(9 + bytes.byteLength);
+  const view = new DataView(out.buffer);
+  view.setUint8(0, (key ? 1 : 0) | (first ? 2 : 0) | (last ? 4 : 0));
+  view.setBigUint64(1, BigInt(stamp), true);
+  out.set(new Uint8Array(bytes), 9);
+  return out.buffer;
+};
+self_.onmessage({ data: { chunk: framed(keyframe, true, 0, true, true) } });
 check(built[0].chunks.length === 1, "the keyframe was fed to the decoder");
 output(new FakeFrame(0));
 check(painted === 1, `one frame out, ${painted} painted`);
@@ -146,17 +137,25 @@ const before = built[0].chunks.length;
 self_.onmessage({ data: { report: true } });        // clear the counters
 // A delta is refused...
 const deltaFrame = new Uint8Array([0, 0, 0, 1, 0x41, 1, 2, 3]).buffer;
-self_.onrtctransform({
-  transformer: { readable: { getReader: () => {
-    let n = 0;
-    return { read: () => Promise.resolve(n++ ? { done: true }
-      : { done: false, value: { data: deltaFrame, timestamp: 1,
-                                type: "delta" } }) };
-  } } },
-});
-await new Promise((go) => globalThis.setTimeout(go, 20));
+self_.onmessage({ data: { chunk: framed(deltaFrame, false, 1, true, true) } });
 check(built[0].chunks.length === before,
       "a delta is dropped while the decoder is behind");
+
+console.log("a frame in pieces is put back together before it is decoded");
+// SCTP will not carry an arbitrarily large message and a keyframe is easily
+// larger than a browser's limit, so the host sends each frame in pieces.
+const half = new Uint8Array(keyframe);
+const head = half.slice(0, 8).buffer, tail = half.slice(8).buffer;
+const fedBefore = built[0].chunks.length;
+self_.onmessage({ data: { chunk: framed(head, true, 5, true, false) } });
+check(built[0].chunks.length === fedBefore,
+      "a first piece on its own decodes nothing");
+self_.onmessage({ data: { chunk: framed(tail, true, 5, false, true) } });
+check(built[0].chunks.length === fedBefore + 1,
+      "and the last piece completes it");
+const rebuilt = new Uint8Array(built[0].chunks[fedBefore].data);
+check(rebuilt.length === half.length,
+      `put back to its full length: ${rebuilt.length} of ${half.length}`);
 
 console.log("every combination worth asking is asked, one at a time");
 // iOS Safari refused both start codes and the parameter sets with nothing

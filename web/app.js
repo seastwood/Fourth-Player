@@ -829,6 +829,21 @@ async function answer(message) {
       deskChannel.addEventListener("close", () => { deskChannel = null; });
       return;
     }
+    // The picture, as whole encoded frames, for a page that decodes it
+    // itself. Silent until it is asked -- see paint.js -- so it costs
+    // nothing on a connection nobody has asked it of.
+    if (event.channel.label === "picture") {
+      pictureChannel = event.channel;
+      pictureChannel.binaryType = "arraybuffer";
+      pictureChannel.addEventListener("open", () => {
+        if (paintMethod === "here") startPainting();
+      });
+      pictureChannel.addEventListener("close", () => {
+        pictureChannel = null;
+        if (painter) stopPainting("the picture channel closed");
+      });
+      return;
+    }
     input = event.channel;
     input.binaryType = "arraybuffer";
     input.addEventListener("open", () => setLink("ok"));
@@ -8448,6 +8463,7 @@ function paintCanvas() { return el("painted"); }
 /* Which codec this connection actually agreed on, read from the receiver
    rather than assumed: the host offers two and the browser picks, and a
    decoder configured for the wrong one does not start. */
+let pictureChannel = null;          // whole frames, when asked for
 let lastCodec = { mime: "", fmtp: "" };
 let lastSdp = "";
 
@@ -8558,37 +8574,14 @@ function stopPainting(why) {
   if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
   const was = Boolean(painter);
   if (painter) { painter.stop(); painter = null; }
-  // And take the transform off the receiver.
-  //
-  // Terminating the worker is not enough: while a transform is attached,
-  // every frame goes to it and none is written back, so the browser's own
-  // decoder is starved whether anything is reading or not. Leaving it there
-  // meant switching back to the browser gave a permanently black picture --
-  // reported exactly that way, and it was the last thing anybody would look
-  // for, because nothing about the browser's own path had changed.
-  const receiver = videoReceiver();
-  if (receiver && "transform" in receiver) {
-    try { receiver.transform = null; } catch (_) { /* older browser */ }
-  }
   giveTheVideoBack();
-  // And a fresh media connection, if this page was really drawing.
+  // Nothing to undo on the receiver and nothing to rebuild.
   //
-  // Detaching the transform is not enough and asking for a keyframe is not
-  // enough either. Measured after switching back: "0.0 frames a second (0.0
-  // arrived)" and the element pausing itself over and over -- WebRTC's
-  // receiver had stopped delivering to its own decoder and setting
-  // receiver.transform back to null did not undo that. Whether that is a
-  // browser bug or the intended reading of the spec, a receiver that has had
-  // a transform taken off it cannot be relied on again.
-  //
-  // So the connection is rebuilt, which is a second of held picture and is
-  // the only thing that reliably works. The page has wanted this path for
-  // other reasons since long before any of this, and it is well travelled.
-  if (was) {
-    report("asking for a fresh media connection: a receiver that has had a "
-           + "transform on it does not deliver again");
-    renewSoon(0, true);
-  }
+  // This used to detach an encoded transform and then ask for a whole fresh
+  // media connection, because a receiver that had carried one never
+  // delivered again. Frames come down a data channel now, which the media
+  // track knows nothing about, so switching back is free and the picture is
+  // already there.
   const canvas = paintCanvas();
   if (canvas) {
     canvas.hidden = true;
@@ -8698,9 +8691,10 @@ async function startPainting() {
     showToast("This browser cannot draw the picture itself");
     return;
   }
-  const receiver = videoReceiver();
   const canvas = paintCanvas();
-  if (!receiver || !canvas) return;          // no media yet; on track arrival
+  if (!pictureChannel || pictureChannel.readyState !== "open" || !canvas) {
+    return;                                  // the channel will start it
+  }
   const shape = videoCodecNow();
   // Asked of the browser rather than constructed and hoped for -- see
   // pickCodec. It is a promise, and the watchdog calls this every couple of
@@ -8773,7 +8767,7 @@ async function startPainting() {
   }
   fitPainted();
   painter = makePainter(canvas, report);
-  if (!painter.start(receiver, codec)) {
+  if (!painter.start(pictureChannel, codec)) {
     giveTheVideoBack();
     painter = null;
     setPaintMethod("browser");
@@ -8905,12 +8899,6 @@ function setPaintMethod(id) {
   // So switching to it rebuilds the connection and the track handler starts
   // the painting when the new one arrives. On a connection that has not
   // carried anything yet there is nothing to rebuild and it starts here.
-  if (pc && videoReceiver() && lastBytes > 0) {
-    report("asking for a fresh media connection: a transform wants a "
-           + "receiver that has not started yet");
-    renewSoon(0, true);
-    return;
-  }
   startPainting();
 }
 

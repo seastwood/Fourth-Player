@@ -22,6 +22,7 @@ loop runs on its own thread and every callback is marshalled back with
 import concurrent.futures
 import logging
 import re
+import struct
 import threading
 import time
 
@@ -1200,6 +1201,27 @@ class Stage:
             f"! {encoder} "
             f"{profile}"
             f"! {parser} config-interval=-1 "
+            # A tee, and the second branch is the whole reason this exists.
+            #
+            # A browser that decodes the picture itself wants whole access
+            # units with start codes -- the shape an encoder produces and a
+            # WebCodecs decoder takes. What goes out on the media track is the
+            # same frames cut into RTP packets, and putting them back together
+            # in a browser turned out to need machinery no browser wants to
+            # lend: an encoded transform needs a receiver that has not started
+            # yet, stops delivering when it is attached to one that has, and
+            # never delivers again once it is taken off. The client this is
+            # modelled on does not use it either -- it carries frames on a
+            # data channel, which is what this branch is for.
+            f"! tee name=frames "
+            f"frames. ! queue max-size-buffers=0 max-size-bytes=0 "
+            f"max-size-time=0 "
+            f"! video/x-{'h265' if hevc else 'h264'},"
+            f"stream-format=byte-stream,alignment=au "
+            f"! appsink name=fsink emit-signals=true sync=false "
+            f"max-buffers=8 drop=true "
+            f"frames. ! queue max-size-buffers=0 max-size-bytes=0 "
+            f"max-size-time=0 "
             f"! {payloader} pt=96 config-interval=-1 aggregate-mode=zero-latency "
             f"mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=video,encoding-name={encoding},"
@@ -1300,6 +1322,7 @@ class Stage:
         self.pipeline = Gst.parse_launch(description)
         self.encoder = self.pipeline.get_by_name("enc")
         self.vsink = self.pipeline.get_by_name("vsink")
+        self.fsink = self.pipeline.get_by_name("fsink")
         self.asink = self.pipeline.get_by_name("asink")
         self.has_audio = self.asink is not None
         # The caps the guests' pipelines have to be told about. They are not
@@ -1307,6 +1330,8 @@ class Stage:
         self.video_caps = None
         self.audio_caps = None
         self.vsink.connect("new-sample", self._on_video)
+        if self.fsink is not None:
+            self.fsink.connect("new-sample", self._on_frame)
         if self.asink is not None:
             self.asink.connect("new-sample", self._on_audio)
         self._watch_the_capture()
@@ -1871,6 +1896,39 @@ class Stage:
     def _on_audio(self, sink):
         return self._forward(sink, "audio")
 
+    def _on_frame(self, sink):
+        """One whole encoded frame, for the guests decoding it themselves.
+
+        Pulled and handed out even when nobody wants it, because the
+        alternative is an appsink that fills and blocks the tee, which stops
+        the branch everybody else is watching. drop=true on the sink keeps
+        that bounded; this keeps it empty.
+        """
+        sample = sink.emit("pull-sample")
+        if sample is None:
+            return Gst.FlowReturn.OK
+        buffer = sample.get_buffer()
+        key = not buffer.has_flags(Gst.BufferFlags.DELTA_UNIT)
+        # Microseconds, which is what an EncodedVideoChunk takes. The clock is
+        # the capture's, so the differences are real elapsed time even though
+        # the two machines have never agreed what time it is.
+        stamp = 0
+        if buffer.pts != Gst.CLOCK_TIME_NONE:
+            stamp = buffer.pts // 1000
+        ok, info = buffer.map(Gst.MapFlags.READ)
+        if not ok:
+            return Gst.FlowReturn.OK
+        try:
+            data = bytes(info.data)
+        finally:
+            buffer.unmap(info)
+        for peer in list(self.peers.values()):
+            try:
+                peer.send_frame(data, key, stamp)
+            except Exception as exc:
+                log.debug("peer %s would not take a frame: %s", peer.id, exc)
+        return Gst.FlowReturn.OK
+
     def _note_gap(self, kind):
         """Say so when this host stops producing, rather than only suspecting it.
 
@@ -2161,6 +2219,10 @@ class Peer:
         self.media = media
         self.channel = None
         self.desk_channel = None
+        # The picture as whole frames, for a guest that decodes it
+        # itself. Off until one asks: see _on_picture_asked.
+        self.frame_channel = None
+        self.frames_wanted = False
         self.on_input = None          # set by the session; called with raw bytes
         self.on_desk = None           # ditto, for keyboard and mouse messages
         self.on_dead = None           # called when the media connection is over
@@ -2318,8 +2380,71 @@ class Peer:
         self._connect(self.desk_channel, "on-message-string", self._on_desk_data)
         self._connect(self.desk_channel, "on-message-data", self._on_desk_data)
 
+        # The picture again, as whole frames, for a guest that decodes it
+        # itself. Ordered and reliable: a frame with a hole in it is not a
+        # frame, and unlike a pad snapshot there is no later message that
+        # makes it right. Created for every guest and used by the ones that
+        # ask -- an empty channel costs a few bytes of SDP.
+        video_options = Gst.Structure.new_from_string(
+            "options, ordered=(boolean)true")
+        self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
+                                              video_options)
+        if self.frame_channel is not None:
+            self._connect(self.frame_channel, "on-open", self._on_picture_open)
+            self._connect(self.frame_channel, "on-close",
+                          lambda _c: setattr(self, "frames_wanted", False))
+            self._connect(self.frame_channel, "on-message-string",
+                          self._on_picture_asked)
+
         self._assembled = True
         self._negotiate()
+
+    def _on_picture_open(self, _channel):
+        log.info("peer %s: the picture channel is open", self.id)
+
+    def _on_picture_asked(self, _channel, message):
+        """A guest turning its own decoding on or off.
+
+        Off by default and asked for explicitly, because sending whole frames
+        to somebody who is not decoding them is the picture twice over -- once
+        on the media track they are watching and once down here into nothing.
+        """
+        want = str(message or "").strip().lower() in ("1", "on", "yes", "true")
+        self.frames_wanted = want
+        log.info("peer %s: %s sending whole frames down the picture channel",
+                 self.id, "started" if want else "stopped")
+        if want:
+            self.stage.request_keyframe("%s (its own decoder)" % self.id)
+
+    def send_frame(self, data, key, stamp):
+        """One encoded frame to a guest that asked for them.
+
+        Chunked, because SCTP will not carry an arbitrarily large message and
+        a keyframe is easily larger than a browser's limit. Each piece says
+        whether it starts a frame and whether it ends one, so the other end
+        can put them back together without knowing anything else.
+        """
+        if not getattr(self, "frames_wanted", False):
+            return
+        channel = self.frame_channel
+        if channel is None or channel.props.ready_state != 1:   # OPEN
+            return
+        # Well under the 256KB a browser will take, so one frame is a few
+        # messages rather than one that might be refused.
+        limit = 60000
+        total = len(data)
+        at = 0
+        while at < total:
+            end = min(at + limit, total)
+            flags = (1 if key else 0)
+            if at == 0:
+                flags |= 2
+            if end >= total:
+                flags |= 4
+            head = struct.pack("<BQ", flags, int(stamp))
+            chunk = head + data[at:end]
+            channel.emit("send-data", GLib.Bytes.new(chunk))
+            at = end
 
     def on_answer(self, sdp_text):
         """Say what the guest agreed to for the microphone line, once.
@@ -2622,6 +2747,8 @@ class Peer:
             _PARKED_AGENTS.append(self.ice)
             self.ice = None
         self.webrtc = self.channel = self.desk_channel = None
+        self.frame_channel = None
+        self.frames_wanted = False
         self._sources = {}
         self._caps = {}
         who = self.id

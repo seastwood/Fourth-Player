@@ -251,21 +251,39 @@ function close() {
   state.decoder = null;
 }
 
-self.onrtctransform = (event) => {
-  const reader = event.transformer.readable.getReader();
-  const pull = () => reader.read().then(({ done, value }) => {
-    if (done) return;
-    state.handed += 1;
-    if (state.handed === 1) say("the first encoded frame arrived here");
-    const data = value.data;
-    // Copied because the frame is recycled the moment this returns.
-    const bytes = new Uint8Array(data.byteLength);
-    bytes.set(new Uint8Array(data));
-    take(value.type || "delta", value.timestamp, bytes.buffer);
-    pull();
-  }).catch(() => { /* the connection went away */ });
-  pull();
-};
+/* Putting a frame back together.
+ *
+ * SCTP will not carry an arbitrarily large message and a keyframe is easily
+ * larger than a browser's limit, so the host sends each frame in pieces. Nine
+ * bytes in front of each say whether it starts a frame, whether it ends one,
+ * whether the frame is a keyframe, and when it was captured. Nothing else is
+ * needed: the pieces of one frame arrive in order and no frame is begun
+ * before the one before it has ended, because the channel is ordered.
+ */
+const FIRST = 2, LAST = 4;
+let building = null;
+
+function chunk(buffer) {
+  const view = new DataView(buffer);
+  const flags = view.getUint8(0);
+  const stamp = Number(view.getBigUint64(1, true));
+  const body = new Uint8Array(buffer, 9);
+  if (flags & FIRST) {
+    building = { key: (flags & 1) !== 0, stamp, parts: [], size: 0 };
+  }
+  if (!building) return;                 // a tail with no head: wait for one
+  building.parts.push(body);
+  building.size += body.length;
+  if (!(flags & LAST)) return;
+  const whole = new Uint8Array(building.size);
+  let at = 0;
+  for (const part of building.parts) { whole.set(part, at); at += part.length; }
+  const made = building;
+  building = null;
+  state.handed += 1;
+  if (state.handed === 1) say("the first encoded frame arrived here");
+  take(made.key ? "key" : "delta", made.stamp, whole.buffer);
+}
 
 self.onmessage = (event) => {
   const m = event.data || {};
@@ -334,7 +352,8 @@ self.onmessage = (event) => {
     state.refused = state.skipped = state.stale = 0;
     return;
   }
-  if (m.stop) { close(); }
+  if (m.chunk) { chunk(m.chunk); return; }
+  if (m.stop) { close(); building = null; }
 };
 
 // Last, so nothing can be sent before the handlers above exist.

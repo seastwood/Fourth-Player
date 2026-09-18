@@ -331,13 +331,21 @@ function toLengthPrefixed(bytes) {
   return out.buffer;
 }
 
+/* Whether this browser can decode and draw the picture itself.
+ *
+ * No mention of encoded transforms any more. Taking the frames off the media
+ * track needed one, and a transform turned out to want a receiver that has
+ * not started yet, to deliver nothing when attached to one that has, and to
+ * leave the receiver delivering nothing for ever once removed. The client
+ * this is modelled on does not use it either: it carries whole frames on a
+ * data channel. So does this now, and all a browser needs is a decoder and a
+ * canvas it can hand to a worker. */
 function canPaintDirectly() {
   return typeof VideoDecoder !== "undefined"
     && typeof VideoFrame !== "undefined"
-    && (typeof RTCRtpScriptTransform !== "undefined"
-        || (typeof RTCRtpReceiver !== "undefined"
-            && RTCRtpReceiver.prototype
-            && "createEncodedStreams" in RTCRtpReceiver.prototype));
+    && typeof OffscreenCanvas !== "undefined"
+    && typeof HTMLCanvasElement !== "undefined"
+    && Boolean(HTMLCanvasElement.prototype.transferControlToOffscreen);
 }
 
 /* The page's half of it: start the worker, give it the canvas, and relay.
@@ -352,6 +360,7 @@ function makePainter(canvas, say) {
   let worker = null, running = false, mine = canvas;
   let last = null;                       // the worker's last set of counters
   let ever = false;                      // it has painted at least once
+  let carrying = null, letting = null;   // the channel, and how to stop reading
   let onGone = null;
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
@@ -370,10 +379,13 @@ function makePainter(canvas, say) {
   }
 
   return {
-    start(receiver, codec) {
+    start(channel, codec) {
       if (running) return false;
-      if (typeof OffscreenCanvas === "undefined"
-          || !HTMLCanvasElement.prototype.transferControlToOffscreen) {
+      if (!channel || channel.readyState !== "open") {
+        say("the picture channel is not open yet");
+        return false;
+      }
+      if (!canPaintDirectly()) {
         say("this browser cannot hand a canvas to a worker");
         return false;
       }
@@ -398,21 +410,13 @@ function makePainter(canvas, say) {
         const m = event.data || {};
         if (m.ready) {
           it.postMessage({ start: { canvas: surface, codec } }, [surface]);
-          try {
-            if (typeof RTCRtpScriptTransform !== "undefined") {
-              receiver.transform = new RTCRtpScriptTransform(it, {});
-              say("the frame worker is ready and the transform is attached");
-            } else {
-              say("this browser has no transform to attach");
-              this.stop();
-              if (onGone) onGone();
-            }
-          } catch (err) {
-            say("this browser would not take the transform: "
-                + ((err && err.message) || "no reason given"));
-            this.stop();
-            if (onGone) onGone();
-          }
+          return;
+        }
+        if (m.started) {
+          // Only now: frames arriving before there is a decoder are frames
+          // thrown away, and the host holds them back until it is asked.
+          try { channel.send("on"); } catch (_) {}
+          say("the picture channel was asked for whole frames");
           return;
         }
         if (m.painted) { ever = true; return; }
@@ -424,11 +428,25 @@ function makePainter(canvas, say) {
           if (onGone) onGone();
         }
       };
+      channel.binaryType = "arraybuffer";
+      carrying = channel;
+      const onPictureChunk = (event) => {
+        const data = event.data;
+        if (!worker || !(data instanceof ArrayBuffer)) return;
+        // Transferred rather than copied: it is this page's last contact with
+        // the bytes, and the worker is the only thing that reads them.
+        worker.postMessage({ chunk: data }, [data]);
+      };
+      // An abort signal rather than keeping the function to hand back later:
+      // one thing to forget instead of two that have to match.
+      letting = new AbortController();
+      channel.addEventListener("message", onPictureChunk,
+                               { signal: letting.signal });
       running = true;
       return true;
     },
 
-    /* Another spelling of the codec, without disturbing the transform. */
+    /* Another spelling of the codec, without disturbing the channel. */
     useCodec(codec) {
       if (!worker || !codec) return false;
       worker.postMessage({ codec });
@@ -441,6 +459,15 @@ function makePainter(canvas, say) {
       running = false;
       last = null;
       ever = false;
+      if (carrying) {
+        // Tell the host to stop sending them, then stop listening. In that
+        // order: the other way round leaves frames arriving at nothing for as
+        // long as the message takes to get there.
+        try { carrying.send("off"); } catch (_) {}
+        if (letting) { try { letting.abort(); } catch (_) {} }
+        carrying = null;
+        letting = null;
+      }
       if (worker) {
         try { worker.postMessage({ stop: true }); } catch (_) {}
         try { worker.terminate(); } catch (_) {}
