@@ -103,6 +103,21 @@ check("and not key" in video,
 check("frames_skipped" in video, "the skipping is counted")
 check("bytes behind" in video, "and said, so this is visible next time")
 
+print("and a link that cannot carry the picture is sent less of it")
+# A send queue that will not drain is the only honest signal that the link is
+# narrower than the picture: nothing is lost, nothing errors, the bytes sit
+# there -- and a guest sees the picture slow down while it fills and speed up
+# while it drains, which is how it was described on mobile data.
+check("FRAME_QUEUE_SECONDS" in video,
+      "the limit is a time, because bytes mean nothing without the rate: a "
+      "megabyte is a moment at 60 Mb/s and four seconds on mobile data")
+check("def _ease_the_rate" in video, "and the encoder is told about it")
+check("BITRATE_DOWN" in video and "BITRATE_UP" in video,
+      "down quickly and up slowly, as every congestion control does")
+check("BITRATE_FLOOR_KBPS" in video, "and never below something watchable")
+check("BITRATE_CALM" in video,
+      "with a quiet spell required before it climbs, so it does not oscillate")
+
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
 check('struct.pack("<BQ"' in video,

@@ -312,10 +312,20 @@ SOURCES = (
 
 # The ways Windows can be asked for the screen, and what to call them.
 # How far behind the picture channel may get before frames are skipped
-# rather than added to a queue nobody is draining. A megabyte is about three
-# seconds of picture at the rates this sends: long past the point where
-# anything in it is worth showing.
-FRAME_QUEUE_LIMIT = 1024 * 1024
+# rather than added to a queue nobody is draining.
+#
+# In time rather than bytes, because bytes mean nothing without knowing the
+# rate: a megabyte is a moment at 60 Mb/s and four seconds on mobile data.
+# A fifth of a second is the most that can sit in a send queue and still be
+# worth showing when it arrives -- past that it is not a picture of now.
+FRAME_QUEUE_SECONDS = 0.2
+
+# What the encoder is allowed to do about a link that cannot carry what it is
+# being given. Down quickly, up slowly, and never below something watchable.
+BITRATE_FLOOR_KBPS = 400
+BITRATE_DOWN = 0.75          # a quarter off, when the queue will not drain
+BITRATE_UP = 1.08            # eight percent back, per quiet spell
+BITRATE_CALM = 40            # frames of quiet before it climbs at all
 
 
 CAPTURE_APIS = {
@@ -940,6 +950,9 @@ class Stage:
         self._stalls = {}
         self._said_stall = {}
         self._last_frame = 0.0
+        # What the encoder is being run at, as against what was asked for.
+        self._rate_now = None
+        self._rate_calm = 0
         self._last_pts = Gst.CLOCK_TIME_NONE
         self._gaps = []
         self._stamps = []
@@ -1991,12 +2004,64 @@ class Stage:
             data = bytes(info.data)
         finally:
             buffer.unmap(info)
+        behind = 0
         for peer in list(self.peers.values()):
             try:
                 peer.send_frame(data, key, stamp)
+                behind = max(behind, getattr(peer, "channel_behind", 0))
             except Exception as exc:
                 log.debug("peer %s would not take a frame: %s", peer.id, exc)
+        self._ease_the_rate(behind)
         return Gst.FlowReturn.OK
+
+    def frame_queue_limit(self):
+        """How many bytes may sit in a send queue before frames are skipped."""
+        rate = max(1, int(self._rate_now or self.cfg.bitrate_kbps))
+        return int(rate * 1000 / 8 * FRAME_QUEUE_SECONDS)
+
+    def _ease_the_rate(self, behind):
+        """Match the encoder to a link that cannot carry what it is given.
+
+        A send queue that will not drain is the only honest signal there is
+        that the link is narrower than the picture: nothing is lost, nothing
+        errors, the bytes simply sit there -- and a guest watching sees the
+        picture slow down while the queue fills and speed up while it drains,
+        which is exactly how it was described.
+
+        The answer is to send less, and to do it the way every congestion
+        control does: down quickly, because the queue is already somebody's
+        delay, and up slowly, because the link has not proved anything yet.
+        """
+        encoder = self.encoder
+        if encoder is None:
+            return
+        asked = max(BITRATE_FLOOR_KBPS, int(self.cfg.bitrate_kbps))
+        if self._rate_now is None:
+            self._rate_now = asked
+        limit = self.frame_queue_limit()
+        if behind > limit:
+            self._rate_calm = 0
+            want = max(BITRATE_FLOOR_KBPS, int(self._rate_now * BITRATE_DOWN))
+        else:
+            self._rate_calm += 1
+            if self._rate_calm < BITRATE_CALM or self._rate_now >= asked:
+                return
+            self._rate_calm = 0
+            want = min(asked, int(self._rate_now * BITRATE_UP) + 1)
+        if want == self._rate_now:
+            return
+        try:
+            encoder.set_property("bitrate", want)
+        except Exception:
+            log.debug("this encoder will not change its bitrate mid-stream",
+                      exc_info=True)
+            return
+        log.info("the link is %s: %d kb/s -> %d kb/s (%d bytes waiting, "
+                 "%d is the most worth keeping)",
+                 "narrower than the picture" if want < self._rate_now
+                 else "keeping up, so giving some back",
+                 self._rate_now, want, behind, limit)
+        self._rate_now = want
 
     def _note_gap(self, kind):
         """Say so when this host stops producing, rather than only suspecting it.
@@ -2314,6 +2379,7 @@ class Peer:
         self.frames_wanted = False
         self._said_shut = False
         self.frames_skipped = 0
+        self.channel_behind = 0
         self.on_input = None          # set by the session; called with raw bytes
         self.on_desk = None           # ditto, for keyboard and mouse messages
         self.on_dead = None           # called when the media connection is over
@@ -2553,7 +2619,8 @@ class Peer:
             waiting = int(channel.props.buffered_amount)
         except Exception:
             waiting = 0
-        if waiting > FRAME_QUEUE_LIMIT and not key:
+        self.channel_behind = waiting
+        if waiting > self.stage.frame_queue_limit() and not key:
             self.frames_skipped += 1
             if self.frames_skipped in (1, 100, 1000):
                 log.warning("peer %s: the picture channel is %d bytes behind, "
