@@ -271,19 +271,40 @@ ENCODERS = {
 # baked into their template instead. On a machine whose whole desktop is being
 # driven by somebody remote that is the right setting anyway: a pointer you
 # cannot see is a pointer you cannot aim.
+# do-timestamp=true on every one of them, and it is the least cosmetic setting
+# in this file.
+#
+# A live GstBaseSrc with it off stamps each frame from a frame counter: frame
+# n is n/fps, exactly, for ever. That is a claim about when the picture was
+# taken, and on these sources it is not true. The desktop captures hand over a
+# frame when the desktop gives them one -- measured on the Windows host at
+# 60fps, over 609 frames: a typical gap of 15.6ms, a worst of 77ms, and 135 of
+# them nowhere near the 16.7ms the timestamps all claimed.
+#
+# The timestamp is what a guest's browser draws by. So the browser was being
+# handed evenly spaced frames whose contents had advanced by wildly uneven
+# amounts, and it drew them evenly, which makes everything in the picture
+# speed up and slow down on a beat. Reported as the video pulsing, and no
+# amount of buffering could touch it: the timestamps were not late, they were
+# wrong. The jitter buffer had been raised to 60ms and read back from the
+# receiver by then, which is what ruled late out.
+#
+# With it on, each frame carries the clock at the moment it was really
+# grabbed, and a frame whose content is 30ms newer is shown 30ms later --
+# which is all "smooth" means.
 SOURCES = (
     ("ximagesrc",
      "ximagesrc name=capture display-name={display} use-damage=0 "
-     "show-pointer=false",
+     "show-pointer=false do-timestamp=true",
      "show-pointer"),
     ("d3d11screencapturesrc",
-     "d3d11screencapturesrc name=capture show-cursor=true",
+     "d3d11screencapturesrc name=capture show-cursor=true do-timestamp=true",
      None),
     # Deprecated in GStreamer and kept as a fallback anyway: it is what a
     # machine with no working D3D11 path has left, and a soft picture beats
     # none. It warns on every start, which is the reason it is last.
     ("gdiscreencapsrc",
-     "gdiscreencapsrc name=capture cursor=true",
+     "gdiscreencapsrc name=capture cursor=true do-timestamp=true",
      None),
 )
 
