@@ -60,8 +60,10 @@ print("and the ones that promise smoothness ask for the most")
 buttery = [p for p in presets if "Buttery" in p["label"]]
 check(buttery, "there are presets called Buttery")
 for preset in buttery:
-    check(preset["jitter"] >= 50,
-          "%s holds %dms, which is a frame-pacing queue and not a token"
+    # Not the largest buffer in the list -- buffering is latency and these
+    # are the responsive presets -- but comfortably more than the clump.
+    check(preset["jitter"] >= 2.5 * (1000.0 / preset["fps"]),
+          "%s holds %dms, over two frames of clumping plus room"
           % (preset["label"], preset["jitter"]))
 
 print("nothing asks for more delay than the host will allow")

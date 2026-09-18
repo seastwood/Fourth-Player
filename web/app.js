@@ -8644,18 +8644,22 @@ function paintStreamValues() {
  * cost bitrate to carry and buy no smoothness at all -- so the high ones say
  * what they need. */
 const STREAM_PRESETS = [
-  // Jitter was 25 on both of these, chosen for latency, and it was the wrong
-  // trade for presets called Buttery. Measured on the Windows host at 60fps:
-  // the timeline handed to the browser is exact -- a frame every 16.7ms, none
-  // of 600 uneven -- while frames *arrive* in pairs, about one in ten landing
+  // Jitter was 25 on both of these. Measured on the Windows host: the timeline
+  // handed to the browser is exact -- a frame every 16.7ms at 60fps, none of
+  // 600 uneven -- while frames *arrive* in pairs, about one in ten landing
   // 33ms after the one before. A jitter buffer exists to absorb precisely
-  // that, and 25ms cannot: the clump is bigger than the buffer, so the picture
-  // hitches on a beat. 60ms swallows the pairing with room to spare and costs
-  // 35ms, which is well under the frame of latency it saves arguing about.
-  { label: "Buttery", height: 1080, fps: 120, kbps: 40000, jitter: 60,
+  // that, and it cannot absorb a clump bigger than itself: at 25ms the
+  // picture hitched on a beat, which is what "it pulses" was.
+  //
+  // So the floor is two frames at the preset's own rate -- 17ms here -- and
+  // these ask for 40, which leaves room for a clump plus a straggler while
+  // staying under what the 60fps presets hold. Both rules matter and they
+  // pull opposite ways: buffering is latency, so the more responsive preset
+  // must still ask for less of it than the slower ones.
+  { label: "Buttery", height: 1080, fps: 120, kbps: 40000, jitter: 40,
     queue: 30, cpb: 80,
     why: "wired, and the host's screen set to 120Hz or more" },
-  { label: "Buttery 1440p", height: 1440, fps: 120, kbps: 60000, jitter: 60,
+  { label: "Buttery 1440p", height: 1440, fps: 120, kbps: 60000, jitter: 40,
     queue: 30, cpb: 80,
     why: "a 1440p desktop at 120Hz or more, wired" },
   { label: "Sharpest", height: 1080, fps: 60, kbps: 16000, jitter: 50,
