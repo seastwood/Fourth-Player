@@ -96,7 +96,8 @@ print("and a channel that is not keeping up skips on purpose")
 # grown to megabytes is not being drained, and everything added to it after
 # that is latency rather than picture.
 check("buffered_amount" in video, "the queue depth is read")
-check("FRAME_QUEUE_LIMIT" in video, "against a named limit")
+check("frame_queue_limit()" in video,
+      "against a limit worked out from the rate, not a fixed size")
 check("and not key" in video,
       "and a keyframe is never the one skipped, since everything after it "
       "depends on it")
