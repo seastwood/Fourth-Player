@@ -523,7 +523,7 @@ self.onmessage = (event) => {
     self.postMessage({ started: true });
     return;
   }
-  if (m.report) {
+  if (m.report || m.peek) {
     self.postMessage({
       stats: {
         handed: state.handed, fed: state.fed, out: state.out,
@@ -541,16 +541,23 @@ self.onmessage = (event) => {
         size: state.canvas ? (state.canvas.width + "x" + state.canvas.height)
                            : "none",
         drawFails: state.drawFails,
-        shown: shownSpread(),
+        shown: m.report ? shownSpread() : null,
         ticks: state.ticks,
         starved: state.starved,
         refresh: Math.round(refreshEvery() * 10) / 10,
       },
     });
-    state.handed = state.fed = state.out = state.drawn = 0;
-    state.refused = state.skipped = state.stale = 0;
-    state.drawFails = 0;
-    state.ticks = state.starved = 0;
+    // Only a report empties them. A peek is somebody checking whether
+    // anything is being painted at all, and two callers sharing one counter
+    // that empties when it is read means whichever asks second is told
+    // nothing happened -- which is how "Drawing 0 of 60 frames a second"
+    // came to be said about a picture that was playing perfectly.
+    if (m.report) {
+      state.handed = state.fed = state.out = state.drawn = 0;
+      state.refused = state.skipped = state.stale = 0;
+      state.drawFails = 0;
+      state.ticks = state.starved = 0;
+    }
     return;
   }
   if (m.tick) {

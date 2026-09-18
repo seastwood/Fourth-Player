@@ -529,6 +529,11 @@ function makePainter(canvas, say) {
                  : ""));
     },
 
+    /* Ask without emptying the counters, for whoever only wants to know
+       whether anything is happening. */
+    peek() {
+      if (worker) { try { worker.postMessage({ peek: true }); } catch (_) {} }
+    },
     painted() { return ever || Boolean(last && last.ever); },
     /* Frames are arriving and none has been a keyframe yet, so there is
        nothing to decode against and nothing is wrong. */

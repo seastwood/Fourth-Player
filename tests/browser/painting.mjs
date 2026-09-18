@@ -93,6 +93,21 @@ check(workerSrc.includes("self.postMessage({ painted: true })"),
 check(app.includes("if (painter) painter.report();"),
       "and the watchdog asks for the numbers when it is armed");
 
+console.log("a counter that empties when read is not shared between two askers");
+// "Drawing 0 of 60 frames a second" over a picture that was playing
+// perfectly. The watchdog and the rate report both asked the worker for its
+// numbers, and asking emptied them -- so whichever asked second was told
+// nothing had happened.
+check(workerSrc.includes("if (m.report || m.peek)"),
+      "there are two ways to ask");
+check(workerSrc.includes("if (m.report) {\n      state.handed"),
+      "and only one of them empties the counters");
+check(app.includes("painter.peek()"),
+      "the watchdog peeks, because it only wants to know if anything is "
+      + "happening");
+check(app.includes("painter.drawnLately() > 0 && mine < want * 0.75"),
+      "and nothing is said about a window that counted no frames at all");
+
 console.log("and the two methods are named after what does the work");
 // "Browser" and "this page" said who to blame, which is not a distinction
 // anybody can act on: both run in the browser and both are this page.

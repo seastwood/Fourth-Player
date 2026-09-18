@@ -3705,7 +3705,12 @@ function tellAboutTheRate(picture) {
                                                        : " (NOT the same)"));
     }
     const want = (streamNow && Number(streamNow.fps)) || 0;
-    if (want && mine < want * 0.75) {
+    // Only about a window that actually counted some frames. A report that
+    // came back empty is a report that was taken while something else had
+    // just emptied the counters, not a picture that has stopped -- and
+    // saying "drawing 0 of 60" over a picture that is plainly playing is
+    // worse than saying nothing.
+    if (want && painter.drawnLately() > 0 && mine < want * 0.75) {
       showNotice("<b>Drawing " + mine.toFixed(0) + " of " + want
                  + " frames a second on this page.</b><br>"
                  + "The browser's own drawing may be smoother on this "
@@ -8659,7 +8664,7 @@ function watchThePainting() {
   // painter's counters come from the worker and arrive a message later; the
   // deadline was being reached with nothing to read but the absence of a
   // reply, which is not the same as nothing having been painted.
-  if (painter) painter.report();
+  if (painter) painter.peek();
   paintWatch = setTimeout(() => {
     paintWatch = 0;
     if (!painter) return;
