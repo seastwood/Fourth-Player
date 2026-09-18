@@ -146,8 +146,9 @@ check(workerSrc.includes("if (m.report) {\n      state.handed"),
 check(app.includes("painter.peek()"),
       "the watchdog peeks, because it only wants to know if anything is "
       + "happening");
-check(app.includes("painter.drawnLately() > 0 && mine < want * 0.75"),
-      "and nothing is said about a window that counted no frames at all");
+check(app.includes("if (!(rate > 0)) { chip.hidden = true; return; }"),
+      "and a window that counted no frames hides the chip rather than "
+      + "reporting a zero at somebody");
 
 console.log("and the two methods are named after what does the work");
 // "Browser" and "this page" said who to blame, which is not a distinction

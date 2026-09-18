@@ -40,6 +40,7 @@ const said = [];
 const make = new Function("said", `
   let Date_now = 0;
   let painter = null;
+  const sayTheRate = () => {};
   const report = (t) => said.push(t);
   const Date = { now: () => Date_now };
   ${body}
