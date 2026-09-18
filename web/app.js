@@ -8755,6 +8755,23 @@ async function startPainting() {
   // element is what plays them, so it is handed a stream with the video
   // removed rather than nothing at all.
   keepAudioOnly();
+  // Shown and placed *before* it is handed over, and re-read afterwards.
+  //
+  // start() replaces the element -- a canvas can only be given to a worker
+  // once, and this has to work a second time -- so `canvas` points at a node
+  // that is no longer in the page by the time start() returns. Everything
+  // done to it after that was being done to nothing: the visible canvas was
+  // never unhidden and never positioned, which is a black rectangle over a
+  // video element that has had its picture taken away. That is the black
+  // screen, in Chrome as well, and it arrived with the move into the worker.
+  //
+  // Doing it first also avoids handing over a canvas that is display:none,
+  // which is one more thing a browser might decline to composite afterwards.
+  if (canvas) {
+    canvas.hidden = false;
+    canvas.classList.add("over");
+  }
+  fitPainted();
   painter = makePainter(canvas, report);
   if (!painter.start(receiver, codec)) {
     giveTheVideoBack();
@@ -8762,7 +8779,11 @@ async function startPainting() {
     setPaintMethod("browser");
     return;
   }
-  canvas.hidden = false;
+  const drawnOn = paintCanvas();
+  if (drawnOn) {
+    drawnOn.hidden = false;
+    drawnOn.classList.add("over");
+  }
   // The <video> element is *not* hidden.
   //
   // Everything that reads the picture reads that element: twenty-odd pointer,
@@ -8771,7 +8792,6 @@ async function startPainting() {
   // taken. A display:none element accepts none of that. So it stays exactly
   // where it was, showing black with its video track removed, and the canvas
   // is laid over it and takes no pointer events at all.
-  if (canvas) canvas.classList.add("over");
   fitPainted();
   paintAfterZoom();
   report("drawing the picture here, " + codec + ", pacing it ourselves");

@@ -251,6 +251,23 @@ check(stopBody.indexOf("receiver.transform = null")
       < stopBody.indexOf("giveTheVideoBack()"),
       "before the stream is handed back, so nothing is starved in between");
 
+console.log("the canvas that is shown is the one that was handed over");
+// start() replaces the element -- a canvas can only be given to a worker
+// once -- so anything done to the old reference afterwards is done to a node
+// no longer in the page. The visible canvas was never unhidden: a black
+// rectangle over a video element whose picture had been taken away.
+const startBody = app.slice(app.indexOf("async function startPainting"),
+                            app.indexOf("function askHostForKeyframe"));
+check(startBody.includes("const drawnOn = paintCanvas();"),
+      "the element is read again after start()");
+check(startBody.indexOf("drawnOn.hidden = false")
+      > startBody.indexOf("painter.start(receiver, codec)"),
+      "and it is the one that is shown");
+check(startBody.indexOf("canvas.hidden = false")
+      < startBody.indexOf("painter.start(receiver, codec)"),
+      "while the handover gets a canvas that is already visible, which is one "
+      + "less thing for a browser to decline to composite");
+
 console.log("and the canvas is put where the video is, not where the stage is");
 // The stage is more than the picture: the on-screen controller has the bottom
 // of it on a phone, so a canvas stretched over the whole stage centres the
