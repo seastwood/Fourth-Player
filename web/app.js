@@ -8554,13 +8554,10 @@ function watchThePictureBox() {
 function fitPainted() {
   const canvas = paintCanvas();
   if (!canvas || !canvas.classList.contains("over") || !video) return;
-  const mine = video.getBoundingClientRect();
-  const theirs = (canvas.offsetParent || video.parentNode)
-    .getBoundingClientRect();
-  canvas.style.top = (mine.top - theirs.top) + "px";
-  canvas.style.left = (mine.left - theirs.left) + "px";
-  canvas.style.width = mine.width + "px";
-  canvas.style.height = mine.height + "px";
+  canvas.style.top = video.offsetTop + "px";
+  canvas.style.left = video.offsetLeft + "px";
+  canvas.style.width = video.offsetWidth + "px";
+  canvas.style.height = video.offsetHeight + "px";
 }
 
 let wholeStream = null;             // what the element had before we took it

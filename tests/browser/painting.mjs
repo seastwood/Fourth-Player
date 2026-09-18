@@ -246,9 +246,16 @@ console.log("and the canvas is put where the video is, not where the stage is");
 // of it on a phone, so a canvas stretched over the whole stage centres the
 // picture lower than the video was and slides it under the controller.
 check(app.includes("function fitPainted"), "the video's own box is measured");
-check(app.includes("video.getBoundingClientRect()")
-      && app.includes("canvas.style.width = mine.width"),
+check(app.includes("video.offsetWidth") && app.includes("video.offsetTop"),
       "and copied onto the canvas in pixels");
+// getBoundingClientRect reports the box *after* transforms. Zoom the picture
+// and it returns the zoomed rectangle; the canvas was sized to that and then
+// given the same zoom on top, so it left the screen at twice the scale.
+const fitted = app.slice(app.indexOf("function fitPainted"),
+                         app.indexOf("function fitPainted") + 600);
+check(!fitted.includes("getBoundingClientRect"),
+      "from the layout box, which knows nothing about the zoom that is about "
+      + "to be applied to both of them");
 const fitBody = app.slice(app.indexOf("function fitStage"),
                           app.indexOf("function fitStage") + 800);
 check(fitBody.includes("fitPainted"),
