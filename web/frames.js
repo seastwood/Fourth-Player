@@ -53,6 +53,7 @@ const state = {
   shown: [],
   lastPts: null,
   nextAt: null,
+  ticked: false,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -112,6 +113,32 @@ function draw(frame) {
     }
   }
   frame.close();
+}
+
+/* Paint at most one frame, if one is due.
+ *
+ * Driven by the page's animation frames rather than by a timer of its own.
+ * A worker has no way to see the display's refresh, and a paint that lands
+ * at an arbitrary moment in the refresh cycle is shown on the next one --
+ * so two paints either side of a boundary are shown one refresh apart while
+ * two in the middle of one are shown together, and the picture appears to
+ * stick and catch up even when every paint is perfectly spaced. Which is
+ * exactly what the numbers said: "17ms typical, worst 21ms, 0 of 601 off the
+ * beat", and still not smooth to look at.
+ *
+ * An animation frame happens just after a refresh. Painting there puts every
+ * frame on the display's own cadence instead of near it.
+ */
+function tick() {
+  if (!state.waiting.length) return;
+  while (state.waiting.length > DEPTH_WANT * 3) {
+    state.waiting.shift().frame.close();
+    state.stale += 1;
+  }
+  const next = state.waiting[0];
+  if (next.due - performance.now() > LIMITS.SLACK_MS) return;
+  state.waiting.shift();
+  draw(next.frame);
 }
 
 function pump() {
@@ -218,7 +245,11 @@ function decoded(frame) {
   // Kept for the report, which is where the reserve comes from.
   state.pacer.due(captured, performance.now());
   state.waiting.push({ frame, due: schedule(captured) });
-  if (!state.timer) pump();
+  // The page's animation frames do the painting. The timer below is only
+  // for a page that is not sending them -- a backgrounded tab, or a browser
+  // without requestAnimationFrame -- where a picture that keeps moving beats
+  // one that stops.
+  if (!state.ticked && !state.timer) pump();
 }
 
 function buildDecoder(codec, description, latency) {
@@ -479,6 +510,7 @@ self.onmessage = (event) => {
     state.drawFails = 0;
     return;
   }
+  if (m.tick) { state.ticked = true; tick(); return; }
   if (m.chunk) { chunk(m.chunk); return; }
   if (m.stop) { close(); building = null; }
 };

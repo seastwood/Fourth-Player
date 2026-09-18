@@ -371,6 +371,7 @@ function makePainter(canvas, say) {
   let last = null;                       // the worker's last set of counters
   let ever = false;                      // it has painted at least once
   let carrying = null, letting = null;   // the channel, and how to stop reading
+  let beating = 0;                       // the animation-frame loop
   let onGone = null;
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
@@ -438,6 +439,19 @@ function makePainter(canvas, say) {
           if (onGone) onGone();
         }
       };
+      // The display's own cadence, handed to the worker.
+      //
+      // A worker cannot see the refresh; the page can, and an animation
+      // frame happens just after one. Telling the worker to paint there puts
+      // every frame on the display's rhythm rather than near it, which is
+      // the difference between paints that are evenly spaced and a picture
+      // that looks evenly spaced.
+      const beat = () => {
+        if (!worker) return;
+        try { worker.postMessage({ tick: true }); } catch (_) {}
+        beating = requestAnimationFrame(beat);
+      };
+      beating = requestAnimationFrame(beat);
       channel.binaryType = "arraybuffer";
       carrying = channel;
       const onPictureChunk = (event) => {
@@ -469,6 +483,7 @@ function makePainter(canvas, say) {
       running = false;
       last = null;
       ever = false;
+      if (beating) { cancelAnimationFrame(beating); beating = 0; }
       if (carrying) {
         // Tell the host to stop sending them, then stop listening. In that
         // order: the other way round leaves frames arriving at nothing for as

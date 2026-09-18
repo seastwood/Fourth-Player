@@ -112,9 +112,18 @@ const framed = (bytes, key, stamp, first, last) => {
 };
 self_.onmessage({ data: { chunk: framed(keyframe, true, 0, true, true) } });
 check(built[0].chunks.length === 1, "the keyframe was fed to the decoder");
+/* The page drives the painting with animation frames now, so the harness
+   has to be the page: advance the clock a refresh and tell the worker. */
+const refresh = async (times) => {
+  for (let i = 0; i < times; i += 1) {
+    clock += 1000 / 60;
+    self_.onmessage({ data: { tick: true } });
+    await new Promise((go) => globalThis.setTimeout(go, 0));
+  }
+};
+
 output(new FakeFrame(0));
-await new Promise((go) => globalThis.setTimeout(go, 0));
-await new Promise((go) => globalThis.setTimeout(go, 0));
+await refresh(6);
 check(painted === 1, `one frame out, ${painted} painted`);
 check(closed === 1, "and the frame was closed, so its buffer goes back");
 
@@ -124,12 +133,10 @@ console.log("a run of them, one paint per turn of the event loop");
 // batch and loses the rest invisibly -- 361 painted in the counters and one
 // frozen picture on the screen.
 for (let i = 1; i <= 30; i += 1) {
-  clock += 16.7;
   output(new FakeFrame(i * 16700));
-  // Let the worker's own timers run between frames, as they would.
-  await new Promise((go) => globalThis.setTimeout(go, 0));
+  await refresh(1);
 }
-await new Promise((go) => globalThis.setTimeout(go, 60));
+await refresh(6);
 check(painted === 31, `31 out, ${painted} painted`);
 check(workerSrc.includes("setTimeout(pump, 0)"),
       "and the queue yields between paints rather than draining in one turn");
@@ -154,6 +161,20 @@ check(workerSrc.includes("if (state.nextAt < now) state.nextAt = now;"),
 // 16ms typical and a worst of 55, eight paints in a hundred off the beat.
 check(workerSrc.includes("state.nextAt = now + gap * START_DEPTH;"),
       "the first frame waits, and the rest inherit that slack");
+// A worker cannot see the display's refresh, and a paint landing at an
+// arbitrary point in the refresh cycle is shown on the next one -- so two
+// paints either side of a boundary are a refresh apart and two inside one
+// are shown together. The picture sticks and catches up while every paint is
+// perfectly spaced, which is what "17ms typical, worst 21ms, 0 off the beat"
+// and still not smooth means.
+check(workerSrc.includes("function tick()"),
+      "the worker paints one frame per animation frame");
+check(readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8")
+        .includes("requestAnimationFrame(beat)"),
+      "and the page is what tells it, because only the page can see a refresh");
+check(workerSrc.includes("if (!state.ticked && !state.timer) pump();"),
+      "with the old timer left as a fallback for a page that stops sending "
+      + "them, where a picture that keeps moving beats one that stops");
 check(/START_DEPTH = (\d+)/.test(workerSrc), "by a named number of frames");
 const slack = Number(workerSrc.match(/START_DEPTH = (\d+)/)[1]);
 check(slack >= 2 && slack <= 5,
