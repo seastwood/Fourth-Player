@@ -104,6 +104,18 @@ check("and not key" in video,
       "and a keyframe is never the one skipped, since everything after it "
       "depends on it")
 check("frames_skipped" in video, "the skipping is counted")
+# And it drops to the next keyframe rather than punching a hole. A display
+# pipeline conceals a missing reference and carries on; a WebCodecs decoder
+# answers it with `Decoding error` and stops, and with an infinite GOP there
+# is no next keyframe unless somebody asks. The log had both events in the
+# same second: "the picture channel is 293137 bytes behind, so frames are
+# being skipped" and "the decoder stopped: Decoding error."
+check("_await_key" in video,
+      "a channel that is behind drops to the next keyframe, rather than "
+      "leaving the decoder a hole it cannot recover from")
+check("self.stage.request_keyframe(self.id)" in video,
+      "and asks for one at once, through the limiter that decides how often "
+      "that may really happen")
 check("bytes behind" in video, "and said, so this is visible next time")
 
 print("and a link that cannot carry the picture is sent less of it")
@@ -211,6 +223,14 @@ check("self.stage.apply_ceiling()" in video,
       "the moment a guest asks for them -- the adaptive path walks down a "
       "quarter at a time on evidence that arrives once a second, and the "
       "channel fails in twenty")
+
+print("and the browser can see such a gap for itself")
+check("made.seq > state.lastSeq + 1" in worker,
+      "the host's numbering is on the wire, so a gap is visible from there "
+      "-- which does not depend on the host having remembered to drop to a "
+      "keyframe itself")
+check("state.awaitKey" in worker,
+      "and nothing is fed to the decoder until a keyframe comes")
 
 print("and the browser says what actually reached it")
 # The host's own send queue read empty while the browser was receiving

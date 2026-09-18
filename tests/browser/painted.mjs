@@ -377,6 +377,31 @@ check(typeof tally.tally.got === "number"
       "saying how many arrived, how many were painted, and which of the "
       + "host's frames was the last to turn up");
 
+console.log("a gap in the host's numbering waits for a keyframe");
+// The host drops to the next keyframe under congestion rather than punching a
+// hole -- a WebCodecs decoder answers a missing reference with `Decoding
+// error` and stops, which tears the whole picture down. This is the half that
+// does not depend on the host having remembered to: the frame numbers are on
+// the wire, so a gap is visible from here.
+const beforeGap = built[0].chunks.length;
+const askedGap = sent.filter((m) => m.ask === "key").length;
+// Past the rate limit on asking, which an earlier case in this file has just
+// spent. Asking is deliberately throttled: a host answering every request
+// spends the whole bitrate on recovery.
+clock += 1000;
+framedSeq += 5;                        // five frames that never arrived
+self_.onmessage({ data: { chunk: framed(deltaFrame, false, 20, true, true) } });
+check(built[0].chunks.length === beforeGap,
+      "the frame after the gap is not fed to the decoder");
+check(sent.filter((m) => m.ask === "key").length > askedGap,
+      "and a keyframe is asked for");
+self_.onmessage({ data: { chunk: framed(deltaFrame, false, 21, true, true) } });
+check(built[0].chunks.length === beforeGap,
+      "nor is the one after that, until a keyframe comes");
+self_.onmessage({ data: { chunk: framed(keyframe, true, 22, true, true) } });
+check(built[0].chunks.length === beforeGap + 1,
+      "and the keyframe restarts it");
+
 console.log("every combination worth asking is asked, one at a time");
 // iOS Safari refused both start codes and the parameter sets with nothing
 // but "Decoder failure" either time. A decoder that will not say which part

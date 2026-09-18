@@ -2622,6 +2622,7 @@ class Peer:
         self.frames_arriving = 1.0
         self._said_shut = False
         self.frames_skipped = 0
+        self._await_key = False
         self._sent_frames = 0
         self._reports = 0
         self._reported_seq = None
@@ -2981,12 +2982,41 @@ class Peer:
                             exc_info=True)
             waiting = 0
         self.channel_behind = waiting
-        if waiting > self.stage.frame_queue_limit() and not key:
+
+        # Skipping a frame means dropping to the next keyframe, not punching a
+        # hole in the stream.
+        #
+        # This dropped individual non-key frames to relieve the queue, which
+        # is what a display pipeline does -- it conceals the damage and
+        # carries on. A WebCodecs decoder does not conceal anything: a frame
+        # that references one it never received is a `Decoding error`, and
+        # with an infinite GOP there is no next keyframe to recover on unless
+        # somebody asks. So the skip killed the decoder, the page tore it down
+        # and built it again, and that is ten seconds of black. The log has
+        # the two events in the same second:
+        #
+        #   the picture channel is 293137 bytes behind, so frames are skipped
+        #   the decoder stopped: Decoding error.
+        #
+        # Dropping to the next keyframe instead costs one short freeze and
+        # leaves a decoder that is still working. The keyframe is asked for at
+        # once, and the Stage's own rate limiter decides how often that may
+        # really happen.
+        if self._await_key:
+            if not key:
+                self.frames_skipped += 1
+                return
+            self._await_key = False
+            log.info("peer %s: a keyframe arrived, so the picture resumes "
+                     "(%d frames dropped waiting for it)",
+                     self.id, self.frames_skipped)
+        elif waiting > self.stage.frame_queue_limit() and not key:
+            self._await_key = True
             self.frames_skipped += 1
-            if self.frames_skipped in (1, 100, 1000):
-                log.warning("peer %s: the picture channel is %d bytes behind, "
-                            "so frames are being skipped (%d so far)",
-                            self.id, waiting, self.frames_skipped)
+            log.warning("peer %s: the picture channel is %d bytes behind, so "
+                        "the picture drops to the next keyframe rather than "
+                        "leaving the decoder a hole", self.id, waiting)
+            self.stage.request_keyframe(self.id)
             return
 
         # Well under the 256KB a browser will take, so one frame is a few

@@ -47,6 +47,8 @@ const state = {
   lost: 0,
   gotAll: 0, shownAll: 0, toldAt: 0, toldGot: 0, toldShown: 0,
   lastSeq: 0,
+  awaitKey: false,
+  gaps: 0,
   ever: false,
   saidDraw: false,
   saidFirst: false,
@@ -624,7 +626,31 @@ function chunk(buffer) {
   building = null;
   state.handed += 1;
   state.gotAll += 1;
+  // A gap in the host's own numbering means frames went missing before they
+  // ever reached this channel -- the host dropping them under congestion, or
+  // a whole frame lost. Either way the next frame references a picture this
+  // decoder has never seen, and a WebCodecs decoder answers that with
+  // `Decoding error` and stops. So nothing is fed until a keyframe, and one
+  // is asked for. The host drops to a keyframe itself now; this is the half
+  // that does not depend on it having remembered to.
+  if (made.seq && state.lastSeq && made.seq > state.lastSeq + 1) {
+    const missed = made.seq - state.lastSeq - 1;
+    state.lastSeq = made.seq;
+    if (!made.key) {
+      state.gaps += 1;
+      if (!state.awaitKey) {
+        state.awaitKey = true;
+        lostFrame(missed + " frame(s) never reached this channel");
+      }
+      return;
+    }
+  }
   state.lastSeq = made.seq;
+  if (state.awaitKey) {
+    if (!made.key) return;
+    state.awaitKey = false;
+    say("a keyframe arrived, so decoding resumes");
+  }
   // Once per connection, not once per report: the counters are zeroed every
   // window, so this was announcing a first frame every twelve seconds.
   if (!state.saidFirst) {
@@ -695,6 +721,7 @@ self.onmessage = (event) => {
         drawn: state.drawn, refused: state.refused,
         skipped: state.skipped, stale: state.stale,
         lost: state.lost,
+        gaps: state.gaps,
         // Whether a keyframe has been seen at all. Frames arriving and
         // nothing being painted is two different situations: a decoder that
         // will not work, and a decoder that has not been given anything it
@@ -731,6 +758,7 @@ self.onmessage = (event) => {
       state.refused = state.skipped = state.stale = 0;
       state.early = state.behind = 0;
       state.lost = 0;
+      state.gaps = 0;
       state.drawFails = 0;
       state.ticks = state.starved = 0;
     }

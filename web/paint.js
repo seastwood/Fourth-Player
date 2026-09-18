@@ -661,7 +661,8 @@ function makePainter(canvas, say) {
               + last.drawn + " painted, " + last.refused + " refused, "
               + last.skipped + " before the first keyframe, " + last.stale
               + " too late to matter, " + (last.behind || 0)
-              + " dropped catching up, " + (last.lost || 0)
+              + " dropped catching up, " + (last.gaps || 0)
+              + " gaps in the host's numbering, " + (last.lost || 0)
               + " lost on the way, " + last.reserve + "ms reserve, canvas "
               + (last.size || "?")
               + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")

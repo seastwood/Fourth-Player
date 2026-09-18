@@ -9064,6 +9064,12 @@ function giveTheVideoBack() {
 
 function stopPainting(why) {
   if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
+  // The next painter counts its own arrivals from zero, and the watchdog
+  // compares against this. Left where it was, nothing could ever be greater
+  // than it again, so a perfectly healthy restarted painter read as a
+  // connection carrying nothing and the page renegotiated -- which is the
+  // fault the counter was added to fix, put back by the restart.
+  lastDrawn = 0;
   const was = Boolean(painter);
   if (painter) { painter.stop(); painter = null; }
   giveTheVideoBack();
