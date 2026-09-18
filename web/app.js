@@ -814,6 +814,9 @@ async function answer(message) {
     if (video.srcObject !== incoming) video.srcObject = incoming;
     holdVideoBack(message.jitter);
     startPlayback();
+    // A receiver exists now, which is the first moment the frames can be
+    // taken. Does nothing unless this viewer chose to draw them here.
+    if (event.track.kind === "video") startPainting();
   });
 
   pc.addEventListener("datachannel", (event) => {
@@ -904,6 +907,9 @@ async function answer(message) {
   // explanation, which is exactly how this failed from outside the network.
   armMediaTimeout();
 
+  // Whatever was reading the old receiver is reading something that is about
+  // to be thrown away. It is started again when the new track arrives.
+  stopPainting("");
   await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
   holdVideoBack(message.jitter);
   // Which line the microphone may go out on, if the host offered one. Taken
@@ -8303,6 +8309,179 @@ let micOn = false;
  *
  * A client setting, remembered per browser: it is this person's microphone
  * and this person's uplink, and two guests in one session would not agree. */
+/* How this page draws the picture. See paint.js for the second way.
+ *
+ * A list rather than a switch, and that is deliberate: the browser's own
+ * <video> element is not a fallback to be grown out of, it is one method with
+ * real advantages -- it is the only one every browser has, it decodes in
+ * hardware without a page's help, and on a weak machine it is cheaper than
+ * anything this page could do. Drawing here costs more and buys control over
+ * when a frame is shown. Which of those is right depends on the machine and
+ * the eyes, so both stay, and the next idea joins the list rather than
+ * replacing one.
+ *
+ * A per-viewer setting like the microphone rate, and for the same reason: it
+ * is about this person's browser, and two guests in one session would not
+ * agree. It asks nothing of the host, so it takes effect the moment it is
+ * chosen rather than waiting for Apply and a recapture. */
+const PAINT_KEY = "fp:paint-method";
+
+const PAINT_METHODS = [
+  {
+    id: "browser",
+    label: "The browser (default)",
+    why: "The <video> element decodes and draws it. Every browser can do "
+       + "this, it uses the least of the machine, and the browser decides "
+       + "when each frame is shown.",
+    ok: () => true,
+  },
+  {
+    id: "here",
+    label: "Draw it on this page",
+    why: "Decodes the frames here and draws them on a canvas, so the moment "
+       + "each one is shown is ours to choose rather than the browser's. "
+       + "Costs more of the machine. H.264 only.",
+    ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
+  },
+];
+
+function paintMethodById(id) {
+  for (const one of PAINT_METHODS) if (one.id === id) return one;
+  return PAINT_METHODS[0];
+}
+
+function savedPaintMethod() {
+  let raw = null;
+  try { raw = localStorage.getItem(PAINT_KEY); } catch (_) {}
+  const found = paintMethodById(raw);
+  // A method this browser cannot do is not offered and not remembered: a
+  // setting carried over from a machine that could would otherwise leave
+  // somebody with no picture and no explanation.
+  return found.ok() ? found.id : PAINT_METHODS[0].id;
+}
+
+let paintMethod = savedPaintMethod();
+let painter = null;
+
+function paintCanvas() { return el("painted"); }
+
+/* Which codec this connection actually agreed on, read from the receiver
+   rather than assumed: the host offers two and the browser picks, and a
+   decoder configured for the wrong one does not start. */
+function videoCodecNow() {
+  if (!pc || !pc.getReceivers) return { mime: "", fmtp: "" };
+  for (const receiver of pc.getReceivers()) {
+    if (!receiver.track || receiver.track.kind !== "video") continue;
+    try {
+      const codecs = (receiver.getParameters() || {}).codecs || [];
+      for (const codec of codecs) {
+        const mime = String(codec.mimeType || "");
+        if (/H26[45]/i.test(mime)) {
+          return { mime, fmtp: codec.sdpFmtpLine || "" };
+        }
+      }
+    } catch (_) { /* older browser */ }
+  }
+  return { mime: "", fmtp: "" };
+}
+
+function videoReceiver() {
+  if (!pc || !pc.getReceivers) return null;
+  for (const receiver of pc.getReceivers()) {
+    if (receiver.track && receiver.track.kind === "video") return receiver;
+  }
+  return null;
+}
+
+/* Back to the browser's own element. Called on switching away, on a
+   renegotiation, and on anything going wrong -- there has to be exactly one
+   way back or a failed experiment is a black screen. */
+function stopPainting(why) {
+  if (painter) { painter.stop(); painter = null; }
+  const canvas = paintCanvas();
+  if (canvas) canvas.hidden = true;
+  if (video) video.hidden = false;
+  if (why) report("the browser is drawing the picture again: " + why);
+}
+
+function startPainting() {
+  if (paintMethod !== "here" || painter) return;
+  if (!paintMethodById("here").ok()) {
+    setPaintMethod("browser");
+    showToast("This browser cannot draw the picture itself");
+    return;
+  }
+  const receiver = videoReceiver();
+  const canvas = paintCanvas();
+  if (!receiver || !canvas) return;          // no media yet; on track arrival
+  const shape = videoCodecNow();
+  const codec = codecFrom(shape.mime, shape.fmtp);
+  if (!codec) {
+    // H.265 is deliberately not attempted -- see paint.js. Saying so beats a
+    // black picture, and staying on the browser beats both.
+    showToast("Drawing it here needs H.264; this stream is "
+              + (shape.mime || "something else"));
+    report("not drawing here: the stream is " + (shape.mime || "unknown"));
+    setPaintMethod("browser");
+    return;
+  }
+  painter = makePainter(canvas, report);
+  if (!painter.start(receiver, codec)) {
+    painter = null;
+    setPaintMethod("browser");
+    return;
+  }
+  canvas.hidden = false;
+  if (video) video.hidden = true;
+  report("drawing the picture here, " + codec + ", pacing it ourselves");
+  // A decoder that has just started has nothing to work from until a keyframe
+  // arrives, and the browser will not ask for one on our behalf any more --
+  // nothing is feeding its decoder to notice. With keyframes sent only on
+  // request this would otherwise be a black picture for a long time.
+  askHostForKeyframe();
+}
+
+function askHostForKeyframe() {
+  try {
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ t: "keyframe" }));
+    }
+  } catch (_) { /* it will come with the next one */ }
+}
+
+function savePaintMethod() {
+  try { localStorage.setItem(PAINT_KEY, paintMethod); } catch (_) {}
+}
+
+function paintPaintMethod() {
+  const box = el("stream-paint");
+  if (box) {
+    if (box.dataset.built !== "1") {
+      box.innerHTML = "";
+      for (const one of PAINT_METHODS) {
+        const option = document.createElement("option");
+        option.value = one.id;
+        option.textContent = one.label + (one.ok() ? "" : " — not on this browser");
+        option.disabled = !one.ok();
+        box.appendChild(option);
+      }
+      box.dataset.built = "1";
+    }
+    box.value = paintMethod;
+  }
+  const note = el("stream-paint-note");
+  if (note) note.textContent = paintMethodById(paintMethod).why;
+}
+
+function setPaintMethod(id) {
+  const found = paintMethodById(id);
+  paintMethod = found.ok() ? found.id : PAINT_METHODS[0].id;
+  savePaintMethod();
+  paintPaintMethod();
+  if (paintMethod === "here") startPainting();
+  else stopPainting("the browser's own element was chosen");
+}
+
 const MIC_KBPS_KEY = "fp:mic-bitrate";
 const MIC_RATES = [16000, 24000, 40000, 64000, 128000];
 
@@ -9003,6 +9182,13 @@ function wireStream() {
   // checkbox and the two number boxes were added without this, so even once
   // the comparison knew about them the button would not have noticed until
   // something else was touched.
+  // Not in the list below: this one is ours, not the host's, so it applies
+  // itself instead of waiting for Apply.
+  const painting = el("stream-paint");
+  if (painting) {
+    paintPaintMethod();
+    painting.addEventListener("change", () => setPaintMethod(painting.value));
+  }
   for (const id of ["stream-size", "stream-fps", "stream-codec",
                     "stream-virtual", "stream-screen",
                     "stream-pace", "stream-oversample",

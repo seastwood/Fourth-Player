@@ -98,6 +98,10 @@
 
 <div id="stage" class="stage" hidden>
   <video id="screen" autoplay playsinline muted></video>
+  <!-- The same picture, drawn by this page instead of by the browser. Empty
+       and hidden unless the switch in the panel is on; see paint.js for why
+       it exists at all. -->
+  <canvas id="painted" hidden></canvas>
 
 
   <div id="hud" class="hud">
@@ -872,6 +876,15 @@
              often</label>
           <input id="stream-oversample" type="checkbox" class="chip">
         </div>
+        <!-- How this page draws the picture. A list rather than a switch
+             because the browser's own element is not a fallback: it is the
+             cheapest method and the only universal one, and on a weak machine
+             that matters more than control over frame timing. See paint.js. -->
+        <div class="acct-row">
+          <label class="tune-label" for="stream-paint">Drawing</label>
+          <select id="stream-paint"></select>
+        </div>
+        <p class="footnote" id="stream-paint-note"></p>
         <div class="acct-row">
           <label class="tune-label" for="stream-truetime">Time frames when
              they arrive</label>
@@ -1206,6 +1219,7 @@
        tabindex="-1"></label>
 
 <script src="/static/frame.js"></script>
+<script src="/static/paint.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

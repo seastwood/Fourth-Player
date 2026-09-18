@@ -399,6 +399,19 @@ class Server:
                     # somebody else's house.
                     log.info("%s reports: %s", guest.label,
                              str(message.get("detail", ""))[:300])
+                elif kind == "keyframe" and guest is not None:
+                    # A page that decodes the picture itself asks for this.
+                    #
+                    # The browser sends a picture-loss indication when *its*
+                    # decoder needs a keyframe, and a page drawing the frames
+                    # on a canvas has taken them before that decoder ever sees
+                    # them -- so nothing is left to notice, and with keyframes
+                    # sent only on request a fresh decoder would wait for a
+                    # very long time. Rate-limited exactly like a PLI is,
+                    # because it costs everybody in the session a keyframe.
+                    if self.session is not None and self.session.stage:
+                        self.session.stage.request_keyframe(
+                            "%s (drawing its own)" % guest.label)
                 elif kind == "renew" and guest is not None:
                     # Their network changed under them. Everything negotiated
                     # before refers to addresses that no longer exist.
