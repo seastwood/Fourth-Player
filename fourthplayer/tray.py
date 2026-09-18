@@ -170,12 +170,46 @@ class Host:
 
     # -- and what can be done about it -------------------------------------
 
+    def stale(self):
+        """Whether the host answering is running code that has since changed.
+
+        This is the Windows deploy hazard made visible. `schtasks /End` ends
+        the tray and not the host it started, so a host orphaned by a restart
+        carries on answering on the port -- and `start()` below used to see
+        that and say "already running", which is true and useless. The deploy
+        looked perfect from every angle: git pulled, the task restarted, the
+        log kept moving, and the code being run was three commits old.
+        """
+        from . import build
+        answer = _ask({"cmd": "status"})
+        if not answer.get("ok"):
+            return False
+        was = answer.get("build")
+        if not was:
+            # A host too old to say. It is by definition not this build.
+            return True
+        return was != build.stamp()
+
     def start(self):
         """Start one, if there is not already one answering."""
         self.wanted = True
         self.failures = 0
         if self.reachable():
-            return True, "already running"
+            if (self.unit or self.may_launch) and self.stale():
+                log.warning("the host that is running was started from code "
+                            "that has since changed, so it is being replaced "
+                            "rather than adopted")
+                went = self.stop()
+                self.wanted = True
+                if not went:
+                    # Still answering. Starting a second one only produces a
+                    # port collision and a confusing log, and the old one is
+                    # at least serving somebody.
+                    log.warning("the old host would not go, so it is being "
+                                "left alone; it is not this build")
+                    return True, "already running (an older build)"
+            else:
+                return True, "already running"
         if self.unit:
             ok, why = self._systemctl("start")
             return (ok, "started" if ok else why)

@@ -26,6 +26,7 @@ from http import HTTPStatus
 
 import websockets
 
+from . import build
 from . import invites
 from .config import Config
 from .session import LAUNCH_POLICIES, LiveSession, StaleGuest
@@ -1388,6 +1389,9 @@ class Server:
             # The remembered setting travels with a closed status too, so the
             # add-on can offer last time's answer when opening the next one.
             return {"ok": True, "open": False,
+                    # What code this host loaded, so a supervisor can tell a
+                    # host that survived a deploy from one that did not.
+                    "build": build.LOADED,
                     "public_url": self.cfg.public_url,
                     "example_url": self.join_url("EXAMPLE"),
                     "require_link": self.cfg.require_link,
@@ -1402,6 +1406,7 @@ class Server:
         return {
             "ok": True,
             "open": True,
+            "build": build.LOADED,
             # null rather than a number when there is no deadline: JSON has no
             # infinity, and a browser refuses to parse one.
             "remaining": None if self.session.unlimited
