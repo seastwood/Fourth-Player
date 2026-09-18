@@ -125,6 +125,12 @@
          than a chip-shaped label, because it does something. -->
     <button id="screen-chip" type="button" class="chip" hidden
             title="Send the next screen">Screen</button>
+    <!-- What is actually on screen, per second. A label rather than a
+         button: it does nothing but say, and it replaces a notice that
+         interrupted somebody to say the same thing worse. Hidden until
+         there is a number worth showing. -->
+    <span id="fps-chip" class="chip" hidden
+          title="Frames a second reaching this screen">&mdash;</span>
     <!-- Talking to the room. Only drawn for somebody the host has given `mic`
          to: it puts a live microphone from this room onto that machine as a
          recording device, where anything signed in there can listen. -->

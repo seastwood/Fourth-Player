@@ -3704,18 +3704,9 @@ function tellAboutTheRate(picture) {
                 && Math.abs(one.width - two.width) < 1 ? " (the same)"
                                                        : " (NOT the same)"));
     }
-    const want = (streamNow && Number(streamNow.fps)) || 0;
-    // Only about a window that actually counted some frames. A report that
-    // came back empty is a report that was taken while something else had
-    // just emptied the counters, not a picture that has stopped -- and
-    // saying "drawing 0 of 60" over a picture that is plainly playing is
-    // worse than saying nothing.
-    if (want && painter.drawnLately() > 0 && mine < want * 0.75) {
-      showNotice("<b>Drawing " + mine.toFixed(0) + " of " + want
-                 + " frames a second on this page.</b><br>"
-                 + "The browser's own drawing may be smoother on this "
-                 + "device &mdash; the Drawing setting switches back.", false);
-    }
+    sayTheRate(mine);
+  } else {
+    sayTheRate(per("decoded"));
   }
   rateWas = seen;
   rateAt = now;
@@ -3809,6 +3800,25 @@ async function watchMedia() {
 function startWatchdog() {
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(watchMedia, 2000);
+}
+
+/* What is reaching the screen, per second, on a chip.
+ *
+ * This replaces a notice that appeared over the picture to say the rate was
+ * low. Something that interrupts to tell somebody a number should only speak
+ * when it matters, and a frame rate never does: it is worth knowing at a
+ * glance and never worth being stopped for. */
+function sayTheRate(rate) {
+  const chip = el("fps-chip");
+  if (!chip) return;
+  if (!(rate > 0)) { chip.hidden = true; return; }
+  const shown = Math.round(rate);
+  chip.hidden = false;
+  chip.textContent = shown + " fps";
+  const want = (streamNow && Number(streamNow.fps)) || 0;
+  // Marked when it is well under what is being sent, which is what the
+  // notice was trying to say. A colour rather than a sentence.
+  chip.classList.toggle("warn", Boolean(want) && shown < want * 0.75);
 }
 
 /* How much video to hold before drawing it, in milliseconds, as the host asked.
