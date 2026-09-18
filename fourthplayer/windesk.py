@@ -36,6 +36,16 @@ INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP = 0x0001, 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE = 0x0001, 0x8000
+# Do not let Windows merge our moves with each other.
+#
+# SendInput's relative motion is coalesced by default: several moves arriving
+# within a tick become one, which is exactly wrong here. The whole reason the
+# guest now sends each movement as it happens rather than one summary per
+# animation frame is so the host sees the shape of the hand's motion, and
+# having Windows put it back into per-tick jumps at the other end undoes that.
+# It also matters for anything reading raw input, which sees the individual
+# moves rather than the cursor.
+MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
 MOUSEEVENTF_WHEEL, MOUSEEVENTF_HWHEEL = 0x0800, 0x1000
 WHEEL_DELTA = 120                      # one notch, as Windows counts them
@@ -190,7 +200,9 @@ class Mouse(_Device):
             self._pending.insert(0, _INPUT(
                 type=INPUT_MOUSE,
                 mi=_MOUSEINPUT(dx=self._dx, dy=self._dy, mouseData=0,
-                               dwFlags=MOUSEEVENTF_MOVE, time=0,
+                               dwFlags=(MOUSEEVENTF_MOVE
+                                        | MOUSEEVENTF_MOVE_NOCOALESCE),
+                               time=0,
                                dwExtraInfo=None)))
             self._dx = self._dy = 0
         super().syn()

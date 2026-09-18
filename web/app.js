@@ -4910,7 +4910,6 @@ let deskWasMine = false;
 let deskRetaking = false;
 let deskAsking = false;        // we asked and have not heard back
 const deskPending = { dx: 0, dy: 0, wdx: 0, wdy: 0 };
-let deskFrame = 0;
 
 /* Matches deskwire.MOTION_LIMIT. Over it the host refuses the whole message
    rather than half of it, so a flick that overshoots must be clamped here
@@ -4982,7 +4981,9 @@ const deskClamp = (n, limit) => Math.max(-limit, Math.min(limit, n));
    Fractions are kept rather than rounded away: the host wants whole pixels,
    and dropping the remainder every frame makes a slow drag travel nowhere. */
 function deskFlush() {
-  deskFrame = 0;
+  if (deskTimer) { clearTimeout(deskTimer); deskTimer = 0; }
+  deskSentAt = (typeof performance !== "undefined" && performance.now)
+    ? performance.now() : Date.now();
   const out = [];
   const dx = Math.trunc(deskPending.dx), dy = Math.trunc(deskPending.dy);
   deskPending.dx -= dx; deskPending.dy -= dy;
@@ -4999,8 +5000,35 @@ function deskFlush() {
   deskSend(out);
 }
 
+/* The shortest gap between two motion messages.
+ *
+ * This used to gather movement and send one message per animation frame,
+ * which is a batch every 16.7ms: a mouse reporting at 125Hz had its motion
+ * collapsed into per-frame jumps, and every movement waited up to a whole
+ * frame before leaving. On the wire that is smoother; under the hand it is
+ * the difference between a pointer that follows and one that catches up, and
+ * it is the other half of "it does not feel native".
+ *
+ * Motion goes out as it happens now, with this as the only limit -- a floor
+ * on the message rate rather than a schedule. Four milliseconds is 250 a
+ * second, which is past what a hand can produce and well inside what the
+ * channel carries; a mouse reporting faster than that has its extra
+ * movements added to the next message rather than dropped, because the
+ * remainder is carried. */
+const DESK_SEND_GAP = 4;
+let deskSentAt = 0;
+let deskTimer = 0;
+
 function deskSoon() {
-  if (!deskFrame) deskFrame = requestAnimationFrame(deskFlush);
+  if (deskTimer) return;                 // one already on its way
+  const now = (typeof performance !== "undefined" && performance.now)
+    ? performance.now() : Date.now();
+  const since = now - deskSentAt;
+  if (since >= DESK_SEND_GAP) {
+    deskFlush();
+    return;
+  }
+  deskTimer = setTimeout(deskFlush, Math.ceil(DESK_SEND_GAP - since));
 }
 
 /* How far the console's pointer moves for a given movement here.
@@ -5219,11 +5247,46 @@ function deskButtonsAllUp() {
 
 function deskCapture() {
   if (!deskHeld || deskCaptured()) return;
-  const ask = video.requestPointerLock && video.requestPointerLock();
-  // Chrome returns a promise and rejects it if the gesture was not one it
-  // liked. Swallowed: the page already says what to do, and an unhandled
-  // rejection in the console helps nobody.
-  if (ask && ask.catch) ask.catch(() => {});
+  if (!video.requestPointerLock) return;
+  // Raw movement, where the browser will give it.
+  //
+  // Under an ordinary pointer lock, movementX and movementY have already had
+  // the operating system's pointer acceleration applied to them -- the curve
+  // that makes a slow drag fine and a fast one fly. The host then applies its
+  // *own* acceleration to the relative motion it injects, so the hand is
+  // accelerated twice and the result is a pointer that does not go where it
+  // is sent. That is the whole of "it does not feel native": not latency, a
+  // curve applied twice.
+  //
+  // `unadjustedMovement` asks for the motion before any of that, which is
+  // what a game reading raw input gets locally. Chrome and Edge have it;
+  // Safari does not, and rejects the request rather than ignoring the option,
+  // so a plain lock is asked for when that happens. The difference is not
+  // subtle on a mouse and matters most to exactly the people who asked.
+  let ask = null;
+  try {
+    ask = video.requestPointerLock({ unadjustedMovement: true });
+  } catch (_) {
+    ask = null;
+  }
+  if (ask && ask.catch) {
+    ask.catch(() => {
+      // Refused the option, or refused the gesture. Which of the two is not
+      // worth asking: trying the plain one costs nothing and the page
+      // already says what to do if that fails too.
+      try {
+        const plain = video.requestPointerLock();
+        if (plain && plain.catch) plain.catch(() => {});
+      } catch (_) { /* nothing more to try */ }
+    });
+    return;
+  }
+  if (!ask) {
+    try {
+      const plain = video.requestPointerLock();
+      if (plain && plain.catch) plain.catch(() => {});
+    } catch (_) { /* nothing more to try */ }
+  }
 }
 
 function deskPaint() {
