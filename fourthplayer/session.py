@@ -159,6 +159,22 @@ SILENCE_SECONDS = 5.0
 WARN_AT = (300, 120, 30)
 
 
+class StaleGuest(Exception):
+    """This guest object is no longer the one sitting in its slot.
+
+    A signalling socket holds one `GuestConnection` for as long as it is open,
+    and everything that socket asks for is asked on behalf of that object. The
+    object outlives the seat: a guest whose media connection died is dropped
+    from the session and their slot goes back to the invite, while their page
+    -- which is fine, and reacting to the same network event -- still has the
+    socket and still asks for things with the guest it was given.
+
+    That is harmless for anything that only reads. It is not harmless for
+    renewing the picture, because a peer is named after the slot: a stale
+    guest renewing into slot 0 takes the name from whoever is in slot 0 now.
+    """
+
+
 class GuestConnection:
     """One browser: a slot, a pad, a WebRTC peer and a socket."""
 
@@ -1175,7 +1191,22 @@ class LiveSession:
         address it had is gone, so the old connection can only ever be
         declared dead. Re-offering is the whole recovery, and it costs the
         guest nothing -- they keep their slot, their pad and their session.
+
+        Only for the guest who is actually in that slot. A peer is named after
+        the slot and nothing else, so a renewal from somebody who has since
+        been dropped from it does not fail -- it succeeds, over the top of the
+        guest who is there now, whose pictures then go to a pipeline their
+        browser never agreed to. Two guests doing this to each other is a
+        session where one picture plays and the other is frozen, swapping
+        every few seconds, which is exactly how it was reported.
         """
+        seated = self.guests.get(guest.slot)
+        if seated is not guest:
+            log.warning("%s asked to renew slot %d, which now belongs to %s; "
+                        "refusing rather than taking the picture from them",
+                        guest.label, guest.slot,
+                        seated.label if seated is not None else "nobody")
+            raise StaleGuest("this seat has moved on")
         self.detach_peer(guest)
         return await self.attach_peer(guest, on_signal)
 
@@ -1423,7 +1454,7 @@ class LiveSession:
         # guest's death -- particularly not the guest replacing them.
         peer.on_dead = None
         if self.stage is not None:
-            self.stage.take_peer(peer.id)
+            self.stage.take_peer(peer.id, expected=peer)
         if background and self.stage is not None:
             # The same single worker that adds peers, so a teardown and the
             # attach that replaces it cannot touch the pipeline at once.

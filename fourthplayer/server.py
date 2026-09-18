@@ -28,7 +28,7 @@ import websockets
 
 from . import invites
 from .config import Config
-from .session import LAUNCH_POLICIES, LiveSession
+from .session import LAUNCH_POLICIES, LiveSession, StaleGuest
 from .tls import ensure_certificate
 from . import control as control_channel
 from . import setupui
@@ -409,6 +409,17 @@ class Server:
 
                     try:
                         await self.session.renew(guest, on_signal)
+                    except StaleGuest:
+                        # Their seat was given away while this socket stayed
+                        # open, so there is nothing here to renew. Closing it
+                        # is the repair: the page reconnects and resumes on
+                        # its guest token, which is the path that knows how to
+                        # find them a seat, and it is already the path a
+                        # dropped socket takes.
+                        await outbox.put({
+                            "t": "error",
+                            "message": "Your seat moved. Reconnecting."})
+                        break
                     except asyncio.TimeoutError:
                         await outbox.put({
                             "t": "error",

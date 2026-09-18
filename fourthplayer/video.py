@@ -1421,13 +1421,27 @@ class Stage:
         self.force_keyframe()
         return peer
 
-    def take_peer(self, peer_id):
+    def take_peer(self, peer_id, expected=None):
         """Unregister a peer and hand it back, without tearing it down yet.
 
         Freeing the name immediately matters: a guest who reloads is replaced
         within milliseconds, and the new peer wants the same slot id while the
         old one is still shutting down.
+
+        `expected` is which peer the caller means. A name is a slot number and
+        a slot can change hands, so a caller holding an old peer could unhook
+        whoever is in that slot now -- silently, because popping a dict says
+        nothing. The peer that was unhooked keeps running and keeps its
+        transports, so its guest sees a picture that stops with no error at
+        either end, and two guests taking the name from each other is a pair
+        of pictures that freeze in turn. Say which one you mean and a stale
+        caller takes nothing.
         """
+        held = self.peers.get(peer_id)
+        if expected is not None and held is not None and held is not expected:
+            log.warning("peer %s was asked for by somebody holding an older "
+                        "one; leaving the current peer where it is", peer_id)
+            return None
         return self.peers.pop(peer_id, None)
 
     def remove_peer(self, peer_id):

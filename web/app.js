@@ -4586,6 +4586,39 @@ function deskSend(list) {
   try { deskChannel.send(JSON.stringify(list)); } catch (_) { /* going away */ }
 }
 
+/* A heartbeat, for as long as this page is holding the keyboard and mouse.
+
+   The host runs a dead-man switch: if it hears nothing from whoever is at the
+   desk for DEADMAN_SECONDS it lets go of every key and button being held. It
+   has to. A tab that dies with Ctrl down leaves Ctrl down on somebody's actual
+   computer, and unlike a game nothing on the machine will put that right.
+
+   The flaw was what it measured. "Heard nothing" meant no input events, and
+   holding a key *is* no input events: the browser's repeats are dropped on
+   purpose (the console does its own repeat, see deskKey), so walking forward
+   with W and not touching the mouse sends exactly one message and then
+   silence. Two seconds later the host let go of W and the character stopped,
+   with the key still physically held. Reported as keys giving up after a
+   while; it applied just as much to holding a mouse button to fire, which was
+   only ever hidden by the movement of aiming.
+
+   So the page says "still here" on a timer instead. An empty batch is a
+   complete, valid message that performs no action, and the host refreshes its
+   clock on any message that arrives -- so this needs nothing on the other end.
+
+   The interval is well under the host's two seconds so that a couple may go
+   missing without anything being dropped, and the switch keeps doing its job:
+   a page that is gone stops sending these, and the host lets go as before. */
+const DESK_ALIVE_MS = 500;
+
+function deskAlive() {
+  if (!deskHeld) return;
+  if (!deskChannel || deskChannel.readyState !== "open") return;
+  try { deskChannel.send("[]"); } catch (_) { /* going away */ }
+}
+
+setInterval(deskAlive, DESK_ALIVE_MS);
+
 const deskClamp = (n, limit) => Math.max(-limit, Math.min(limit, n));
 
 /* Movement is gathered and sent once a frame rather than per event. A mouse
@@ -8204,11 +8237,23 @@ let micOn = false;
 const MIC_KBPS_KEY = "fp:mic-bitrate";
 const MIC_RATES = [16000, 24000, 40000, 64000, 128000];
 
+/* The rate a microphone starts at, and the lowest one offered.
+ *
+ * It was 24 kb/s, chosen as the lower end of what sounds like a voice. 16 is
+ * the setting that made a conversation feel live -- measured by having one,
+ * not reasoned about -- after the two default buffers had already come out.
+ * Opus is still comfortably intelligible here; this is the rate a telephone
+ * call would envy, and it is a voice channel, not a recording.
+ *
+ * Only the default moves. Anybody who has already chosen a rate keeps it:
+ * the stored value wins, and the higher rates are still in the list. */
+const MIC_DEFAULT_KBPS = 16000;
+
 function savedMicRate() {
   let raw = null;
   try { raw = localStorage.getItem(MIC_KBPS_KEY); } catch (_) {}
   const value = Number(raw);
-  return MIC_RATES.includes(value) ? value : 24000;
+  return MIC_RATES.includes(value) ? value : MIC_DEFAULT_KBPS;
 }
 
 let micRate = savedMicRate();
