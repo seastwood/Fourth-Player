@@ -52,6 +52,18 @@ check("frames_wanted" in video,
       "and it is off until a guest asks, so a guest watching the media track "
       "is not sent the picture twice")
 
+print("an open channel is recognised by the enum, not by a guessed number")
+# It compared ready_state against 1. OPEN is 2; 1 is CONNECTING. So every
+# frame but the one or two that landed during the handshake was dropped on
+# the way out, which is exactly what the log showed: "the first encoded frame
+# arrived here" and then nothing at all, for ever.
+check("GstWebRTC.WebRTCDataChannelState.OPEN" in video,
+      "the state is compared against the name")
+check("ready_state != 1" not in video, "and not against a number")
+check("_said_shut" in video,
+      "and a channel that is not open says so once, rather than sixty times "
+      "a second or not at all")
+
 print("a frame too big for one message is sent in pieces")
 check("limit = 60000" in video, "well under what a browser will accept")
 check('struct.pack("<BQ"' in video,

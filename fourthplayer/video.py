@@ -2223,6 +2223,7 @@ class Peer:
         # itself. Off until one asks: see _on_picture_asked.
         self.frame_channel = None
         self.frames_wanted = False
+        self._said_shut = False
         self.on_input = None          # set by the session; called with raw bytes
         self.on_desk = None           # ditto, for keyboard and mouse messages
         self.on_dead = None           # called when the media connection is over
@@ -2427,8 +2428,19 @@ class Peer:
         if not getattr(self, "frames_wanted", False):
             return
         channel = self.frame_channel
-        if channel is None or channel.props.ready_state != 1:   # OPEN
+        if channel is None:
             return
+        if channel.props.ready_state != GstWebRTC.WebRTCDataChannelState.OPEN:
+            # Said once per peer rather than per frame: sixty a second would
+            # bury everything else, and the interesting fact is that it is
+            # happening at all.
+            if not self._said_shut:
+                self._said_shut = True
+                log.info("peer %s: the picture channel is %s, so frames are "
+                         "not being sent", self.id,
+                         channel.props.ready_state.value_nick)
+            return
+        self._said_shut = False
         # Well under the 256KB a browser will take, so one frame is a few
         # messages rather than one that might be refused.
         limit = 60000
