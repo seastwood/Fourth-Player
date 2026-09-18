@@ -113,6 +113,8 @@ const framed = (bytes, key, stamp, first, last) => {
 self_.onmessage({ data: { chunk: framed(keyframe, true, 0, true, true) } });
 check(built[0].chunks.length === 1, "the keyframe was fed to the decoder");
 output(new FakeFrame(0));
+await new Promise((go) => globalThis.setTimeout(go, 0));
+await new Promise((go) => globalThis.setTimeout(go, 0));
 check(painted === 1, `one frame out, ${painted} painted`);
 check(closed === 1, "and the frame was closed, so its buffer goes back");
 
