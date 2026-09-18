@@ -269,8 +269,23 @@ function tell(at) {
   } });
 }
 
+/* How long the animation frames may be silent before the timer takes over.
+ *
+ * Longer than a refresh at any rate a screen runs at, so an ordinary frame
+ * boundary is never mistaken for a page that has stopped sending them. */
+const BEAT_GAP_MS = 100;
+
+function quietBeats() {
+  if (!state.lastBeat) return true;      // none yet, so nothing to wait for
+  return performance.now() - state.lastBeat > BEAT_GAP_MS;
+}
+
 function tick() {
   state.ticks += 1;
+  // The animation frames are back, so the timer standing in for them is not
+  // wanted -- two things painting the same queue is two paints per frame and
+  // one of them wasted.
+  if (state.timer) { clearTimeout(state.timer); state.timer = 0; }
   // Only to the memory bound, oldest first.
   //
   // A queued frame is early, not stale: the queue *is* the reserve. This used
@@ -358,6 +373,17 @@ function pump() {
   if (state.waiting.length) state.timer = setTimeout(pump, 0);
 }
 
+/* Keep the timer alive while the page is not sending animation frames.
+ *
+ * pump() only re-arms itself while there is something queued, so a quiet
+ * moment ends it -- and if the beats are still gone when the next frame
+ * arrives, `decoded` starts it again. This is the other half: a page that
+ * has stopped beating and has nothing queued right now must still be ready
+ * the moment something does arrive. */
+setInterval(() => {
+  if (!state.timer && state.waiting.length && quietBeats()) pump();
+}, BEAT_GAP_MS);
+
 /* How deep the queue of frames waiting to be shown may get.
  *
  * With a reserve, frames legitimately wait their turn, so this has to clear
@@ -396,11 +422,18 @@ function decoded(frame) {
   // mechanism absorbs both sources of variance.
   const due = state.pacer.schedule(captured, performance.now());
   state.waiting.push({ frame, due });
-  // The page's animation frames do the painting. The timer below is only
-  // for a page that is not sending them -- a backgrounded tab, or a browser
-  // without requestAnimationFrame -- where a picture that keeps moving beats
-  // one that stops.
-  if (!state.ticked && !state.timer) pump();
+  // The page's animation frames do the painting, and a timer takes over
+  // whenever they stop.
+  //
+  // "Whenever", not "if they never started". This read `!state.ticked`, which
+  // is set by the first tick and never cleared, so the fallback was available
+  // to a page that had never sent an animation frame and to no other. A page
+  // that sends them and then stops -- which is what a throttled window does,
+  // and Chrome throttles a window it thinks is occluded -- got no fallback at
+  // all, and the picture simply held still. Measured: 244 refreshes in eleven
+  // seconds where sixty a second is 660, with a 1050ms gap between two paints
+  // in the middle of it.
+  if (!state.timer && quietBeats()) pump();
 }
 
 function buildDecoder(codec, description, latency) {

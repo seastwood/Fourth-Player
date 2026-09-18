@@ -3865,7 +3865,14 @@ function tellAboutTheRate(picture) {
     // out what it is doing, and "i can't really tell what is happening" is a
     // fair thing to say about a diagnostic that only the host can see.
     const mine = painter.drawnLately() / span;
-    report(painter.report() + " over " + span.toFixed(0) + "s");
+    // Whether this window has been called hidden, which is the one thing the
+    // worker's numbers cannot say. A throttled window and a stalled link look
+    // identical from in there: both are frames not arriving and refreshes not
+    // happening. Chrome throttles a window it thinks is occluded, and a Mac
+    // occludes a window whenever anything is in front of it.
+    report(painter.report() + " over " + span.toFixed(0) + "s; this page is "
+           + (document.hidden ? "hidden" : "visible") + " and has been called "
+           + "hidden " + hiddenSpells + " time(s)");
     // Where the two actually are, whenever they could disagree. Four bugs in
     // a row have come from the canvas and the video disagreeing about a box
     // -- its position, its identity, its size, and the coordinate space it
@@ -9120,10 +9127,17 @@ let paintPaused = false;            // put down because the page went away
  * nothing at all. */
 const PAINT_HIDDEN_MS = 20000;
 let paintHideTimer = 0;
+/* How many times this page has been called hidden, ever. Reported, because a
+   throttled window and a stalled link look identical from the numbers and
+   only this tells them apart: Chrome throttles animation frames and timers in
+   a window it thinks is occluded, and a Mac occludes a window whenever
+   anything is in front of it. */
+let hiddenSpells = 0;
 
 function watchTheTab() {
   if (typeof document === "undefined" || !document.addEventListener) return;
   document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hiddenSpells += 1;
     if (document.hidden) {
       if (painter && !paintHideTimer) {
         paintHideTimer = setTimeout(() => {

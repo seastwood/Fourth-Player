@@ -479,6 +479,24 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
+console.log("\nthe timer takes over whenever the beats stop, not only if none came");
+// Measured: 244 refreshes in eleven seconds where sixty a second is 660, with
+// a 1050ms gap between two paints in the middle. Chrome throttles animation
+// frames in a window it thinks is occluded, and a Mac occludes a window
+// whenever anything is in front of it. The fallback was guarded on
+// `!state.ticked`, which the first tick sets and nothing clears -- so it was
+// available to a page that had never sent an animation frame and to no other.
+check(!worker.includes("if (!state.ticked && !state.timer) pump();"),
+      "the fallback is no longer for a page that never started beating");
+check(worker.includes("quietBeats()"),
+      "it asks whether the beats have stopped, which a page that stops "
+      + "beating answers the same way as one that never began");
+check(worker.includes("const BEAT_GAP_MS"),
+      "with a named gap, longer than a refresh at any rate a screen runs at");
+check(worker.includes("if (state.timer) { clearTimeout(state.timer); state.timer = 0; }"),
+      "and the beats coming back put the timer away, or the same queue is "
+      + "painted twice a frame");
+
 console.log("\na window behind another window has not gone away");
 // Chrome on a Mac calls a window hidden whenever it is occluded -- another
 // window in front, a space switching, a full-screen app taking over for a

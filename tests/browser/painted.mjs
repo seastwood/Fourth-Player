@@ -252,9 +252,11 @@ check(workerSrc.includes("function refreshEvery()"),
       "the refresh is still measured, since 60Hz, 120Hz and 59.94 are all real");
 check(paintSrc.includes("requestAnimationFrame(beat)"),
       "and the page is what tells it, because only the page can see a refresh");
-check(workerSrc.includes("if (!state.ticked && !state.timer) pump();"),
-      "with the old timer left as a fallback for a page that stops sending "
-      + "them, where a picture that keeps moving beats one that stops");
+check(workerSrc.includes("if (!state.timer && quietBeats()) pump();"),
+      "with a timer as the fallback for a page that stops sending them, where "
+      + "a picture that keeps moving beats one that stops -- and for a page "
+      + "that stops as much as one that never started, which is the throttled "
+      + "window this was blind to");
 
 // Presentation is FIFO. A queued frame is early, not stale: the queue *is*
 // the reserve. Painting "the newest frame that is due" and closing the rest
