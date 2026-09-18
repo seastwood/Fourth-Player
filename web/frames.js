@@ -45,6 +45,7 @@ const state = {
   rung: 0,
   handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
   ever: false,
+  saidDraw: false,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -58,6 +59,7 @@ function draw(frame) {
     canvas.height = frame.displayHeight;
   }
   try {
+    if (!state.context) throw new Error("no context");
     state.context.drawImage(frame, 0, 0);
     state.drawn += 1;
     if (!state.ever) {
@@ -67,7 +69,16 @@ function draw(frame) {
       // deadline that arrives before the first report has nothing to read.
       self.postMessage({ painted: true });
     }
-  } catch (_) { /* the canvas went away */ }
+  } catch (err) {
+    // Said once. A paint that throws every frame is a black screen with a
+    // decoder reporting itself perfectly healthy, and nothing about the
+    // counters distinguishes it from a decoder producing nothing.
+    if (!state.saidDraw) {
+      state.saidDraw = true;
+      say("the canvas would not take a frame: "
+          + ((err && err.message) || "no reason given"));
+    }
+  }
   frame.close();
 }
 
@@ -260,8 +271,25 @@ self.onmessage = (event) => {
   const m = event.data || {};
   if (m.start) {
     state.canvas = m.start.canvas;
-    state.context = state.canvas.getContext("2d", { alpha: false,
-                                                    desynchronized: true });
+    // No `desynchronized` here, and no assuming a context came back.
+    //
+    // That hint is for a canvas on a page, where it lets the browser skip a
+    // compositing step; on an OffscreenCanvas it is at best ignored and at
+    // worst the reason getContext returns null. A null context is a black
+    // screen with every other number looking perfect, because the only thing
+    // that fails is a drawImage inside a try -- which is exactly the shape of
+    // failure this has produced twice already, so it is said out loud rather
+    // than caught and swallowed.
+    try {
+      state.context = state.canvas.getContext("2d", { alpha: false });
+    } catch (err) {
+      state.context = null;
+    }
+    if (!state.context) {
+      self.postMessage({ failed: "this browser gave the worker no way to "
+                                 + "draw on the canvas" });
+      return;
+    }
     state.pacer = makePacer(LIMITS);
     state.codec = m.start.codec;
     try {
