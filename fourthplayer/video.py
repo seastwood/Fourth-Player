@@ -355,6 +355,56 @@ def _cuda_converter():
 KEYFRAME_FALLBACK_SECONDS = 10
 
 
+# NVENC's low-delay tuning, where the element has it.
+#
+# `zerolatency=true` stops the encoder reordering frames, which is what its
+# name says and all it does. It leaves the *preset* alone -- and the default
+# one on these elements introduces itself as "Default (deprecated, use p1~7
+# with tune)". That preset picks rate control aimed at quality over a whole
+# clip, which under CBR means spending unevenly from frame to frame: the
+# thing a still desktop never shows and a moving picture does.
+#
+# `tune=low-latency` is what NVIDIA's own guidance asks for in this job, and
+# p4 is the middle of the seven speed presets rather than a guess at either
+# end. Neither is invented for this project; they are the settings a real-time
+# encoder is supposed to be given.
+#
+# Verified rather than assumed, because a nick this build does not have would
+# fail at pipeline construction -- and a capture that will not build is a host
+# that does not work at all. The value is set on a throwaway element and read
+# back; only a change that actually took is used.
+_NV_TUNING = "preset=p4 tune=low-latency"
+
+
+def _takes(element, pairs):
+    """Whether `element` really accepts every "property=nick" in `pairs`."""
+    try:
+        made = Gst.ElementFactory.make(element)
+    except Exception:
+        return False
+    if made is None:
+        return False
+    for pair in pairs.split():
+        name, _, nick = pair.partition("=")
+        if made.find_property(name) is None:
+            return False
+        try:
+            before = made.get_property(name)
+            Gst.util_set_object_arg(made, name, nick)
+            if made.get_property(name) == before:
+                return False            # the nick was not understood
+        except Exception:
+            return False
+    return True
+
+
+def encoder_tuning(element):
+    """Extra settings this particular encoder should be given, or ""."""
+    if not element.startswith("nv"):
+        return ""
+    return " " + _NV_TUNING if _takes(element, _NV_TUNING) else ""
+
+
 def keyframe_gap(element, settings, fps, wanted=0):
     """Frames between unrequested keyframes, for this particular encoder.
 
@@ -507,6 +557,11 @@ def host_codecs(hardware=True):
 
 # How many RTP packets each appsink may hold before it starts dropping them.
 # See the sinks themselves for why four was not enough to survive a keyframe.
+# How many frames go into one pacing report. Ten seconds at 60fps: long
+# enough that a single hiccup does not dominate it, short enough to say
+# something about the minute somebody is complaining about.
+PACE_SAMPLE = 600
+
 VIDEO_SINK_PACKETS = 1024
 AUDIO_SINK_PACKETS = 128
 
@@ -848,6 +903,9 @@ class Stage:
         self._last_sample = {}
         self._stalls = {}
         self._said_stall = {}
+        self._last_frame = 0.0
+        self._last_pts = Gst.CLOCK_TIME_NONE
+        self._gaps = []
 
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
         cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
@@ -902,6 +960,10 @@ class Stage:
                                   kbps=cfg.bitrate_kbps,
                                   bps=cfg.bitrate_kbps * 1000,
                                   keyint=keyint, cpb=cpb)
+        tuning = encoder_tuning(element)
+        if tuning:
+            encoder += tuning
+            log.info("tuning %s for low delay (%s)", element, tuning.strip())
         # Pin the profile between encoder and parser: the payloader reads it
         # from these caps to build profile-level-id, and without it a browser
         # is guessing.
@@ -1687,6 +1749,58 @@ class Stage:
                     "(%d gap%s so far)",
                     kind, (now - last) * 1000, count, "" if count == 1 else "s")
 
+    def _note_pace(self, buffer):
+        """How evenly frames are actually leaving, as a number rather than a guess.
+
+        "The frames just do not arrive smoothly at a steady rate" is a real
+        complaint and an unfalsifiable one from the other end: a guest is
+        looking at the end of a chain with a capture, an encoder, a fan-out
+        and a network in it, and any of those could be the uneven part. The
+        browser already reports what it received. This is what was sent.
+
+        Frames, not packets, and a frame is a change of presentation
+        timestamp. Every packet carved out of one frame carries that frame's
+        PTS, so the first packet with a new one is a new frame.
+
+        The marker bit was tried first and is wrong here, which is worth
+        writing down because it looks so obviously right: the marker means
+        "last packet of this access unit", and measured through this host's
+        own H.265 chain it arrives *twice* per frame -- 600 frames in, 1200
+        markers out. Counting those said the encoder was producing 270
+        frames a second when it had been asked for 120, which was a story
+        about the instrument rather than the picture.
+
+        Costs one comparison per packet and one clock read per frame, and
+        says nothing until it has a full sample to speak about.
+        """
+        pts = buffer.pts
+        if pts == Gst.CLOCK_TIME_NONE or pts == self._last_pts:
+            return                      # still the frame we already counted
+        self._last_pts = pts
+        now = time.monotonic()
+        last = self._last_frame
+        self._last_frame = now
+        if not last:
+            return
+        self._gaps.append(now - last)
+        if len(self._gaps) < PACE_SAMPLE:
+            return
+        gaps = sorted(self._gaps)
+        self._gaps = []
+        total = sum(gaps)
+        middle = gaps[len(gaps) // 2] * 1000
+        worst = gaps[-1] * 1000
+        nominal = 1.0 / max(1, self.cfg.fps)
+        # Late by more than half a frame is the threshold because that is
+        # where a frame misses its slot on the guest's display and either
+        # doubles the one before it or is skipped -- which is what uneven
+        # looks like, rather than what it measures.
+        late = sum(1 for g in gaps if g > nominal * 1.5)
+        log.info("pacing: %d frames in %.1fs (%.1f/s, asked for %d), typical "
+                 "gap %.1fms, worst %.0fms, %d late by more than half a frame",
+                 len(gaps), total, len(gaps) / total if total else 0,
+                 self.cfg.fps, middle, worst, late)
+
     def _forward(self, sink, kind):
         """Hand one encoded packet to every guest.
 
@@ -1707,6 +1821,8 @@ class Stage:
             self.video_caps = caps
         else:
             self.audio_caps = caps
+        if kind == "video":
+            self._note_pace(buffer)
         for peer in list(self.peers.values()):
             try:
                 peer.push(kind, buffer, caps)
