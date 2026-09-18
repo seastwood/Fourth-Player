@@ -3951,6 +3951,14 @@ async function watchMedia() {
     stalledSince = 0;
     connectedAt = 0;
     mediaFresh = true;
+    // Working, so the allowance for recovering from a decoder that fails
+    // mid-stream is given back. A decode error after ten minutes of a good
+    // picture is not evidence that this browser cannot decode the stream --
+    // it is a frame that arrived wrong, or a size change, or the decoder
+    // being reclaimed. Counting those against a fixed budget from the
+    // beginning of the session means a long session eventually runs out and
+    // hands the picture back for the one thing that was never the point.
+    paintRecoveries = 0;
     setLink("ok");
     clearMediaFailure();
     return;
@@ -9091,17 +9099,39 @@ let paintPaused = false;            // put down because the page went away
  * So going away is a pause, not a failure: the painter is put down, the host
  * is told to stop sending frames, and coming back starts it again with every
  * counter reset. Nothing is judged while nobody is watching. */
+/* How long the page has to stay out of sight before the drawing is put down.
+ *
+ * Not the instant it goes. Chrome on a Mac calls a window hidden whenever it
+ * is occluded -- another window in front of it, a space switching, a
+ * full-screen app taking over for a moment -- and this was tearing the
+ * decoder down and building it again every time. The log filled with "the
+ * page went away" while somebody sat watching the picture, and every one of
+ * those is a stop, a restart, and a black gap waiting for a keyframe.
+ *
+ * The reason for putting it down at all is real: animation frames stop in a
+ * background tab, and browsers reclaim decoders from one. But neither happens
+ * in the first few seconds, and a page that comes back inside this has lost
+ * nothing at all. */
+const PAINT_HIDDEN_MS = 20000;
+let paintHideTimer = 0;
+
 function watchTheTab() {
   if (typeof document === "undefined" || !document.addEventListener) return;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      if (painter) {
-        paintPaused = true;
-        report("the page went away; putting the drawing down until it is back");
-        stopPainting(null);
+      if (painter && !paintHideTimer) {
+        paintHideTimer = setTimeout(() => {
+          paintHideTimer = 0;
+          if (!document.hidden || !painter) return;
+          paintPaused = true;
+          report("the page has been away a while; putting the drawing down "
+                 + "until it is back");
+          stopPainting(null);
+        }, PAINT_HIDDEN_MS);
       }
       return;
     }
+    if (paintHideTimer) { clearTimeout(paintHideTimer); paintHideTimer = 0; }
     if (!paintPaused) return;
     paintPaused = false;
     paintTried = 0;
@@ -9421,10 +9451,12 @@ async function startPainting() {
     // browser cannot do it and hand the picture back. Reported as switching
     // itself to WebRTC while WebCodecs was working, which is exactly what it
     // would have looked like.
-    if (typeof document !== "undefined" && document.hidden) {
-      // Whatever went wrong went wrong while nobody was looking. The
-      // visibility handler puts this back when the page returns.
-      paintPaused = true;
+    if (typeof document !== "undefined" && document.hidden && paintPaused) {
+      // Whatever went wrong went wrong while nobody was looking, and the page
+      // has been away long enough for that to be the explanation. A window
+      // that is merely occluded for a moment is not away -- see
+      // PAINT_HIDDEN_MS -- and treating it as away is how a decoder gets torn
+      // down and rebuilt while somebody is watching the picture.
       stopPainting(null);
       return;
     }

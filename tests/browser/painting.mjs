@@ -479,6 +479,29 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
+console.log("\na window behind another window has not gone away");
+// Chrome on a Mac calls a window hidden whenever it is occluded -- another
+// window in front, a space switching, a full-screen app taking over for a
+// moment. This tore the decoder down and rebuilt it every time: the host log
+// filled with "the page went away" while somebody sat watching the picture,
+// and each one is a stop, a restart, and a black gap waiting for a keyframe.
+check(app.includes("PAINT_HIDDEN_MS"),
+      "going out of sight starts a clock rather than a teardown");
+const hidden = Number((app.match(/const PAINT_HIDDEN_MS = (\d+);/) || [])[1]);
+check(hidden >= 10000,
+      hidden + "ms: long enough that an occluded window costs nothing, short "
+      + "enough that a background tab still lets the decoder go");
+check(app.includes("clearTimeout(paintHideTimer)"),
+      "and coming back inside that cancels it, having lost nothing");
+check(app.includes("document.hidden && paintPaused"),
+      "the same judgement where a failure is blamed on the page being away: "
+      + "merely occluded is not away");
+// A decode error after ten minutes of a good picture is not evidence that
+// this browser cannot decode the stream. Counting those against a budget
+// fixed at the start of the session means a long session runs out.
+check(app.includes("paintRecoveries = 0;\n    setLink(\"ok\");"),
+      "and a stream that is working earns its recovery allowance back");
+
 console.log("\na silent media track is not a dead connection");
 // The page judged the connection alive by video bytes on the media track, and
 // the host now deliberately sends none of those to a guest drawing its own
