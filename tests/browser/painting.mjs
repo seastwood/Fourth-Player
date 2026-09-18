@@ -479,6 +479,23 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
+console.log("\nthe page times the two things only it can see");
+// Every measurement so far has been taken in the worker, after the fact, and
+// downstream of both candidates: "frames did not arrive" is equally true of a
+// channel that stalled and of a thread that could not service one, and those
+// want opposite fixes. Several rounds were spent inferring which from numbers
+// that could not tell them apart. These two can, because they are timed on
+// the page at the moment the channel hands a piece over and at the moment an
+// animation frame runs.
+check(paintFile.includes("gaps() {"),
+      "the painter reports the worst gap between pieces arriving and the "
+      + "worst gap between animation frames");
+check(paintFile.includes("chunkGap = 0;\n      beatGap = 0;"),
+      "cleared as they are read, so each answer describes the window just "
+      + "gone rather than the worst since the page loaded");
+check(app.includes("worst gap between pieces arriving"),
+      "and the report carries both");
+
 console.log("\nthe timer takes over whenever the beats stop, not only if none came");
 // Measured: 244 refreshes in eleven seconds where sixty a second is 660, with
 // a 1050ms gap between two paints in the middle. Chrome throttles animation

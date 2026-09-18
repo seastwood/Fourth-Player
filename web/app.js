@@ -3870,7 +3870,11 @@ function tellAboutTheRate(picture) {
     // identical from in there: both are frames not arriving and refreshes not
     // happening. Chrome throttles a window it thinks is occluded, and a Mac
     // occludes a window whenever anything is in front of it.
-    report(painter.report() + " over " + span.toFixed(0) + "s; this page is "
+    const wait = painter.gaps ? painter.gaps() : null;
+    report(painter.report()
+           + (wait ? "; worst gap between pieces arriving " + wait.chunk
+                     + "ms, between animation frames " + wait.beat + "ms" : "")
+           + " over " + span.toFixed(0) + "s; this page is "
            + (document.hidden ? "hidden" : "visible") + " and has been called "
            + "hidden " + hiddenSpells + " time(s)");
     // Where the two actually are, whenever they could disagree. Four bugs in

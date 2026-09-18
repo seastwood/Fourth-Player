@@ -499,6 +499,10 @@ function makePainter(canvas, say) {
   let beating = 0;                       // the animation-frame loop
   let onGone = null, onShape = null;
   let chunks = 0;                        // pieces off the channel, ever
+  let chunkAt = 0, chunkGap = 0;         // and the worst gap between them
+  let beatAt = 0, beatGap = 0;           // the same, for animation frames
+  const now = () => ((typeof performance !== "undefined" && performance.now)
+                     ? performance.now() : Date.now());
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
      fresh one. The element keeps its id, its classes and its place, because
@@ -593,6 +597,12 @@ function makePainter(canvas, say) {
       // that looks evenly spaced.
       const beat = () => {
         if (!worker) return;
+        // And the longest gap between animation frames, on the same clock.
+        // A stalled channel and a throttled page both end in a picture that
+        // holds still; only these two numbers side by side say which.
+        const at = now();
+        if (beatAt && at - beatAt > beatGap) beatGap = at - beatAt;
+        beatAt = at;
         try { worker.postMessage({ tick: true }); } catch (_) {}
         beating = requestAnimationFrame(beat);
       };
@@ -607,6 +617,16 @@ function makePainter(canvas, say) {
         // that has to be answerable without waiting for a message to come
         // back. See `arrived`.
         chunks += 1;
+        // The longest a piece has ever taken to follow the one before it,
+        // timed here -- on the page, the moment the channel hands it over,
+        // before the worker has touched it. Everything else measured so far
+        // has been after the fact and downstream: "frames did not arrive" is
+        // true of a channel that stalled and of a thread that could not
+        // service it, and those want opposite fixes. This one number
+        // separates them, and none of the others could.
+        const at = now();
+        if (chunkAt && at - chunkAt > chunkGap) chunkGap = at - chunkAt;
+        chunkAt = at;
         // Transferred rather than copied: it is this page's last contact with
         // the bytes, and the worker is the only thing that reads them.
         worker.postMessage({ chunk: data }, [data]);
@@ -729,6 +749,16 @@ function makePainter(canvas, say) {
      * for ever: the black screening and the freezes were a renegotiation each
      * time. This is the other place a working connection shows itself. */
     arrived() { return chunks; },
+    /* The worst gaps seen since the last time this was asked, in the page's
+       own time: one for pieces arriving off the channel, one for animation
+       frames. Reading them clears them, so each answer describes the window
+       just gone. */
+    gaps() {
+      const was = { chunk: Math.round(chunkGap), beat: Math.round(beatGap) };
+      chunkGap = 0;
+      beatGap = 0;
+      return was;
+    },
   };
 }
 
