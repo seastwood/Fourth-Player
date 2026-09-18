@@ -366,6 +366,15 @@ function canPaintDirectly() {
  * what the worker says back to whoever is listening. A frame is never
  * touched on this thread.
  */
+/* Set by the page before a painter is made. Kept here so the worker and the
+   page cannot disagree about the default. */
+let smoothingFrames = 3;
+function smoothingWanted() { return smoothingFrames; }
+function setSmoothing(frames) {
+  smoothingFrames = Math.max(1, Math.min(10, Number(frames) || 3));
+  return smoothingFrames;
+}
+
 function makePainter(canvas, say) {
   let worker = null, running = false, mine = canvas;
   let last = null;                       // the worker's last set of counters
@@ -420,7 +429,9 @@ function makePainter(canvas, say) {
       worker.onmessage = (event) => {
         const m = event.data || {};
         if (m.ready) {
-          it.postMessage({ start: { canvas: surface, codec } }, [surface]);
+          it.postMessage({ start: { canvas: surface, codec,
+                                    smoothing: smoothingWanted() } },
+                         [surface]);
           return;
         }
         if (m.started) {
@@ -529,6 +540,11 @@ function makePainter(canvas, say) {
                  : ""));
     },
 
+    /* How many frames to keep in hand, changed while it runs. */
+    smooth(frames) {
+      if (worker) { try { worker.postMessage({ smoothing: frames }); } catch (_) {} }
+    },
+
     /* Ask without emptying the counters, for whoever only wants to know
        whether anything is happening. */
     peek() {
@@ -546,7 +562,7 @@ function makePainter(canvas, say) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
-                     toAnnexB, looksAnnexB, splitAnnexB,
+                     toAnnexB, looksAnnexB, splitAnnexB, setSmoothing,
                      avcDescription, toLengthPrefixed,
                      makePainter, PACE };
 }

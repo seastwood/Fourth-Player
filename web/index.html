@@ -885,6 +885,18 @@
           <select id="stream-paint"></select>
         </div>
         <p class="footnote" id="stream-paint-note"></p>
+        <!-- The one real trade in drawing it here: every frame held is a
+             frame of delay, and every frame held is a hiccup absorbed. -->
+        <div class="acct-row" id="stream-smooth-row">
+          <label class="tune-label" for="stream-smooth">Smoothing</label>
+          <select id="stream-smooth">
+            <option value="1">Least delay</option>
+            <option value="3">Balanced</option>
+            <option value="6">Smoothest</option>
+          </select>
+        </div>
+        <p class="footnote">Frames held back before drawing, when this page is
+           drawing. More rides out a stutter; less is nearer to live.</p>
         <div class="acct-row">
           <label class="tune-label" for="stream-truetime">Time frames when
              they arrive</label>

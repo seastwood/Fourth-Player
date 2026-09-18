@@ -8421,6 +8421,30 @@ let micOn = false;
  * agree. It asks nothing of the host, so it takes effect the moment it is
  * chosen rather than waiting for Apply and a recapture. */
 const PAINT_KEY = "fp:paint-method";
+const SMOOTH_KEY = "fp:paint-smoothing";
+
+/* How many frames this page keeps in hand while drawing. Per viewer, like
+   the method itself: it is their machine, their link and their eyes. */
+function savedSmoothing() {
+  let raw = null;
+  try { raw = localStorage.getItem(SMOOTH_KEY); } catch (_) {}
+  const want = Number(raw);
+  return (want >= 1 && want <= 10) ? want : 3;
+}
+
+function paintSmoothing() {
+  const box = el("stream-smooth");
+  if (box) box.value = String(setSmoothing(savedSmoothing()));
+}
+
+function setPaintSmoothing(frames) {
+  const want = setSmoothing(frames);
+  try { localStorage.setItem(SMOOTH_KEY, String(want)); } catch (_) {}
+  // Applied to a painter that is already running, so the difference can be
+  // heard out rather than needing a reload to try.
+  if (painter) painter.smooth(want);
+  report("smoothing: keeping " + want + " frame(s) in hand");
+}
 
 const PAINT_METHODS = [
   {
@@ -9699,6 +9723,12 @@ function wireStream() {
   if (painting) {
     paintPaintMethod();
     painting.addEventListener("change", () => setPaintMethod(painting.value));
+  }
+  const smoothing = el("stream-smooth");
+  if (smoothing) {
+    paintSmoothing();
+    smoothing.addEventListener("change",
+                               () => setPaintSmoothing(smoothing.value));
   }
   for (const id of ["stream-size", "stream-fps", "stream-codec",
                     "stream-virtual", "stream-screen",

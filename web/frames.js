@@ -301,8 +301,12 @@ function pump() {
  * are gentle, because a renderer that lurches is the thing being fixed.
  */
 const GAP_MIN = 4, GAP_MAX = 250;       // a sane frame interval, in ms
-const DEPTH_WANT = 2;                   // frames in hand, ideally
-const START_DEPTH = 3;                  // frames of slack to begin with
+/* How many frames to keep in hand. Set by the page -- see the Smoothing
+   setting -- because it is the one real trade here and different rooms want
+   different answers: every frame held is a frame of delay, and every frame
+   held is a hiccup absorbed. Moonlight calls the same choice frame pacing. */
+let DEPTH_WANT = 2;
+let START_DEPTH = 3;
 
 /* The display's own interval, learnt from the ticks. */
 function refreshEvery() {
@@ -643,6 +647,11 @@ self.onmessage = (event) => {
       state.drawFails = 0;
       state.ticks = state.starved = 0;
     }
+    return;
+  }
+  if (m.smoothing) {
+    START_DEPTH = Math.max(1, Math.min(10, m.smoothing | 0));
+    DEPTH_WANT = Math.max(1, START_DEPTH - 1);
     return;
   }
   if (m.tick) {

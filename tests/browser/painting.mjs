@@ -94,6 +94,20 @@ check(app.includes("if (painter) painter.peek();"),
       "and the watchdog asks for the numbers when it is armed, without "
       + "emptying them");
 
+console.log("and how many frames to hold is the viewer's to choose");
+// The one real trade in drawing it here: every frame held is a frame of
+// delay, and every frame held is a hiccup absorbed. Moonlight calls the same
+// choice frame pacing, and offers it for the same reason -- different rooms
+// want different answers.
+check(page.includes('<select id="stream-smooth">'), "there is a Smoothing list");
+check(app.includes("SMOOTH_KEY"), "remembered per browser, like the method");
+check(app.includes("painter.smooth(want)"),
+      "and applied to a painter already running, so it can be heard out "
+      + "without a reload");
+check(workerSrc.includes("let DEPTH_WANT = 2;")
+      && workerSrc.includes("m.smoothing"),
+      "the worker takes it, rather than holding a number of its own");
+
 console.log("something that was drawing and stops is started again, not abandoned");
 // A decoder can fail in the middle of a working stream -- a picture that
 // changes size, a frame that arrives damaged -- and the answer is another
