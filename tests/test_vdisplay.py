@@ -114,7 +114,7 @@ check('id="set-virtual"' in page, "the page has the switch")
 check("virtual_display: Boolean(" in script,
       "and sends a real boolean; a string would be true whatever it said, "
       "which turned a setting on once already")
-check('for flag in ("audio", "virtual_display", "pace_frames", "oversample")'
+check('for flag in ("audio", "virtual_display", "pace_frames", "oversample",'
       in sess,
       "every on/off setting is read the same way, rather than one growing "
       "its own "
