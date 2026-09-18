@@ -3597,6 +3597,47 @@ async function tellAboutThePicture() {
     + (video.framesDropped || 0) + " dropped");
 }
 
+/* What this browser is really drawing, per second, as against what the host
+   says it sent.
+
+   The host can measure what it hands to the network and has, exhaustively.
+   What nobody could see is the other end: whether a stream sent at 60 a
+   second is being decoded at 60 a second, or at 45 with the difference
+   arriving as choppiness. Totals cannot answer that -- "620 frames decoded"
+   is a number without a clock beside it -- so this is a rate, taken over a
+   window long enough that one hiccup does not decide it.
+
+   framesReceived, framesDecoded and framesDropped are three different
+   numbers and the gaps between them say different things: received but not
+   decoded is a decoder that cannot keep up, decoded but dropped is a
+   renderer discarding frames it had, and a received rate below what the host
+   sent is loss on the way. */
+const RATE_EVERY_MS = 10000;
+let rateAt = 0;
+let rateWas = null;
+
+function tellAboutTheRate(picture) {
+  if (!picture) return;
+  const now = Date.now();
+  const seen = {
+    at: now,
+    received: picture.framesReceived || 0,
+    decoded: picture.framesDecoded || 0,
+    dropped: picture.framesDropped || 0,
+  };
+  if (!rateWas) { rateWas = seen; rateAt = now; return; }
+  if (now - rateAt < RATE_EVERY_MS) return;
+  const span = (now - rateWas.at) / 1000;
+  if (span <= 0) { rateWas = seen; rateAt = now; return; }
+  const per = (key) => ((seen[key] - rateWas[key]) / span);
+  report("drawing " + per("decoded").toFixed(1) + " frames a second ("
+         + per("received").toFixed(1) + " arrived, "
+         + per("dropped").toFixed(1) + " thrown away) over " + span.toFixed(0)
+         + "s");
+  rateWas = seen;
+  rateAt = now;
+}
+
 async function watchMedia() {
   if (ended || !pc) return;
   let bytes = 0;
@@ -3619,6 +3660,7 @@ async function watchMedia() {
   } catch (_) { return; }
   // Before the branches below, every one of which returns.
   noteFreezes(picture);
+  tellAboutTheRate(picture);
   tellAboutSound();
   tellAboutTheShape();
   tellAboutThePicture();
