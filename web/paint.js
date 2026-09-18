@@ -381,7 +381,7 @@ function makePainter(canvas, say) {
   let ever = false;                      // it has painted at least once
   let carrying = null, letting = null;   // the channel, and how to stop reading
   let beating = 0;                       // the animation-frame loop
-  let onGone = null;
+  let onGone = null, onShape = null;
 
   /* A canvas can only be handed to a worker once, so each attempt gets a
      fresh one. The element keeps its id, its classes and its place, because
@@ -442,6 +442,7 @@ function makePainter(canvas, say) {
           return;
         }
         if (m.painted) { ever = true; return; }
+        if (m.shape) { if (onShape) onShape(m.shape); return; }
         // The worker cannot reach the channel: it has the counters, the page
         // has the wire. Both of these are the worker asking the page to say
         // something to the host.
@@ -505,6 +506,11 @@ function makePainter(canvas, say) {
     },
 
     whenGone(fn) { onGone = fn; },
+
+    /* Told the shape of the picture as the decoder sees it. The page has no
+       other way to know it while this path is drawing: the <video> element it
+       would normally measure is holding the sound and nothing else. */
+    whenShaped(fn) { onShape = fn; },
 
     stop() {
       running = false;

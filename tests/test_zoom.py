@@ -67,12 +67,14 @@ HARNESS = "\n".join(lift(name) for name in
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, cursorU = 0.5, cursorV = 0.5;
 let DRIVING = false, INSET = 0;
+let streamShape = null;
 function cursorDriving() { return DRIVING; }
 function bottomInset() { return INSET; }
 function paintZoom() {}
 function paintCanvas() { return null; }
 const video = { offsetWidth: 0, offsetHeight: 0,
                 videoWidth: 2560, videoHeight: 1440, style: {} };
+function fitPainted() {}
 
 /* Where the pointer actually lands on the glass, and where the picture's own
    edges end up, for a guest at (u, v) on a screen of a given shape.
@@ -85,6 +87,18 @@ const video = { offsetWidth: 0, offsetHeight: 0,
 function place(ask) {
   video.offsetWidth = ask.box[0];
   video.offsetHeight = ask.box[1];
+  // "decoding" means the page is drawing the picture itself: the <video>
+  // element has been left holding the sound, so it knows no shape at all and
+  // the decoder's own report is the only source there is.
+  if (ask.decoding) {
+    video.videoWidth = 0;
+    video.videoHeight = 0;
+    streamShape = { width: 2560, height: 1440 };
+  } else {
+    video.videoWidth = 2560;
+    video.videoHeight = 1440;
+    streamShape = null;
+  }
   DRIVING = Boolean(ask.driving);
   INSET = ask.inset || 0;
   zoom = ask.zoom;
@@ -147,7 +161,10 @@ answer = run(
              (0.5, 0.5, True, 0), (0.25, 0.0, True, 0), (0.25, 1.0, True, 0),
              (0.25, 0.25, False, 0), (0.25, 0.5, True, 400))]
            + [{"box": PHONE, "zoom": 1, "u": 0.25, "v": v, "driving": True,
-               "inset": 0} for v in (0.25, 0.75)])
+               "inset": 0} for v in (0.25, 0.75)]
+           # The same two again, with the page decoding the picture itself.
+           + [{"box": PHONE, "zoom": 2, "u": 0.25, "v": v, "driving": True,
+               "inset": 0, "decoding": True} for v in (0.25, 0.75)])
 rooms = answer["rooms"]
 pans = answer["pans"]
 slid = answer["slid"]
@@ -221,6 +238,28 @@ still = [places[7], places[8]]
 check(abs(still[0]["top"] - still[1]["top"]) < 1e-9,
       "and at 1x the picture does not move however the pointer does: %.1f "
       "against %.1f" % (still[0]["top"], still[1]["top"]))
+
+print("and it is the same picture whoever is drawing it")
+# The <video> element is left holding the sound while the page decodes the
+# picture itself, so videoWidth is zero and every piece of geometry measured
+# from it fell back to the shape of the *element*. On an upright phone that is
+# a screen more than twice as tall as it is wide standing in for a picture a
+# quarter of its height -- wrong only up and down, because the picture fills
+# the width either way. The pointer moved a quarter as far as the finger while
+# the picture slid under it by the whole distance, which is what "I'm just
+# trying to move the cursor and it's scrolling instead" looks like, and it is
+# why none of this was ever as bad on the WebRTC path.
+for (label, drawn, decoded) in (("above the middle", places[0], places[9]),
+                                ("below it", places[1], places[10])):
+    # Both numbers in the message, because the first version of it printed
+    # only the pointer -- which matched -- and read "422.0 against 422.0" over
+    # a failure that was entirely in where the picture had been dragged to.
+    check(abs(drawn["y"] - decoded["y"]) < 0.5
+          and abs(drawn["top"] - decoded["top"]) < 0.5,
+          "the pointer and the picture land in the same place with the page "
+          "decoding, %s: pointer %.1f against %.1f, picture top %.1f against "
+          "%.1f" % (label, decoded["y"], drawn["y"], decoded["top"],
+                    drawn["top"]))
 
 print("zooming towards the middle keeps the middle where it is")
 check(pans[0] == 0, "nothing offset stays nothing: %r" % pans[0])

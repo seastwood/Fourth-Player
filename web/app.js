@@ -2383,8 +2383,13 @@ function videoRefused() {
 }
 
 /* Whether there is a picture on the screen, as opposed to a connection that
-   ought to be carrying one. videoWidth is zero until frames have decoded. */
+   ought to be carrying one. videoWidth is zero until frames have decoded --
+   and stays zero for ever while the page is decoding them itself, because the
+   <video> element is holding the sound and nothing else by then. Asking the
+   painter as well is what stops "this browser will not accept the video"
+   appearing over a WebCodecs picture that is playing perfectly. */
 function pictureIsShowing() {
+  if (painter && painter.painted()) return true;
   return !!(video && video.videoWidth > 0 && video.videoHeight > 0);
 }
 
@@ -2660,6 +2665,11 @@ el("screen").addEventListener("click", () => {
  * video element: object-fit letterboxes a 16:9 stream inside whatever shape
  * the phone is, and being able to drag off into the black would be a way to
  * lose the game entirely. */
+/* The shape of the picture arriving, remembered. Set from the <video>
+   element whenever it knows, and from the decoder's own frames when the page
+   is drawing them itself -- see pictureBox. */
+let streamShape = null;
+
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, dragged = false;
 
@@ -2675,7 +2685,25 @@ let zoom = 1, panX = 0, panY = 0, dragged = false;
  * the pointer in the middle drifted off as soon as the zoom was not 1. */
 function pictureBox() {
   const box = { width: video.offsetWidth, height: video.offsetHeight };
-  const w = video.videoWidth, h = video.videoHeight;
+  // The stream's own shape, from whichever of the two knows it.
+  //
+  // Normally the <video> element does. While the page is decoding the
+  // picture itself that element is holding the sound and nothing else, so
+  // videoWidth is zero and this fell back to the shape of the *element* --
+  // which on an upright phone is a screen more than twice as tall as it is
+  // wide, standing in for a picture a quarter of its height.
+  //
+  // Everything worked out from here was then wrong by that ratio, and only up
+  // and down, because the picture fills the width either way. The pointer
+  // moved a quarter as far as the finger and the picture slid under it by the
+  // whole distance, which is "I'm just trying to move the cursor and it's
+  // scrolling instead", and it is why none of this was ever as bad on the
+  // WebRTC path.
+  if (video.videoWidth && video.videoHeight) {
+    streamShape = { width: video.videoWidth, height: video.videoHeight };
+  }
+  const w = (video.videoWidth || (streamShape && streamShape.width)) || 0;
+  const h = (video.videoHeight || (streamShape && streamShape.height)) || 0;
   if (!w || !h || !box.width || !box.height) {
     return { width: box.width, height: box.height, box };
   }
@@ -9022,6 +9050,17 @@ async function startPainting() {
   // If the worker gives up on its own -- a decoder that will not run, a
   // transform the browser refuses -- that is the same situation as nothing
   // being painted, and it goes through the one place that handles it.
+  // The decoder is the only thing that knows the picture's shape once the
+  // <video> element has been left holding the sound, and every piece of
+  // geometry on this page is measured from that shape. Taking it the moment
+  // it is known -- and re-laying the canvas out with it -- is what keeps the
+  // pointer where the finger put it.
+  painter.whenShaped((shape) => {
+    if (!shape || !shape.width || !shape.height) return;
+    streamShape = { width: shape.width, height: shape.height };
+    fitPainted();
+    applyZoom();
+  });
   painter.whenGone(() => {
     if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
     // Something that has been drawing and then stops is not something that

@@ -174,6 +174,18 @@ function draw(frame) {
       || canvas.height !== frame.displayHeight) {
     canvas.width = frame.displayWidth;
     canvas.height = frame.displayHeight;
+    // Said out loud, because the page cannot see it.
+    //
+    // The canvas belongs to this worker now, and the <video> element the page
+    // measures its geometry from has had the picture taken off it -- it is
+    // holding the sound and nothing else while this path draws. So the page's
+    // idea of the picture's shape went to zero the moment WebCodecs started,
+    // and everything worked out from it -- how far the picture may be
+    // dragged, how far a finger moves the pointer, where the pointer is on
+    // the screen -- fell back to the shape of the *element*, which on an
+    // upright phone is four times too tall. This is the only place that
+    // actually knows.
+    self.postMessage({ shape: { width: canvas.width, height: canvas.height } });
   }
   try {
     if (!state.context) throw new Error("no way to paint");

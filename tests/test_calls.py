@@ -122,6 +122,32 @@ everything = code_only(everything)
 
 print("every call resolves to a definition")
 defined = set(PROVIDED)
+# `let a = null, b = null;` declares two things, and the pattern below sees
+# only the first. That is not academic: a function kept in the second half of
+# such a pair was reported as called and never defined, which is a false alarm
+# in an audit whose whole value is that it does not cry wolf. Each declaration
+# is split on its top-level commas first, so every declarator is its own.
+def split_declarations(text):
+    out = []
+    for statement in re.finditer(r"\b(?:const|let|var)\s+([^;\n]+)", text):
+        depth = 0
+        part = ""
+        for ch in statement.group(1):
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            if ch == "," and depth == 0:
+                out.append("let " + part)
+                part = ""
+            else:
+                part += ch
+        out.append("let " + part)
+    return "\n".join(out)
+
+
+everything += "\n" + split_declarations(everything)
+
 for pattern in (r"function\s+([A-Za-z_$][\w$]*)",
                 r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=",
                 r"([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?function",
