@@ -398,8 +398,15 @@ class Server:
                     # know what it sent; whether any of it arrived is visible
                     # from one side only, and that side is usually a phone in
                     # somebody else's house.
+                    # Six hundred rather than three: the drawing report
+                    # outgrew the old limit and was being cut off exactly
+                    # where it stopped listing what arrived and started
+                    # saying how evenly it was painted -- which is the half
+                    # that says whether a freeze was the link or this end.
+                    # Three separate rounds of chasing one fault were spent
+                    # unable to read the number that named it.
                     log.info("%s reports: %s", guest.label,
-                             str(message.get("detail", ""))[:300])
+                             str(message.get("detail", ""))[:600])
                 elif kind == "keyframe" and guest is not None:
                     # A page that decodes the picture itself asks for this.
                     #

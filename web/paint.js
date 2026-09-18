@@ -102,7 +102,16 @@ const PACE = {
    delay and a hiccup absorbed, which is the one real trade here, so it stays
    the guest's to make. Three -- the default -- is moonlight-web's 25ms. */
 function maxFor(frames) {
-  return Math.max(4, Math.min(100, Math.round((frames || 3) * (1000 / 120))));
+  // Never below twenty milliseconds, whatever the setting says.
+  //
+  // One frame of smoothing mapped to 8ms, and a link with a late tail of 18
+  // to 26ms was then capped at 8 -- so the pacer could not cover what it had
+  // measured, every frame past the cap was an underrun, and the setting
+  // meant for "least delay" produced the most judder. A cap is a ceiling on
+  // what may be held, and the control law only holds what the link has been
+  // seen to need, so a generous one costs nothing on a link that does not
+  // need it: the deadband takes a clean link to zero either way.
+  return Math.max(20, Math.min(100, Math.round((frames || 3) * (1000 / 120))));
 }
 
 function makePacer(limits) {
@@ -656,32 +665,35 @@ function makePainter(canvas, say) {
     report() {
       if (worker) { try { worker.postMessage({ report: true }); } catch (_) {} }
       if (!last) return "drawing here: nothing said yet";
-      return ("drawing here: " + last.handed + " handed over by the transform, "
+      // The smoothness first, because it is the only part that describes what
+      // an eye can see, and because everything after it kept being the half
+      // that got cut off.
+      return ("drawing here: "
+              + (last.shown
+                 ? "painted every " + last.shown.typical + "ms typical, worst "
+                   + last.shown.worst + "ms, " + last.shown.off + " of "
+                   + last.shown.of + " off the beat; "
+                 : "")
+              + (last.ticks
+                 ? last.starved + " of " + last.ticks
+                   + " refreshes had nothing to paint and " + (last.early || 0)
+                   + " nothing due yet (a refresh is "
+                   + (last.refresh || "?") + "ms); "
+                 : "")
+              + (last.pace
+                 ? "reserve " + last.pace.reserve + "ms over a late tail of "
+                   + last.pace.tail + "ms, widened " + last.pace.underruns
+                   + " times; "
+                 : "")
+              + last.handed + " handed over by the transform, "
               + last.fed + " fed to the decoder, " + last.out + " came out, "
               + last.drawn + " painted, " + last.refused + " refused, "
               + last.skipped + " before the first keyframe, " + last.stale
               + " too late to matter, " + (last.behind || 0)
               + " dropped catching up, " + (last.gaps || 0)
               + " gaps in the host's numbering, " + (last.lost || 0)
-              + " lost on the way, " + last.reserve + "ms reserve, canvas "
-              + (last.size || "?")
-              + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
-              + (last.ticks
-                 ? "; " + last.starved + " of " + last.ticks
-                   + " refreshes had nothing to paint and " + (last.early || 0)
-                   + " nothing due yet (a refresh is "
-                   + (last.refresh || "?") + "ms)"
-                 : "")
-              + (last.pace
-                 ? "; the reserve is " + last.pace.reserve + "ms over a late "
-                   + "tail of " + last.pace.tail + "ms, widened "
-                   + last.pace.underruns + " times"
-                 : "")
-              + (last.shown
-                 ? "; painted every " + last.shown.typical + "ms typical, "
-                   + "worst " + last.shown.worst + "ms, " + last.shown.off
-                   + " of " + last.shown.of + " off the beat"
-                 : ""));
+              + " lost on the way, canvas " + (last.size || "?")
+              + (last.drawFails ? ", " + last.drawFails + " paints refused" : ""));
     },
 
     /* How many frames to keep in hand, changed while it runs. */

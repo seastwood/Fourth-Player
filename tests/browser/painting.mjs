@@ -660,9 +660,16 @@ loose.cap(10);
 for (let i = 0; i < 300; i += 1) {
   loose.schedule(i * 16.7, i * 16.7 + 10 + (i % 2) * 400);
 }
-check(tight.reserve() < loose.reserve() && tight.reserve() <= 10,
+// With a floor under the cap, because one frame mapped to 8ms and a link
+// whose late tail was 18 to 26ms was then capped at 8 -- the pacer could not
+// cover what it had measured, and the setting meant for "least delay"
+// produced the most judder.
+check(tight.reserve() < loose.reserve() && tight.reserve() <= 25,
       `one frame of smoothing holds ${tight.reserve()}ms and ten holds `
       + `${loose.reserve()}ms on the same link`);
+check(tight.reserve() >= 20,
+      `and the lowest setting is still not tighter than a real link's `
+      + `jitter: ${tight.reserve()}ms`);
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
