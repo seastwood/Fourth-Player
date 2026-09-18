@@ -8889,8 +8889,29 @@ function setPaintMethod(id) {
   paintMethod = wantedPaintMethod();
   savePaintMethod();
   paintPaintMethod();
-  if (paintMethod === "here") startPainting();
-  else stopPainting("the browser's own element was chosen");
+  if (paintMethod !== "here") {
+    stopPainting("WebRTC was chosen");
+    return;
+  }
+  // A transform wants a receiver that has not started yet.
+  //
+  // Attached to one already carrying a picture, it was delivering nothing at
+  // all: "the frame worker is ready and the transform is attached" and then
+  // no first frame, ever. The same receiver on a fresh connection delivers
+  // immediately -- which is the mirror of what leaving WebCodecs already has
+  // to do, and for what looks like the same reason: a transform is part of
+  // how a receiver is set up rather than something it will take mid-flight.
+  //
+  // So switching to it rebuilds the connection and the track handler starts
+  // the painting when the new one arrives. On a connection that has not
+  // carried anything yet there is nothing to rebuild and it starts here.
+  if (pc && videoReceiver() && lastBytes > 0) {
+    report("asking for a fresh media connection: a transform wants a "
+           + "receiver that has not started yet");
+    renewSoon(0, true);
+    return;
+  }
+  startPainting();
 }
 
 const MIC_KBPS_KEY = "fp:mic-bitrate";

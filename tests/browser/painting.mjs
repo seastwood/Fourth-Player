@@ -198,6 +198,20 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
+console.log("switching to it rebuilds the connection too, for the same reason");
+// "the frame worker is ready and the transform is attached" and then no first
+// frame, ever. A transform attached to a receiver already carrying a picture
+// delivers nothing; the same receiver on a fresh connection delivers at once.
+// It is part of how a receiver is set up rather than something it will take
+// mid-flight, which is the mirror of why leaving has to rebuild as well.
+const setBody = app.slice(app.indexOf("function setPaintMethod"),
+                          app.indexOf("function setPaintMethod") + 1600);
+check(setBody.includes("renewSoon(0, true)"),
+      "choosing WebCodecs on a running connection asks for a fresh one");
+check(setBody.includes("lastBytes > 0"),
+      "and one that has never carried anything is started in place, since "
+      + "there is nothing to rebuild");
+
 console.log("switching back rebuilds the connection, because nothing less works");
 // Measured after switching back: "0.0 frames a second (0.0 arrived)" and the
 // element pausing itself over and over. WebRTC's receiver had stopped
