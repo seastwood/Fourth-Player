@@ -342,7 +342,12 @@ FRAMES_ARRIVING_GOOD = 0.97
 BITRATE_FLOOR_KBPS = 400
 BITRATE_DOWN = 0.75          # a quarter off, when the queue will not drain
 BITRATE_UP = 1.08            # eight percent back, per quiet spell
-BITRATE_CALM = 40            # frames of quiet before it climbs at all
+BITRATE_CALM = 3             # guest reports -- seconds -- of quiet before
+                             # it climbs a step. Each step is a reconfiguration
+                             # of a running NVENC, which is not free, and this
+                             # was once counted in frames: forty of them, so a
+                             # link behaving itself was asked to change its
+                             # mind every seven hundred milliseconds for ever.
 
 
 CAPTURE_APIS = {
@@ -2050,10 +2055,11 @@ class Stage:
         count is the other signal, and the more trustworthy one; see
         `note_arrivals`.
 
-        Either one moves the rate the same way, which is the way every
-        congestion control moves it: down quickly, because the queue is
-        already somebody's delay, and up slowly, because the link has not
-        proved anything yet.
+        This half is the emergency: a queue over the limit is already delay
+        somebody is watching, so it comes down at once rather than waiting for
+        the next report. Climbing back belongs to `note_arrivals`, which is
+        the only place with evidence that the link is actually carrying
+        anything.
         """
         limit = self.frame_queue_limit()
         if behind > limit:
@@ -2061,24 +2067,20 @@ class Stage:
             self._set_rate(down=True,
                            why="%d bytes are waiting to be sent and %d is the "
                                "most worth keeping" % (behind, limit))
-            return
-        self._rate_calm += 1
-        if self._rate_calm < BITRATE_CALM:
-            return
-        self._rate_calm = 0
-        if self._arriving() < FRAMES_ARRIVING_GOOD:
-            # The queue is empty but the frames are not arriving, which is the
-            # case this whole path was blind to. Nothing to give back yet.
-            return
-        self._set_rate(down=False, why="the queue has stayed empty")
 
     def note_arrivals(self):
         """A guest has said how much of the picture is reaching it.
 
-        Once a second rather than once a frame, so this steps the rate at most
-        once a second in either direction. Driving the per-frame path from a
-        per-second signal would walk the encoder to the floor on a single bad
-        report.
+        Both halves of the climb and the fall live here, on the guest's
+        once-a-second report, so the rate moves at most once a second in
+        either direction.
+
+        That cadence is the point. The climb used to run off a count of
+        frames, which on a link that was behaving meant a new bitrate every
+        seven hundred milliseconds -- and every one of those is an NVENC
+        reconfiguration in the middle of a stream. Asking the encoder to
+        change its mind that often is not free, and it was being asked on no
+        evidence at all beyond "nothing has gone wrong for forty frames".
         """
         arriving = self._arriving()
         if arriving < FRAMES_ARRIVING_LOW:
@@ -2086,6 +2088,20 @@ class Stage:
             self._set_rate(down=True,
                            why="only %.0f%% of the frames sent are arriving"
                                % (arriving * 100))
+            return
+        if arriving < FRAMES_ARRIVING_GOOD:
+            # Between the two there is nothing to do. A band rather than a
+            # line, because a rate that is exactly right still reports the odd
+            # bad second, and an encoder that answers every one of those
+            # oscillates for ever.
+            return
+        self._rate_calm += 1
+        if self._rate_calm < BITRATE_CALM:
+            return
+        self._rate_calm = 0
+        self._set_rate(down=False,
+                       why="%d seconds of the picture arriving whole"
+                           % BITRATE_CALM)
 
     def _arriving(self):
         """The worst-off guest's share of the frames sent to it.
@@ -2708,9 +2724,10 @@ class Peer:
         self._reports += 1
         if self._reports % 10 == 1 or self.frames_arriving < FRAMES_ARRIVING_LOW:
             log.info("peer %s: the browser received %d of the %d frames sent "
-                     "(%.0f%%), painted %d and was %dms behind",
+                     "(%.0f%%), painted %d, with %dms in hand",
                      self.id, got, since, self.frames_arriving * 100,
-                     int(report.get("shown") or 0), int(report.get("late") or 0))
+                     int(report.get("shown") or 0),
+                     int(report.get("reserve") or 0))
         self.stage.note_arrivals()
 
     def send_frame(self, data, key, stamp):

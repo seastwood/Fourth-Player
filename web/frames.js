@@ -243,7 +243,7 @@ function tell(at) {
   state.toldShown = state.shownAll;
   self.postMessage({ tally: {
     got, shown,
-    late: Math.round(state.pacer ? -state.pacer.reserve() : 0),
+    reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
   } });
 }
 
