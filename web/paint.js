@@ -497,7 +497,9 @@ function makePainter(canvas, say) {
               + last.fed + " fed to the decoder, " + last.out + " came out, "
               + last.drawn + " painted, " + last.refused + " refused, "
               + last.skipped + " before the first keyframe, " + last.stale
-              + " too late to matter, " + last.reserve + "ms reserve");
+              + " too late to matter, " + last.reserve + "ms reserve, canvas "
+              + (last.size || "?")
+              + (last.drawFails ? ", " + last.drawFails + " paints refused" : ""));
     },
 
     painted() { return ever || Boolean(last && last.ever); },

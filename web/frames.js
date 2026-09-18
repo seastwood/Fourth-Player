@@ -46,6 +46,9 @@ const state = {
   handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
   ever: false,
   saidDraw: false,
+  saidFirst: false,
+  drawFails: 0,
+  drew: false,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -73,6 +76,7 @@ function draw(frame) {
     // Said once. A paint that throws every frame is a black screen with a
     // decoder reporting itself perfectly healthy, and nothing about the
     // counters distinguishes it from a decoder producing nothing.
+    state.drawFails += 1;
     if (!state.saidDraw) {
       state.saidDraw = true;
       say("the canvas would not take a frame: "
@@ -84,6 +88,7 @@ function draw(frame) {
 
 function pump() {
   state.timer = 0;
+  state.drew = false;
   while (state.waiting.length) {
     // Drop to the latest. A frame that was due while the thread was busy is
     // not worth drawing once a newer one exists: it costs a paint and shows
@@ -101,11 +106,25 @@ function pump() {
     }
     state.waiting.shift();
     draw(next.frame);
+    // One paint per turn of the event loop, always.
+    //
+    // A transferred OffscreenCanvas shows what was drawn on it when the task
+    // that drew ends. Draining the whole queue in one go therefore shows the
+    // last frame of the batch and throws the rest away invisibly, and
+    // painting straight out of the decoder's callback can leave several in
+    // one turn. Yielding after each is what makes a painted frame a shown
+    // frame -- which is the difference between "361 painted" in the counters
+    // and one frozen picture on the screen.
+    if (state.waiting.length) {
+      state.timer = setTimeout(pump, 0);
+    }
+    return;
   }
 }
 
 function decoded(frame) {
   state.out += 1;
+  state.drew = state.drew || false;
   const captured = (frame.timestamp || 0) / 1000;
   const now = performance.now();
   const wait = state.pacer.hold(captured, now);
@@ -281,7 +300,12 @@ function chunk(buffer) {
   const made = building;
   building = null;
   state.handed += 1;
-  if (state.handed === 1) say("the first encoded frame arrived here");
+  // Once per connection, not once per report: the counters are zeroed every
+  // window, so this was announcing a first frame every twelve seconds.
+  if (!state.saidFirst) {
+    state.saidFirst = true;
+    say("the first encoded frame arrived here");
+  }
   take(made.key ? "key" : "delta", made.stamp, whole.buffer);
 }
 
@@ -351,10 +375,16 @@ self.onmessage = (event) => {
         keyed: state.started,
         reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
         ever: state.ever,
+        // The surface itself, because every counter can read perfectly while
+        // nothing reaches the screen.
+        size: state.canvas ? (state.canvas.width + "x" + state.canvas.height)
+                           : "none",
+        drawFails: state.drawFails,
       },
     });
     state.handed = state.fed = state.out = state.drawn = 0;
     state.refused = state.skipped = state.stale = 0;
+    state.drawFails = 0;
     return;
   }
   if (m.chunk) { chunk(m.chunk); return; }

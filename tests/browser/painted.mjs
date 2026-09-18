@@ -113,12 +113,19 @@ output(new FakeFrame(0));
 check(painted === 1, `one frame out, ${painted} painted`);
 check(closed === 1, "and the frame was closed, so its buffer goes back");
 
-console.log("a run of them, with the canvas resized to the picture");
+console.log("a run of them, one paint per turn of the event loop");
+// A transferred OffscreenCanvas shows what was drawn when the task that drew
+// it ends. Draining a queue in one go therefore shows the last frame of the
+// batch and loses the rest invisibly -- 361 painted in the counters and one
+// frozen picture on the screen.
 for (let i = 1; i <= 30; i += 1) {
   clock += 16.7;
   output(new FakeFrame(i * 16700));
 }
+await new Promise((go) => globalThis.setTimeout(go, 60));
 check(painted === 31, `31 out, ${painted} painted`);
+check(workerSrc.includes("setTimeout(pump, 0)"),
+      "and the queue yields between paints rather than draining in one turn");
 check(canvas.width === 1280 && canvas.height === 720,
       `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
 
