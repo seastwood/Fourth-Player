@@ -153,6 +153,43 @@ check(app.includes("await pickCodec"), "the page waits for that answer");
 check(app.includes("paintStarting"),
       "with a guard, because the watchdog calls this every couple of seconds");
 
+console.log("\nthe bitstream is looked at rather than believed");
+// The symptom of getting this wrong is one frame fed and "Decoder failure"
+// with nothing else to go on. WebRTC is supposed to hand out Annex B and not
+// every browser does; a decoder configured without a description expects
+// nothing else.
+const bytes = (a) => new Uint8Array(a).buffer;
+let shaped = paint.toAnnexB(bytes([0, 0, 0, 1, 0x65, 0x88]));
+check(shaped.shape === "annex-b", "a four-byte start code is left alone");
+check(new Uint8Array(shaped.data).join() === "0,0,0,1,101,136",
+      "untouched, byte for byte");
+check(paint.toAnnexB(bytes([0, 0, 1, 0x65, 7])).shape === "annex-b",
+      "and so is a three-byte one");
+
+shaped = paint.toAnnexB(bytes([0, 0, 0, 3, 0x67, 1, 2, 0, 0, 0, 2, 0x68, 9]));
+check(shaped.shape === "length-prefixed",
+      "lengths that add up exactly are proof, not a guess");
+check(new Uint8Array(shaped.data).join() === "0,0,0,1,103,1,2,0,0,0,1,104,9",
+      "each length becomes a start code, in place: "
+      + new Uint8Array(shaped.data).join());
+
+check(paint.toAnnexB(bytes([9, 9, 9, 9, 1, 2, 3])).shape === "unknown",
+      "anything else goes through unchanged, for the decoder to judge");
+
+console.log("\nand the transform is not attached before the worker can hear it");
+// Measured: "0 fed to the decoder" over ten seconds while twenty megabytes
+// arrived. new Worker() returns before the worker's script has run, so
+// attaching a transform on the next line races its own handler -- and the
+// losing side is silence.
+const frames = readFileSync(new URL("../../web/frames.js", import.meta.url), "utf8");
+check(frames.indexOf("self.onrtctransform") < frames.indexOf("ready: true"),
+      "the worker registers its handler before it says it is ready");
+check(paintFile.includes("if (m && m.ready)"),
+      "and the page waits for that before attaching anything");
+check(paintFile.indexOf("new RTCRtpScriptTransform(mine")
+      > paintFile.indexOf("if (m && m.ready)"),
+      "the transform is attached inside that, not beside it");
+
 console.log("\nthe pacing holds the early frames and releases the late ones");
 const pacer = paint.makePacer({ MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95,
                                 WINDOW: 120 });

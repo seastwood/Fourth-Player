@@ -174,6 +174,55 @@ async function pickCodec(mime, fmtp) {
   return "";
 }
 
+/* Encoded H.264 and H.265 come in two shapes and only one of them is what a
+ * decoder configured without a `description` expects.
+ *
+ * Annex B separates NAL units with start codes -- 00 00 01, or 00 00 00 01.
+ * The other shape prefixes each unit with its length, which is what an mp4
+ * carries and what a decoder wants a `description` for. WebRTC is supposed to
+ * hand out the first; not every browser does, and the symptom when it does
+ * not is one frame fed and "Decoder failure" with nothing else to go on.
+ *
+ * So rather than believing either end, this looks. A start code is passed
+ * through untouched. Otherwise the lengths are walked, and they either add up
+ * exactly -- which is proof, not a guess -- or the bytes go through unchanged
+ * for the decoder to reject with its own opinion.
+ */
+function looksAnnexB(view) {
+  if (view.length < 4) return false;
+  if (view[0] === 0 && view[1] === 0 && view[2] === 1) return true;
+  return view[0] === 0 && view[1] === 0 && view[2] === 0 && view[3] === 1;
+}
+
+function toAnnexB(buffer) {
+  const view = new Uint8Array(buffer);
+  if (looksAnnexB(view)) return { data: buffer, shape: "annex-b" };
+  // Walk it as 4-byte lengths first. Anything that does not land exactly on
+  // the end is not this format.
+  let at = 0, count = 0;
+  while (at + 4 <= view.length) {
+    const size = (view[at] << 24 | view[at + 1] << 16
+                  | view[at + 2] << 8 | view[at + 3]) >>> 0;
+    if (size === 0 || at + 4 + size > view.length) { count = -1; break; }
+    at += 4 + size;
+    count += 1;
+  }
+  if (count < 1 || at !== view.length) {
+    return { data: buffer, shape: "unknown" };
+  }
+  // Same length: a four-byte length becomes a four-byte start code.
+  const out = new Uint8Array(view.length);
+  at = 0;
+  while (at + 4 <= view.length) {
+    const size = (view[at] << 24 | view[at + 1] << 16
+                  | view[at + 2] << 8 | view[at + 3]) >>> 0;
+    out[at] = 0; out[at + 1] = 0; out[at + 2] = 0; out[at + 3] = 1;
+    out.set(view.subarray(at + 4, at + 4 + size), at + 4);
+    at += 4 + size;
+  }
+  return { data: out.buffer, shape: "length-prefixed" };
+}
+
 function canPaintDirectly() {
   return typeof VideoDecoder !== "undefined"
     && typeof VideoFrame !== "undefined"
@@ -198,6 +247,7 @@ function makePainter(canvas, say) {
   // to tell which of the four it was.
   let fed = 0, out = 0, drawn = 0, refused = 0, skipped = 0;
   let started = false;                   // a keyframe has been seen
+  let shape = "";                        // what the bitstream turned out to be
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -264,11 +314,21 @@ function makePainter(canvas, say) {
         if (!key) { skipped += 1; return; }
         started = true;
       }
+      let bytes = data;
+      try {
+        const shaped = toAnnexB(data instanceof ArrayBuffer ? data
+                                : data.buffer || data);
+        bytes = shaped.data;
+        if (shape === "") {
+          shape = shaped.shape;
+          say("the encoded frames are " + shape);
+        }
+      } catch (_) { /* pass it through as it came */ }
       try {
         decoder.decode(new EncodedVideoChunk({
           type: key ? "key" : "delta",
           timestamp: timestamp,
-          data: data,
+          data: bytes,
         }));
         fed += 1;
       } catch (err) {
@@ -302,14 +362,28 @@ function makePainter(canvas, say) {
         return false;
       }
       worker = new Worker("/static/frames.js");
+      const mine = worker;
       worker.onmessage = (event) => {
         const m = event.data;
+        // The worker says when its handler is in place. Attaching the
+        // transform before that is a race whose losing side is silence: the
+        // event fires, nothing is listening, and no frame ever arrives.
+        if (m && m.ready) {
+          try {
+            if (typeof RTCRtpScriptTransform !== "undefined") {
+              receiver.transform = new RTCRtpScriptTransform(mine, {});
+            }
+          } catch (err) {
+            say("this browser would not take the transform: "
+                + (err && err.message ? err.message : "no reason given"));
+            this.stop();
+          }
+          return;
+        }
         this.take(m.type, m.timestamp, m.bytes);
       };
       try {
-        if (typeof RTCRtpScriptTransform !== "undefined") {
-          receiver.transform = new RTCRtpScriptTransform(worker, {});
-        } else {
+        if (typeof RTCRtpScriptTransform === "undefined") {
           const streams = receiver.createEncodedStreams();
           // The older shape: no worker involved, so the frames are read here
           // and handed to the same decoder.
@@ -341,6 +415,7 @@ function makePainter(canvas, say) {
       if (worker) { try { worker.terminate(); } catch (_) {} worker = null; }
       pacer.forget();
       started = false;
+      shape = "";
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
@@ -362,5 +437,6 @@ function makePainter(canvas, say) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { makePacer, codecCandidates, pickCodec, PACE };
+  module.exports = { makePacer, codecCandidates, pickCodec,
+                     toAnnexB, looksAnnexB, PACE };
 }

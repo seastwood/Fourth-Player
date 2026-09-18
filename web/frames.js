@@ -11,6 +11,14 @@
  * and its jitter buffer, which is the machinery being replaced. The <video>
  * element goes black, and the canvas beside it is what anybody sees.
  */
+/* Registered before anything is told this worker exists.
+ *
+ * `new Worker()` returns before the worker's script has run, and attaching a
+ * transform to a receiver on the next line is a race: if the rtctransform
+ * event fires before this handler is set, it is simply lost, and the page sits
+ * there having been handed no frames at all. Measured exactly that way -- "0
+ * fed to the decoder" over ten seconds while twenty megabytes arrived. So the
+ * page waits for the "ready" below before it attaches anything. */
 self.onrtctransform = (event) => {
   const transformer = event.transformer;
   const reader = transformer.readable.getReader();
@@ -35,3 +43,6 @@ self.onrtctransform = (event) => {
 
   pump();
 };
+
+// Last, so it cannot be sent before the handler above exists.
+self.postMessage({ ready: true });
