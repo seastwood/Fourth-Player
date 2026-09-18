@@ -255,6 +255,11 @@ function tell(at) {
   state.toldGot = state.gotAll;
   state.toldShown = state.shownAll;
   self.postMessage({ tally: {
+    // The running total is what the host compares against, not `got`: the
+    // two ends' seconds are not the same second, and comparing a window here
+    // against a window there read as 69% arriving on a LAN carrying
+    // everything. Totals cancel whatever the windows do with their edges.
+    total: state.gotAll,
     got, shown,
     reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
   } });

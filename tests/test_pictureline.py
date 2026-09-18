@@ -166,6 +166,25 @@ check("ASK_KEY_EVERY" in worker,
 check('text.lower() == "key"' in video, "which the host takes")
 check("self.stage.request_keyframe" in video, "through the rate limiter")
 
+print("a data channel is not an RTP stream, and is not asked to be")
+# The quality slider at its top built the pipeline at 62500 kb/s and the
+# guest's screen went black: SCTP is reliable, ordered and single-threaded
+# through one association, its throughput ceiling is far below what the same
+# link carries as media, and it fell over inside twenty seconds -- gstsctpenc
+# saying "Could not write to resource" while the guest saw nothing at all and
+# had no error of its own, because nothing arrived to fail on.
+check("DATA_CHANNEL_CEILING_KBPS" in video,
+      "the picture channel has a ceiling of its own, separate from the setting")
+check("def _ceiling" in video,
+      "applied only while somebody is actually being sent whole frames, so a "
+      "guest watching the media track is not capped for somebody else's sake")
+check("def apply_ceiling" in video,
+      "and brought down at once rather than eased")
+check("self.stage.apply_ceiling()" in video,
+      "the moment a guest asks for them -- the adaptive path walks down a "
+      "quarter at a time on evidence that arrives once a second, and the "
+      "channel fails in twenty")
+
 print("and the browser says what actually reached it")
 # The host's own send queue read empty while the browser was receiving
 # thirty-six of every sixty frames sent. An empty queue proves the bytes were
@@ -176,6 +195,18 @@ check("tally" in worker and "tally" in paint,
       "and the page puts it on the channel, which the worker cannot reach")
 check("_take_picture_report" in video, "the host reads it")
 check("frames_arriving" in video, "as a share of what it sent")
+# The first version compared "what the browser saw in its last second"
+# against "what this end sent between its last two reports", and those are
+# not the same second: the report's own travel time moves the boundary, so a
+# window that straddled a few frames read as 69% arriving on a LAN with
+# nothing wrong. It walked the encoder from 62 Mb/s to 1.5 on a link carrying
+# everything.
+check('report.get("total")' in video and "state.gotAll" in worker,
+      "from running totals rather than a window against a window, because "
+      "the two ends' seconds are not the same second")
+check("_shortfall" in video,
+      "compared as how much the gap between the totals grew, which cancels "
+      "whatever the windows do with their edges")
 check("FRAMES_ARRIVING_LOW" in video and "FRAMES_ARRIVING_GOOD" in video,
       "and steers the encoder by it")
 check("def _arriving" in video,

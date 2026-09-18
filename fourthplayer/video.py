@@ -337,6 +337,25 @@ FRAME_LIFETIME_MS = 150
 FRAMES_ARRIVING_LOW = 0.85
 FRAMES_ARRIVING_GOOD = 0.97
 
+# The most a guest drawing its own picture may be sent.
+#
+# Whole frames go down a WebRTC data channel, which is SCTP over DTLS over
+# UDP, and SCTP is not an RTP stream: it is reliable, ordered and
+# single-threaded through one association, and it has a throughput ceiling far
+# below what the same link carries as media. Asked for 62500 kb/s -- the
+# quality slider at its top, on a LAN -- the association fell over inside
+# twenty seconds, gstsctpenc said "Could not write to resource", and the guest
+# got a black screen with no error of its own because nothing arrived at all
+# to fail on.
+#
+# So the picture channel has a ceiling of its own, separate from what the
+# setting asks for. The guests watching the media track are unaffected: this
+# only caps the shared encoder while somebody is being sent whole frames, and
+# it is generous enough that nothing below it is a compromise at the sizes
+# this streams. Above it, nobody gets a picture at all, which is worse than
+# anybody's idea of a quality setting.
+DATA_CHANNEL_CEILING_KBPS = 20000
+
 # What the encoder is allowed to do about a link that cannot carry what it is
 # being given. Down quickly, up slowly, and never below something watchable.
 BITRATE_FLOOR_KBPS = 400
@@ -2103,6 +2122,47 @@ class Stage:
                        why="%d seconds of the picture arriving whole"
                            % BITRATE_CALM)
 
+    def _ceiling(self):
+        """The most this encoder may be asked for, whoever is watching.
+
+        The setting, unless somebody is being sent whole frames down a data
+        channel -- see DATA_CHANNEL_CEILING_KBPS for why that is a different
+        number and not a smaller version of the same one.
+        """
+        want = int(self.cfg.bitrate_kbps)
+        for peer in list(self.peers.values()):
+            if getattr(peer, "frames_wanted", False):
+                return min(want, DATA_CHANNEL_CEILING_KBPS)
+        return want
+
+    def apply_ceiling(self):
+        """Bring the encoder under the ceiling at once, not by degrees.
+
+        The adaptive path walks the rate down a quarter at a time on evidence
+        from the guest, and that evidence arrives once a second -- far too
+        slow when the pipeline has just been built at 62500 kb/s and the
+        channel that has to carry it fails within twenty. So the moment a
+        guest asks for whole frames, the rate is clamped rather than eased.
+        """
+        want = max(BITRATE_FLOOR_KBPS, self._ceiling())
+        now = self._rate_now if self._rate_now is not None \
+            else int(self.cfg.bitrate_kbps)
+        if now <= want:
+            return
+        encoder = self.encoder
+        if encoder is None:
+            return
+        try:
+            encoder.set_property("bitrate", want)
+        except Exception:
+            log.debug("this encoder will not change its bitrate mid-stream",
+                      exc_info=True)
+            return
+        log.info("a guest is being sent whole frames, so the picture comes "
+                 "down to what a data channel can carry: %d kb/s -> %d kb/s",
+                 now, want)
+        self._rate_now = want
+
     def _arriving(self):
         """The worst-off guest's share of the frames sent to it.
 
@@ -2121,7 +2181,7 @@ class Stage:
         encoder = self.encoder
         if encoder is None:
             return
-        asked = max(BITRATE_FLOOR_KBPS, int(self.cfg.bitrate_kbps))
+        asked = max(BITRATE_FLOOR_KBPS, self._ceiling())
         if self._rate_now is None:
             self._rate_now = asked
         if down:
@@ -2464,6 +2524,7 @@ class Peer:
         self._sent_frames = 0
         self._reported_at = 0
         self._reports = 0
+        self._shortfall = 0
         # What fraction of the frames sent to this guest reach it. Unknown
         # until it says so, and "all of them" is the honest starting guess:
         # nothing has gone wrong yet.
@@ -2691,9 +2752,11 @@ class Peer:
         # let it climb on a report that predates this decoder.
         self.frames_arriving = 1.0
         self._reported_at = self._sent_frames
+        self._shortfall = 0
         log.info("peer %s: %s sending whole frames down the picture channel",
                  self.id, "started" if want else "stopped")
         if want:
+            self.stage.apply_ceiling()
             log.info("peer %s: forcing a keyframe, because a decoder that has "
                      "just started has nothing to decode against", self.id)
             self.stage.force_keyframe()
@@ -2705,8 +2768,22 @@ class Peer:
         queue read zero bytes behind while the browser was receiving
         thirty-six of every sixty frames sent, because an empty queue proves
         the bytes were handed to SCTP, not that they arrived. This end knows
-        what it sent; only that end knows what turned up; the difference is
-        the link, and it is the difference the encoder is steered by.
+        what it sent; only that end knows what turned up.
+
+        Counted as a running shortfall rather than a per-window ratio, which
+        is the second version of this and the correct one. The first compared
+        "what the browser saw in its last second" against "what this end sent
+        between its last two reports", and those are not the same second: the
+        report's own travel time moves the boundary, so a window that happened
+        to straddle a few frames read as 69% arriving on a LAN with nothing
+        wrong at all. That is not a cosmetic error -- it walked the encoder
+        from 62 Mb/s down to 1.5 on a link that was carrying everything.
+
+        The shortfall cancels it. Both ends count from the beginning, and what
+        is compared is how much the gap between the two totals *grew* between
+        one report and the next. Whatever the windows do with their edges, a
+        frame that arrives is counted on both sides eventually, so a stable
+        gap means nothing is being lost however ragged the reporting.
         """
         try:
             report = json.loads(text)
@@ -2714,18 +2791,26 @@ class Peer:
             log.debug("peer %s sent something unreadable up the picture "
                       "channel: %r", self.id, text[:120])
             return
-        got = int(report.get("got") or 0)
+        got = int(report.get("total") or 0)
+        if not got:
+            # A browser too old to send a total. Nothing to compare, and a
+            # guess here is what the last version of this was.
+            return
         sent = self._sent_frames
         since = sent - self._reported_at
+        missing = max(0, sent - got)
+        lost = max(0, missing - self._shortfall)
         self._reported_at = sent
+        self._shortfall = missing
         if since <= 0:
             return
-        self.frames_arriving = min(1.0, got / float(since))
+        self.frames_arriving = max(0.0, min(1.0, 1.0 - lost / float(since)))
         self._reports += 1
         if self._reports % 10 == 1 or self.frames_arriving < FRAMES_ARRIVING_LOW:
-            log.info("peer %s: the browser received %d of the %d frames sent "
-                     "(%.0f%%), painted %d, with %dms in hand",
-                     self.id, got, since, self.frames_arriving * 100,
+            log.info("peer %s: the browser is %d frames behind what was sent, "
+                     "%d more than last time out of %d sent (%.0f%% arriving), "
+                     "painted %d, with %dms in hand",
+                     self.id, missing, lost, since, self.frames_arriving * 100,
                      int(report.get("shown") or 0),
                      int(report.get("reserve") or 0))
         self.stage.note_arrivals()
