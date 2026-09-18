@@ -906,6 +906,7 @@ class Stage:
         self._last_frame = 0.0
         self._last_pts = Gst.CLOCK_TIME_NONE
         self._gaps = []
+        self._stamps = []
 
         # Bits the encoder may hold back to smooth a burst. Smoothing is delay.
         cpb = max(16, int(cfg.bitrate_kbps * cfg.cpb_ms / 1000))
@@ -1793,30 +1794,45 @@ class Stage:
         pts = buffer.pts
         if pts == Gst.CLOCK_TIME_NONE or pts == self._last_pts:
             return                      # still the frame we already counted
-        self._last_pts = pts
+        was, self._last_pts = self._last_pts, pts
         now = time.monotonic()
         last = self._last_frame
         self._last_frame = now
         if not last:
             return
         self._gaps.append(now - last)
+        # And the timeline the guest is handed, which is the one that decides
+        # when their browser draws. Arrival can be as ragged as the network
+        # likes and still look right, because a jitter buffer exists to absorb
+        # exactly that. A ragged *timestamp* cannot be absorbed by anything:
+        # it is an instruction to draw unevenly, and the browser obeys it.
+        if was != Gst.CLOCK_TIME_NONE and pts > was:
+            self._stamps.append((pts - was) / float(Gst.SECOND))
         if len(self._gaps) < PACE_SAMPLE:
             return
         gaps = sorted(self._gaps)
+        stamps = sorted(self._stamps)
         self._gaps = []
+        self._stamps = []
         total = sum(gaps)
-        middle = gaps[len(gaps) // 2] * 1000
-        worst = gaps[-1] * 1000
         nominal = 1.0 / max(1, self.cfg.fps)
         # Late by more than half a frame is the threshold because that is
         # where a frame misses its slot on the guest's display and either
         # doubles the one before it or is skipped -- which is what uneven
         # looks like, rather than what it measures.
         late = sum(1 for g in gaps if g > nominal * 1.5)
-        log.info("pacing: %d frames in %.1fs (%.1f/s, asked for %d), typical "
-                 "gap %.1fms, worst %.0fms, %d late by more than half a frame",
-                 len(gaps), total, len(gaps) / total if total else 0,
-                 self.cfg.fps, middle, worst, late)
+        said = ("pacing: %d frames in %.1fs (%.1f/s, asked for %d), typical "
+                "gap %.1fms, worst %.0fms, %d late by more than half a frame"
+                % (len(gaps), total, len(gaps) / total if total else 0,
+                   self.cfg.fps, gaps[len(gaps) // 2] * 1000,
+                   gaps[-1] * 1000, late))
+        if stamps:
+            ragged = sum(1 for g in stamps if g > nominal * 1.5)
+            said += ("; the timeline says typical %.1fms, worst %.0fms, "
+                     "%d uneven (a frame should be %.1fms)"
+                     % (stamps[len(stamps) // 2] * 1000, stamps[-1] * 1000,
+                        ragged, nominal * 1000))
+        log.info("%s", said)
 
     def _forward(self, sink, kind):
         """Hand one encoded packet to every guest.

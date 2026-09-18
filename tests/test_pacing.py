@@ -7,6 +7,7 @@ reports what it received; this reports what was sent. Between the two there is
 nowhere left for the unevenness to hide.
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -46,6 +47,7 @@ stage.cfg = FakeCfg()
 stage._last_frame = 0.0
 stage._last_pts = video.Gst.CLOCK_TIME_NONE
 stage._gaps = []
+stage._stamps = []
 
 clock = [1000.0]
 real = video.time.monotonic
@@ -60,18 +62,19 @@ try:
     # through this host's H.265 chain, so counting markers doubled the rate.
     for _ in range(50):
         clock[0] += 0.0001
-        stage._note_pace(FakeBuffer(7000))
+        stage._note_pace(FakeBuffer(7_000_000_000))
     check(len(stage._gaps) == 0 and stage._last_frame > 0,
           "fifty packets sharing a timestamp are one frame, not fifty")
 
     print("a steady stream reports itself as steady")
     # A clean start: the section above left a frame counted at its own clock.
     stage._gaps = []
+    stage._stamps = []
     stage._last_frame = 0.0
-    stamp = 7000
+    stamp = 7_000_000_000
     for _ in range(video.PACE_SAMPLE + 1):
         clock[0] += 1 / 60.0
-        stamp += 1500                       # 90kHz, one frame at 60fps
+        stamp += int(1e9 / 60)              # nanoseconds, one frame at 60fps
         # Several packets per frame, as the payloader really produces.
         for _ in range(3):
             stage._note_pace(FakeBuffer(stamp))
@@ -84,18 +87,19 @@ try:
     print("and an uneven one is caught rather than averaged away")
     said.clear()
     stage._gaps = []
+    stage._stamps = []
     stage._last_frame = 0.0
-    stamp = 500000
+    stamp = 500_000_000_000
     for i in range(video.PACE_SAMPLE + 1):
         # Every tenth frame arrives a frame and a half late, which is exactly
         # the case that averages out to the right rate and looks wrong.
         clock[0] += (1 / 60.0) * (3.0 if i % 10 == 0 else 0.78)
-        stamp += 1500
+        stamp += int(1e9 / 60)
         for _ in range(3):
             stage._note_pace(FakeBuffer(stamp))
     report = said[0] if said else ""
     check("late by more than half a frame" in report, "it says how many were late")
-    late = int(report.split(", ")[-1].split(" ")[0])
+    late = int(re.search(r"(\d+) late by", report).group(1))
     check(late >= video.PACE_SAMPLE // 10 - 1,
           "and counts them: %d of %d" % (late, video.PACE_SAMPLE))
     check("60." in report.split("(")[1][:6] or "59." in report.split("(")[1][:6],
