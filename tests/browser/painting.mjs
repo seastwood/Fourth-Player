@@ -198,13 +198,25 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
+console.log("switching back rebuilds the connection, because nothing less works");
+// Measured after switching back: "0.0 frames a second (0.0 arrived)" and the
+// element pausing itself over and over. WebRTC's receiver had stopped
+// delivering to its own decoder and setting receiver.transform to null did
+// not undo that -- a receiver that has had a transform taken off it cannot be
+// relied on again.
+check(stopBodyFor("renewSoon(0, true)"),
+      "a fresh media connection is asked for");
+check(stopBodyFor("if (was) {"),
+      "but only when this page was really drawing, so an ordinary "
+      + "renegotiation does not recurse into another one");
+
 console.log("switching back asks for a keyframe, or it stays black");
 // The browser's own decoder has had nothing for as long as the transform was
 // attached, so it has no reference frame to decode against -- and with
 // keyframes sent only on request, nothing asks on its behalf. Reported as
 // switching back needing a page refresh.
-check(stopBodyFor("askHostForKeyframe()"),
-      "stopPainting asks the host for one");
+check(stopBodyFor("receiver.transform = null"),
+      "and the transform comes off first, whatever else follows");
 
 console.log("and the decoding, pacing and painting all happen off this thread");
 // About twenty frames a second reached the canvas out of sixty, with the

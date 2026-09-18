@@ -8556,6 +8556,7 @@ function giveTheVideoBack() {
 
 function stopPainting(why) {
   if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
+  const was = Boolean(painter);
   if (painter) { painter.stop(); painter = null; }
   // And take the transform off the receiver.
   //
@@ -8570,12 +8571,24 @@ function stopPainting(why) {
     try { receiver.transform = null; } catch (_) { /* older browser */ }
   }
   giveTheVideoBack();
-  // And ask for a keyframe, or the picture stays black until one happens to
-  // come along. The browser's own decoder has had nothing for as long as the
-  // transform was attached, so it has no reference frame to decode against,
-  // and with keyframes sent only on request nothing will ask on its behalf.
-  // Reported as switching back needing a page refresh.
-  askHostForKeyframe();
+  // And a fresh media connection, if this page was really drawing.
+  //
+  // Detaching the transform is not enough and asking for a keyframe is not
+  // enough either. Measured after switching back: "0.0 frames a second (0.0
+  // arrived)" and the element pausing itself over and over -- WebRTC's
+  // receiver had stopped delivering to its own decoder and setting
+  // receiver.transform back to null did not undo that. Whether that is a
+  // browser bug or the intended reading of the spec, a receiver that has had
+  // a transform taken off it cannot be relied on again.
+  //
+  // So the connection is rebuilt, which is a second of held picture and is
+  // the only thing that reliably works. The page has wanted this path for
+  // other reasons since long before any of this, and it is well travelled.
+  if (was) {
+    report("asking for a fresh media connection: a receiver that has had a "
+           + "transform on it does not deliver again");
+    renewSoon(0, true);
+  }
   const canvas = paintCanvas();
   if (canvas) {
     canvas.hidden = true;
