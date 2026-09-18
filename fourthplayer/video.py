@@ -1807,6 +1807,8 @@ class Stage:
         """
         self._grabbed = []
         self._grab_last = 0.0
+        self._grab_stamps = []
+        self._grab_pts = Gst.CLOCK_TIME_NONE
         element = self.pipeline.get_by_name("capture")
         pad = element.get_static_pad("src") if element is not None else None
         if pad is None:
@@ -1814,11 +1816,26 @@ class Stage:
         pad.add_probe(Gst.PadProbeType.BUFFER, self._on_grabbed)
 
     def _on_grabbed(self, _pad, info):
-        """One frame, straight off the capture. Kept as cheap as it looks."""
+        """One frame, straight off the capture. Kept as cheap as it looks.
+
+        Both clocks again, and here for a second reason: everything between
+        this pad and the guest can rewrite a timestamp, and one thing in that
+        chain exists to. Comparing the stamp here with the stamp at the far
+        end says whether the capture is telling the truth *and* whether
+        anything downstream is flattening it back out.
+        """
         now = time.monotonic()
         last, self._grab_last = self._grab_last, now
         if last:
             self._grabbed.append(now - last)
+        try:
+            pts = info.get_buffer().pts
+        except Exception:
+            return Gst.PadProbeReturn.OK
+        was, self._grab_pts = self._grab_pts, pts
+        if (pts != Gst.CLOCK_TIME_NONE and was != Gst.CLOCK_TIME_NONE
+                and pts > was):
+            self._grab_stamps.append((pts - was) / float(Gst.SECOND))
         return Gst.PadProbeReturn.OK
 
     def _grab_report(self):
@@ -1827,13 +1844,24 @@ class Stage:
         if len(taken) < 30:
             return ""
         self._grabbed = []
+        stamped = self._grab_stamps
+        self._grab_stamps = []
         taken.sort()
         nominal = 1.0 / max(1, self.cfg.fps)
         rough = sum(1 for g in taken if g > nominal * 1.5 or g < nominal * 0.5)
-        return ("; the desktop was really sampled every %.1fms typical, "
+        said = ("; the desktop was really sampled every %.1fms typical, "
                 "worst %.0fms, %d of %d nowhere near %.1fms"
                 % (taken[len(taken) // 2] * 1000, taken[-1] * 1000,
                    rough, len(taken), nominal * 1000))
+        if len(stamped) >= 30:
+            stamped.sort()
+            odd = sum(1 for g in stamped
+                      if g > nominal * 1.5 or g < nominal * 0.5)
+            said += ("; and stamped at the capture every %.1fms typical, "
+                     "worst %.0fms, %d of %d uneven"
+                     % (stamped[len(stamped) // 2] * 1000, stamped[-1] * 1000,
+                        odd, len(stamped)))
+        return said
 
     def _note_pace(self, buffer):
         """How evenly frames are actually leaving, as a number rather than a guess.
