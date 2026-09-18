@@ -62,8 +62,8 @@ if not node:
     sys.exit(0)
 
 HARNESS = "\n".join(lift(name) for name in
-                    ("panRoom", "panTowards", "pictureBox", "applyZoom",
-                     "paintAfterZoom", "cursorFollow")) + """
+                    ("panRoom", "panTowards", "streamSize", "pictureBox",
+                     "applyZoom", "paintAfterZoom", "cursorFollow")) + """
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, cursorU = 0.5, cursorV = 0.5;
 let DRIVING = false, INSET = 0;

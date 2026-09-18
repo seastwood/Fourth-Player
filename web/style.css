@@ -259,7 +259,12 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
      here: it measures the window, which is taller than the stage by
      however much browser furniture is on screen. */
   --sh: calc(var(--vv-height, 100dvh) / 100);
-  background: #000;
+  /* No black of its own. The picture's own element paints the letterbox, and
+     it now stops short of the chips and the keyboard's buttons -- see the
+     note by `video` -- so a black stage behind it would simply fill the gap
+     back in and nothing would look any different. What shows there instead is
+     the page's background, which is the point. */
+  background: transparent;
   /* No pinch on the picture.
    *
    * `manipulation` only turns off double-tap zoom; a two-finger touch still
@@ -343,6 +348,27 @@ video, #painted {
      back exactly where it was, underneath everything with a number below. */
   position: relative;
   z-index: 0;
+}
+
+/* Where the black is allowed to reach.
+ *
+ * A 16:9 stream inside an upright phone is a strip across the middle with
+ * letterbox black above and below it, and that black used to run the whole
+ * height of the screen -- behind the row of chips at the top and behind the
+ * keyboard's buttons at the bottom, so the page was one continuous black
+ * field with controls floating in it. The picture's box now stops just under
+ * the chips and just above the buttons, and the page's own background shows
+ * either side of it, which is what separates "the game" from "the furniture".
+ *
+ * Both numbers are measured and written by fitPicture(), and it never takes
+ * more than the black there is: where the picture fills the height already --
+ * a phone held sideways -- both come out zero and nothing moves. margin
+ * rather than `top`, because this element is position: relative and a
+ * relative offset would slide the picture without shortening its box, which
+ * is the same trap as setting `top` against a percentage height. */
+video {
+  margin-top: var(--picture-top, 0px);
+  height: calc(100% - var(--picture-top, 0px) - var(--picture-bottom, 0px));
 }
 
 .hud {
@@ -923,12 +949,25 @@ select.chip option { background: var(--bg2); color: var(--ink); }
 .tbtn-start.live { background: var(--dim); color: var(--bg); }
 
 @media (orientation: portrait) {
-  .stage { display: flex; flex-direction: column; background: #000; }
-  /* The controller takes the height it needs and the picture gets whatever is
-     left, rather than the picture claiming a fixed share and pushing the last
-     row of buttons off the bottom of the phone. Nothing scrolls: a control you
-     have to scroll to reach is not a control. */
-  video, #painted { flex: 1 1 auto; min-height: 0; max-height: none; }
+  /* No black here either. The picture's own element paints the letterbox and
+     stops short of the chips and the keyboard's buttons; a black stage behind
+     it would fill the gap straight back in. */
+  .stage { display: flex; flex-direction: column; }
+  /* The picture gets whatever is left, up to the height it has been given.
+     Both halves matter and the first one is easy to lose. Growing is how a
+     banner still costs the picture height: a notice that has to be read is in
+     the flow here, so it takes its space out of the column and the picture
+     gives it up. Capping is the change -- `max-height: none` let the picture
+     grow straight back over whatever the bottom inset had just taken off it,
+     so the top of the black moved under the chips and the bottom did not
+     budge, which is half a change and reads as a bug.
+     Nothing scrolls: a control you have to scroll to reach is not a control. */
+  video, #painted {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100% - var(--picture-top, 0px)
+                          - var(--picture-bottom, 0px));
+  }
   .touch {
     flex: 0 0 auto;
     /* Select and start angled between the bumpers, the way the pad this is

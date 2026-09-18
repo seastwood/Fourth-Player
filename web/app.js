@@ -2670,6 +2670,17 @@ el("screen").addEventListener("click", () => {
    is drawing them itself -- see pictureBox. */
 let streamShape = null;
 
+/* The stream's shape, from whichever of the two knows it, remembered. The
+   element's answer wins while it has one, because it is the live truth; the
+   decoder's is what there is once the element has been left holding the
+   sound. */
+function streamSize() {
+  if (video && video.videoWidth && video.videoHeight) {
+    streamShape = { width: video.videoWidth, height: video.videoHeight };
+  }
+  return streamShape;
+}
+
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, dragged = false;
 
@@ -2699,11 +2710,9 @@ function pictureBox() {
   // whole distance, which is "I'm just trying to move the cursor and it's
   // scrolling instead", and it is why none of this was ever as bad on the
   // WebRTC path.
-  if (video.videoWidth && video.videoHeight) {
-    streamShape = { width: video.videoWidth, height: video.videoHeight };
-  }
-  const w = (video.videoWidth || (streamShape && streamShape.width)) || 0;
-  const h = (video.videoHeight || (streamShape && streamShape.height)) || 0;
+  const shape = streamSize();
+  const w = (shape && shape.width) || 0;
+  const h = (shape && shape.height) || 0;
   if (!w || !h || !box.width || !box.height) {
     return { width: box.width, height: box.height, box };
   }
@@ -3227,13 +3236,17 @@ if (el("zoom-btn") && el("zoom-range")) {
   });
 }
 
-/* The shape of the picture decides how far it can be moved, and that is not
+/* The shape of the picture decides how far it can be moved, and how much
+   black there is for the chips and the buttons to stand on, and neither is
    known until the stream says what size it is -- nor after it changes, which
-   is what a codec renegotiation does. */
-video.addEventListener("loadedmetadata", applyZoom);
-window.addEventListener("resize", applyZoom);
+   is what a codec renegotiation does. `resize` on a <video> means its
+   *stream* changed size, not its box, so this cannot chase its own tail. */
+const reshaped = () => { fitPicture(); applyZoom(); };
+video.addEventListener("loadedmetadata", reshaped);
+video.addEventListener("resize", reshaped);
+window.addEventListener("resize", reshaped);
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", applyZoom);
+  window.visualViewport.addEventListener("resize", reshaped);
 }
 
 el("hudbtn").addEventListener("click", (event) => {
@@ -5666,6 +5679,9 @@ function deskPaintKeys() {
   // picture, which is right for watching and wrong for this: it resizes the
   // video element, and the pointer's geometry is measured from that.
   stage.classList.toggle("driving", cursorDriving());
+  // The keyboard's buttons decide where the black stops, and they have just
+  // appeared, gone, or moved with the keyboard.
+  fitPicture();
   // Whether the picture may slide inside its own letterboxing changes with
   // that same answer, so the moment it changes the picture has to be clamped
   // again. Without this, putting the pointer down left the picture wherever
@@ -7329,7 +7345,7 @@ function fitStage() {
   // Whatever the picture's box becomes, the canvas follows it. Done here
   // because this is the one function that runs on every reason the stage
   // changes shape.
-  requestAnimationFrame(fitPainted);
+  requestAnimationFrame(() => { fitPicture(); fitPainted(); });
   const vv = window.visualViewport;
   if (!vv) return;                       // the dvh fallback in the CSS applies
   noteZoom(vv);
@@ -8719,9 +8735,70 @@ let watchingTheBox = null;
 function watchThePictureBox() {
   if (watchingTheBox || typeof ResizeObserver === "undefined" || !video) return;
   try {
-    watchingTheBox = new ResizeObserver(() => fitPainted());
+    watchingTheBox = new ResizeObserver((entries) => {
+      // The picture's own box is the one thing this must not answer by
+      // resizing again: fitPicture changes it, so calling it from here would
+      // be a loop. The chips and the buttons are what decide how far the
+      // black may reach, and they are laid out independently of the picture,
+      // so measuring them when they change settles in one pass.
+      if (entries.some((entry) => entry.target !== video)) fitPicture();
+      fitPainted();
+    });
     watchingTheBox.observe(video);
+    const hud = el("hud"), dock = el("desk-dock");
+    if (hud) watchingTheBox.observe(hud);
+    if (dock) watchingTheBox.observe(dock);
   } catch (_) { watchingTheBox = null; }
+}
+
+/* How far the picture's black may reach, top and bottom.
+ *
+ * A 16:9 stream inside an upright phone is a strip across the middle, and the
+ * letterbox black used to run the whole height of the screen -- behind the
+ * chips at the top and behind the keyboard's buttons at the bottom, so the
+ * whole page was one black field with controls floating in it. The box stops
+ * just under the chips and just above the buttons now, and the page's own
+ * background shows either side.
+ *
+ * It never takes more than the black there is. The picture is not made
+ * smaller to tidy up an edge: where it already fills the height -- a phone
+ * held sideways -- there is no slack, both numbers come out zero, and nothing
+ * moves. Where there is less slack than the furniture wants, the two share
+ * what there is in the proportion they asked for, so neither edge takes it
+ * all.
+ */
+function fitPicture() {
+  if (!stage || !video) return;
+  const box = stage.getBoundingClientRect();
+  if (!box.height || !box.width) return;
+  const room = (part, from) => {
+    if (!part || part.hidden) return 0;
+    const at = part.getBoundingClientRect();
+    if (at.height <= 0) return 0;
+    return Math.max(0, from === "top" ? at.bottom - box.top
+                                      : box.bottom - at.top);
+  };
+  const wantTop = room(el("hud"), "top");
+  const wantBottom = room(el("desk-dock"), "bottom");
+
+  // The black there is to give away: the height of the box, less the height
+  // the picture actually occupies in it.
+  const shape = streamSize();
+  let slack = 0;
+  if (shape && shape.width && shape.height) {
+    const fit = Math.min(box.width / shape.width, box.height / shape.height);
+    slack = Math.max(0, box.height - shape.height * fit);
+  }
+  let top = wantTop, bottom = wantBottom;
+  const want = wantTop + wantBottom;
+  if (want > slack) {
+    const share = want > 0 ? slack / want : 0;
+    top = wantTop * share;
+    bottom = wantBottom * share;
+  }
+  const style = document.documentElement.style;
+  style.setProperty("--picture-top", Math.round(top) + "px");
+  style.setProperty("--picture-bottom", Math.round(bottom) + "px");
 }
 
 function fitPainted() {
@@ -9058,6 +9135,7 @@ async function startPainting() {
   painter.whenShaped((shape) => {
     if (!shape || !shape.width || !shape.height) return;
     streamShape = { width: shape.width, height: shape.height };
+    fitPicture();
     fitPainted();
     applyZoom();
   });

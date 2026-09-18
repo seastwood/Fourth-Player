@@ -320,10 +320,22 @@ check(fitBody.includes("fitPainted"),
 // And the reasons the box moves while the viewport stands still: a notice
 // above the picture, the on-screen pad arriving, a chip strip growing by a
 // line. The video reflows for those and the canvas over it did not.
-check(app.includes("new ResizeObserver(() => fitPainted())"),
+const watcher = app.slice(app.indexOf("watchingTheBox = new ResizeObserver"),
+                          app.indexOf("watchingTheBox.observe(video)"));
+check(watcher.includes("fitPainted()"),
       "and by watching the element itself, which asks no questions about why");
 check(app.includes("watchingTheBox.observe(video)"),
       "the picture's own box is what is watched");
+// The chips and the keyboard's buttons decide how far the letterbox black
+// may reach, and they are laid out independently of the picture -- so they
+// are watched too, and the picture's own box deliberately is not allowed to
+// re-trigger that measurement or it would resize itself for ever.
+check(app.includes('watchingTheBox.observe(hud)')
+      && app.includes('watchingTheBox.observe(dock)'),
+      "along with the furniture the black stops at");
+check(watcher.includes("entry.target !== video") && watcher.includes("fitPicture"),
+      "with the picture's own box excluded from that half, so it cannot chase "
+      + "its own tail");
 check(app.includes("typeof ResizeObserver === \"undefined\""),
       "and a browser without one still works, it just does not follow");
 const overRule = css2.slice(css2.indexOf("#painted.over {"),
