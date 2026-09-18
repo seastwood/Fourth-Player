@@ -26,8 +26,9 @@ for (const one of ["framesReceived", "framesDecoded", "framesDropped"]) {
 }
 
 console.log("and it runs on the watchdog that already has the stats");
-const watch = app.slice(app.indexOf("async function watchMedia()"),
-                        app.indexOf("async function watchMedia()") + 1200);
+const watchFrom = app.indexOf("async function watchMedia()");
+const watch = app.slice(watchFrom,
+                        app.indexOf("\nfunction ", watchFrom));
 check(watch.includes("tellAboutTheRate(picture)"),
       "called with the stats already fetched, not fetching its own");
 
