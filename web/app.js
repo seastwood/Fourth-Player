@@ -8725,8 +8725,20 @@ async function startPainting() {
     return;
   }
   paintWaitedSaid = false;
+  // The <video> element gives up its decoder first, before anything asks for
+  // another one.
+  //
+  // iOS allows very few video decoders at once -- few enough that one is a
+  // realistic number -- and hiding the element does not release the one it
+  // holds. This used to run *after* the worker had built its decoder, which
+  // is asking the device for one more than it has while the first is still
+  // held. The audio tracks stay: they are in the same MediaStream and this
+  // element is what plays them, so it is handed a stream with the video
+  // removed rather than nothing at all.
+  keepAudioOnly();
   painter = makePainter(canvas, report);
   if (!painter.start(receiver, codec)) {
+    giveTheVideoBack();
     painter = null;
     setPaintMethod("browser");
     return;
@@ -8743,19 +8755,6 @@ async function startPainting() {
   if (canvas) canvas.classList.add("over");
   fitPainted();
   paintAfterZoom();
-  // And the <video> element gives up its decoder.
-  //
-  // iOS allows very few video decoders at once -- few enough that one is a
-  // realistic number -- and hiding the element does not release the one it
-  // holds. So a page that has just built a second decoder for the same
-  // stream is asking for one more than the device will give, and what comes
-  // back is a decoder that configures, accepts a frame and then reports
-  // "Decoder failure" with nothing else to say. Exactly what happened.
-  //
-  // The audio tracks stay: they are in the same MediaStream and the element
-  // is what plays them, so this hands it a stream with the video removed
-  // rather than nothing at all.
-  keepAudioOnly();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
   watchThePainting();
   // If the worker gives up on its own -- a decoder that will not run, a

@@ -42,6 +42,7 @@ const state = {
   shape: "",
   waiting: [],
   timer: 0,
+  rung: 0,
   handed: 0, fed: 0, out: 0, drawn: 0, refused: 0, skipped: 0, stale: 0,
   ever: false,
 };
@@ -95,13 +96,19 @@ function decoded(frame) {
   if (!state.timer) pump();
 }
 
-function buildDecoder(codec, description) {
-  const config = { codec, optimizeForLatency: true };
+function buildDecoder(codec, description, latency) {
+  const config = { codec };
   if (description) config.description = description;
+  // optimizeForLatency is a hint and a browser may refuse the whole config
+  // over it. It is worth asking for -- it is the difference between a
+  // decoder that outputs a frame as soon as it can and one that buffers to
+  // be tidy -- but it is not worth failing over, so it is one of the rungs
+  // below rather than a fixed part of every attempt.
+  if (latency) config.optimizeForLatency = true;
   const decoder = new VideoDecoder({
     output: decoded,
     error: (err) => {
-      if (tryAvcc()) return;
+      if (nextRung()) return;
       self.postMessage({
         failed: "the decoder stopped: "
                 + ((err && err.message) || "no reason given"),
@@ -113,42 +120,72 @@ function buildDecoder(codec, description) {
   return decoder;
 }
 
-/* The parameter sets up front and length-prefixed frames, which is what
-   WebKit wants and will not say. See avcDescription in paint.js. */
-function tryAvcc() {
-  if (state.feedAs !== "annexb") return false;
-  if (state.codec.indexOf("avc1.") !== 0) return false;
-  if (!state.lastKey) return false;
-  let description = null;
-  try { description = avcDescription(state.lastKey); } catch (_) {}
-  if (!description) return false;
-  // Bytes 1 to 3 of an avcC box are the profile, compatibility flags and
-  // level as the *encoder* wrote them. The SDP says what the two ends agreed
-  // to send, which is not always the same thing, and a decoder handed a
-  // description compares the two.
-  const exact = "avc1." + [description[1], description[2], description[3]]
+/* Everything worth asking a decoder, in the order worth asking it.
+ *
+ * iOS Safari refused both of the first two shapes -- start codes, and the
+ * parameter sets up front -- with nothing but "Decoder failure" either time.
+ * A decoder that will not say which part of a config it dislikes leaves only
+ * one honest method: offer the combinations one at a time and watch. There
+ * are four and they cost nothing to walk.
+ *
+ * The two axes are the bitstream shape (start codes, as WebRTC delivers, or
+ * the mp4 shape with a description) and whether the latency hint is asked
+ * for. Everything else -- the codec string, the profile, the level -- is read
+ * out of the stream by then and is not a guess. */
+const RUNGS = [
+  { avcc: false, latency: true },
+  { avcc: true, latency: true },
+  { avcc: true, latency: false },
+  { avcc: false, latency: false },
+];
+
+function describeKey() {
+  if (!state.lastKey) return null;
+  try { return avcDescription(state.lastKey); } catch (_) { return null; }
+}
+
+/* Bytes 1 to 3 of an avcC box are the profile, compatibility flags and level
+   as the *encoder* wrote them. The SDP says what the two ends agreed to send,
+   which is not always the same thing, and a decoder handed a description
+   compares the two. */
+function exactCodec(description) {
+  return "avc1." + [description[1], description[2], description[3]]
     .map((b) => (b < 16 ? "0" : "") + b.toString(16).toUpperCase()).join("");
-  const keyframe = state.lastKey;
-  try {
-    if (state.decoder && state.decoder.state !== "closed") state.decoder.close();
-  } catch (_) {}
-  try {
-    state.decoder = buildDecoder(exact, description);
-  } catch (err) {
-    self.postMessage({
-      failed: "the parameter sets were refused as well: "
-              + ((err && err.message) || "no reason given"),
-    });
-    return false;
+}
+
+function nextRung() {
+  const isAvc = state.codec.indexOf("avc1.") === 0;
+  while (state.rung + 1 < RUNGS.length) {
+    state.rung += 1;
+    const want = RUNGS[state.rung];
+    let description = null;
+    if (want.avcc) {
+      if (!isAvc) continue;              // an hvcC is a different box
+      description = describeKey();
+      if (!description) continue;        // no parameter sets seen yet
+    }
+    const codec = description ? exactCodec(description) : state.codec;
+    const keyframe = state.lastKey;
+    try {
+      if (state.decoder && state.decoder.state !== "closed") {
+        state.decoder.close();
+      }
+    } catch (_) {}
+    try {
+      state.decoder = buildDecoder(codec, description, want.latency);
+    } catch (err) {
+      continue;                          // this rung will not even configure
+    }
+    state.codec = codec;
+    state.feedAs = want.avcc ? "avcc" : "annexb";
+    state.started = false;
+    say("trying " + codec + (want.avcc ? " with the parameter sets up front"
+                                       : " with start codes")
+        + (want.latency ? "" : " and no latency hint"));
+    if (keyframe) take("key", 0, keyframe);
+    return true;
   }
-  state.codec = exact;
-  state.feedAs = "avcc";
-  state.started = false;
-  say("that decoder would not take frames separated by start codes; handing "
-      + "it the parameter sets up front instead, as " + exact
-      + " (read out of the stream, not the SDP)");
-  take("key", 0, keyframe);
-  return true;
+  return false;
 }
 
 function take(type, timestamp, data) {
@@ -222,7 +259,8 @@ self.onmessage = (event) => {
     state.pacer = makePacer(LIMITS);
     state.codec = m.start.codec;
     try {
-      state.decoder = buildDecoder(state.codec, null);
+      state.rung = 0;
+      state.decoder = buildDecoder(state.codec, null, true);
     } catch (err) {
       self.postMessage({
         failed: "no decoder would start for " + state.codec,
@@ -238,8 +276,9 @@ self.onmessage = (event) => {
     state.codec = m.codec;
     state.feedAs = "annexb";
     state.started = false;
+    state.rung = 0;
     try {
-      state.decoder = buildDecoder(state.codec, null);
+      state.decoder = buildDecoder(state.codec, null, true);
     } catch (err) {
       self.postMessage({ failed: "no decoder would start for " + m.codec });
       return;

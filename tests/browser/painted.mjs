@@ -158,6 +158,21 @@ await new Promise((go) => globalThis.setTimeout(go, 20));
 check(built[0].chunks.length === before,
       "a delta is dropped while the decoder is behind");
 
+console.log("every combination worth asking is asked, one at a time");
+// iOS Safari refused both start codes and the parameter sets with nothing
+// but "Decoder failure" either time. A decoder that will not say which part
+// of a config it dislikes leaves one honest method: offer the combinations
+// and watch. The latency hint is one of them -- worth asking for, not worth
+// failing over.
+check(workerSrc.includes("const RUNGS = ["), "the combinations are a list");
+const rungs = workerSrc.slice(workerSrc.indexOf("const RUNGS = ["),
+                              workerSrc.indexOf("];", workerSrc.indexOf("const RUNGS = [")));
+check((rungs.match(/avcc:/g) || []).length === 4, "four of them");
+check(rungs.includes("latency: false"),
+      "including the same shapes without the latency hint");
+check(workerSrc.includes("if (!isAvc) continue"),
+      "and an hvcC is never guessed at, because it is a different box");
+
 console.log("a decoder that fails is given the parameter sets instead");
 sent.length = 0;
 onError(new Error("Decoder failure"));
@@ -176,7 +191,8 @@ check(replayed[3] === 6 && replayed[0] === 0,
       "length-prefixed now, not start-coded: "
       + Array.from(replayed.slice(0, 5)).join(","));
 check(sent.some((m) => m.note && /parameter sets up front/.test(m.note)),
-      "and it says what it did");
+      "and it says which rung it is on: "
+      + (sent.filter((m) => m.note).map((m) => m.note).join(" | ") || "nothing"));
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
