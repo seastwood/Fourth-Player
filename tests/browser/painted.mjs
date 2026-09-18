@@ -59,7 +59,10 @@ const world = {
   VideoDecoder: FakeDecoder,
   VideoFrame: FakeFrame,
   EncodedVideoChunk: class { constructor(o) { Object.assign(this, o); } },
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, 0),
+  setTimeout: (fn, ms) => globalThis.setTimeout(() => {
+    clock += Math.max(0, ms || 0);
+    fn();
+  }, 0),
   clearTimeout: (id) => globalThis.clearTimeout(id),
 };
 
@@ -121,6 +124,8 @@ console.log("a run of them, one paint per turn of the event loop");
 for (let i = 1; i <= 30; i += 1) {
   clock += 16.7;
   output(new FakeFrame(i * 16700));
+  // Let the worker's own timers run between frames, as they would.
+  await new Promise((go) => globalThis.setTimeout(go, 0));
 }
 await new Promise((go) => globalThis.setTimeout(go, 60));
 check(painted === 31, `31 out, ${painted} painted`);
@@ -128,6 +133,25 @@ check(workerSrc.includes("setTimeout(pump, 0)"),
       "and the queue yields between paints rather than draining in one turn");
 check(canvas.width === 1280 && canvas.height === 720,
       `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
+
+console.log("frames that arrive in a burst are still painted evenly");
+// The fault this replaced: an absolute schedule built by mapping the capture
+// clock onto this one drifts until every frame is late on arrival, and a
+// queue of late frames is drained as fast as the event loop allows. Measured
+// on the real thing: "painted every 10ms typical, worst 176ms, 224 of 475
+// off the beat", on a stream sending an even sixty a second.
+check(workerSrc.includes("function schedule(captureMs)"),
+      "the schedule is built by a named thing that can be read");
+check(workerSrc.includes("captureMs - state.lastPts"),
+      "from the differences between capture times, which need no agreement "
+      + "about where zero is or how fast a second passes");
+check(workerSrc.includes("if (state.nextAt < now) state.nextAt = now;"),
+      "and never into the past, which is what let a queue drain in one turn");
+check(workerSrc.includes("state.waiting.length > DEPTH_WANT * 3"),
+      "frames are dropped only when genuinely behind, not whenever the next "
+      + "one happens to be due");
+check(!workerSrc.includes("state.waiting[1].due <= performance.now()"),
+      "which threw away one of every pair on a link that delivers in pairs");
 
 console.log("the counters name every stage, including the one before us");
 sent.length = 0;

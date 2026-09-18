@@ -51,6 +51,8 @@ const state = {
   drew: false,
   lastDraw: 0,
   shown: [],
+  lastPts: null,
+  nextAt: null,
 };
 
 function say(text) { self.postMessage({ note: text }); }
@@ -119,8 +121,10 @@ function pump() {
     // Drop to the latest. A frame that was due while the thread was busy is
     // not worth drawing once a newer one exists: it costs a paint and shows
     // somebody a picture they have already been shown the successor of.
-    while (state.waiting.length > 1
-           && state.waiting[1].due <= performance.now()) {
+    // Only when genuinely behind. Dropping whenever the next frame happened
+    // to be due threw away one of every pair on a link that delivers in
+    // pairs, which is most of them, and reads as skipping.
+    while (state.waiting.length > DEPTH_WANT * 3) {
       state.waiting.shift().frame.close();
       state.stale += 1;
     }
@@ -148,16 +152,60 @@ function pump() {
   }
 }
 
+/* When to paint the next frame.
+ *
+ * Built from the *differences* between capture times and nothing else, which
+ * is the whole point. Mapping a capture clock onto this one needs the two to
+ * agree about where zero is and how fast a second passes, and they do not:
+ * the capture clock restarts whenever the pipeline does, and neither runs at
+ * exactly the rate of the other. An absolute schedule built on that mapping
+ * drifts until every frame is already late on arrival, and a queue of frames
+ * that are all late is drained as fast as the event loop allows -- which was
+ * measured as "painted every 10ms typical, worst 176ms, 224 of 475 off the
+ * beat" on a stream sending an even sixty a second.
+ *
+ * Differences need no agreement about anything. The gap between two capture
+ * timestamps is how far apart the pictures are, so painting them that far
+ * apart is right whatever either clock thinks the time is.
+ *
+ * The queue depth is the only correction: too many waiting means this end is
+ * behind and should hurry slightly; none waiting means it may relax. Both
+ * are gentle, because a renderer that lurches is the thing being fixed.
+ */
+const GAP_MIN = 4, GAP_MAX = 250;       // a sane frame interval, in ms
+const DEPTH_WANT = 2;                   // frames in hand, ideally
+
+function schedule(captureMs) {
+  const now = performance.now();
+  let gap = 1000 / 60;
+  if (state.lastPts !== null) {
+    gap = Math.min(GAP_MAX, Math.max(GAP_MIN, captureMs - state.lastPts));
+  }
+  state.lastPts = captureMs;
+  if (state.nextAt === null) {
+    // First frame: paint it now, and start the clock from here.
+    state.nextAt = now;
+    return now;
+  }
+  // Behind or ahead, nudged by at most a tenth of a frame each time.
+  const deep = state.waiting.length;
+  const nudge = gap * 0.1;
+  if (deep > DEPTH_WANT) gap -= nudge;
+  else if (deep === 0) gap += nudge;
+  state.nextAt += gap;
+  // Never schedule into the past, or everything after it arrives already
+  // late and the queue drains in one burst -- which is the fault this
+  // replaces.
+  if (state.nextAt < now) state.nextAt = now;
+  return state.nextAt;
+}
+
 function decoded(frame) {
   state.out += 1;
-  state.drew = state.drew || false;
   const captured = (frame.timestamp || 0) / 1000;
-  const now = performance.now();
-  // An absolute moment, not a delay. The capture clock is even, so a
-  // schedule built on it is even too, whatever the network did on the way --
-  // which is the difference between a picture that plays and one that
-  // arrives.
-  state.waiting.push({ frame, due: state.pacer.due(captured, now) });
+  // Kept for the report, which is where the reserve comes from.
+  state.pacer.due(captured, performance.now());
+  state.waiting.push({ frame, due: schedule(captured) });
   if (!state.timer) pump();
 }
 
@@ -297,6 +345,8 @@ function close() {
     if (state.decoder && state.decoder.state !== "closed") state.decoder.close();
   } catch (_) {}
   state.decoder = null;
+  state.lastPts = null;
+  state.nextAt = null;
 }
 
 /* Putting a frame back together.
