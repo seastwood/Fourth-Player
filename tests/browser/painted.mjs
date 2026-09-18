@@ -25,10 +25,15 @@ const said = [];
 let output = null, onError = null;
 let painted = 0, closed = 0;
 
+const built = [];
 class FakeDecoder {
-  constructor(o) { output = o.output; onError = o.error; this.state = "unconfigured"; }
-  configure() { this.state = "configured"; }
-  decode() {}
+  constructor(o) {
+    output = o.output; onError = o.error; this.state = "unconfigured";
+    this.config = null; this.chunks = [];
+    built.push(this);
+  }
+  configure(c) { this.state = "configured"; this.config = c; }
+  decode(chunk) { this.chunks.push(chunk); }
   close() { this.state = "closed"; }
 }
 FakeDecoder.isConfigSupported = async () => ({ supported: true });
@@ -101,6 +106,56 @@ second.start({ transform: null }, "avc1.42E01F");
 onError(new Error("Decoder failure"));
 check(said.some((t) => /decoder/i.test(t)),
       "the failure is reported: " + (said[0] || "nothing"));
+
+console.log("\na decoder that refuses start codes is given the parameter sets");
+// iOS Safari configures for Annex B, accepts one frame and reports "Decoder
+// failure" -- against every spelling of the codec, so it is not the profile
+// or the level. WebKit wants what an mp4 carries: the parameter sets up
+// front as a description, and each frame length-prefixed.
+built.length = 0;
+said.length = 0;
+const third = paint.makePainter(canvas, (t) => said.push(t));
+third.start({ transform: null }, "avc1.42E01F");
+check(built.length === 1 && built[0].config
+      && built[0].config.description === undefined,
+      "it starts with no description, which means start codes");
+
+// A real keyframe: SPS, PPS, IDR.
+const sps = [0x67, 0x42, 0xe0, 0x28, 0xaa, 0xbb];
+const pps = [0x68, 0xce, 0x3c, 0x80];
+const idr = [0x65, 0x88, 0x84, 0x21];
+const keyframe = new Uint8Array([0, 0, 0, 1, ...sps, 0, 0, 0, 1, ...pps,
+                                 0, 0, 1, ...idr]).buffer;
+third.take("key", 0, keyframe);
+check(built[0].chunks.length === 1, "the keyframe is fed as it came");
+
+onError(new Error("Decoder failure"));
+check(built.length === 2, "a failure builds a second decoder, it does not stop");
+const now = built[1].config;
+check(now && now.description, "and configures it with a description");
+check(now.codec === "avc1.42E01F", "keeping the codec that was agreed");
+const desc = Array.from(new Uint8Array(now.description));
+check(desc[0] === 1 && desc[4] === 0xff && desc[5] === 0xe1,
+      "a well-formed avcC: version 1, four-byte lengths, one SPS ("
+      + desc.slice(0, 6).map((b) => b.toString(16)).join(" ") + ")");
+check(desc[1] === 0x42 && desc[3] === 0x28,
+      "with the profile and level read out of the SPS itself");
+
+check(built[1].chunks.length === 1,
+      "the keyframe already in hand is replayed, so it need not wait for the next");
+const replayed = new Uint8Array(built[1].chunks[0].data);
+check(replayed[0] === 0 && replayed[1] === 0 && replayed[2] === 0
+      && replayed[3] === 6,
+      "and it is length-prefixed now, not start-coded: "
+      + Array.from(replayed.slice(0, 5)).join(","));
+check(said.some((t) => /parameter sets up front/.test(t)),
+      "and it says what it did: " + (said.find((t) => /parameter/.test(t)) || ""));
+
+console.log("\nand it does not try that twice, or on a codec it cannot build one for");
+check(third.tryAvcc() === false, "once switched, there is nothing else to try");
+const fourth = paint.makePainter(canvas, () => {});
+fourth.start({ transform: null }, "hvc1.1.6.L93.B0");
+check(fourth.tryAvcc() === false, "and H.265 is left alone");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

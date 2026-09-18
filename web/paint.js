@@ -233,6 +233,104 @@ function toAnnexB(buffer) {
   return { data: out.buffer, shape: "length-prefixed" };
 }
 
+/* The other way of handing H.264 to a decoder, for the browser that will not
+ * take the first.
+ *
+ * iOS Safari configures a decoder for Annex B, accepts one frame and reports
+ * "Decoder failure" -- measured against all three spellings of the codec, so
+ * it is not the profile or the level. WebKit wants what an mp4 carries
+ * instead: the parameter sets handed over once, up front, as a `description`,
+ * and every frame length-prefixed rather than separated by start codes.
+ *
+ * Both of those are derivable from the stream itself. The parameter sets
+ * arrive in front of every keyframe (the host sets config-interval=-1 for
+ * exactly this reason), so the first keyframe carries everything needed to
+ * build the description, and the conversion of the frames is the inverse of
+ * toAnnexB.
+ */
+function splitAnnexB(view) {
+  const units = [];
+  let at = 0;
+  // Skip to the first start code.
+  while (at + 3 <= view.length) {
+    if (view[at] === 0 && view[at + 1] === 0
+        && (view[at + 2] === 1
+            || (view[at + 2] === 0 && view[at + 3] === 1))) break;
+    at += 1;
+  }
+  while (at + 3 <= view.length) {
+    const wide = view[at + 2] === 0;
+    const from = at + (wide ? 4 : 3);
+    let next = from;
+    while (next + 3 <= view.length) {
+      if (view[next] === 0 && view[next + 1] === 0
+          && (view[next + 2] === 1
+              || (view[next + 2] === 0 && view[next + 3] === 1))) break;
+      next += 1;
+    }
+    const end = (next + 3 <= view.length) ? next : view.length;
+    if (end > from) units.push(view.subarray(from, end));
+    if (end >= view.length) break;
+    at = end;
+  }
+  return units;
+}
+
+/* The avcC box a decoder wants as its `description`, or null if this frame
+   does not carry the parameter sets. */
+function avcDescription(bytes) {
+  const units = splitAnnexB(new Uint8Array(bytes));
+  const sps = [], pps = [];
+  for (const unit of units) {
+    const kind = unit[0] & 0x1f;
+    if (kind === 7) sps.push(unit);
+    else if (kind === 8) pps.push(unit);
+  }
+  if (!sps.length || !pps.length || sps[0].length < 4) return null;
+  let size = 7;
+  for (const one of sps) size += 2 + one.length;
+  for (const one of pps) size += 2 + one.length;
+  const out = new Uint8Array(size);
+  let at = 0;
+  out[at++] = 1;                       // configurationVersion
+  out[at++] = sps[0][1];               // profile
+  out[at++] = sps[0][2];               // profile compatibility
+  out[at++] = sps[0][3];               // level
+  out[at++] = 0xff;                    // reserved + four-byte lengths
+  out[at++] = 0xe0 | (sps.length & 0x1f);
+  for (const one of sps) {
+    out[at++] = (one.length >> 8) & 0xff;
+    out[at++] = one.length & 0xff;
+    out.set(one, at); at += one.length;
+  }
+  out[at++] = pps.length & 0xff;
+  for (const one of pps) {
+    out[at++] = (one.length >> 8) & 0xff;
+    out[at++] = one.length & 0xff;
+    out.set(one, at); at += one.length;
+  }
+  return out;
+}
+
+/* Start codes to four-byte lengths: the inverse of toAnnexB, and what a
+   decoder configured with a description expects every frame to look like. */
+function toLengthPrefixed(bytes) {
+  const units = splitAnnexB(new Uint8Array(bytes));
+  if (!units.length) return bytes;
+  let size = 0;
+  for (const one of units) size += 4 + one.length;
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const one of units) {
+    out[at++] = (one.length >>> 24) & 0xff;
+    out[at++] = (one.length >>> 16) & 0xff;
+    out[at++] = (one.length >>> 8) & 0xff;
+    out[at++] = one.length & 0xff;
+    out.set(one, at); at += one.length;
+  }
+  return out.buffer;
+}
+
 function canPaintDirectly() {
   return typeof VideoDecoder !== "undefined"
     && typeof VideoFrame !== "undefined"
@@ -259,6 +357,14 @@ function makePainter(canvas, say) {
   let started = false;                   // a keyframe has been seen
   let shape = "";                        // what the bitstream turned out to be
   let ever = false;                      // anything painted, ever
+  // How frames are handed over, and what is needed to change our mind.
+  // "annexb" is the format WebRTC delivers and what a decoder with no
+  // description expects; "avcc" is what WebKit wants instead. The last
+  // keyframe is kept because it carries the parameter sets the description is
+  // built from, and because the new decoder needs a keyframe to start on.
+  let feedAs = "annexb";
+  let codecNow = "";
+  let lastKey = null;
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -334,6 +440,8 @@ function makePainter(canvas, say) {
           shape = shaped.shape;
           say("the encoded frames are " + shape);
         }
+        if (key) lastKey = bytes;
+        if (feedAs === "avcc") bytes = toLengthPrefixed(bytes);
       } catch (_) { /* pass it through as it came */ }
       try {
         decoder.decode(new EncodedVideoChunk({
@@ -354,8 +462,20 @@ function makePainter(canvas, say) {
       }
     },
 
-    start(receiver, codec) {
-      if (running) return false;
+    /* Hand the parameter sets over as a description and length-prefix the
+       frames, which is what iOS Safari wants and what it will not say. True
+       if the switch was made. */
+    tryAvcc() {
+      if (feedAs !== "annexb") return false;
+      if (codecNow.indexOf("avc1.") !== 0) return false;   // H.264 only
+      if (!lastKey) return false;
+      let description = null;
+      try { description = avcDescription(lastKey); } catch (_) {}
+      if (!description) return false;
+      const keyframe = lastKey;
+      try {
+        if (decoder && decoder.state !== "closed") decoder.close();
+      } catch (_) {}
       try {
         decoder = new VideoDecoder({
           output: decoded,
@@ -364,6 +484,37 @@ function makePainter(canvas, say) {
             this.stop();
           },
         });
+        decoder.configure({ codec: codecNow, description,
+                            optimizeForLatency: true });
+      } catch (err) {
+        say("the parameter sets were refused as well: "
+            + (err && err.message ? err.message : "no reason given"));
+        return false;
+      }
+      feedAs = "avcc";
+      started = false;
+      say("that decoder would not take frames separated by start codes; "
+          + "handing it the parameter sets up front instead");
+      // The new decoder needs a keyframe and the next one may be seconds
+      // away, so it gets the one that is already in hand.
+      this.take("key", 0, keyframe);
+      return true;
+    },
+
+    start(receiver, codec) {
+      if (running) return false;
+      try {
+        decoder = new VideoDecoder({
+          output: decoded,
+          error: (err) => {
+            // One more thing to try before giving up, and it is the thing
+            // WebKit actually wants. See avcDescription.
+            if (this.tryAvcc()) return;
+            say("the direct decoder stopped: " + (err && err.message));
+            this.stop();
+          },
+        });
+        codecNow = codec;
         // No description, which means Annex B -- the format WebRTC hands out
         // for H.264. A description here would mean AVCC and every frame would
         // be rejected as malformed.
@@ -428,6 +579,9 @@ function makePainter(canvas, say) {
       started = false;
       shape = "";
       ever = false;
+      feedAs = "annexb";
+      lastKey = null;
+      codecNow = "";
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
@@ -453,5 +607,7 @@ function makePainter(canvas, say) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
-                     toAnnexB, looksAnnexB, makePainter, PACE };
+                     toAnnexB, looksAnnexB, splitAnnexB,
+                     avcDescription, toLengthPrefixed,
+                     makePainter, PACE };
 }
