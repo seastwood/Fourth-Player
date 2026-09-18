@@ -78,6 +78,93 @@ function shownSpread() {
   };
 }
 
+/* Two ways to put a frame on the canvas, and the first is worth the code.
+ *
+ * drawImage of a VideoFrame onto a 2D context is the obvious way and it has
+ * a property that matters here: it blocks when the swap chain is full. A
+ * paint that blocks is a paint that lands late, and one late paint is a
+ * frame shown for two refreshes and the next one skipped -- which is what
+ * "worst 60ms" in an otherwise even report has been all along. moonlight-web
+ * says the same thing about it in as many words: "the synchronous drawImage
+ * blocking on a full swap chain, the signature of presentation
+ * back-pressure", and prefers a GL renderer for exactly this reason.
+ *
+ * Uploading the frame as a texture and drawing one triangle over the canvas
+ * does not block that way. The triangle is generated in the vertex shader
+ * from gl_VertexID, so there are no buffers to bind and nothing to keep in
+ * step with the canvas size.
+ */
+function makeGlPainter(canvas) {
+  let gl = null;
+  try {
+    gl = canvas.getContext("webgl2", {
+      alpha: false, antialias: false, depth: false, stencil: false,
+      desynchronized: true, preserveDrawingBuffer: false,
+      powerPreference: "high-performance",
+    });
+  } catch (_) { return null; }
+  if (!gl) return null;
+
+  const build = (kind, text) => {
+    const part = gl.createShader(kind);
+    gl.shaderSource(part, text);
+    gl.compileShader(part);
+    if (!gl.getShaderParameter(part, gl.COMPILE_STATUS)) return null;
+    return part;
+  };
+  const vertex = build(gl.VERTEX_SHADER, `#version 300 es
+out vec2 uv;
+void main() {
+  vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  uv = vec2(corner.x, 1.0 - corner.y);
+  gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
+}`);
+  const fragment = build(gl.FRAGMENT_SHADER, `#version 300 es
+precision mediump float;
+in vec2 uv;
+uniform sampler2D picture;
+out vec4 colour;
+void main() { colour = texture(picture, uv); }`);
+  if (!vertex || !fragment) return null;
+  const program = gl.createProgram();
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+  gl.useProgram(program);
+
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.uniform1i(gl.getUniformLocation(program, "picture"), 0);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
+  return {
+    what: "webgl",
+    paint(frame) {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE,
+                    frame);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
+}
+
+function makeFlatPainter(canvas) {
+  let context = null;
+  try {
+    context = canvas.getContext("2d", { alpha: false });
+  } catch (_) { return null; }
+  if (!context) return null;
+  return {
+    what: "2d",
+    paint(frame) { context.drawImage(frame, 0, 0); },
+  };
+}
+
 function draw(frame) {
   const canvas = state.canvas;
   if (!canvas) { frame.close(); return; }
@@ -87,8 +174,8 @@ function draw(frame) {
     canvas.height = frame.displayHeight;
   }
   try {
-    if (!state.context) throw new Error("no context");
-    state.context.drawImage(frame, 0, 0);
+    if (!state.context) throw new Error("no way to paint");
+    state.context.paint(frame);
     state.drawn += 1;
     // How evenly the picture is actually painted, which is the only thing
     // anybody watching can see. Every other number in this report describes
@@ -483,16 +570,13 @@ self.onmessage = (event) => {
     // that fails is a drawImage inside a try -- which is exactly the shape of
     // failure this has produced twice already, so it is said out loud rather
     // than caught and swallowed.
-    try {
-      state.context = state.canvas.getContext("2d", { alpha: false });
-    } catch (err) {
-      state.context = null;
-    }
+    state.context = makeGlPainter(state.canvas) || makeFlatPainter(state.canvas);
     if (!state.context) {
       self.postMessage({ failed: "this browser gave the worker no way to "
                                  + "draw on the canvas" });
       return;
     }
+    say("painting with " + state.context.what);
     state.pacer = makePacer(LIMITS);
     state.codec = m.start.codec;
     try {
@@ -545,6 +629,7 @@ self.onmessage = (event) => {
         ticks: state.ticks,
         starved: state.starved,
         refresh: Math.round(refreshEvery() * 10) / 10,
+        how: state.context ? state.context.what : "none",
       },
     });
     // Only a report empties them. A peek is somebody checking whether

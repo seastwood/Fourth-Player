@@ -51,7 +51,11 @@ class FakeFrame {
 
 const canvas = {
   width: 300, height: 150,
-  getContext: () => ({ drawImage: () => { painted += 1; } }),
+  // No webgl2 here, so the worker falls back to the flat painter -- which is
+  // itself worth checking: a browser without WebGL still gets a picture.
+  getContext: (kind) => (kind === "2d"
+    ? { drawImage: () => { painted += 1; } }
+    : null),
 };
 
 const world = {
@@ -174,6 +178,25 @@ check(workerSrc.includes("function tick()"),
 // boundary, and each crossing shows one frame twice and skips the next --
 // 45 paints in 670 off the beat on a game, none on a test pattern whose
 // capture intervals are exact.
+// drawImage of a VideoFrame onto a 2D context blocks when the swap chain is
+// full, and a paint that blocks lands late -- one frame shown for two
+// refreshes and the next skipped, which is "worst 60ms" in an otherwise even
+// report. moonlight-web names the same thing: "the synchronous drawImage
+// blocking on a full swap chain, the signature of presentation
+// back-pressure", and prefers a GL renderer for it.
+check(workerSrc.includes("function makeGlPainter"),
+      "there is a GL painter, which does not block that way");
+check(workerSrc.includes("gl.getContext") === false
+      && workerSrc.includes('getContext("webgl2"'),
+      "asked for first");
+check(workerSrc.includes("function makeFlatPainter"),
+      "and a 2D one behind it, so a browser without WebGL still gets a picture");
+check(workerSrc.includes("makeGlPainter(state.canvas) || makeFlatPainter"),
+      "in that order");
+check(workerSrc.includes("gl_VertexID"),
+      "the triangle comes from the vertex shader, so there is nothing to bind "
+      + "and nothing to keep in step with the canvas size");
+
 check(workerSrc.includes("Math.round(gap / refresh)"),
       "the schedule is rounded to whole refreshes");
 check(workerSrc.includes("function refreshEvery()"),
