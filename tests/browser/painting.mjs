@@ -252,7 +252,16 @@ check(app.includes("video.getBoundingClientRect()")
 const fitBody = app.slice(app.indexOf("function fitStage"),
                           app.indexOf("function fitStage") + 800);
 check(fitBody.includes("fitPainted"),
-      "re-measured by fitStage, which runs on every reason the stage moves");
+      "re-measured by fitStage, which runs on every reason the viewport moves");
+// And the reasons the box moves while the viewport stands still: a notice
+// above the picture, the on-screen pad arriving, a chip strip growing by a
+// line. The video reflows for those and the canvas over it did not.
+check(app.includes("new ResizeObserver(() => fitPainted())"),
+      "and by watching the element itself, which asks no questions about why");
+check(app.includes("watchingTheBox.observe(video)"),
+      "the picture's own box is what is watched");
+check(app.includes("typeof ResizeObserver === \"undefined\""),
+      "and a browser without one still works, it just does not follow");
 const overRule = css2.slice(css2.indexOf("#painted.over {"),
                             css2.indexOf("}", css2.indexOf("#painted.over {")));
 check(overRule.indexOf("width: 100%") < 0,

@@ -8530,6 +8530,27 @@ function videoReceiver() {
  * So the element's own box is measured and copied. Cheap, and it has to
  * happen whenever the stage is relaid out, which is what fitStage already
  * does on every viewport change. */
+/* Whenever the picture's box changes, for any reason at all.
+ *
+ * fitStage() covers the reasons the *viewport* changes -- rotation, the
+ * address bar, a keyboard pushing the page up. It does not cover the reasons
+ * the box inside the stage changes while the viewport stands still: a notice
+ * appearing above the picture, the on-screen pad arriving, a chip strip
+ * growing by a line. The <video> element reflows for those and the canvas
+ * laid over it did not, so it sat where the picture used to be.
+ *
+ * A ResizeObserver asks no questions about why. It is set up once and left
+ * running; fitPainted does nothing when nothing is being painted. */
+let watchingTheBox = null;
+
+function watchThePictureBox() {
+  if (watchingTheBox || typeof ResizeObserver === "undefined" || !video) return;
+  try {
+    watchingTheBox = new ResizeObserver(() => fitPainted());
+    watchingTheBox.observe(video);
+  } catch (_) { watchingTheBox = null; }
+}
+
 function fitPainted() {
   const canvas = paintCanvas();
   if (!canvas || !canvas.classList.contains("over") || !video) return;
@@ -8786,6 +8807,7 @@ async function startPainting() {
     canvas.hidden = false;
     canvas.classList.add("over");
   }
+  watchThePictureBox();
   fitPainted();
   painter = makePainter(canvas, report);
   if (!painter.start(pictureChannel, codec)) {

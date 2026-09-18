@@ -49,7 +49,7 @@ PROVIDED = {
     "fetch", "setTimeout", "setInterval", "clearTimeout", "clearInterval",
     "requestAnimationFrame", "cancelAnimationFrame", "alert", "confirm",
     "WebSocket", "RTCPeerConnection", "RTCRtpReceiver", "MediaStream",
-    "IntersectionObserver", "Worker",
+    "IntersectionObserver", "ResizeObserver", "Worker",
     # WebCodecs and the encoded transform, for the second way of drawing the
     # picture. Every one of these is also feature-detected before it is used
     # -- see canPaintDirectly -- because a browser without them has to fall
