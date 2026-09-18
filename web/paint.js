@@ -118,7 +118,14 @@ function canPaintDirectly() {
 function makePainter(canvas, say) {
   let worker = null, decoder = null, pacer = makePacer(PACE);
   let waiting = [];                      // decoded frames not yet drawn
-  let timer = 0, running = false, drawn = 0, late = 0, held = 0;
+  let timer = 0, running = false;
+  // Four counters, because four different things go wrong and they look
+  // identical from a chair: nothing arriving, nothing decoding, nothing
+  // drawing, or nothing visible. The first attempt at this was a black
+  // screen with a cheerful "drawing the picture here" in the log and no way
+  // to tell which of the four it was.
+  let fed = 0, out = 0, drawn = 0, refused = 0, skipped = 0;
+  let started = false;                   // a keyframe has been seen
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -128,9 +135,11 @@ function makePainter(canvas, say) {
       canvas.width = frame.displayWidth;
       canvas.height = frame.displayHeight;
     }
-    try { context.drawImage(frame, 0, 0); } catch (_) { /* gone */ }
+    try {
+      context.drawImage(frame, 0, 0);
+      drawn += 1;
+    } catch (_) { /* the canvas went away with the page */ }
     frame.close();
-    drawn += 1;
   }
 
   function pump() {
@@ -148,6 +157,7 @@ function makePainter(canvas, say) {
   }
 
   function decoded(frame) {
+    out += 1;
     // The capture moment, in milliseconds. A VideoFrame's timestamp comes
     // from the RTP timestamp, which is the host's own capture clock at 90kHz
     // -- so the difference between two of them is real elapsed time at the
@@ -167,6 +177,40 @@ function makePainter(canvas, say) {
   }
 
   return {
+    /* One encoded frame, from whichever of the two routes brought it.
+     *
+     * Everything before the first keyframe is thrown away rather than fed.
+     * A decoder handed a delta frame with nothing to apply it to raises on
+     * the spot, and the exception was being swallowed -- so the first second
+     * of every connection was a stream of errors nobody could see, and
+     * whether the decoder ever recovered was luck. Waiting is correct and it
+     * is also what makes the counters mean something. */
+    take(type, timestamp, data) {
+      if (!decoder || decoder.state !== "configured") return;
+      const key = type === "key";
+      if (!started) {
+        if (!key) { skipped += 1; return; }
+        started = true;
+      }
+      try {
+        decoder.decode(new EncodedVideoChunk({
+          type: key ? "key" : "delta",
+          timestamp: timestamp,
+          data: data,
+        }));
+        fed += 1;
+      } catch (err) {
+        refused += 1;
+        // A decoder that has given up stays given up, and there is no point
+        // feeding it for the rest of the session.
+        if (decoder.state !== "configured") {
+          say("the decoder stopped accepting frames: "
+              + (err && err.message ? err.message : "no reason given"));
+          this.stop();
+        }
+      }
+    },
+
     start(receiver, codec) {
       if (running) return false;
       try {
@@ -188,14 +232,7 @@ function makePainter(canvas, say) {
       worker = new Worker("/static/frames.js");
       worker.onmessage = (event) => {
         const m = event.data;
-        if (!decoder || decoder.state !== "configured") return;
-        try {
-          decoder.decode(new EncodedVideoChunk({
-            type: m.type === "key" ? "key" : "delta",
-            timestamp: m.timestamp,
-            data: m.bytes,
-          }));
-        } catch (_) { late += 1; }
+        this.take(m.type, m.timestamp, m.bytes);
       };
       try {
         if (typeof RTCRtpScriptTransform !== "undefined") {
@@ -206,14 +243,8 @@ function makePainter(canvas, say) {
           // and handed to the same decoder.
           const reader = streams.readable.getReader();
           const pull = () => reader.read().then(({ done, value }) => {
-            if (done || !decoder || decoder.state !== "configured") return;
-            try {
-              decoder.decode(new EncodedVideoChunk({
-                type: value.type === "key" ? "key" : "delta",
-                timestamp: value.timestamp,
-                data: value.data,
-              }));
-            } catch (_) { late += 1; }
+            if (done) return;
+            this.take(value.type, value.timestamp, value.data);
             pull();
           }).catch(() => {});
           pull();
@@ -237,15 +268,24 @@ function makePainter(canvas, say) {
       }
       if (worker) { try { worker.terminate(); } catch (_) {} worker = null; }
       pacer.forget();
+      started = false;
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
        here: if this is not better, the numbers should say so. */
+    /* Said out loud rather than kept, because a black screen with no numbers
+       beside it is exactly what this cost the first time. */
     report() {
-      const out = { drawn, undecodable: late, reserve: Math.round(pacer.reserve()) };
-      drawn = 0; late = 0; held = 0;
-      return out;
+      const said = ("drawing here: " + fed + " fed to the decoder, " + out
+                    + " came out, " + drawn + " painted, " + refused
+                    + " refused, " + skipped + " before the first keyframe, "
+                    + Math.round(pacer.reserve()) + "ms reserve");
+      fed = 0; out = 0; drawn = 0; refused = 0; skipped = 0;
+      return said;
     },
+    /* The canvas as it stands, for whoever wants to know whether anything has
+       ever been painted on it at all. */
+    painted() { return canvas.width > 16 && canvas.height > 16; },
   };
 }
 

@@ -3636,10 +3636,17 @@ function tellAboutTheRate(picture) {
   const span = (now - rateWas.at) / 1000;
   if (span <= 0) { rateWas = seen; rateAt = now; return; }
   const per = (key) => ((seen[key] - rateWas[key]) / span);
-  report("drawing " + per("decoded").toFixed(1) + " frames a second ("
+  // WebRTC's own counters, which describe WebRTC's own decoder. While this
+  // page is drawing the frames itself that decoder is not the one anybody is
+  // looking at, so its numbers are said as what they are and the painter's
+  // are said beside them. Measuring two methods against each other needs
+  // both on the same yardstick.
+  report((painter ? "webrtc counted " : "drawing ")
+         + per("decoded").toFixed(1) + " frames a second ("
          + per("received").toFixed(1) + " arrived, "
          + per("dropped").toFixed(1) + " thrown away) over " + span.toFixed(0)
          + "s");
+  if (painter) report(painter.report() + " over " + span.toFixed(0) + "s");
   rateWas = seen;
   rateAt = now;
 }

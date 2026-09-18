@@ -89,6 +89,28 @@ check(app.includes('stopPainting("")') &&
 check(app.includes("if (event.track.kind === \"video\") startPainting()"),
       "and it starts again when the new track arrives");
 
+console.log("nothing is fed to the decoder before the first keyframe");
+// A decoder handed a delta frame with nothing to apply it to raises on the
+// spot, and that exception was being swallowed -- so the first second of
+// every connection was a stream of invisible errors and whether the decoder
+// recovered was luck. It was a black screen with "drawing the picture here"
+// in the log and no way to tell which of four things had gone wrong.
+const paintSrc = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
+check(paintSrc.includes("if (!key) { skipped += 1; return; }"),
+      "deltas before the first keyframe are counted and dropped");
+check(paintSrc.includes("started = true"), "and the gate opens on a keyframe");
+check(paintSrc.includes("started = false"), "and closes again on stop");
+
+console.log("and every stage of it is counted, because they fail alike");
+for (const one of ["fed", "out", "drawn", "refused", "skipped"]) {
+  check(new RegExp("\\b" + one + "\\b").test(paintSrc), `${one} is counted`);
+}
+check(paintSrc.includes("came out") && paintSrc.includes("painted"),
+      "the report distinguishes decoded from painted");
+check(app.includes("painter.report()"), "and the page says it out loud");
+check(app.includes('painter ? "webrtc counted "'),
+      "with WebRTC's own numbers labelled as its own, not as the picture");
+
 console.log("\nthe codec string is read from the connection, not guessed");
 check(paint.codecFrom("video/H264", "profile-level-id=640c1f;packetization-mode=1")
       === "avc1.640C1F", "H.264 takes profile-level-id straight from the fmtp");
