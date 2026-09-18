@@ -1027,14 +1027,21 @@ class Stage:
         # fault is in the capture -- and if it is not smooth, the capture was
         # never the problem and neither was anything I have changed today.
         #
-        # animation-mode=running-time so the ball moves by the clock rather
-        # than by frame number: a pattern that advances one step per frame
-        # looks perfectly smooth no matter how unevenly the frames are timed,
-        # which would make this test agree with everything and prove nothing.
+        # Scrolling bars rather than the bouncing ball this started as. A
+        # single ball on a 2560-wide picture is a small thing moving against a
+        # large still one, and it was reported as not moving at all. Bars fill
+        # the frame: the whole picture slides, every edge in it is a chance to
+        # see a stutter, and there is nothing to squint at.
+        #
+        # horizontal-speed is pixels per frame, so the number is worked out
+        # from the frame rate to keep the bars moving at the same speed on the
+        # screen whatever the rate is set to -- otherwise changing the frame
+        # rate changes what is being watched as well as how it arrives, and
+        # the two cannot be told apart.
         if getattr(cfg, "test_pattern", False):
+            step = max(1, int(round(600.0 / max(1, cfg.fps))))
             source_line = ("videotestsrc name=capture is-live=true "
-                           "pattern=ball animation-mode=running-time "
-                           "background-color=0xff101010")
+                           "pattern=smpte horizontal-speed=%d" % step)
             # The D3D11 and CUDA converters take frames the GPU already holds
             # and this one is made on the CPU, so it needs putting there.
             if "d3d11" in converter:
@@ -1043,7 +1050,9 @@ class Stage:
                 source_line += " ! cudaupload"
             self._pointer_property = None
             self.source_name = "videotestsrc"
-            log.warning("sending a test pattern instead of the screen")
+            log.warning("sending a test pattern instead of the screen: bars "
+                        "moving %d pixels a frame, about 600 a second",
+                        step)
 
         # A screen of our own, if one was asked for and this machine can make
         # one. Made at exactly the size being sent, so the capture is the

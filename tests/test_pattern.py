@@ -43,12 +43,17 @@ except Exception as exc:
 check("videotestsrc name=capture" in video,
       "the source is replaced rather than the picture being drawn over")
 
-print("and the pattern moves by the clock, not by frame number")
-# The whole point. A ball that advances one step per frame looks perfectly
-# smooth however unevenly the frames are timed, so it would agree with
-# anything and prove nothing.
-check("animation-mode=running-time" in video,
-      "animation-mode=running-time, or this test cannot fail")
+print("and the whole picture moves, at a speed that does not depend on the rate")
+# Bars, not a ball: one ball on a 2560-wide picture is a small moving thing
+# against a large still one, and was reported as not moving at all.
+check("pattern=smpte" in video, "the bars fill the frame")
+check("horizontal-speed" in video, "and they scroll")
+# horizontal-speed is pixels per frame, so it has to be worked out from the
+# frame rate. Otherwise changing the rate changes what is being watched as
+# well as how it arrives, and the two cannot be told apart.
+check("600.0 / max(1, cfg.fps)" in video,
+      "the step is derived from the frame rate, so the speed on screen is "
+      "the same whatever the rate")
 
 print("it reaches the encoder the same way the screen does")
 spot = video.index("videotestsrc name=capture")
