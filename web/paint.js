@@ -501,7 +501,12 @@ function makePainter(canvas, say) {
               + last.skipped + " before the first keyframe, " + last.stale
               + " too late to matter, " + last.reserve + "ms reserve, canvas "
               + (last.size || "?")
-              + (last.drawFails ? ", " + last.drawFails + " paints refused" : ""));
+              + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
+              + (last.shown
+                 ? "; painted every " + last.shown.typical + "ms typical, "
+                   + "worst " + last.shown.worst + "ms, " + last.shown.off
+                   + " of " + last.shown.of + " off the beat"
+                 : ""));
     },
 
     painted() { return ever || Boolean(last && last.ever); },

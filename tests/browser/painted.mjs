@@ -137,6 +137,14 @@ check(stats, "a report came back");
 check(stats.handed === 1, `what the transform handed over: ${stats.handed}`);
 check(stats.drawn === 31, `and what was painted: ${stats.drawn}`);
 check(stats.ever === true, "and that something has been painted at all");
+// The only number in the whole report that describes what an eye can see.
+// Everything else -- handed over, fed, decoded, painted -- counts things
+// upstream of the picture, and a stream can be perfect at all of them and
+// still be painted unevenly. "It feels like it is skipping" is a statement
+// about this and nothing else.
+check(stats.shown && typeof stats.shown.typical === "number",
+      "and how evenly it was painted: " + JSON.stringify(stats.shown));
+check(stats.shown.of >= 10, "over enough paints to mean something");
 
 console.log("a saturated decoder is not given more, but keyframes still go in");
 built[0].decodeQueueSize = 99;

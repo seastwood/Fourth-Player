@@ -49,9 +49,27 @@ const state = {
   saidFirst: false,
   drawFails: 0,
   drew: false,
+  lastDraw: 0,
+  shown: [],
 };
 
 function say(text) { self.postMessage({ note: text }); }
+
+/* What the gaps between paints looked like, in one small object. */
+function shownSpread() {
+  const gaps = state.shown.slice().sort((a, b) => a - b);
+  state.shown = [];
+  if (gaps.length < 10) return null;
+  const nominal = gaps[Math.floor(gaps.length / 2)];
+  return {
+    typical: Math.round(nominal * 10) / 10,
+    worst: Math.round(gaps[gaps.length - 1]),
+    // Painted more than half a frame away from the middle of the pack, in
+    // either direction: too close together is as visible as too far apart.
+    off: gaps.filter((g) => Math.abs(g - nominal) > nominal * 0.5).length,
+    of: gaps.length,
+  };
+}
 
 function draw(frame) {
   const canvas = state.canvas;
@@ -65,6 +83,14 @@ function draw(frame) {
     if (!state.context) throw new Error("no context");
     state.context.drawImage(frame, 0, 0);
     state.drawn += 1;
+    // How evenly the picture is actually painted, which is the only thing
+    // anybody watching can see. Every other number in this report describes
+    // something upstream of the eye: frames handed over, fed, decoded. A
+    // stream can be perfect at all of those and still be painted unevenly,
+    // and that is what "it feels like it is skipping" means.
+    const at = performance.now();
+    if (state.lastDraw) state.shown.push(at - state.lastDraw);
+    state.lastDraw = at;
     if (!state.ever) {
       state.ever = true;
       // Said the moment it happens rather than waiting to be asked. Whether
@@ -383,6 +409,7 @@ self.onmessage = (event) => {
         size: state.canvas ? (state.canvas.width + "x" + state.canvas.height)
                            : "none",
         drawFails: state.drawFails,
+        shown: shownSpread(),
       },
     });
     state.handed = state.fed = state.out = state.drawn = 0;
