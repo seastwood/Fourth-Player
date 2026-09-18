@@ -453,6 +453,12 @@ def host_codecs(hardware=True):
     return found
 
 
+# How many RTP packets each appsink may hold before it starts dropping them.
+# See the sinks themselves for why four was not enough to survive a keyframe.
+VIDEO_SINK_PACKETS = 1024
+AUDIO_SINK_PACKETS = 128
+
+
 def best_shared_codec(guest_codecs, hardware=True):
     """The best codec both ends can manage, or h264 if they cannot agree.
 
@@ -961,8 +967,34 @@ class Stage:
             f"mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=video,encoding-name={encoding},"
             f"payload=96,clock-rate=90000 "
+            # These buffers are RTP packets, not frames, and that is the
+            # whole reason this number is what it is.
+            #
+            # It was 4. A packet is at most `rtp_mtu` bytes, so four of them
+            # is around five kilobytes -- and a keyframe is hundreds of
+            # kilobytes that the payloader pushes as one burst, hundreds of
+            # packets arriving inside a millisecond of each other. The
+            # consumer is `_forward`, which is Python: it copies the buffer
+            # once per guest and pushes it. Fast, but not faster than a burst
+            # arriving, and with drop=true everything that did not fit was
+            # thrown away.
+            #
+            # So a keyframe arrived at the guests with holes in it, they could
+            # not decode it, and they asked for another keyframe -- which was
+            # dropped the same way. That is the storm in the log: "guests are
+            # losing the picture faster than sending keyframes can fix". It
+            # gets worse with each guest added, because `_forward` does a
+            # copy per guest before it can take the next packet, which is why
+            # it showed up as a problem that needed two clients to see.
+            #
+            # A thousand packets is over a megabyte of keyframe at any MTU
+            # this offers, and costs nothing when it is not needed: the queue
+            # only holds what has not been handed out yet, which in the steady
+            # state is nothing. drop=true stays, because a consumer that has
+            # genuinely stopped must not grow this without limit -- it is now
+            # a last resort rather than something every keyframe hits.
             f"! appsink name=vsink emit-signals=true sync=false "
-            f"max-buffers=4 drop=true"
+            f"max-buffers={VIDEO_SINK_PACKETS} drop=true"
         )
         self._description = description
         self._audio_description = self._audio_branch() if cfg.audio else ""
@@ -1014,8 +1046,14 @@ class Stage:
             f"frame-size={cfg.audio_frame_ms} inband-fec=true "
             f"! rtpopuspay pt=97 mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=audio,encoding-name=OPUS,payload=97,clock-rate=48000 "
+            # Sixteen Opus packets is a third of a second, and the same
+            # argument as the video sink applies with less force: the burst is
+            # smaller, but a pause in `_forward` still costs whole packets,
+            # and a lost Opus packet is a hole in somebody's voice. Guests
+            # were reporting two to four percent of their samples invented on
+            # a local network, which is not what a local network does.
             f"! appsink name=asink emit-signals=true sync=false "
-            f"max-buffers=16 drop=true")
+            f"max-buffers={AUDIO_SINK_PACKETS} drop=true")
 
     def _build(self, with_audio):
         description = self._description

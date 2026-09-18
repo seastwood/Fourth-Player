@@ -416,8 +416,12 @@ class Server:
                         # its guest token, which is the path that knows how to
                         # find them a seat, and it is already the path a
                         # dropped socket takes.
+                        # "request" and not a refusal: this says nothing
+                        # about whether their link is still good, and counting
+                        # it would send somebody back to the PIN screen for a
+                        # seat that simply moved while their socket was open.
                         await outbox.put({
-                            "t": "error",
+                            "t": "error", "reason": "request",
                             "message": "Your seat moved. Reconnecting."})
                         break
                     except asyncio.TimeoutError:
