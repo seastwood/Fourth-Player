@@ -2660,13 +2660,31 @@ class LiveSession:
         try:
             found = vdisplay.monitors()
         except Exception:
+            log.info("this machine would not list its screens", exc_info=True)
+            self._screens_said = "none"
             return []
         mine = getattr(getattr(self, "stage", None), "vdisplay", None)
         ours = getattr(mine, "monitor_handle", None)
-        return [{"index": index, "name": name, "width": width,
-                 "height": height, "primary": primary,
-                 "virtual": handle == ours and ours is not None}
-                for index, handle, width, height, primary, name in found]
+        out = [{"index": index, "name": name, "width": width,
+                "height": height, "primary": primary,
+                "virtual": handle == ours and ours is not None}
+               for index, handle, width, height, primary, name in found]
+        # Said when it changes, and not otherwise: this is asked for on a
+        # timer by any open page, so logging every answer would be noise.
+        #
+        # Worth saying at all because the switcher only appears when there is
+        # more than one screen, and "the chip does not appear" and "this
+        # machine is only reporting one screen" look identical from a browser
+        # -- while one is a page bug and the other is a monitor that has gone
+        # to sleep or been detached.
+        shape = "; ".join("%s %dx%d%s%s" % (s["name"], s["width"], s["height"],
+                                            " (main)" if s["primary"] else "",
+                                            " (virtual)" if s["virtual"] else "")
+                          for s in out) or "none"
+        if shape != getattr(self, "_screens_said", None):
+            self._screens_said = shape
+            log.info("screens to choose from: %d -- %s", len(out), shape)
+        return out
 
     def _desktop_size(self):
         """The host's own screen, read once and remembered.
