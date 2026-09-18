@@ -216,8 +216,17 @@ const slack = Number(workerSrc.match(/START_DEPTH = (\d+)/)[1]);
 check(slack >= 2 && slack <= 5,
       `${slack} frames: enough to absorb a hiccup, few enough to stay a game`);
 check(workerSrc.includes("state.waiting.length > DEPTH_WANT * 3"),
-      "frames are dropped only when genuinely behind, not whenever the next "
-      + "one happens to be due");
+      "a runaway queue is still trimmed");
+// Ninety frames a second into a sixty hertz screen: thirty a second cannot
+// be shown and must go. Showing the oldest due frame every refresh runs a
+// fixed number behind until something dumps the backlog -- measured as "956
+// came out, 931 painted, 23 too late to matter", which is stale picture and
+// then a jump.
+check(workerSrc.includes("state.waiting[1].due - now <= LIMITS.SLACK_MS"),
+      "every refresh shows the newest frame that is due and lets the rest go");
+check(workerSrc.includes("gap >= refresh * 0.9"),
+      "and a gap shorter than a refresh is not rounded up to one, which "
+      + "would make the schedule advance slower than the frames arrive");
 check(!workerSrc.includes("state.waiting[1].due <= performance.now()"),
       "which threw away one of every pair on a link that delivers in pairs");
 

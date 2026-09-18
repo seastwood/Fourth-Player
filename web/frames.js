@@ -236,9 +236,24 @@ function tick() {
     state.waiting.shift().frame.close();
     state.stale += 1;
   }
-  const next = state.waiting[0];
-  if (next.due - performance.now() > LIMITS.SLACK_MS) return;
-  state.waiting.shift();
+  // The newest frame that is due, not the oldest.
+  //
+  // A refresh can show one frame. When more than one is due -- which is
+  // every refresh when the stream sends more frames a second than the screen
+  // can show -- the oldest of them is the wrong choice: it is the most stale
+  // picture available, and picking it every time means running a fixed
+  // number of frames behind until something drops the backlog in one go.
+  // Showing the newest and letting the rest go keeps the picture current and
+  // spreads the dropping evenly, which is what ninety frames into sixty
+  // refreshes has to do anyway.
+  const now = performance.now();
+  if (state.waiting[0].due - now > LIMITS.SLACK_MS) return;
+  while (state.waiting.length > 1
+         && state.waiting[1].due - now <= LIMITS.SLACK_MS) {
+    state.waiting.shift().frame.close();
+    state.stale += 1;
+  }
+  const next = state.waiting.shift();
   draw(next.frame);
 }
 
@@ -336,7 +351,17 @@ function schedule(captureMs) {
   // a tenth of a frame moved the phase a little every time; nudging a whole
   // refresh moves it once and stops.
   const refresh = refreshEvery();
-  if (refresh > 0) {
+  if (refresh > 0 && gap >= refresh * 0.9) {
+    // Only when a frame can have a refresh of its own. Rounding a gap that
+    // is already shorter than a refresh *up* to one makes the schedule
+    // advance more slowly than the frames arrive -- ninety a second into a
+    // sixty hertz screen, and the queue grows until something dumps it. The
+    // measurement: "956 came out, 931 painted, 23 too late to matter", which
+    // is a fifth of a second of stale picture and then a jump.
+    //
+    // Below a refresh the true gap is kept, so the schedule tracks the rate
+    // the frames are really coming at, and the tick below shows the newest
+    // one that is due and lets the others go.
     const steps = Math.max(1, Math.round(gap / refresh));
     gap = steps * refresh;
   }
