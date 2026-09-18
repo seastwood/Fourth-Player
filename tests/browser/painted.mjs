@@ -89,10 +89,18 @@ check(painted === 31, `31 frames in, ${painted} painted`);
 check(canvas.width === 1280 && canvas.height === 720,
       `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
 
-console.log("the report names every stage");
+console.log("the report names every stage, including the one before us");
 const line = painter.report();
 check(/painted/.test(line) && /came out/.test(line),
       "it says what came out and what was painted: " + line);
+// The counters could not tell a transform delivering slowly from a page
+// losing what it was given, and those are different faults: 188 fed and 185
+// painted looks perfect until you notice the stream was sending 60 a second
+// and only 21 ever arrived.
+check(/handed over by the transform/.test(line),
+      "and how many the transform handed over in the first place");
+check(typeof painter.drawnLately === "function",
+      "and the painted rate can be read for saying on screen");
 
 console.log("stopping leaves nothing behind");
 painter.stop();

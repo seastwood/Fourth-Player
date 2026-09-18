@@ -3664,7 +3664,21 @@ function tellAboutTheRate(picture) {
          + per("received").toFixed(1) + " arrived, "
          + per("dropped").toFixed(1) + " thrown away) over " + span.toFixed(0)
          + "s");
-  if (painter) report(painter.report() + " over " + span.toFixed(0) + "s");
+  if (painter) {
+    // On screen as well as in the log. Somebody watching a picture that is
+    // not right should not have to read a file on another machine to find
+    // out what it is doing, and "i can't really tell what is happening" is a
+    // fair thing to say about a diagnostic that only the host can see.
+    const mine = painter.drawnLately() / span;
+    report(painter.report() + " over " + span.toFixed(0) + "s");
+    const want = (streamNow && Number(streamNow.fps)) || 0;
+    if (want && mine < want * 0.75) {
+      showNotice("<b>Drawing " + mine.toFixed(0) + " of " + want
+                 + " frames a second on this page.</b><br>"
+                 + "The browser's own drawing may be smoother on this "
+                 + "device &mdash; the Drawing setting switches back.", false);
+    }
+  }
   rateWas = seen;
   rateAt = now;
 }

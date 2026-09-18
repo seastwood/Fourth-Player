@@ -366,6 +366,7 @@ function makePainter(canvas, say) {
   let codecNow = "";
   let lastKey = null;
   let arrived = false;                   // any frame has reached us at all
+  let handed = 0, handedWas = 0;         // what the transform gave the worker
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -602,6 +603,7 @@ function makePainter(canvas, say) {
           }
           return;
         }
+        if (typeof m.n === "number") handed = m.n;
         this.take(m.type, m.timestamp, m.bytes);
       };
       try {
@@ -643,6 +645,8 @@ function makePainter(canvas, say) {
       lastKey = null;
       codecNow = "";
       arrived = false;
+      handed = 0;
+      handedWas = 0;
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
@@ -650,7 +654,10 @@ function makePainter(canvas, say) {
     /* Said out loud rather than kept, because a black screen with no numbers
        beside it is exactly what this cost the first time. */
     report() {
-      const said = ("drawing here: " + fed + " fed to the decoder, " + out
+      const gave = handed - handedWas;
+      handedWas = handed;
+      const said = ("drawing here: " + gave + " handed over by the transform, "
+                    + fed + " fed to the decoder, " + out
                     + " came out, " + drawn + " painted, " + refused
                     + " refused, " + skipped + " before the first keyframe, "
                     + Math.round(pacer.reserve()) + "ms reserve");
@@ -663,6 +670,9 @@ function makePainter(canvas, say) {
        surface nothing had ever drawn on -- which is precisely the state this
        is meant to detect. */
     painted() { return ever; },
+    /* Frames painted since the last report, for saying on screen how this is
+       going without anybody having to read a log on another machine. */
+    drawnLately() { return drawn; },
   };
 }
 

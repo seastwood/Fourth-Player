@@ -23,9 +23,11 @@ self.onrtctransform = (event) => {
   const transformer = event.transformer;
   const reader = transformer.readable.getReader();
 
+  let count = 0;
   const pump = () => reader.read().then(({ done, value }) => {
     if (done) return;
     const frame = value;
+    count += 1;
     const data = frame.data;
     // Copied out of the frame, not referenced: the frame is recycled the
     // moment this returns and a detached ArrayBuffer arrives as an empty
@@ -37,6 +39,11 @@ self.onrtctransform = (event) => {
       timestamp: frame.timestamp,
       type: frame.type || "delta",
       at: performance.now(),
+      // How many the transform has handed *this worker*, so the page can
+      // tell a transform that is delivering slowly from a page that is
+      // losing what it was given. Those are different faults and the
+      // counters on the other side cannot see the difference.
+      n: count,
     }, [bytes.buffer]);
     pump();
   }).catch(() => { /* the connection went away */ });
