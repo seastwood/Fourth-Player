@@ -8528,7 +8528,7 @@ function watchThePainting() {
     if (more) {
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
              + "s; trying " + more);
-      restartPainting();
+      tryAnotherSpelling(more);
     } else {
       // Given up on, and *not* unchosen.
       //
@@ -8545,8 +8545,10 @@ function watchThePainting() {
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
              + "s and there is nothing else to try; the browser is drawing it "
              + "for now, and the choice is kept");
-      showToast("Drawing it here produced no picture — the browser is drawing "
-                + "it for now");
+      showNotice("<b>Drawing it on this page produced no picture.</b><br>"
+                 + "The browser is drawing it instead for now. Everything "
+                 + "that was tried is in the host's log. Your choice is kept "
+                 + "&mdash; reloading tries again.", true);
       stopPainting("");
       paintPaintMethod();
     }
@@ -8561,10 +8563,21 @@ function paintNextSpelling() {
   return paintTried < all.length ? all[paintTried] : "";
 }
 
-function restartPainting() {
-  if (painter) { painter.stop(); painter = null; }
-  giveTheVideoBack();
-  startPainting();
+/* Another spelling, on the connection that is already up.
+ *
+ * Not a restart: a receiver's transform is attached once, and taking the
+ * worker away to attach another left nothing delivering frames -- every
+ * retry read "0 fed to the decoder" while megabytes arrived, so the second
+ * and third attempts could not have worked whatever was wrong with the
+ * first. Only the decoder is rebuilt. */
+function tryAnotherSpelling(codec) {
+  if (!painter) { startPainting(); return; }
+  if (!painter.useCodec(codec)) {
+    stopPainting("no decoder would start");
+    return;
+  }
+  askHostForKeyframe();
+  watchThePainting();
 }
 
 async function startPainting() {
@@ -8607,7 +8620,9 @@ async function startPainting() {
     // arrived is the wrong thing: the watchdog tries again every couple of
     // seconds, so the choice stands and it starts when it can.
     if (shape.mime) {
-      showToast("This browser will not decode " + shape.mime + " here");
+      showNotice("<b>This browser will not decode " + shape.mime
+                 + " on this page.</b><br>The browser is drawing it instead.",
+                 true);
       report("not drawing here: this browser will not decode " + shape.mime
              + " (tried " + (codecCandidates(shape.mime, shape.fmtp).join(", ")
                              || "nothing") + ")");

@@ -70,6 +70,13 @@ check(app.includes("there is nothing else to try"),
       "when the spellings run out it says so");
 // It used to call setPaintMethod("browser") here, which writes the choice
 // down -- so a failed attempt silently replaced what somebody had picked.
+// A toast fades in seconds and is easy to be looking away from: this
+// happened three times before it was noticed at all. The notice panel stays
+// until it is dismissed and says what to do about it.
+check(app.includes('showNotice("<b>Drawing it on this page produced no picture'),
+      "the fallback says so on screen, in the notice rather than a toast");
+check(app.includes("reloading tries again"),
+      "and says what to do about it");
 check(app.includes("paintGaveUp = true"),
       "and gives up on this connection rather than unchoosing the method");
 check(app.slice(app.indexOf("there is nothing else to try") - 400,
@@ -80,6 +87,18 @@ check(app.includes("if (paintGaveUp) return;"),
       "and nothing retries in a loop in between");
 check(app.includes("paintGaveUp = false;\n  paintTried = 0;"),
       "a fresh media connection is a fresh chance");
+
+console.log("and a retry keeps the transform, because it is attached once");
+// Every retry read "0 fed to the decoder" while megabytes arrived: taking
+// the worker away and attaching another transform to the same receiver left
+// nothing delivering frames, so the second and third attempts could not have
+// worked whatever was wrong with the first.
+check(app.includes("function tryAnotherSpelling"), "there is a retry path");
+check(!app.includes("function restartPainting"),
+      "and it is not a restart any more");
+check(paintFile.includes("useCodec(codec)"),
+      "the painter rebuilds only the decoder");
+check(app.includes("painter.useCodec(codec)"), "and the page asks it to");
 
 console.log("and a failure walks the list rather than giving up on the first");
 check(app.includes("function paintNextSpelling"), "there is a next one");

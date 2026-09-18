@@ -365,6 +365,7 @@ function makePainter(canvas, say) {
   let feedAs = "annexb";
   let codecNow = "";
   let lastKey = null;
+  let arrived = false;                   // any frame has reached us at all
   const context = canvas.getContext("2d", { alpha: false,
                                             desynchronized: true });
 
@@ -425,6 +426,10 @@ function makePainter(canvas, say) {
      * whether the decoder ever recovered was luck. Waiting is correct and it
      * is also what makes the counters mean something. */
     take(type, timestamp, data) {
+      if (!arrived) {
+        arrived = true;
+        say("the first encoded frame arrived here");
+      }
       if (!decoder || decoder.state !== "configured") return;
       const key = type === "key";
       if (!started) {
@@ -501,6 +506,39 @@ function makePainter(canvas, say) {
       return true;
     },
 
+    /* Try another spelling of the codec without touching the transform.
+     *
+     * Restarting the whole painter for this was wrong and the counters said
+     * so: every retry read "0 fed to the decoder" while megabytes arrived.
+     * A receiver's transform is attached once; taking the worker away and
+     * attaching another to the same receiver left nothing delivering frames
+     * at all, so the second and third attempts were guaranteed to fail
+     * whatever was wrong with the first. Only the decoder is rebuilt now. */
+    useCodec(codec) {
+      if (!codec) return false;
+      try {
+        if (decoder && decoder.state !== "closed") decoder.close();
+      } catch (_) {}
+      try {
+        decoder = new VideoDecoder({
+          output: decoded,
+          error: (err) => {
+            if (this.tryAvcc()) return;
+            say("the direct decoder stopped: " + (err && err.message));
+            this.stop();
+          },
+        });
+        decoder.configure({ codec, optimizeForLatency: true });
+        codecNow = codec;
+        feedAs = "annexb";
+        started = false;
+        return true;
+      } catch (err) {
+        say("this browser would not start a decoder for " + codec);
+        return false;
+      }
+    },
+
     start(receiver, codec) {
       if (running) return false;
       try {
@@ -525,6 +563,11 @@ function makePainter(canvas, say) {
       }
       worker = new Worker("/static/frames.js");
       const mine = worker;
+      worker.onerror = (err) => {
+        say("the frame worker would not load: "
+            + ((err && err.message) || "no reason given"));
+        this.stop();
+      };
       worker.onmessage = (event) => {
         const m = event.data;
         // The worker says when its handler is in place. Attaching the
@@ -534,6 +577,11 @@ function makePainter(canvas, say) {
           try {
             if (typeof RTCRtpScriptTransform !== "undefined") {
               receiver.transform = new RTCRtpScriptTransform(mine, {});
+              // Said because the alternative was a silence with three
+              // possible causes: the worker never loaded, it loaded and was
+              // never told, or it was told and no frame ever came. Each
+              // needs a different fix and they looked identical.
+              say("the frame worker is ready and the transform is attached");
             }
           } catch (err) {
             say("this browser would not take the transform: "
@@ -582,6 +630,7 @@ function makePainter(canvas, say) {
       feedAs = "annexb";
       lastKey = null;
       codecNow = "";
+      arrived = false;
     },
     running() { return running; },
     /* Counted rather than guessed at, in the same spirit as everything else
