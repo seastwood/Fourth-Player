@@ -8658,6 +8658,13 @@ const PAINT_PROVE_MS = 4000;
 const PAINT_KEY_ASKS = 3;
 let paintKeyAsks = 0;
 
+/* How many times a method that was working may stop and be started again
+   before it is treated as one that does not work. Each costs a second of
+   picture; three covers the occasional decoder giving up without letting a
+   genuinely broken one retry for ever. */
+const PAINT_RECOVERIES = 3;
+let paintRecoveries = 0;
+
 function watchThePainting() {
   if (paintWatch) clearTimeout(paintWatch);
   // Ask now, so there is an answer to judge by when the deadline comes. The
@@ -8859,6 +8866,23 @@ async function startPainting() {
   // being painted, and it goes through the one place that handles it.
   painter.whenGone(() => {
     if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
+    // Something that has been drawing and then stops is not something that
+    // cannot draw.
+    //
+    // A decoder can fail in the middle of a working stream -- a picture that
+    // changes size, a frame that arrives damaged -- and the answer to that is
+    // to build another one and ask for a keyframe, not to conclude that this
+    // browser cannot do it and hand the picture back. Reported as switching
+    // itself to WebRTC while WebCodecs was working, which is exactly what it
+    // would have looked like.
+    if (painter && painter.painted() && paintRecoveries < PAINT_RECOVERIES) {
+      paintRecoveries += 1;
+      report("the drawing stopped after working; starting it again ("
+             + paintRecoveries + " of " + PAINT_RECOVERIES + ")");
+      stopPainting(null);
+      startPainting();
+      return;
+    }
     const more = paintNextSpelling();
     if (more) tryAnotherSpelling(more);
     else giveUpPainting();
@@ -8944,6 +8968,7 @@ function setPaintMethod(id) {
   paintTried = 0;
   paintGaveUp = false;
   paintKeyAsks = 0;
+  paintRecoveries = 0;
   paintChoice = (id && PAINT_METHODS.some((one) => one.id === id)) ? id : "";
   paintMethod = wantedPaintMethod();
   savePaintMethod();

@@ -90,8 +90,22 @@ check(paintFile.includes("painted() { return ever || Boolean(last && last.ever);
 check(workerSrc.includes("self.postMessage({ painted: true })"),
       "and the worker says it the moment it happens, not when next asked: a "
       + "deadline reached before the first report had nothing to read");
-check(app.includes("if (painter) painter.report();"),
-      "and the watchdog asks for the numbers when it is armed");
+check(app.includes("if (painter) painter.peek();"),
+      "and the watchdog asks for the numbers when it is armed, without "
+      + "emptying them");
+
+console.log("something that was drawing and stops is started again, not abandoned");
+// A decoder can fail in the middle of a working stream -- a picture that
+// changes size, a frame that arrives damaged -- and the answer is another
+// decoder and a keyframe, not the conclusion that this browser cannot do it.
+// Reported as switching itself to WebRTC while WebCodecs was working.
+check(app.includes("painter.painted() && paintRecoveries < PAINT_RECOVERIES"),
+      "a method that has painted gets started again");
+check(/PAINT_RECOVERIES = (\d+)/.test(app), "a bounded number of times");
+check(Number(app.match(/PAINT_RECOVERIES = (\d+)/)[1]) <= 5,
+      "few enough that a genuinely broken one does not retry for ever");
+check(app.includes("paintRecoveries = 0;"),
+      "and choosing the method by hand starts that count again");
 
 console.log("a counter that empties when read is not shared between two askers");
 // "Drawing 0 of 60 frames a second" over a picture that was playing
