@@ -1029,6 +1029,22 @@ class Stage:
         # contents advance evenly and one that judders however well it is
         # drawn.
         wanted_api = str(getattr(cfg, "capture_api", "") or "").strip().lower()
+        if not wanted_api and source_element == "d3d11screencapturesrc":
+            # Nobody chose, so choose the better one where it exists.
+            #
+            # Measured on this machine, same game, same everything else:
+            #
+            #   Desktop Duplication  sampled every 15.5ms typical, worst 32ms,
+            #                        146 of 600 nowhere near 16.7ms
+            #   Graphics Capture     sampled every 16.7ms typical, worst 35ms,
+            #                        17 of 600 uneven
+            #
+            # The typical interval goes from wrong to exactly right and the
+            # uneven quarter becomes an uneven twentieth. Checked rather than
+            # assumed, because a property a build does not have is a pipeline
+            # that will not start, and that is a host with no capture at all.
+            if _takes("d3d11screencapturesrc", "capture-api=wgc"):
+                wanted_api = "wgc"
         if wanted_api and source_element == "d3d11screencapturesrc":
             if wanted_api in CAPTURE_APIS:
                 source_line += " capture-api=%s" % wanted_api

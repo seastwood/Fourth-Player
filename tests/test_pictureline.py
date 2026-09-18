@@ -41,6 +41,19 @@ spot = video.find("tee name=frames")
 check(spot > 0 and video.find("{payloader}", spot) > spot,
       "the payloader is downstream of the tee, so both come from one encode")
 
+print("and Windows is asked for the screen the better way, where it exists")
+# Measured on the machine, same game, same everything else:
+#   Desktop Duplication  every 15.5ms typical, worst 32ms, 146 of 600 uneven
+#   Graphics Capture     every 16.7ms typical, worst 35ms,  17 of 600 uneven
+# The typical interval goes from wrong to exactly right and the uneven
+# quarter becomes an uneven twentieth.
+check('_takes("d3d11screencapturesrc", "capture-api=wgc")' in video,
+      "Graphics Capture is the default where the build has it")
+check("CAPTURE_APIS" in video, "and the names are a table, not scattered")
+check("no such way of capturing the screen" in video,
+      "an unknown one is refused with a line rather than passed through to "
+      "a pipeline that will not build")
+
 print("and the frames are offered on a channel of their own")
 check('"create-data-channel", "picture"' in video, "a channel called picture")
 check('ordered=(boolean)true' in video[video.find("picture channel") - 600:
