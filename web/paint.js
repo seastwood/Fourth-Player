@@ -301,7 +301,6 @@ function makePainter(canvas, say) {
     const now = performance.now();
     const wait = pacer.hold(captured, now);
     if (wait <= 0) {
-      held += 1;
       if (waiting.length) { waiting.push({ frame, due: now }); pump(); }
       else draw(frame);
       return;
@@ -454,5 +453,5 @@ function makePainter(canvas, say) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
-                     toAnnexB, looksAnnexB, PACE };
+                     toAnnexB, looksAnnexB, makePainter, PACE };
 }
