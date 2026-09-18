@@ -3430,6 +3430,86 @@ function heldBackMs(now, before) {
   return Math.round((delay / emitted) * 1000);
 }
 
+/* Keeping the browser's own buffer the size the link needs, and no larger.
+ *
+ * jitter_ms is a number somebody sets once, and a link is not one thing all
+ * evening: a phone on a landing with good signal wants nothing held back,
+ * and the same phone in the garden wants sixty milliseconds. Set for the bad
+ * case it costs delay all night; set for the good one it stutters the moment
+ * anything goes wrong.
+ *
+ * So it moves. This is moonlight-web's JitterController in shape, and their
+ * asymmetry is the whole of it: go up fast, come down slowly. A freeze has
+ * already been seen by somebody and the cost of over-correcting is a few
+ * milliseconds; coming down in a hurry means going back up again, and a
+ * buffer that oscillates is worse than one that is merely too big.
+ *
+ * Only for the browser's own drawing. The other method has its own queue in
+ * the worker, and two things holding frames back is twice the delay for one
+ * link's worth of jitter.
+ */
+const JITTER = {
+  FLOOR_MS: 20,        // never less; a buffer of nothing has no slack at all
+  CEILING_MS: 300,     // never more; past this it is a recording, not a game
+  ON_FREEZE_MS: 50,    // a freeze was seen by somebody, so move properly
+  ON_LOSS_MS: 30,      // loss is a freeze that has not happened yet
+  FROM_JITTER: 3,      // times the smoothed jitter, which is a tail estimate
+  FROM_RTT: 0.4,       // times the round trip, when the link is losing
+  CALM_TICKS: 5,       // quiet windows before coming down at all
+  DOWN_MS: 10,         // and then this much per window
+  DEADBAND_MS: 5,      // below this, leave it alone rather than thrash
+  LOSS_ENOUGH: 0.005,  // half a percent is where loss starts to be felt
+};
+
+let jitterTarget = 0;
+let jitterSmoothed = 0;
+let jitterCalm = 0;
+
+function tuneTheBuffer(picture, before, path) {
+  // The page's own drawing does its own holding back; see frames.js.
+  if (painter || !picture || !before) return;
+  if (!jitterTarget) {
+    jitterTarget = Math.max(JITTER.FLOOR_MS,
+                            (streamNow && Number(streamNow.jitter_ms)) || 60);
+  }
+  const froze = (picture.freezeCount || 0) - (before.freezeCount || 0);
+  const had = (picture.packetsReceived || 0) - (before.packetsReceived || 0);
+  const lost = (picture.packetsLost || 0) - (before.packetsLost || 0);
+  const share = had + lost > 0 ? lost / (had + lost) : 0;
+  // getStats reports jitter in seconds, and it is already a smoothed
+  // estimate; smoothing it again keeps one spike from moving the target.
+  const seen = (picture.jitter || 0) * 1000;
+  jitterSmoothed = jitterSmoothed ? (jitterSmoothed * 0.8 + seen * 0.2) : seen;
+  const rtt = path && path.currentRoundTripTime != null
+    ? path.currentRoundTripTime * 1000 : 0;
+
+  let want = Math.max(JITTER.FLOOR_MS, JITTER.FROM_JITTER * jitterSmoothed);
+  if (share > JITTER.LOSS_ENOUGH) {
+    want = Math.max(want, JITTER.FROM_RTT * rtt, jitterTarget + JITTER.ON_LOSS_MS);
+  }
+  if (froze > 0) want = Math.max(want, jitterTarget + JITTER.ON_FREEZE_MS);
+
+  if (want > jitterTarget) {
+    jitterCalm = 0;
+  } else if (froze === 0 && share <= JITTER.LOSS_ENOUGH) {
+    jitterCalm += 1;
+    want = jitterCalm >= JITTER.CALM_TICKS
+      ? jitterTarget - JITTER.DOWN_MS : jitterTarget;
+  } else {
+    want = jitterTarget;
+  }
+
+  want = Math.max(JITTER.FLOOR_MS, Math.min(JITTER.CEILING_MS, Math.round(want)));
+  if (Math.abs(want - jitterTarget) < JITTER.DEADBAND_MS) return;
+  const was = jitterTarget;
+  jitterTarget = want;
+  holdVideoBack(want);
+  report("holding video back " + want + "ms now (was " + was + "): "
+         + (froze > 0 ? froze + " freeze(s), " : "")
+         + (share * 100).toFixed(2) + "% lost, jitter "
+         + jitterSmoothed.toFixed(1) + "ms");
+}
+
 function noteFreezes(now) {
   if (!now) return;
   const before = lastVideoStat;
@@ -3744,6 +3824,7 @@ async function watchMedia() {
     });
   } catch (_) { return; }
   // Before the branches below, every one of which returns.
+  tuneTheBuffer(picture, lastVideoStat, path);
   noteFreezes(picture);
   tellAboutTheRate(picture);
   // Chosen but not started: a codec that was not known when the track
