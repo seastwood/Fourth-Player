@@ -48,6 +48,8 @@ stage._last_frame = 0.0
 stage._last_pts = video.Gst.CLOCK_TIME_NONE
 stage._gaps = []
 stage._stamps = []
+stage._grabbed = []
+stage._grab_last = 0.0
 
 clock = [1000.0]
 real = video.time.monotonic
