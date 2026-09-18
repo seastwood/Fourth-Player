@@ -133,11 +133,32 @@ check(app.indexOf("giveTheVideoBack()") < app.indexOf("canvas.hidden = true"),
 check(app.includes("video.srcObject = whole;"),
       "a browser that refuses a hand-built stream keeps the one it had");
 
-console.log("the canvas and the video are never both showing");
-check(app.includes("canvas.hidden = false") && app.includes("video.hidden = true"),
-      "starting hides the video");
-check(app.includes("canvas.hidden = true") && app.includes("video.hidden = false"),
-      "stopping hides the canvas");
+console.log("the canvas goes over the video, never instead of it");
+// Everything that reads the picture reads the <video> element: twenty-odd
+// pointer, wheel and gesture handlers, the zoom's geometry, and
+// requestPointerLock, which is how the keyboard and mouse are taken. A
+// display:none element accepts none of that -- so the element stays where it
+// is, showing black with its video track removed, and the canvas is laid on
+// top and takes no pointer events at all.
+check(!app.includes("video.hidden = true"),
+      "the video element is never hidden while painting");
+check(app.includes('canvas.classList.add("over")'), "the canvas is laid over it");
+check(app.includes('canvas.classList.remove("over")'), "and taken off again");
+const css = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
+const over = css.slice(css.indexOf("#painted.over {"),
+                       css.indexOf("}", css.indexOf("#painted.over {")));
+check(over.includes("position: absolute"), "positioned over the stage");
+check(over.includes("pointer-events: none"),
+      "and deaf to pointers, which is the whole of why the handlers below "
+      + "still work");
+check(/z-index:\s*1/.test(over), "and above the video, not behind it");
+
+console.log("and it moves with the picture when that is zoomed or dragged");
+check(app.includes("canvas.style.transform = how"),
+      "the same transform is written to both");
+check(app.indexOf("video.style.transform = how")
+      < app.indexOf("canvas.style.transform = how"),
+      "from one place, so they cannot drift apart");
 
 console.log("a fresh connection does not leave a reader on a dead receiver");
 check(app.includes('stopPainting("")') &&

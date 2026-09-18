@@ -289,6 +289,29 @@ button:focus-visible { outline: 3px solid var(--edge); outline-offset: 3px; }
    rules that would drift apart the first time one of them changed. */
 #painted[hidden], video[hidden] { display: none !important; }
 
+/* The canvas over the video rather than instead of it.
+ *
+ * The <video> element is what every pointer, wheel and gesture handler is
+ * attached to, what the zoom measures itself against, and what
+ * requestPointerLock is called on to take the keyboard and mouse. Hiding it
+ * would have taken all of that away -- so while this page is drawing the
+ * picture the element stays exactly where it was, showing black with its
+ * video track removed, and this is laid over the top of it.
+ *
+ * pointer-events: none is the whole of why that works: every touch and click
+ * passes straight through to the element underneath, which is the one that
+ * knows what to do with it. The stage is position: fixed, so this anchors to
+ * the stage box. */
+#painted.over {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
 video, #painted {
   width: 100%;
   height: 100%;

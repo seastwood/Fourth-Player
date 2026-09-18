@@ -2743,8 +2743,14 @@ function applyZoom() {
 /* Put the numbers on the screen. Split out only so the driving path above can
    reach it without repeating itself. */
 function paintAfterZoom() {
-  video.style.transform = (zoom === ZOOM_MIN && !panX && !panY)
+  const how = (zoom === ZOOM_MIN && !panX && !panY)
     ? "" : "translate(" + panX + "px, " + panY + "px) scale(" + zoom + ")";
+  video.style.transform = how;
+  // The canvas is the same picture in the same place, so it moves with it.
+  // Without this, pinching and dragging over the picture would move an
+  // element nobody can see while the picture itself sat still.
+  const canvas = paintCanvas();
+  if (canvas) canvas.style.transform = how;
   paintZoom();
 }
 
@@ -8487,7 +8493,7 @@ function stopPainting(why) {
   if (painter) { painter.stop(); painter = null; }
   giveTheVideoBack();
   const canvas = paintCanvas();
-  if (canvas) canvas.hidden = true;
+  if (canvas) { canvas.hidden = true; canvas.classList.remove("over"); }
   if (video) video.hidden = false;
   if (why) report("the browser is drawing the picture again: " + why);
 }
@@ -8597,7 +8603,16 @@ async function startPainting() {
     return;
   }
   canvas.hidden = false;
-  if (video) video.hidden = true;
+  // The <video> element is *not* hidden.
+  //
+  // Everything that reads the picture reads that element: twenty-odd pointer,
+  // wheel and gesture handlers, the zoom's geometry, and -- the one that would
+  // have hurt -- requestPointerLock, which is how the keyboard and mouse are
+  // taken. A display:none element accepts none of that. So it stays exactly
+  // where it was, showing black with its video track removed, and the canvas
+  // is laid over it and takes no pointer events at all.
+  if (canvas) canvas.classList.add("over");
+  paintAfterZoom();
   // And the <video> element gives up its decoder.
   //
   // iOS allows very few video decoders at once -- few enough that one is a
