@@ -117,9 +117,12 @@ check(app.includes("SMOOTH_KEY"), "remembered per browser, like the method");
 check(app.includes("painter.smooth(want)"),
       "and applied to a painter already running, so it can be heard out "
       + "without a reload");
-check(workerSrc.includes("let DEPTH_WANT = 2;")
-      && workerSrc.includes("m.smoothing"),
-      "the worker takes it, rather than holding a number of its own");
+check(workerSrc.includes("m.smoothing")
+      && workerSrc.includes("state.pacer.cap(SMOOTHING)"),
+      "the worker takes it, rather than holding a number of its own -- and it "
+      + "moves the *cap* on the reserve, so the setting is a ceiling on the "
+      + "delay rather than an amount of delay bought whether or not the link "
+      + "needs it");
 
 console.log("something that was drawing and stops is started again, not abandoned");
 // A decoder can fail in the middle of a working stream -- a picture that
@@ -476,52 +479,115 @@ check(paintFile.indexOf('channel.send("on")') > paintFile.indexOf("if (m.started
       "and the host is asked for frames only once the decoder exists, so "
       + "none arrive before there is anything to decode them");
 
-console.log("\nthe pacing turns ragged arrival into an even schedule");
-// The job is not "how long should I hold this frame" -- that produced a
-// schedule as ragged as the arrivals it was meant to smooth. It is a playout
-// clock: show each frame at its capture time plus one offset. The capture
-// clock is even, so the schedule is even, whatever the network did.
-const L = { MAX_MS: 25, SLACK_MS: 2, QUANTILE: 0.95, WINDOW: 120, EASE: 0.05 };
+console.log("\nthe presentation clock holds a frame for what the link owes it");
+// moonlight-web's FramePacer, adopted whole. Every number here is the control
+// law rather than a running decoder, which is the point of it being
+// clock-injected: nothing reads performance.now(), so this is deterministic.
+const L = { MAX: 25 };
 
 const bursty = paint.makePacer(L);
 const shown = [];
-for (let i = 0; i < 200; i += 1) {
-  const captured = i * 33.3;
-  // Frames arrive in pairs: one quickly, the next 18ms behind it.
-  shown.push(bursty.due(captured, captured + 10 + (i % 2 ? 0 : 18)));
+for (let i = 0; i < 300; i += 1) {
+  const captured = i * 16.7;
+  // Frames arrive in pairs: one quickly, the next 18ms behind it. That is the
+  // shape the reserve exists for -- without one, the late frame leaves the
+  // previous picture up an extra refresh and then the pair collapses into a
+  // single paint, which is the repeat-then-skip judder.
+  shown.push(bursty.schedule(captured, captured + 10 + (i % 2 ? 0 : 18)));
 }
-const gaps = [];
-for (let i = 1; i < shown.length; i += 1) gaps.push(shown[i] - shown[i - 1]);
-const settled = gaps.slice(100);
+const settled = [];
+for (let i = 201; i < shown.length; i += 1) settled.push(shown[i] - shown[i - 1]);
 const tightest = Math.min(...settled), widest = Math.max(...settled);
-check(Math.abs(widest - tightest) < 0.01,
-      `every gap the same: ${tightest.toFixed(1)}ms to ${widest.toFixed(1)}ms`);
-check(Math.abs(tightest - 33.3) < 0.01,
-      "and it is the capture interval, not something invented");
+check(widest - tightest < 6,
+      `the pairs are pulled apart: gaps ${tightest.toFixed(1)}ms to `
+      + `${widest.toFixed(1)}ms, against 18ms of arrival burst`);
 check(bursty.reserve() >= 15 && bursty.reserve() <= 25,
       `paid for with ${bursty.reserve()}ms of delay, which is the burst`);
 
-console.log("\na clean link is not made to wait for nothing");
+console.log("\na clean link waits for nothing at all");
+// The deadband is why: a 1-2ms residual hold on a link with no jitter is
+// latency bought for nothing, so a negligible target snaps to exactly zero
+// and the path is bit-for-bit the immediate one.
 const clean = paint.makePacer(L);
-for (let i = 0; i < 200; i += 1) clean.due(i * 33.3, i * 33.3 + 10);
-check(clean.reserve() <= 1,
+let held = 0;
+for (let i = 0; i < 300; i += 1) {
+  const captured = i * 16.7, arrived = captured + 10;
+  if (clean.schedule(captured, arrived) > arrived) held += 1;
+}
+check(clean.reserve() === 0,
       `nothing reserved on a link with no jitter: ${clean.reserve()}ms`);
+check(held === 0, `and not one frame held: ${held}`);
 
 console.log("\nand the reserve is capped, because a reserve is latency");
 const wild = paint.makePacer(L);
 for (let i = 0; i < 300; i += 1) {
-  wild.due(i * 33.3, i * 33.3 + 10 + (i % 2) * 400);
+  wild.schedule(i * 16.7, i * 16.7 + 10 + (i % 2) * 400);
 }
-check(wild.reserve() <= L.MAX_MS + 1,
-      `a link jittering by 400ms still reserves at most ${L.MAX_MS}: `
+check(wild.reserve() <= L.MAX,
+      `a link jittering by 400ms still reserves at most ${L.MAX}: `
       + wild.reserve());
 
-console.log("\nand one early frame does not poison it for ever");
+console.log("\na few late frames do not ratchet it to the cap");
+// The trap moonlight-web documents from having measured it: every late frame
+// bumped the reserve by 8ms while decay shed 8ms a *second*, so any link with
+// a few percent of late frames pinned at the cap -- 24ms of reserve held
+// against a p95 late tail of 2.7ms. The bump is capped by the same tail
+// estimate the periodic control would use, so it changes when the target
+// moves and never where it moves to.
+const occasional = paint.makePacer(L);
+for (let i = 0; i < 2000; i += 1) {
+  // A few milliseconds of ordinary jitter -- enough that the reserve is not
+  // zero, because a zero reserve cannot ratchet -- plus one frame in
+  // twenty-five arriving 30ms late.
+  const ordinary = [0, 3, 5][i % 3];
+  occasional.schedule(i * 16.7,
+                      i * 16.7 + 10 + ordinary + (i % 25 === 0 ? 30 : 0));
+}
+check(occasional.reserve() > 0 && occasional.reserve() < 10,
+      `4% of frames 30ms late buys the tail, not the cap: `
+      + `${occasional.reserve()}ms of ${L.MAX}`);
+check(occasional.stats().underruns > 0,
+      "and the underruns were seen and counted rather than swallowed: "
+      + occasional.stats().underruns);
+
+console.log("\none early frame does not poison it for ever");
 const poisoned = paint.makePacer(L);
-poisoned.due(0, 0);
-for (let i = 1; i < 300; i += 1) poisoned.due(i * 33.3, i * 33.3 + 20);
-check(poisoned.reserve() <= 2,
+poisoned.schedule(1, 1);                 // one impossibly fast arrival
+for (let i = 1; i < 1200; i += 1) poisoned.schedule(i * 16.7, i * 16.7 + 20);
+// It takes a while on purpose. The baseline rises at 3ms a second, so a 20ms
+// step is absorbed over about seven seconds -- and that slowness is the point
+// of it: a baseline that chased the delay upward would swallow a sustained
+// bad patch and report no jitter at all. What must not happen is staying
+// pegged, and it does not.
+check(poisoned.reserve() === 0,
       `a steady link after one freak arrival settles: ${poisoned.reserve()}ms`);
+
+console.log("\nand a discontinuity rebases instead of pegging the reserve");
+// A uint32 wrap, a resolution change, a pipeline restart, a tab that was
+// throttled in the background: the transit delay jumps by more than any
+// jitter, and adapting to it instead of rebasing holds the cap for the whole
+// window.
+const jumped = paint.makePacer(L);
+for (let i = 0; i < 200; i += 1) jumped.schedule(i * 16.7, i * 16.7 + 10);
+for (let i = 200; i < 400; i += 1) jumped.schedule(i * 16.7, i * 16.7 + 9000);
+check(jumped.reserve() === 0,
+      `nine seconds of step is a new baseline, not jitter: `
+      + `${jumped.reserve()}ms`);
+
+console.log("\nthe Smoothing setting moves the cap and nothing else");
+const tight = paint.makePacer();
+tight.cap(1);
+for (let i = 0; i < 300; i += 1) {
+  tight.schedule(i * 16.7, i * 16.7 + 10 + (i % 2) * 400);
+}
+const loose = paint.makePacer();
+loose.cap(10);
+for (let i = 0; i < 300; i += 1) {
+  loose.schedule(i * 16.7, i * 16.7 + 10 + (i % 2) * 400);
+}
+check(tight.reserve() < loose.reserve() && tight.reserve() <= 10,
+      `one frame of smoothing holds ${tight.reserve()}ms and ten holds `
+      + `${loose.reserve()}ms on the same link`);
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

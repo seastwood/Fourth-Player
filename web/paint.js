@@ -36,57 +36,164 @@
  * late is invisible in a mean and plainly visible on a screen. It is capped,
  * because a reserve is latency and this is a game.
  */
+/* The presentation clock.
+ *
+ * This is moonlight-web's FramePacer, adopted after measuring what was here
+ * before and reading theirs. Their header states the problem better than any
+ * number I took: presenting a frame the moment it decodes is optimal on a
+ * metronomic link and the *worst* case under jitter -- a frame 10ms late
+ * leaves the one before it up for an extra refresh, then the two that arrive
+ * together collapse into one, and that repeat-then-skip pair is the judder.
+ *
+ * What was here instead was an interval accumulator: `nextAt += gap`, with
+ * gap taken from the capture deltas and rounded to whole refreshes, nudged by
+ * the queue depth. It is open-loop, and it drifts -- the host's sixty a
+ * second and the screen's sixty a second are not the same sixty -- so the
+ * schedule slid against the arrivals until frames were late on arrival, hit
+ * `if (nextAt < now) nextAt = now`, and the queue drained in a burst.
+ * Measured on a game: 51 of 350 refreshes with nothing to paint and 22 frames
+ * thrown away for being too late, on a stream the host was sending perfectly.
+ *
+ * The objection written against an absolute schedule -- that the two clocks
+ * have unrelated origins and unrelated rates, and the capture clock restarts
+ * whenever the pipeline does -- is real, and is answered here rather than
+ * avoided. Only the *difference* between the clocks is ever used, so the
+ * origins cancel. DRIFT lets the baseline follow a rate difference at about
+ * three milliseconds a second, so drift is tracked rather than accumulated.
+ * RESYNC_MS rebases outright on a discontinuity, which is what a pipeline
+ * restart or a throttled tab looks like from here.
+ *
+ * The control law, which is theirs:
+ *   baseline  the best transit seen lately. Down instantly -- a shorter path
+ *             is a fact -- and up only by DRIFT, so a sustained bad patch is
+ *             not quietly absorbed into the baseline and hidden.
+ *   excess    how much later than the baseline this frame actually landed.
+ *   target    p95 of the excess, plus a small margin, clamped. Up at once,
+ *             because the judder has already happened; down slowly, because
+ *             one calm second is not evidence.
+ * A frame is then held for `target - excess`: one that took the best path
+ * waits the whole reserve, one that has already spent it goes straight out.
+ * The latency added is the reserve, and only while the link is really
+ * jittery -- DEADBAND snaps a negligible target to exactly zero so a clean
+ * link is the immediate path again.
+ *
+ * Clock-injected on purpose: `now` is always an argument and nothing here
+ * reads performance.now(), so the whole law is deterministic in a test. The
+ * version this replaces could only be tested through a running decoder.
+ */
 const PACE = {
-  MAX_MS: 25,        // about a frame and a half at 60fps
-  SLACK_MS: 2,       // present now rather than arm a timer for less than this
-  QUANTILE: 0.95,    // cover the late tail, not the mean
-  WINDOW: 120,       // arrivals remembered, about two seconds at 60fps
-  EASE: 0.05,        // how fast the playout clock follows the target
+  MIN: 0,              // a clean link adds nothing
+  MAX: 25,             // about a frame and a half at 60fps; see MAX_FOR
+  QUANTILE: 0.95,      // cover the late tail, not the mean
+  SAFETY: 1.15,        // a small margin over the measured tail
+  WINDOW_MS: 2000,     // the sliding window behind the tail estimate
+  MAX_SAMPLES: 256,    // and a hard bound on it
+  CONTROL_MS: 100,     // how often the target may be re-evaluated
+  DECAY_MS: 250,       // and how often it may step down
+  DECAY_STEP: 2,       // by this much -- 8ms a second, slow on purpose
+  BUMP: 8,             // step up when a frame blew through the whole reserve
+  DEADBAND: 3,         // below this the target snaps to MIN
+  DRIFT: 0.05,         // how fast the baseline may rise, per frame
+  RESYNC_MS: 500,      // past this it is a discontinuity, not jitter
+  SLACK_MS: 2,         // present now rather than wait for less than this
 };
 
-function makePacer(limits) {
-  const c = limits || PACE;
-  // Recent transits -- when a frame arrived, against when it was captured.
-  // The two clocks have unrelated origins and that is fine: only the
-  // differences are ever used.
-  const seen = [];
-  // The one number that decides smoothness: how far behind the capture clock
-  // the picture is shown. Presentation time is capture time plus this, so an
-  // evenly captured stream is an evenly shown one however unevenly it
-  // arrived -- which is the whole job, and is not what asking "how long
-  // should I hold this particular frame" achieves. That produced a schedule
-  // as ragged as the arrivals it was meant to smooth.
-  let offset = null;
+/* The cap, from the Smoothing setting. Every frame of reserve is a frame of
+   delay and a hiccup absorbed, which is the one real trade here, so it stays
+   the guest's to make. Three -- the default -- is moonlight-web's 25ms. */
+function maxFor(frames) {
+  return Math.max(4, Math.min(100, Math.round((frames || 3) * (1000 / 120))));
+}
 
-  function target() {
-    const sorted = seen.slice().sort((a, b) => a - b);
-    const at = Math.min(sorted.length - 1,
-                        Math.floor(sorted.length * c.QUANTILE));
-    // The fastest path, plus enough to cover the late tail: a frame that
-    // takes the quickest route waits, one that took the slowest does not.
-    return sorted[0] + Math.min(c.MAX_MS, sorted[at] - sorted[0]);
+function makePacer(limits) {
+  const c = Object.assign({}, PACE, limits || null);
+  let primed = false;
+  let baseline = 0;
+  let targetMs = c.MIN;
+  let samples = [];            // { at, excess } over WINDOW_MS
+  let lastControl = 0, lastDecay = 0;
+  let lateTail = 0, lastExcess = 0, underruns = 0;
+
+  function tail() {
+    const n = samples.length;
+    if (!n) return 0;
+    const v = samples.map((one) => one.excess).sort((a, b) => a - b);
+    return v[Math.min(n - 1, Math.floor(n * c.QUANTILE))];
+  }
+
+  /* The reserve was shorter than what the link just did, so the judder has
+     already happened -- step up for the frames behind this one.
+
+     Capped by the same tail estimate the periodic control would apply, only
+     evaluated now instead of up to CONTROL_MS later. Uncapped it compounds:
+     every late frame adds BUMP while decay sheds 8ms a second, so a link with
+     a few percent of late frames ratchets to the cap and stays pinned there.
+     moonlight-web measured that: 24ms of reserve held against a p95 tail of
+     2.7ms. The quantile is the whole point -- cover the tail and let the
+     outliers hitch -- and reacting to each outlier overrides it. */
+  function noteUnderrun() {
+    underruns += 1;
+    const justified = tail() * c.SAFETY;
+    const want = Math.min(c.MAX, targetMs + c.BUMP, justified);
+    if (want > targetMs) targetMs = want;
+  }
+
+  function control(nowMs) {
+    if (nowMs - lastControl < c.CONTROL_MS) return;
+    lastControl = nowMs;
+    lateTail = tail();
+    const want = Math.min(c.MAX, lateTail * c.SAFETY);
+    if (want > targetMs) {
+      targetMs = want;
+      lastDecay = nowMs;
+    } else if (nowMs - lastDecay >= c.DECAY_MS) {
+      lastDecay = nowMs;
+      targetMs = Math.max(c.MIN, want, targetMs - c.DECAY_STEP);
+    }
+    if (targetMs < c.DEADBAND) targetMs = c.MIN;
   }
 
   return {
     /* When this frame should be shown, on the same clock `nowMs` is on. */
-    due(captureMs, nowMs) {
-      const transit = nowMs - captureMs;
-      seen.push(transit);
-      if (seen.length > c.WINDOW) seen.shift();
-      if (offset === null) offset = transit;
-      if (seen.length >= 10) {
-        // Eased rather than snapped. A playout clock that jumps is a stutter
-        // of its own, and nothing here is urgent: the target moves slowly
-        // because it is a quantile over a couple of seconds of arrivals.
-        offset += (target() - offset) * c.EASE;
+    schedule(captureMs, nowMs) {
+      if (!(captureMs > 0)) return nowMs;     // no stamp, nothing to pace to
+      const delay = nowMs - captureMs;
+      if (!primed || Math.abs(delay - baseline) > c.RESYNC_MS) {
+        primed = true;
+        baseline = delay;
+        samples = [];
+        lastControl = lastDecay = nowMs;
+        lateTail = lastExcess = 0;
+        return nowMs;
       }
-      return captureMs + offset;
+      baseline = Math.min(delay, baseline + c.DRIFT);
+      const excess = delay - baseline;        // >= 0 by construction
+      lastExcess = excess;
+      samples.push({ at: nowMs, excess });
+      const cutoff = nowMs - c.WINDOW_MS;
+      while (samples.length && samples[0].at < cutoff) samples.shift();
+      while (samples.length > c.MAX_SAMPLES) samples.shift();
+      control(nowMs);
+      const wait = targetMs - excess;
+      // Noted after the deadline is worked out, never for this frame: it is
+      // already late, and holding it longer adds to the hitch being removed.
+      if (targetMs > 0 && excess > targetMs) noteUnderrun();
+      return wait > c.SLACK_MS ? nowMs + wait : nowMs;
     },
-    forget() { seen.length = 0; offset = null; },
-    reserve() {
-      if (seen.length < 10) return 0;
-      const sorted = seen.slice().sort((a, b) => a - b);
-      return Math.round(offset - sorted[0]);
+    /* A frame due but not arrived, seen by the renderer rather than here. */
+    ranDry() { noteUnderrun(); },
+    forget() {
+      primed = false;
+      baseline = 0;
+      targetMs = c.MIN;
+      samples = [];
+      lateTail = lastExcess = 0;
+    },
+    cap(frames) { c.MAX = maxFor(frames); },
+    reserve() { return Math.round(targetMs); },
+    stats() {
+      return { reserve: Math.round(targetMs), tail: Math.round(lateTail),
+               excess: Math.round(lastExcess), underruns };
     },
   };
 }
@@ -547,14 +654,21 @@ function makePainter(canvas, say) {
               + last.fed + " fed to the decoder, " + last.out + " came out, "
               + last.drawn + " painted, " + last.refused + " refused, "
               + last.skipped + " before the first keyframe, " + last.stale
-              + " too late to matter, " + (last.lost || 0)
+              + " too late to matter, " + (last.behind || 0)
+              + " dropped catching up, " + (last.lost || 0)
               + " lost on the way, " + last.reserve + "ms reserve, canvas "
               + (last.size || "?")
               + (last.drawFails ? ", " + last.drawFails + " paints refused" : "")
               + (last.ticks
                  ? "; " + last.starved + " of " + last.ticks
-                   + " refreshes had nothing to paint (a refresh is "
+                   + " refreshes had nothing to paint and " + (last.early || 0)
+                   + " nothing due yet (a refresh is "
                    + (last.refresh || "?") + "ms)"
+                 : "")
+              + (last.pace
+                 ? "; the reserve is " + last.pace.reserve + "ms over a late "
+                   + "tail of " + last.pace.tail + "ms, widened "
+                   + last.pace.underruns + " times"
                  : "")
               + (last.shown
                  ? "; painted every " + last.shown.typical + "ms typical, "

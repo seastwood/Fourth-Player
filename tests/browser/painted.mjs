@@ -155,18 +155,23 @@ console.log("frames that arrive in a burst are still painted evenly");
 // queue of late frames is drained as fast as the event loop allows. Measured
 // on the real thing: "painted every 10ms typical, worst 176ms, 224 of 475
 // off the beat", on a stream sending an even sixty a second.
-check(workerSrc.includes("function schedule(captureMs)"),
+check(paintSrc.includes("function makePacer("),
       "the schedule is built by a named thing that can be read");
-check(workerSrc.includes("captureMs - state.lastPts"),
-      "from the differences between capture times, which need no agreement "
-      + "about where zero is or how fast a second passes");
-check(workerSrc.includes("if (state.nextAt < now) state.nextAt = now;"),
-      "and never into the past, which is what let a queue drain in one turn");
-// Painting the first frame the instant it arrives leaves nothing in hand, so
-// the next frame to be late is a gap on the screen. Measured with no slack:
-// 16ms typical and a worst of 55, eight paints in a hundred off the beat.
-check(workerSrc.includes("state.nextAt = now + gap * START_DEPTH;"),
-      "the first frame waits, and the rest inherit that slack");
+// Both of the faults this has been through, so neither comes back. First an
+// absolute schedule built by mapping the capture clock onto this one, which
+// drifted until every frame was late on arrival and the queue drained as fast
+// as the event loop allowed: "painted every 10ms typical, worst 176ms, 224 of
+// 475 off the beat", on a stream sending an even sixty. Then an interval
+// accumulator, which was open-loop and drifted the other way: 51 of 350
+// refreshes with nothing to paint. The pacer is the third answer and the
+// first one with a control loop in it -- the baseline tracks the clock
+// difference instead of assuming it away.
+check(paintSrc.includes("const delay = nowMs - captureMs;"),
+      "from the difference between the clocks, so their origins cancel and "
+      + "neither has to be known");
+check(paintSrc.includes("nowMs + wait : nowMs"),
+      "and a deadline is never in the past: a frame that has already spent "
+      + "the reserve goes out now rather than being held longer");
 // A worker cannot see the display's refresh, and a paint landing at an
 // arbitrary point in the refresh cycle is shown on the next one -- so two
 // paints either side of a boundary are a refresh apart and two inside one
@@ -199,38 +204,87 @@ check(workerSrc.includes("gl_VertexID"),
       "the triangle comes from the vertex shader, so there is nothing to bind "
       + "and nothing to keep in step with the canvas size");
 
-check(workerSrc.includes("Math.round(gap / refresh)"),
-      "the schedule is rounded to whole refreshes");
+// The presentation clock, which is moonlight-web's FramePacer. What was here
+// was an interval accumulator -- `nextAt += gap` from the capture deltas,
+// rounded to whole refreshes, nudged by the queue depth. Open-loop, so it
+// drifted against the arrivals (the host's sixty a second and the screen's
+// sixty a second are not the same sixty), and the clamp that stopped it
+// scheduling into the past collapsed the schedule when it did. Measured on a
+// game: 51 of 350 refreshes with nothing to paint and 22 frames thrown away
+// for being too late, out of a stream the host had sent perfectly.
+check(!workerSrc.includes("state.nextAt")
+      && !workerSrc.includes("state.lastPts"),
+      "no interval accumulator is left in the worker (the note saying what "
+      + "it was stays, which is why this looks for the state and not the word)");
+check(workerSrc.includes("state.pacer.schedule(captured, performance.now())"),
+      "a frame's deadline comes from the pacer, and it is used rather than "
+      + "worked out and thrown away, which is what the old code did with it");
+check(paintSrc.includes("baseline = Math.min(delay, baseline + c.DRIFT)"),
+      "the baseline is the best transit seen lately: down at once, up only by "
+      + "a drift, so a rate difference between the clocks is tracked instead "
+      + "of accumulated -- which is the objection to an absolute schedule, "
+      + "answered rather than avoided");
+check(paintSrc.includes("Math.abs(delay - baseline) > c.RESYNC_MS"),
+      "and a discontinuity rebases outright, which is what a pipeline restart "
+      + "or a throttled tab looks like from here");
+check(paintSrc.includes("targetMs = want;") && paintSrc.includes("DECAY_STEP"),
+      "the reserve rises at once and decays slowly: the judder has already "
+      + "happened, and one calm second is not evidence");
+check(paintSrc.includes("if (targetMs < c.DEADBAND) targetMs = c.MIN;"),
+      "a negligible reserve snaps to nothing, so a clean link is the "
+      + "immediate path and adds no latency at all");
+// The trap moonlight-web documents from having measured it: bumping on every
+// late frame compounds, because decay sheds 8ms a second while each outlier
+// adds 8ms. They measured 24ms of reserve held against a p95 tail of 2.7ms.
+check(paintSrc.includes("Math.min(c.MAX, targetMs + c.BUMP, justified)"),
+      "and a bump is capped by the same tail estimate, or a link with a few "
+      + "percent of late frames ratchets to the cap and pins there");
+check(paintSrc.includes("function maxFor(frames)"),
+      "the Smoothing setting moves the cap on the reserve, which is the one "
+      + "real trade and the guest's to make");
 check(workerSrc.includes("function refreshEvery()"),
-      "and the refresh is measured, since 60Hz, 120Hz and 59.94 are all real");
-check(workerSrc.includes("gap = Math.max(GAP_MIN, gap - step)")
-      && workerSrc.includes("const step = refresh > 0 ? refresh"),
-      "and the depth correction moves by a whole refresh, not a fraction of "
-      + "one, which would put the drift straight back");
-check(readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8")
-        .includes("requestAnimationFrame(beat)"),
+      "the refresh is still measured, since 60Hz, 120Hz and 59.94 are all real");
+check(paintSrc.includes("requestAnimationFrame(beat)"),
       "and the page is what tells it, because only the page can see a refresh");
 check(workerSrc.includes("if (!state.ticked && !state.timer) pump();"),
       "with the old timer left as a fallback for a page that stops sending "
       + "them, where a picture that keeps moving beats one that stops");
-check(/START_DEPTH = (\d+)/.test(workerSrc), "by a named number of frames");
-const slack = Number(workerSrc.match(/START_DEPTH = (\d+)/)[1]);
-check(slack >= 2 && slack <= 5,
-      `${slack} frames: enough to absorb a hiccup, few enough to stay a game`);
-check(workerSrc.includes("state.waiting.length > DEPTH_WANT * 3"),
-      "a runaway queue is still trimmed");
-// Ninety frames a second into a sixty hertz screen: thirty a second cannot
-// be shown and must go. Showing the oldest due frame every refresh runs a
-// fixed number behind until something dumps the backlog -- measured as "956
-// came out, 931 painted, 23 too late to matter", which is stale picture and
-// then a jump.
-check(workerSrc.includes("state.waiting[1].due - now <= LIMITS.SLACK_MS"),
-      "every refresh shows the newest frame that is due and lets the rest go");
-check(workerSrc.includes("gap >= refresh * 0.9"),
-      "and a gap shorter than a refresh is not rounded up to one, which "
-      + "would make the schedule advance slower than the frames arrive");
-check(!workerSrc.includes("state.waiting[1].due <= performance.now()"),
-      "which threw away one of every pair on a link that delivers in pairs");
+
+// Presentation is FIFO. A queued frame is early, not stale: the queue *is*
+// the reserve. Painting "the newest frame that is due" and closing the rest
+// throws away good pictures whenever two land in one refresh -- and two
+// landing in one refresh is what jitter looks like.
+check(!workerSrc.includes("state.waiting[1].due - now <= LIMITS.SLACK_MS"),
+      "nothing overtakes the head of the queue any more");
+check(workerSrc.includes("draw(state.waiting.shift().frame)"),
+      "the head is what is painted, in order");
+check(/QUEUE_CAP = (\d+)/.test(workerSrc), "with a named memory bound");
+const cap = Number(workerSrc.match(/QUEUE_CAP = (\d+)/)[1]);
+check(cap >= 4 && cap <= 10,
+      cap + " frames: clear of the deepest reserve, so it cannot drop what it "
+      + "just decided to hold");
+check(workerSrc.includes("state.waiting.length > QUEUE_CAP"),
+      "and that is the only reason a frame is dropped");
+check(workerSrc.includes("state.early += 1")
+      && workerSrc.includes("state.starved += 1"),
+      "a refresh with nothing due yet and a refresh with nothing at all are "
+      + "counted apart: the first is the reserve working and the second is a "
+      + "hole in the picture, and they want opposite fixes");
+check(workerSrc.includes("state.pacer.ranDry()"),
+      "and only the second widens the reserve");
+// FIFO with only a count for a bound lets latency creep: 60.00 from the host
+// against 59.94 from the screen is one frame every sixteen seconds, and the
+// queue grows until it reaches the memory bound a minute and a half later
+// with the picture a hundred milliseconds behind for no visible reason.
+check(workerSrc.includes("now - state.waiting[0].due > slipped"),
+      "the queue is bounded by time as well, so the delay stays the reserve "
+      + "whatever the two frame rates are");
+check(workerSrc.includes("(refreshEvery() || 1000 / 60) * 1.5"),
+      "at more than a whole refresh, because the head is legitimately a "
+      + "little overdue at equilibrium -- anything less throws away one of "
+      + "every pair on a link that delivers in pairs");
+check(workerSrc.includes("state.waiting.length > 1 && now -"),
+      "and never the last frame in hand");
 
 console.log("the counters name every stage, including the one before us");
 sent.length = 0;

@@ -53,8 +53,9 @@ const state = {
   drew: false,
   lastDraw: 0,
   shown: [],
-  lastPts: null,
-  nextAt: null,
+  early: 0,
+  behind: 0,
+  everPainted: false,
   ticked: false,
   ticks: 0,
   starved: 0,
@@ -261,184 +262,131 @@ function tell(at) {
 
 function tick() {
   state.ticks += 1;
+  // Only to the memory bound, oldest first.
+  //
+  // A queued frame is early, not stale: the queue *is* the reserve. This used
+  // to trim to a target depth and then paint "the newest frame that is due",
+  // closing the rest -- which throws away perfectly good pictures whenever
+  // two land in one refresh, and two landing in one refresh is exactly what
+  // jitter looks like. That was the 22 frames "too late to matter" in a run
+  // where the host had sent every one of them on time. Presentation is FIFO
+  // now, as moonlight-web's is: nothing is dropped except to bound memory,
+  // and a frame that is early waits its turn instead of being overtaken.
+  while (state.waiting.length > QUEUE_CAP) {
+    state.waiting.shift().frame.close();
+    state.stale += 1;
+  }
   if (!state.waiting.length) {
-    // Nothing to paint. A refresh with an empty queue and a refresh where
-    // the next frame is simply not due yet are different things, and only
-    // the first is a hole in the picture: it means nothing arrived in time,
-    // which is the network or the host rather than anything here. Counted
-    // because a 209ms gap between paints has two possible causes and they
-    // want opposite fixes.
+    // Nothing arrived in time. This is the real underrun -- a hole in the
+    // picture, and the network or the host rather than anything here -- and
+    // the pacer is told, because widening the reserve is what covers it.
+    // Only once something has been painted: the queue is empty before the
+    // first frame too, and that is not evidence about the link.
     state.starved += 1;
+    if (state.everPainted && state.pacer) state.pacer.ranDry();
     return;
   }
-  while (state.waiting.length > DEPTH_WANT * 3) {
-    state.waiting.shift().frame.close();
-    state.stale += 1;
-  }
-  // The newest frame that is due, not the oldest.
-  //
-  // A refresh can show one frame. When more than one is due -- which is
-  // every refresh when the stream sends more frames a second than the screen
-  // can show -- the oldest of them is the wrong choice: it is the most stale
-  // picture available, and picking it every time means running a fixed
-  // number of frames behind until something drops the backlog in one go.
-  // Showing the newest and letting the rest go keeps the picture current and
-  // spreads the dropping evenly, which is what ninety frames into sixty
-  // refreshes has to do anyway.
   const now = performance.now();
-  if (state.waiting[0].due - now > LIMITS.SLACK_MS) return;
-  while (state.waiting.length > 1
-         && state.waiting[1].due - now <= LIMITS.SLACK_MS) {
+  // Catching up, when genuinely behind.
+  //
+  // FIFO with only a count for a bound lets latency creep. Sixty a second
+  // from the host and 59.94 from the screen is a tenth of a percent, which is
+  // one frame every sixteen seconds -- the queue grows by one, then another,
+  // until it reaches the memory bound a minute and a half later and the
+  // picture is a hundred milliseconds behind for no reason anybody can see.
+  // Bounding by *time* instead pins the delay to the reserve whatever the two
+  // rates are: while the head should already have been shown, drop it.
+  //
+  // The threshold is more than one refresh because the head is legitimately a
+  // little overdue at equilibrium -- this only looks once per refresh, so a
+  // frame due just after the last look is up to a refresh old by this one.
+  // Dropping at anything less throws away one of every pair on a link that
+  // delivers in pairs, which is most of them, and reads as skipping.
+  const slipped = (refreshEvery() || 1000 / 60) * 1.5;
+  while (state.waiting.length > 1 && now - state.waiting[0].due > slipped) {
     state.waiting.shift().frame.close();
-    state.stale += 1;
+    state.behind += 1;
   }
-  const next = state.waiting.shift();
-  draw(next.frame);
+  if (state.waiting[0].due - now > LIMITS.SLACK_MS) {
+    // Early, not starved. Counted apart because the two want opposite fixes:
+    // this one means the reserve is doing its job.
+    state.early += 1;
+    return;
+  }
+  state.everPainted = true;
+  draw(state.waiting.shift().frame);
 }
 
 function pump() {
   state.timer = 0;
   state.drew = false;
-  while (state.waiting.length) {
-    // Drop to the latest. A frame that was due while the thread was busy is
-    // not worth drawing once a newer one exists: it costs a paint and shows
-    // somebody a picture they have already been shown the successor of.
-    // Only when genuinely behind. Dropping whenever the next frame happened
-    // to be due threw away one of every pair on a link that delivers in
-    // pairs, which is most of them, and reads as skipping.
-    while (state.waiting.length > DEPTH_WANT * 3) {
-      state.waiting.shift().frame.close();
-      state.stale += 1;
-    }
-    const next = state.waiting[0];
-    const wait = next.due - performance.now();
-    if (wait > LIMITS.SLACK_MS) {
-      state.timer = setTimeout(pump, wait);
-      return;
-    }
-    state.waiting.shift();
-    draw(next.frame);
-    // One paint per turn of the event loop, always.
-    //
-    // A transferred OffscreenCanvas shows what was drawn on it when the task
-    // that drew ends. Draining the whole queue in one go therefore shows the
-    // last frame of the batch and throws the rest away invisibly, and
-    // painting straight out of the decoder's callback can leave several in
-    // one turn. Yielding after each is what makes a painted frame a shown
-    // frame -- which is the difference between "361 painted" in the counters
-    // and one frozen picture on the screen.
-    if (state.waiting.length) {
-      state.timer = setTimeout(pump, 0);
-    }
+  // Only to the memory bound, and then the head's turn -- the same rule as
+  // tick(), because a page that has stopped sending animation frames should
+  // see the same picture, only timed by a timer rather than by a refresh.
+  while (state.waiting.length > QUEUE_CAP) {
+    state.waiting.shift().frame.close();
+    state.stale += 1;
+  }
+  if (!state.waiting.length) return;
+  const next = state.waiting[0];
+  const wait = next.due - performance.now();
+  if (wait > LIMITS.SLACK_MS) {
+    state.timer = setTimeout(pump, wait);
     return;
   }
+  state.waiting.shift();
+  state.everPainted = true;
+  draw(next.frame);
+  // One paint per turn of the event loop, always.
+  //
+  // A transferred OffscreenCanvas shows what was drawn on it when the task
+  // that drew ends. Draining the whole queue in one go therefore shows the
+  // last frame of the batch and throws the rest away invisibly, and painting
+  // straight out of the decoder's callback can leave several in one turn.
+  // Yielding after each is what makes a painted frame a shown frame -- which
+  // is the difference between "361 painted" in the counters and one frozen
+  // picture on the screen.
+  if (state.waiting.length) state.timer = setTimeout(pump, 0);
 }
 
-/* When to paint the next frame.
+/* How deep the queue of frames waiting to be shown may get.
  *
- * Built from the *differences* between capture times and nothing else, which
- * is the whole point. Mapping a capture clock onto this one needs the two to
- * agree about where zero is and how fast a second passes, and they do not:
- * the capture clock restarts whenever the pipeline does, and neither runs at
- * exactly the rate of the other. An absolute schedule built on that mapping
- * drifts until every frame is already late on arrival, and a queue of frames
- * that are all late is drained as fast as the event loop allows -- which was
- * measured as "painted every 10ms typical, worst 176ms, 224 of 475 off the
- * beat" on a stream sending an even sixty a second.
+ * With a reserve, frames legitimately wait their turn, so this has to clear
+ * the deepest reserve plus whatever bunching the link delivers -- or it drops
+ * exactly what it just decided to hold. Six is moonlight-web's figure and is
+ * about a hundred milliseconds at 60fps, which is well past any reserve the
+ * pacer will ask for.
  *
- * Differences need no agreement about anything. The gap between two capture
- * timestamps is how far apart the pictures are, so painting them that far
- * apart is right whatever either clock thinks the time is.
- *
- * The queue depth is the only correction: too many waiting means this end is
- * behind and should hurry slightly; none waiting means it may relax. Both
- * are gentle, because a renderer that lurches is the thing being fixed.
+ * The scheduling that used to live here was an interval accumulator --
+ * `nextAt += gap`, from the capture deltas, rounded to whole refreshes and
+ * nudged by the queue depth. It is gone; see the note on makePacer in
+ * paint.js for what it was doing wrong and what replaces it. The short of it
+ * is that an open-loop clock drifts against the arrivals, and the clamp that
+ * stopped it scheduling into the past collapsed the schedule when it did.
  */
-const GAP_MIN = 4, GAP_MAX = 250;       // a sane frame interval, in ms
-/* How many frames to keep in hand. Set by the page -- see the Smoothing
-   setting -- because it is the one real trade here and different rooms want
-   different answers: every frame held is a frame of delay, and every frame
-   held is a hiccup absorbed. Moonlight calls the same choice frame pacing. */
-let DEPTH_WANT = 2;
-let START_DEPTH = 3;
+const QUEUE_CAP = 6;
 
-/* The display's own interval, learnt from the ticks. */
+/* The Smoothing setting, in frames, as the page last said. Three is the
+   default and gives moonlight-web's 25ms cap. */
+let SMOOTHING = 3;
+
+/* The display's own interval, learnt from the ticks. Kept for the report:
+   a paint cadence means nothing without knowing what the screen can show. */
 function refreshEvery() {
   if (state.beats.length < 12) return 0;
   const sorted = state.beats.slice().sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-function schedule(captureMs) {
-  const now = performance.now();
-  let gap = 1000 / 60;
-  if (state.lastPts !== null) {
-    gap = Math.min(GAP_MAX, Math.max(GAP_MIN, captureMs - state.lastPts));
-  }
-  state.lastPts = captureMs;
-  // Rounded to whole refreshes, which is what frame pacing means.
-  //
-  // A frame is shown for one refresh or two or three; there is no such thing
-  // as showing one for one and a half. So a schedule in fractions of a
-  // refresh is a schedule that cannot be kept: it drifts through the
-  // boundary, and each time it crosses, one frame is shown twice and the
-  // next is skipped. Measured on a game, with nothing starving and every
-  // frame in hand: 45 paints in 670 off the beat. The test pattern, whose
-  // capture intervals are exact, had none.
-  //
-  // Rounding also settles the correction below. Nudging a fractional gap by
-  // a tenth of a frame moved the phase a little every time; nudging a whole
-  // refresh moves it once and stops.
-  const refresh = refreshEvery();
-  if (refresh > 0 && gap >= refresh * 0.9) {
-    // Only when a frame can have a refresh of its own. Rounding a gap that
-    // is already shorter than a refresh *up* to one makes the schedule
-    // advance more slowly than the frames arrive -- ninety a second into a
-    // sixty hertz screen, and the queue grows until something dumps it. The
-    // measurement: "956 came out, 931 painted, 23 too late to matter", which
-    // is a fifth of a second of stale picture and then a jump.
-    //
-    // Below a refresh the true gap is kept, so the schedule tracks the rate
-    // the frames are really coming at, and the tick below shows the newest
-    // one that is due and lets the others go.
-    const steps = Math.max(1, Math.round(gap / refresh));
-    gap = steps * refresh;
-  }
-  if (state.nextAt === null) {
-    // The first frame waits, and everything after it inherits that slack.
-    //
-    // Painting the first one the instant it arrives leaves the renderer with
-    // nothing in hand: the next frame to be late is a gap on the screen,
-    // because there is no frame behind it to show meanwhile. Measured with
-    // no slack at all: sixteen milliseconds typical and a worst of fifty-five,
-    // with eight in every hundred paints off the beat -- about five a second,
-    // which is what a stutter is.
-    //
-    // A couple of frames of slack costs a couple of frames of delay and
-    // absorbs every hiccup smaller than itself. The queue then sits at that
-    // depth on its own, because the depth is what the nudging below keeps.
-    state.nextAt = now + gap * START_DEPTH;
-    return state.nextAt;
-  }
-  // Behind or ahead, by a whole refresh or not at all.
-  const deep = state.waiting.length;
-  const step = refresh > 0 ? refresh : gap * 0.1;
-  if (deep > DEPTH_WANT * 2) gap = Math.max(GAP_MIN, gap - step);
-  else if (deep === 0) gap += step;
-  state.nextAt += gap;
-  // Never schedule into the past, or everything after it arrives already
-  // late and the queue drains in one burst -- which is the fault this
-  // replaces.
-  if (state.nextAt < now) state.nextAt = now;
-  return state.nextAt;
-}
-
 function decoded(frame) {
   state.out += 1;
   const captured = (frame.timestamp || 0) / 1000;
-  // Kept for the report, which is where the reserve comes from.
-  state.pacer.due(captured, performance.now());
-  state.waiting.push({ frame, due: schedule(captured) });
+  // Timed from the decoder's output rather than from the frame's arrival, as
+  // moonlight-web does and for their reason: decode time varies too, and it
+  // is the cadence of what reaches the screen that has to be even, so one
+  // mechanism absorbs both sources of variance.
+  const due = state.pacer.schedule(captured, performance.now());
+  state.waiting.push({ frame, due });
   // The page's animation frames do the painting. The timer below is only
   // for a page that is not sending them -- a backgrounded tab, or a browser
   // without requestAnimationFrame -- where a picture that keeps moving beats
@@ -582,8 +530,7 @@ function close() {
     if (state.decoder && state.decoder.state !== "closed") state.decoder.close();
   } catch (_) {}
   state.decoder = null;
-  state.lastPts = null;
-  state.nextAt = null;
+  state.everPainted = false;
 }
 
 /* Putting a frame back together.
@@ -677,6 +624,9 @@ self.onmessage = (event) => {
   const m = event.data || {};
   if (m.start) {
     state.canvas = m.start.canvas;
+    if (m.start.smoothing) {
+      SMOOTHING = Math.max(1, Math.min(10, m.start.smoothing | 0));
+    }
     // No `desynchronized` here, and no assuming a context came back.
     //
     // That hint is for a canvas on a page, where it lets the browser skip a
@@ -694,6 +644,7 @@ self.onmessage = (event) => {
     }
     say("painting with " + state.context.what);
     state.pacer = makePacer(LIMITS);
+    state.pacer.cap(SMOOTHING);
     state.codec = m.start.codec;
     try {
       state.rung = 0;
@@ -736,6 +687,13 @@ self.onmessage = (event) => {
         // can start from. They want opposite answers.
         keyed: state.started,
         reserve: Math.round(state.pacer ? state.pacer.reserve() : 0),
+        // What the pacer is actually seeing, so a jittery link can be told
+        // from a reserve that is too small for it. `early` is a refresh where
+        // the next frame was simply not due yet, which is the reserve working
+        // -- the opposite of `starved`, and the two used to be one number.
+        early: state.early,
+        behind: state.behind,
+        pace: state.pacer ? state.pacer.stats() : null,
         ever: state.ever,
         // The surface itself, because every counter can read perfectly while
         // nothing reaches the screen.
@@ -757,6 +715,7 @@ self.onmessage = (event) => {
     if (m.report) {
       state.handed = state.fed = state.out = state.drawn = 0;
       state.refused = state.skipped = state.stale = 0;
+      state.early = state.behind = 0;
       state.lost = 0;
       state.drawFails = 0;
       state.ticks = state.starved = 0;
@@ -764,8 +723,12 @@ self.onmessage = (event) => {
     return;
   }
   if (m.smoothing) {
-    START_DEPTH = Math.max(1, Math.min(10, m.smoothing | 0));
-    DEPTH_WANT = Math.max(1, START_DEPTH - 1);
+    // The one real trade, and the guest's to make: every millisecond of
+    // reserve is a millisecond of delay and a hiccup absorbed. The setting
+    // moves the *cap* on the reserve; what is actually held inside it is
+    // whatever the link turns out to need, which on a clean one is nothing.
+    SMOOTHING = Math.max(1, Math.min(10, m.smoothing | 0));
+    if (state.pacer) state.pacer.cap(SMOOTHING);
     return;
   }
   if (m.tick) {
