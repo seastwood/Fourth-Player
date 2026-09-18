@@ -147,6 +147,20 @@ class Config:
     # true, so the browser has a real choice for every refresh.
     true_time: bool = False
 
+    # Which way a guest's browser should draw the picture, unless that guest
+    # has chosen for themselves.
+    #
+    # "browser" hands the stream to a <video> element and WebRTC decides when
+    # each frame is shown. "here" takes the encoded frames, decodes them with
+    # WebCodecs and paints them on a canvas on a schedule the page chooses.
+    # See web/paint.js.
+    #
+    # A default rather than an instruction: it is the guest's machine that
+    # has to do the work and the guest's eyes that judge the result, so a
+    # viewer who picks one keeps it. This is what everybody else gets, and
+    # what somebody sees the first time they connect.
+    draw_with: str = "browser"
+
     match_refresh: bool = True
     virtual_display: bool = False
     # Which screen to send when the machine has more than one, as the device

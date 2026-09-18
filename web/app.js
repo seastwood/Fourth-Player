@@ -8391,17 +8391,36 @@ function paintMethodById(id) {
   return PAINT_METHODS[0];
 }
 
-function savedPaintMethod() {
+/* What this viewer has chosen, or "" for whatever the host prefers.
+ *
+ * Three states rather than two, because the host's setting is a default and
+ * not an instruction. It is the guest's machine doing the work and the
+ * guest's eyes judging the result, so a viewer who picks one keeps it --
+ * while somebody connecting for the first time gets whatever the owner set
+ * in the setup page, which is the only way a preference there can mean
+ * anything at all. */
+function savedPaintChoice() {
   let raw = null;
   try { raw = localStorage.getItem(PAINT_KEY); } catch (_) {}
-  const found = paintMethodById(raw);
-  // A method this browser cannot do is not offered and not remembered: a
-  // setting carried over from a machine that could would otherwise leave
-  // somebody with no picture and no explanation.
+  if (!raw) return "";
+  const found = PAINT_METHODS.some((one) => one.id === raw);
+  // A method this browser cannot do is not remembered: a setting carried
+  // over from a machine that could would otherwise leave somebody with no
+  // picture and no explanation.
+  return (found && paintMethodById(raw).ok()) ? raw : "";
+}
+
+let paintChoice = savedPaintChoice();
+let hostDrawWith = PAINT_METHODS[0].id;     // what the host says it prefers
+
+/* The one actually in force. */
+function wantedPaintMethod() {
+  const id = paintChoice || hostDrawWith;
+  const found = paintMethodById(id);
   return found.ok() ? found.id : PAINT_METHODS[0].id;
 }
 
-let paintMethod = savedPaintMethod();
+let paintMethod = wantedPaintMethod();
 let painter = null;
 let paintWaitedSaid = false;
 
@@ -8682,24 +8701,46 @@ function askHostForKeyframe() {
 }
 
 function savePaintMethod() {
-  try { localStorage.setItem(PAINT_KEY, paintMethod); } catch (_) {}
+  try {
+    if (paintChoice) localStorage.setItem(PAINT_KEY, paintChoice);
+    else localStorage.removeItem(PAINT_KEY);
+  } catch (_) {}
+}
+
+/* The host's preference arrived. A viewer following it moves with it; a
+   viewer who has chosen is left alone, which is the whole point of the
+   choice. */
+function hostPrefersDrawing(id) {
+  const next = (id && PAINT_METHODS.some((one) => one.id === id))
+    ? id : PAINT_METHODS[0].id;
+  if (next === hostDrawWith) { paintPaintMethod(); return; }
+  hostDrawWith = next;
+  if (paintChoice) { paintPaintMethod(); return; }   // theirs wins
+  setPaintMethod("");
 }
 
 function paintPaintMethod() {
   const box = el("stream-paint");
   if (box) {
-    if (box.dataset.built !== "1") {
+    const built = "follow:" + hostDrawWith;
+    if (box.dataset.built !== built) {
       box.innerHTML = "";
+      const follow = document.createElement("option");
+      follow.value = "";
+      follow.textContent = "Follow the host — "
+        + paintMethodById(hostDrawWith).label.replace(" (default)", "");
+      box.appendChild(follow);
       for (const one of PAINT_METHODS) {
         const option = document.createElement("option");
         option.value = one.id;
-        option.textContent = one.label + (one.ok() ? "" : " — not on this browser");
+        option.textContent = one.label.replace(" (default)", "")
+          + (one.ok() ? "" : " — not on this browser");
         option.disabled = !one.ok();
         box.appendChild(option);
       }
-      box.dataset.built = "1";
+      box.dataset.built = built;
     }
-    box.value = paintMethod;
+    box.value = paintChoice;
   }
   const note = el("stream-paint-note");
   if (note) {
@@ -8712,13 +8753,13 @@ function paintPaintMethod() {
 }
 
 function setPaintMethod(id) {
-  const found = paintMethodById(id);
   // Choosing it by hand is a fresh start: the list of spellings is walked
   // again from the top rather than continuing where a previous attempt gave
   // up, which would make the second try of the day start at the end.
   paintTried = 0;
   paintGaveUp = false;
-  paintMethod = found.ok() ? found.id : PAINT_METHODS[0].id;
+  paintChoice = (id && PAINT_METHODS.some((one) => one.id === id)) ? id : "";
+  paintMethod = wantedPaintMethod();
   savePaintMethod();
   paintPaintMethod();
   if (paintMethod === "here") startPainting();
@@ -9348,6 +9389,7 @@ function paintStream(state) {
   // renegotiation -- so it looked like a setting that does not work, which
   // is a worse thing to have than one that is merely hard to tune.
   if (state && Number(state.jitter_ms) > 0) holdVideoBack(Number(state.jitter_ms));
+  if (state && state.draw_with) hostPrefersDrawing(String(state.draw_with));
   const size = el("stream-size");
   if (size && Array.isArray(state.sizes)) {
     size.innerHTML = "";

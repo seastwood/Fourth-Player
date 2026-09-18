@@ -159,6 +159,15 @@ SILENCE_SECONDS = 5.0
 WARN_AT = (300, 120, 30)
 
 
+# The ways a guest's browser can draw the picture. The names are the page's;
+# see web/paint.js and the PAINT_METHODS beside it in web/app.js.
+DRAW_WAYS = ("browser", "here")
+
+# Settings that tell a browser what to do and say nothing about the capture.
+# Changing one must not cost the room a second of picture rebuilding
+# something that is not affected by it.
+CLIENT_ONLY = {"draw_with"}
+
 class StaleGuest(Exception):
     """This guest object is no longer the one sitting in its slot.
 
@@ -2722,6 +2731,8 @@ class LiveSession:
             "oversample": bool(getattr(cfg, "oversample", False)),
             "test_pattern": bool(getattr(cfg, "test_pattern", False)),
             "true_time": bool(getattr(cfg, "true_time", False)),
+            "draw_with": str(getattr(cfg, "draw_with", "browser") or "browser"),
+            "draw_ways": list(DRAW_WAYS),
             # Whether one could be made here at all, so the page can offer the
             # switch where it means something and explain itself where it does
             # not. A switch that silently does nothing is worse than no switch.
@@ -2824,6 +2835,13 @@ class LiveSession:
         # the link and share settings are -- which had to be fixed once
         # already, because bool("off") is True and a string sent from a page
         # therefore turned everything on.
+        if "draw_with" in asked:
+            want_draw = str(asked["draw_with"] or "browser")
+            if want_draw not in DRAW_WAYS:
+                raise ValueError("no such way of drawing: %s" % want_draw)
+            if want_draw != str(getattr(self.cfg, "draw_with", "browser")):
+                changes["draw_with"] = want_draw
+
         if "guest_mic_device" in asked:
             want_mic = str(asked["guest_mic_device"] or "")
             # Empty is always allowed and means "nowhere". Anything else has
@@ -2875,6 +2893,14 @@ class LiveSession:
         except Exception as exc:
             log.warning("could not write the config (%s); the change still "
                         "applies to this session", exc)
+
+        # Nothing about the capture changed, so nothing is rebuilt. Every
+        # change here costs the room about a second of held picture, and a
+        # setting that only tells a browser how to draw does not need to.
+        if set(changes) <= CLIENT_ONLY:
+            out = self.stream_settings()
+            self.notify({"t": "stream", **out})
+            return {"ok": True, "changed": sorted(changes), **out}
 
         if self.stage is not None:
             want = self.cfg.codec

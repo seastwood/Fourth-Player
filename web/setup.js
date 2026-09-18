@@ -272,6 +272,31 @@ function fillPicture(stream, policies) {
   if (over) over.checked = Boolean(stream.oversample);
   const pattern = el("set-testpattern");
   if (pattern) pattern.checked = Boolean(stream.test_pattern);
+  // What a guest's browser does with the picture, unless that guest has
+  // chosen for themselves. A default rather than an instruction: it is their
+  // machine doing the work and their eyes judging it. The labels are the
+  // client page's own, so the two never describe the same thing differently.
+  const draw = el("set-draw");
+  if (draw) {
+    const ways = Array.isArray(stream.draw_ways)
+      ? stream.draw_ways : ["browser", "here"];
+    const named = {
+      browser: "the browser (WebRTC into a video element)",
+      here: "the page itself (WebCodecs onto a canvas)",
+    };
+    const built = JSON.stringify(ways);
+    if (draw.dataset.built !== built) {
+      draw.innerHTML = "";
+      for (const one of ways) {
+        const option = document.createElement("option");
+        option.value = one;
+        option.textContent = named[one] || one;
+        draw.appendChild(option);
+      }
+      draw.dataset.built = built;
+    }
+    draw.value = stream.draw_with || "browser";
+  }
   const truetime = el("set-truetime");
   if (truetime) truetime.checked = Boolean(stream.true_time);
   if (pace && stream.true_time) { pace.checked = false; pace.disabled = true; }
@@ -534,6 +559,7 @@ const ACTIONS = {
       test_pattern: Boolean(el("set-testpattern")
                             && el("set-testpattern").checked),
       true_time: Boolean(el("set-truetime") && el("set-truetime").checked),
+      draw_with: el("set-draw") ? el("set-draw").value : "browser",
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
       guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",
