@@ -2844,27 +2844,42 @@ class Peer:
         # says which frame it belongs to, so a frame that cannot be completed
         # is dropped and the run ends until a keyframe restarts it.
         #
-        # Timed rather than counted, which is the one combination not yet
-        # tried and the only one whose abandonment is decided by a clock.
+        # Ordered, with a five-hundred-millisecond lifetime.
         #
-        # "Never retransmit" sounds stronger and is not: it means give up when
-        # you *would* have retransmitted once, and when a loss is found by
-        # timeout rather than by fast retransmit that is a full second first.
-        # Which is why none of ordered, then unordered, then unreliable moved
-        # the number -- 1049, 1062, 1069, 1073, 1085ms -- they all left SCTP's
-        # loss *detection* in the path, and detection is where the second is
-        # spent. The media track bundled on the very same socket never stalls,
-        # because RTP does not detect loss at all.
+        # This is moonlight-web's configuration exactly, arrived at from the
+        # other direction, and their comments record the same fight. Ordered,
+        # because frames reference their predecessor so delivery order *is*
+        # decode order -- they tried unordered and it "turned every SCTP
+        # retransmit into a false frameId gap and an IDR cycle", which is what
+        # happened here too. A lifetime rather than a retransmit count,
+        # because a count "kept retransmitting second-old frames in order
+        # ahead of the keyframe once the link was back".
         #
-        # A lifetime is a clock: past it the message is abandoned whether or
-        # not anything has noticed it missing, and the receiver is told to
-        # skip past it on the next packet out. Fifty milliseconds is three
-        # frames -- long past the point where a frame was worth having.
+        # They do not avoid the stall. They bound it: past the lifetime the
+        # sender gives the message up, and the far end skips to what is
+        # current. Five hundred is theirs and is the number that matters --
+        # a hundred and fifty was tried here and the stall stayed at a full
+        # second, which is the thing to check rather than assume.
         video_options = Gst.Structure.new_from_string(
-            "options, ordered=(boolean)false, max-packet-lifetime=(int)50")
+            "options, ordered=(boolean)true, max-packet-lifetime=(int)500")
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
                                               video_options)
         if self.frame_channel is not None:
+            # Read back, because a property that is silently not applied looks
+            # exactly like one that is. The picture channel was configured
+            # with a lifetime and stalled for a full second anyway, five
+            # times over, which is what a lifetime is supposed to prevent --
+            # and "the setting is there" was never checked against "the
+            # setting took". Same habit as encoder_tuning.
+            try:
+                got = self.frame_channel.props.max_packet_lifetime
+                log.info("peer %s: the picture channel gives up on a piece "
+                         "after %sms (asked for 500)", self.id, got)
+            except Exception:
+                log.warning("peer %s: this webrtcbin will not say whether the "
+                            "picture channel has a packet lifetime at all, so "
+                            "a lost packet may cost a full retransmission "
+                            "timeout", self.id, exc_info=True)
             self._connect(self.frame_channel, "on-open", self._on_picture_open)
             self._connect(self.frame_channel, "on-close",
                           lambda _c: setattr(self, "frames_wanted", False))
@@ -3080,7 +3095,7 @@ class Peer:
         # overruns a queue somewhere and loses a packet. A data channel has no
         # pacer, so this is one: smaller pieces, released at the rate the
         # picture is actually being encoded at. See `_drain`.
-        limit = 8000
+        limit = 16000
         self._sent_frames += 1
         if self._sent_frames % 600 == 0:
             log.info("peer %s: the picture channel has sent %d frames and is "

@@ -702,11 +702,12 @@ let wantSeq = 0;                       // the next frame to hand over
 
 /* How long a frame may be incomplete while newer ones are ready.
  *
- * Short, because nothing is retransmitted any more: a piece that has not
- * arrived by the time a later frame is complete is never going to. It is not
- * zero only because the channel is unordered, so the pieces of one frame can
- * legitimately arrive either side of the pieces of the next. */
-const PATCH_MS = 40;
+ * The same figure the sender gives up after, which is moonlight-web's
+ * arrangement: "past 500 ms (our own FRAME_TIMEOUT_MS) the sender gives a
+ * message up and we skip to what is current". Shorter than that and this end
+ * throws away frames the other end is still successfully retransmitting;
+ * longer and it waits for something already abandoned. */
+const PATCH_MS = 500;
 
 /* Ask for a keyframe, but not once per lost frame: on a link losing pieces
    steadily that is a request per frame, and a host answering all of them

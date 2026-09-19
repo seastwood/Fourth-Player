@@ -134,7 +134,7 @@ check("BITRATE_CALM" in video,
       "with a quiet spell required before it climbs, so it does not oscillate")
 
 print("a frame too big for one message is sent in pieces")
-check("limit = 8000" in video,
+check("limit = 16000" in video,
       "small enough to be paced, rather than as large as a browser will take")
 
 print("and the pieces are paced onto the wire rather than dumped on it")
@@ -192,13 +192,20 @@ print("a frame with a piece missing is dropped rather than decoded")
 # 1049, 1062, 1069, 1085ms -- while the guest's page beat steadily at 18ms and
 # nothing was ever lost. That number is SCTP's minimum retransmission timeout,
 # and it is the price of asking for a retransmission at all.
-check("max-packet-lifetime=(int)50" in video,
+check("max-packet-lifetime=(int)500" in video,
       "so a piece is abandoned by a clock rather than by a retransmission "
       "that has not happened: 'never retransmit' means give up when you "
       "would have retransmitted once, and a loss found by timeout costs the "
       "full second first, which is where every one of these went")
-check("ordered=(boolean)false, max-packet-lifetime" in video,
-      "and unordered with it, so one frame's pieces never wait on another's")
+check("ordered=(boolean)true, max-packet-lifetime" in video,
+      "and ordered with it, which is moonlight-web's configuration exactly: "
+      "frames reference their predecessor, so delivery order is decode order, "
+      "and they record unordered turning every retransmit into a false gap "
+      "and an IDR cycle -- which is what it did here too")
+check("max_packet_lifetime" in video,
+      "and it is read back, because a property that is silently not applied "
+      "looks exactly like one that is -- this was configured with a lifetime "
+      "and stalled for a full second anyway, five times over")
 # Scoped to the picture channel: the input channel legitimately counts,
 # because a pad snapshot is worthless the moment the next one exists.
 spot = video.find("video_options = Gst.Structure.new_from_string")
