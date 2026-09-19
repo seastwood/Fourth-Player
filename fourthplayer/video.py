@@ -630,15 +630,20 @@ _host_codecs = None
 # hand is at worst four keyframes a second, which an eight megabit stream can
 # afford far more easily than it can afford the freeze.
 #
-# The burst is where that is bought, not the gap: test_budget holds the
-# long-run rate to at most forty percent of the frame budget, and it is right
-# to -- a keyframe is worth twenty-odd ordinary frames, so four a second is
-# twice the whole picture. So four in hand, answered at once, and then one a
-# second. An isolated loss, which is nearly all of them, is repaired
-# instantly; only sustained loss is made to wait, and sustained loss cannot be
-# repaired by spending the entire bitrate on keyframes anyway.
-KEYFRAME_MIN_GAP = 1.25
-KEYFRAME_BURST = 4
+# The burst is where that is bought, not the gap. Two tests hold the long-run
+# rate to at most forty percent of the frame budget and they are right to: a
+# keyframe is worth about fifteen ordinary frames, so even one a second is
+# half the picture at thirty. They also caught two attempts at this -- a
+# quarter-second gap, then one second -- and the arithmetic they enforce is
+# the whole of the trade: whatever is spent on the burst has to come off the
+# refill. Three in hand, answered at once, and one every two seconds after.
+#
+# The burst is what matters. An isolated loss is nearly all of them, and three
+# of those in quick succession are repaired instantly; only sustained loss is
+# made to wait, and sustained loss cannot be repaired by spending the whole
+# bitrate on keyframes anyway.
+KEYFRAME_MIN_GAP = 2.0
+KEYFRAME_BURST = 3
 
 # Video is the first feed a guest is given, so it is the first transceiver.
 VIDEO_TRANSCEIVER = 0
