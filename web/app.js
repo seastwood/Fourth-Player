@@ -4992,6 +4992,11 @@ let deskWasMine = false;
 let deskRetaking = false;
 let deskAsking = false;        // we asked and have not heard back
 const deskPending = { dx: 0, dy: 0, wdx: 0, wdy: 0 };
+/* The movements the mouse made, in order, waiting to go out. */
+const deskMoves = [];
+/* How many may share one message. Enough for a frame of a fast mouse, few
+   enough that one message stays small. */
+const DESK_MOVE_RUN = 16;
 
 /* Matches deskwire.MOTION_LIMIT. Over it the host refuses the whole message
    rather than half of it, so a flick that overshoots must be clamped here
@@ -5067,11 +5072,26 @@ function deskFlush() {
   deskSentAt = (typeof performance !== "undefined" && performance.now)
     ? performance.now() : Date.now();
   const out = [];
-  const dx = Math.trunc(deskPending.dx), dy = Math.trunc(deskPending.dy);
-  deskPending.dx -= dx; deskPending.dy -= dy;
-  if (dx || dy) {
-    out.push({ t: "m", dx: deskClamp(dx, DESK_MOTION_LIMIT),
-               dy: deskClamp(dy, DESK_MOTION_LIMIT) });
+  // Each movement in the order it was made, rather than their sum.
+  //
+  // Summing them is what the browser already did to us, and undoing it is
+  // the point: an acceleration curve applied to one lump of eight pixels
+  // does not give what it gives applied to eight movements of one. The
+  // fraction is still carried, per movement, so nothing is lost to rounding
+  // however small the pieces are.
+  while (deskMoves.length) {
+    const one = deskMoves.shift();
+    deskPending.dx += one.dx;
+    deskPending.dy += one.dy;
+    const dx = Math.trunc(deskPending.dx), dy = Math.trunc(deskPending.dy);
+    deskPending.dx -= dx; deskPending.dy -= dy;
+    if (dx || dy) {
+      out.push({ t: "m", dx: deskClamp(dx, DESK_MOTION_LIMIT),
+                 dy: deskClamp(dy, DESK_MOTION_LIMIT) });
+    }
+    // One message carries a bounded run of them; the rest wait for the next
+    // flush rather than making a single message unbounded.
+    if (out.length >= DESK_MOVE_RUN) break;
   }
   const wx = Math.trunc(deskPending.wdx), wy = Math.trunc(deskPending.wdy);
   deskPending.wdx -= wx; deskPending.wdy -= wy;
@@ -5142,8 +5162,7 @@ function setDeskSpeed(value) {
 function deskMoved(dx, dy) {
   dx *= deskSpeed;
   dy *= deskSpeed;
-  deskPending.dx += dx;
-  deskPending.dy += dy;
+  if (dx || dy) deskMoves.push({ dx, dy });
   // Keep a guess at where the console's pointer has got to.
   //
   // Under a pointer lock the browser stops updating clientX and clientY -- the
@@ -6235,7 +6254,32 @@ function deskListen() {
       // Before the movement, so a button the browser says is down is pressed
       // on the console before the aim moves rather than after it.
       deskButtonsCheck(event);
-      deskMoved(event.movementX || 0, event.movementY || 0);
+      // Every movement the mouse actually made, not one lump per frame.
+      //
+      // Chrome delivers mousemove once per animation frame with the movement
+      // since the last one summed into it, however fast the mouse reports.
+      // The host was measured receiving them every 16.6ms -- the refresh,
+      // not the mouse -- so a hand moving steadily arrived as sixty jumps a
+      // second, and Windows applied its acceleration curve once to each lump
+      // instead of to each real movement. That is a pointer whose gain
+      // depends on how the browser happened to chop the motion up, which is
+      // what "cursor control feels a little jittery" is.
+      //
+      // getCoalescedEvents gives back the ones it merged, each with its own
+      // movement. They go out as separate movements in the same message, so
+      // the console sees the sequence the mouse produced and the message rate
+      // does not change.
+      let each = null;
+      if (event.getCoalescedEvents) {
+        try { each = event.getCoalescedEvents(); } catch (_) { each = null; }
+      }
+      if (each && each.length > 1) {
+        for (const one of each) {
+          deskMoved(one.movementX || 0, one.movementY || 0);
+        }
+      } else {
+        deskMoved(event.movementX || 0, event.movementY || 0);
+      }
     }
   }, true);
   video.addEventListener("wheel", (event) => {

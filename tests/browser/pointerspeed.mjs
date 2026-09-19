@@ -26,6 +26,9 @@ check(from > 0 && until > from, "the pointer-speed code was found in app.js");
 
 function harness(stored) {
   const pending = { dx: 0, dy: 0 };
+  // Movements are queued in the order the mouse made them now, rather than
+  // summed into one, so the harness holds the queue deskMoved pushes onto.
+  const moves = [];
   const store = new Map();
   if (stored !== undefined) store.set("fp:pointer-speed", stored);
   const localStorage = {
@@ -35,34 +38,39 @@ function harness(stored) {
   let flushes = 0;
   const fns = new Function(
     "deskPending", "deskSoon", "pictureBox", "zoom", "localStorage",
+    "deskMoves",
     "let cursorU = 0.5, cursorV = 0.5;"
     + app.slice(from, until)
     + "; return { deskMoved, setDeskSpeed, speed: () => deskSpeed,"
     + " cursor: () => [cursorU, cursorV] };")(
       pending, () => { flushes++; }, () => ({ width: 1000, height: 1000 }), 1,
-      localStorage);
-  return { pending, fns, store, flushed: () => flushes };
+      localStorage, moves);
+  return { pending, fns, store, moves, flushed: () => flushes };
 }
 
 console.log("the default is one to one");
+// Movements queue in the order the mouse made them rather than summing into
+// one pending pair: the browser had already summed them once, and undoing
+// that is the point -- an acceleration curve applied to one lump of eight
+// pixels does not give what it gives applied to eight movements of one.
 let h = harness();
 check(h.fns.speed() === 1, "nothing stored means normal speed");
 h.fns.deskMoved(10, -4);
-check(h.pending.dx === 10 && h.pending.dy === -4,
-      `unscaled motion passes through: ${h.pending.dx},${h.pending.dy}`);
+check(h.moves[0].dx === 10 && h.moves[0].dy === -4,
+      `unscaled motion passes through: ${h.moves[0].dx},${h.moves[0].dy}`);
 
 console.log("\na faster setting moves the console pointer further");
 h = harness("2");
 check(h.fns.speed() === 2, "the stored value is read back");
 h.fns.deskMoved(10, -4);
-check(h.pending.dx === 20 && h.pending.dy === -8,
-      `10 becomes 20: ${h.pending.dx},${h.pending.dy}`);
+check(h.moves[0].dx === 20 && h.moves[0].dy === -8,
+      `10 becomes 20: ${h.moves[0].dx},${h.moves[0].dy}`);
 
 console.log("\nand a slower one moves it less");
 h = harness("0.5");
 h.fns.deskMoved(10, 10);
-check(h.pending.dx === 5 && h.pending.dy === 5,
-      `10 becomes 5: ${h.pending.dx},${h.pending.dy}`);
+check(h.moves[0].dx === 5 && h.moves[0].dy === 5,
+      `10 becomes 5: ${h.moves[0].dx},${h.moves[0].dy}`);
 
 console.log("\nthe estimate of where the pointer is scales with it");
 // The whole reason the multiply lives at the top of deskMoved. At double
@@ -116,5 +124,30 @@ const padPanel = html.slice(html.indexOf('<div id="pads"'),
 check(!/id="desk-speed"/.test(padPanel),
       "and not in the controller panel, where it was and where nobody with a "
       + "mouse would look");
+
+console.log("\nthe movements a mouse made are kept apart, not summed");
+// The browser had already summed them: Chrome delivers mousemove once per
+// animation frame with everything since the last one folded in, whatever rate
+// the mouse reports at. The host was measured receiving them every 16.6ms --
+// the refresh, not the mouse -- so a hand moving steadily arrived as sixty
+// jumps a second, and Windows applied its acceleration curve once to each
+// lump instead of to each real movement. A pointer whose gain depends on how
+// the browser chopped the motion up is a pointer that does not track the
+// hand, which is what "cursor control feels a little jittery" is.
+h = harness();
+h.fns.deskMoved(3, 0);
+h.fns.deskMoved(4, 0);
+h.fns.deskMoved(5, 0);
+check(h.moves.length === 3,
+      `three movements stay three: ${h.moves.length}`);
+check(h.moves.map((m) => m.dx).join() === "3,4,5",
+      `and in the order they were made: ${h.moves.map((m) => m.dx).join()}`);
+// The page asks the browser for them rather than taking the summary.
+check(app.includes("getCoalescedEvents"),
+      "and the page asks the browser for the ones it merged");
+check(app.includes("const DESK_MOVE_RUN"),
+      "with a bound on how many share one message, so a fast mouse does not "
+      + "make an unbounded one");
+
 
 process.exit(fails ? 1 : 0);
