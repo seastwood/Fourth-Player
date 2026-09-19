@@ -1640,6 +1640,27 @@ class Stage:
         # identical from a phone, and only one of them is a fault.
         if windesktop.supported():
             log.info("desktop: %s", windesktop.explain())
+        # What the colour actually negotiated as.
+        #
+        # "The colouring feels kind of flat" has two ordinary causes and they
+        # want opposite fixes, so guessing between them is worth nothing. A
+        # desktop is full-range RGB; the encoder wants YUV. If the conversion
+        # compresses 0-255 into 16-235 and the browser is not told, the
+        # picture comes back with its contrast squeezed out -- flat. And if
+        # the matrix disagrees at either end -- BT.601 against BT.709 -- the
+        # hues go with it. Neither is visible from here without asking, and
+        # nothing in this pipeline has ever said which it picked.
+        try:
+            pad = self.encoder.get_static_pad("sink") if self.encoder else None
+            caps = pad.get_current_caps() if pad is not None else None
+            if caps is not None and caps.get_size():
+                one = caps.get_structure(0)
+                log.info("colour: %s, colorimetry %s",
+                         one.get_value("format"),
+                         one.get_value("colorimetry") or "(not stated)")
+        except Exception:
+            log.debug("could not read the colour the encoder negotiated",
+                      exc_info=True)
         log.info("capture running: %dx%d @%d, %d kb/s, %s, audio %s",
                  self.sending_width, self.sending_height, self.cfg.fps,
                  self.cfg.bitrate_kbps, self.encoder_name,
