@@ -134,7 +134,29 @@ check("BITRATE_CALM" in video,
       "with a quiet spell required before it climbs, so it does not oscillate")
 
 print("a frame too big for one message is sent in pieces")
-check("limit = 60000" in video, "well under what a browser will accept")
+check("limit = 8000" in video,
+      "small enough to be paced, rather than as large as a browser will take")
+
+print("and the pieces are paced onto the wire rather than dumped on it")
+# Sixty thousand meant a whole frame was usually one message, handed to SCTP
+# in one call and put on the wire as a burst of forty-odd packets back to
+# back, sixty times a second. Every WebRTC media stack has a pacer between the
+# encoder and the socket precisely because a burst overruns a queue somewhere
+# and loses a packet -- and losing one costs a second here, which is SCTP's
+# minimum retransmission timeout. The guest's own page measured it: pieces
+# stopped arriving for 1073ms while its animation frames carried on at 18ms,
+# and nothing was lost -- it all turned up at once when the timeout expired.
+check("def _drain" in video, "there is a pacer")
+check("self._outbox" in video, "with a queue of pieces waiting their turn")
+check("PACE_TICK_MS" in video and "PACE_HEADROOM" in video,
+      "a tick fine enough to spread a frame, and headroom so a queue that "
+      "has fallen behind can catch up without the pacer being the bottleneck")
+check("self.stage.rate_now()" in video,
+      "paced at what the encoder is actually producing, since anything "
+      "slower makes the pacer itself the bottleneck")
+check("self._allowance = min(self._allowance," in video,
+      "and an idle bucket does not save up a burst to spend later, which "
+      "would be the very thing this exists to prevent")
 check('struct.pack("<BQHHI"' in video,
       "each piece says what it is: flags, the capture time, which piece it "
       "is, how many there are, and the host's own number for the frame")

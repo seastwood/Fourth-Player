@@ -19,6 +19,7 @@ loop runs on its own thread and every callback is marshalled back with
 `call_soon_threadsafe`. Nothing in this module touches session state directly.
 """
 
+import collections
 import concurrent.futures
 import json
 import logging
@@ -2103,6 +2104,16 @@ class Stage:
         self._ease_the_rate(behind)
         return Gst.FlowReturn.OK
 
+    def rate_now(self):
+        """What the encoder is actually being asked for, in kb/s.
+
+        The pacer's rate: what is being produced is what has to be put on the
+        wire, and anything slower turns the pacer itself into the bottleneck.
+        """
+        if self._rate_now:
+            return self._rate_now
+        return max(1, int(self.cfg.bitrate_kbps))
+
     def frame_queue_limit(self):
         """How many bytes may sit in a send queue before frames are skipped.
 
@@ -2623,6 +2634,10 @@ class Peer:
         self._said_shut = False
         self.frames_skipped = 0
         self._await_key = False
+        self._outbox = collections.deque()
+        self._pacing = False
+        self._paced_at = 0.0
+        self._allowance = 0.0
         self._sent_frames = 0
         self._reports = 0
         self._reported_seq = None
@@ -3021,9 +3036,18 @@ class Peer:
             self.stage.request_keyframe(self.id)
             return
 
-        # Well under the 256KB a browser will take, so one frame is a few
-        # messages rather than one that might be refused.
-        limit = 60000
+        # Small enough to be paced, rather than as large as a browser will
+        # take.
+        #
+        # Sixty thousand meant a whole frame was usually one message, handed
+        # to SCTP in a single call and put on the wire as a burst of forty-odd
+        # packets back to back, sixty times a second, with nothing spreading
+        # them out. RTP does not do that -- every WebRTC media stack has a
+        # pacer between the encoder and the socket precisely because a burst
+        # overruns a queue somewhere and loses a packet. A data channel has no
+        # pacer, so this is one: smaller pieces, released at the rate the
+        # picture is actually being encoded at. See `_drain`.
+        limit = 8000
         self._sent_frames += 1
         if self._sent_frames % 600 == 0:
             log.info("peer %s: the picture channel has sent %d frames and is "
@@ -3050,10 +3074,74 @@ class Peer:
                 flags |= 4
             head = struct.pack("<BQHHI", flags, int(stamp), index, pieces,
                                self._sent_frames & 0xFFFFFFFF)
-            chunk = head + data[at:end]
-            channel.emit("send-data", GLib.Bytes.new(chunk))
+            self._outbox.append(head + data[at:end])
             at = end
             index += 1
+        self._pace()
+
+    # How often the pacer wakes, and how much headroom it allows over the rate
+    # the encoder is producing at.
+    #
+    # Two milliseconds is about an eighth of a frame at sixty a second, which
+    # is fine enough that a frame leaves as a handful of small bursts rather
+    # than one large one, and coarse enough that a timer can keep it. The
+    # headroom is what lets a queue that has fallen behind catch up without
+    # the pacer itself becoming the bottleneck: a fifth over is enough to
+    # absorb a keyframe without being enough to put the burst back.
+    PACE_TICK_MS = 2
+    PACE_HEADROOM = 1.2
+
+    def _pace(self):
+        """Start the pacer if it is not already running."""
+        if self._pacing or not self._outbox:
+            return
+        self._pacing = True
+        self._paced_at = time.monotonic()
+        self._allowance = 0.0
+        GLib.timeout_add(self.PACE_TICK_MS, self._drain)
+
+    def _drain(self):
+        """Put out as many pieces as the elapsed time has paid for.
+
+        A leaky bucket, which is all a pacer is. The rate is what the encoder
+        is being asked to produce, so in the steady state this hands SCTP a
+        frame's worth of bytes over a frame's worth of time instead of all at
+        once -- and a burst of forty packets back to back is what overruns a
+        queue and loses one. Losing one costs a second: SCTP's minimum
+        retransmission timeout, measured on the guest's own page as pieces
+        stopping for 1073ms while its animation frames carried on at 18ms.
+        """
+        channel = self.frame_channel
+        if channel is None or not self._outbox:
+            self._pacing = False
+            return False
+        now = time.monotonic()
+        rate = max(1, int(self.stage.rate_now())) * 1000 / 8.0   # bytes/second
+        self._allowance += (now - self._paced_at) * rate * self.PACE_HEADROOM
+        self._paced_at = now
+        # A bucket that has been idle must not save up a burst to spend later,
+        # which would be the very thing this exists to prevent.
+        self._allowance = min(self._allowance, rate * 0.05)
+        try:
+            state = channel.props.ready_state
+        except Exception:
+            state = None
+        if state is not None and state != GstWebRTC.WebRTCDataChannelState.OPEN:
+            self._outbox.clear()
+            self._pacing = False
+            return False
+        while self._outbox and self._allowance >= len(self._outbox[0]):
+            piece = self._outbox.popleft()
+            self._allowance -= len(piece)
+            try:
+                channel.emit("send-data", GLib.Bytes.new(piece))
+            except Exception:
+                self._outbox.clear()
+                break
+        if not self._outbox:
+            self._pacing = False
+            return False
+        return True
 
     def on_answer(self, sdp_text):
         """Say what the guest agreed to for the microphone line, once.
