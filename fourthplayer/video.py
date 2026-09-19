@@ -3998,8 +3998,15 @@ class Peer:
             worst = ordered[-1]
             rough = sum(1 for g in self._desk_gaps
                         if abs(g - middle) > middle * 0.5)
-            log.info("peer %s: pointer movements arrive every %.1fms typical, "
-                     "worst %.0fms, %d of %d more than half a step off",
+            # A batch, not a movement: one message carries every movement
+            # the mouse made since the last, so this still reads 16.6ms and
+            # correctly so. The number that mattered was the first one --
+            # 16.6 where the mouse reports at 8, which said the browser was
+            # summing them -- and it is named as batches now so nobody reads
+            # it as movements later and concludes the wrong thing.
+            log.info("peer %s: a batch of pointer movement arrives every "
+                     "%.1fms typical, worst %.0fms, %d of %d more than half "
+                     "a step off",
                      self.id, middle, worst, rough, len(self._desk_gaps))
             self._desk_gaps = []
         if hasattr(payload, "get_data"):
