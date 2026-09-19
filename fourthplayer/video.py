@@ -2698,6 +2698,8 @@ class Peer:
         self._sent_frames = 0
         self._reports = 0
         self._reported_seq = None
+        self._desk_at = 0.0
+        self._desk_gaps = []
         # What fraction of the frames sent to this guest reach it. Unknown
         # until it says so, and "all of them" is the honest starting guess:
         # nothing has gone wrong yet.
@@ -3974,6 +3976,32 @@ class Peer:
     def _on_desk_data(self, _channel, payload):
         if self.on_desk is None or self.webrtc is None:
             return
+        # How evenly the pointer's movements are arriving.
+        #
+        # "Cursor control feels a little jittery" has two candidates -- the
+        # picture it is being watched through, and the path the movements
+        # travel -- and they want opposite fixes. A hand moving smoothly
+        # produces movements at the mouse's own report rate, so a spacing that
+        # is even here means the input path is clean and the unevenness is in
+        # the picture; one that arrives in bursts means it is not. Nothing has
+        # ever measured this, and guessing between the two from how it feels
+        # is what the last several rounds of the picture were.
+        now = time.monotonic()
+        if self._desk_at:
+            gap = (now - self._desk_at) * 1000.0
+            if gap < 500:                 # a pause is not a burst
+                self._desk_gaps.append(gap)
+        self._desk_at = now
+        if len(self._desk_gaps) >= 600:
+            ordered = sorted(self._desk_gaps)
+            middle = ordered[len(ordered) // 2]
+            worst = ordered[-1]
+            rough = sum(1 for g in self._desk_gaps
+                        if abs(g - middle) > middle * 0.5)
+            log.info("peer %s: pointer movements arrive every %.1fms typical, "
+                     "worst %.0fms, %d of %d more than half a step off",
+                     self.id, middle, worst, rough, len(self._desk_gaps))
+            self._desk_gaps = []
         if hasattr(payload, "get_data"):
             payload = payload.get_data()
         elif not isinstance(payload, (str, bytes, bytearray)):
