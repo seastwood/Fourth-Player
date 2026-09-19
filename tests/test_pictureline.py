@@ -184,15 +184,23 @@ print("a frame with a piece missing is dropped rather than decoded")
 # The channel has a packet lifetime now, so pieces can go missing: a
 # concatenated head and tail is not a frame, and feeding one to the decoder is
 # how a stall becomes corruption.
-check("FRAME_LIFETIME_MS" in video,
-      "the host gives each piece a lifetime instead of retransmitting for ever")
-check("max-packet-lifetime" in video, "on the picture channel itself")
-check("ordered=(boolean)false, max-packet-lifetime" in video,
-      "and unordered, which is the whole of it: an ordered stream holds every "
-      "frame behind a lost packet until SCTP's one-second minimum timeout "
-      "expires. Measured on the guest's own page -- pieces stopped arriving "
-      "for 1073ms while its animation frames carried on at 18ms, and not one "
-      "frame was lost; they all turned up at once when the timeout fired")
+# Three goes at this, and each left the cost in place. Ordered and reliable
+# froze the picture for a second per lost packet. Unordered changed nothing,
+# proving the stall was the sender waiting on its own timeout rather than the
+# receiver blocking. Pacing the pieces onto the wire changed nothing either,
+# so the loss is not a burst overrunning a queue. The number never moved --
+# 1049, 1062, 1069, 1085ms -- while the guest's page beat steadily at 18ms and
+# nothing was ever lost. That number is SCTP's minimum retransmission timeout,
+# and it is the price of asking for a retransmission at all.
+check("max-retransmits=(int)0" in video,
+      "so the picture channel never asks for one: a video frame that arrives "
+      "a second late is not a picture, it is a freeze with a picture at the "
+      "end of it")
+check("ordered=(boolean)false, max-retransmits" in video,
+      "and unordered with it, so one frame's pieces never wait on another's")
+check("max-packet-lifetime" not in video,
+      "and no lifetime beside it, because SCTP takes one partial-reliability "
+      "policy and never-retransmit is the stronger")
 check("made.have === made.pieces" in worker,
       "so pieces are collected by which frame they belong to, in any order")
 check("wantSeq" in worker,

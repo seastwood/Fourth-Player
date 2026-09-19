@@ -678,9 +678,11 @@ let wantSeq = 0;                       // the next frame to hand over
 
 /* How long a frame may be incomplete while newer ones are ready.
  *
- * The same figure the host abandons a piece after: past it, the piece is not
- * coming, and holding the frames behind it is the very thing being fixed. */
-const PATCH_MS = 180;
+ * Short, because nothing is retransmitted any more: a piece that has not
+ * arrived by the time a later frame is complete is never going to. It is not
+ * zero only because the channel is unordered, so the pieces of one frame can
+ * legitimately arrive either side of the pieces of the next. */
+const PATCH_MS = 40;
 
 /* Ask for a keyframe, but not once per lost frame: on a link losing pieces
    steadily that is a request per frame, and a host answering all of them

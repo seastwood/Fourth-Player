@@ -322,14 +322,6 @@ SOURCES = (
 # worth showing when it arrives -- past that it is not a picture of now.
 FRAME_QUEUE_SECONDS = 0.2
 
-# How long a piece of a frame is worth retransmitting for.
-#
-# Past this the browser has either shown the frame without it or moved on, so
-# a copy that arrives later is not a picture, it is a delay imposed on every
-# frame queued behind it. Generous enough for one retransmit on a mobile link
-# and short enough that a loss costs a frame rather than a second.
-FRAME_LIFETIME_MS = 150
-
 # What the browser's own count of arriving frames has to fall to before the
 # encoder is told the link cannot carry what it is being given, and what it
 # has to reach before it is given some back. The browser is the only witness
@@ -2807,28 +2799,35 @@ class Peer:
         # itself. Created for every guest and used by the ones that ask -- an
         # empty channel costs a few bytes of SDP.
         #
-        # Unordered, and worth retransmitting only for a moment.
+        # Unordered, and never retransmitted.
         #
-        # It was ordered, on the reasoning that the pieces of a frame arrive
-        # in order and the browser then has only to notice a missing one. That
-        # is true and it cost a full second of picture every time a single
-        # packet went astray. SCTP's minimum retransmission timeout is one
-        # second, a lost packet with little traffic behind it gets no fast
-        # retransmit, and an *ordered* stream holds everything behind it until
-        # the retransmission lands. Measured from the guest's own page: pieces
-        # stopped arriving for 1073ms while its animation frames carried on at
-        # 18ms, and not one frame was lost -- they all turned up at once when
-        # the timeout expired. Three losses in a row is three seconds of that,
-        # which is what "sometimes they happen 3 times in a row" is.
+        # Three goes at this, and each one left the cost in place. Ordered and
+        # reliable froze the picture for a second per lost packet. Unordered
+        # changed nothing, which proved the stall was the sender waiting on
+        # its own timeout rather than the receiver blocking. Pacing the pieces
+        # onto the wire -- which every media stack does and this had never
+        # done -- changed nothing either, so the loss is not a burst overruning
+        # a queue. The one number never moved: 1049, 1062, 1069, 1085ms, while
+        # the guest's page beat steadily at 18ms and nothing was ever lost.
         #
-        # Unordered, a lost piece delays its own frame and nothing else.
-        # Everything else keeps being delivered while SCTP recovers it. The
-        # browser already has what it needs to put them back together in any
-        # order: every piece carries which frame it belongs to, which piece it
-        # is, and how many there are.
+        # That number is SCTP's minimum retransmission timeout, and it is the
+        # cost of asking for a retransmission at all. So stop asking. A video
+        # frame that arrives a second late is not a picture, it is a freeze
+        # with a picture at the end of it -- the frame was always worthless by
+        # the time it came, and what the wait bought was nothing.
+        #
+        # This is what Moonlight and Sunshine do over UDP, and what the media
+        # track beside this one does: send it once, and if a piece is missing,
+        # give up on that frame and ask for a keyframe. A lost packet now
+        # costs one frame and a keyframe -- a blink -- instead of a second of
+        # held picture. The browser already does exactly this: every piece
+        # says which frame it belongs to, so a frame that cannot be completed
+        # is dropped and the run ends until a keyframe restarts it.
+        #
+        # A lifetime cannot be set as well: SCTP takes one partial-reliability
+        # policy, and "never retransmit" is the stronger of the two.
         video_options = Gst.Structure.new_from_string(
-            "options, ordered=(boolean)false, max-packet-lifetime=(int)%d"
-            % FRAME_LIFETIME_MS)
+            "options, ordered=(boolean)false, max-retransmits=(int)0")
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
                                               video_options)
         if self.frame_channel is not None:
