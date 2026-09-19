@@ -45,18 +45,38 @@ const stat = (n) => ({ freezeCount: n.froze || 0, packetsLost: n.lost || 0,
                        packetsReceived: n.got || 0, jitter: (n.jitter || 0) / 1000 });
 
 console.log("\na quiet link comes down, slowly");
+// Primed by a jittery spell first, because a clean link now starts at
+// nothing: the target used to be seeded from the host's guess whether or not
+// anything had gone wrong, which charged every guest twenty-odd milliseconds
+// of delay for a link that was behaving. There has to be something to come
+// down from before "comes down" can be tested.
 let before = stat({ got: 0 });
-for (let i = 1; i <= 40; i += 1) {
+for (let i = 1; i <= 6; i += 1) {
+  const now = stat({ got: i * 100, jitter: 30 });
+  run.tune(now, before, { currentRoundTripTime: 0.05 });
+  before = now;
+}
+const raised = run.target();
+check(raised > 60, `a jittery spell raises it: ${raised}ms`);
+for (let i = 7; i <= 60; i += 1) {
   const now = stat({ got: i * 100, jitter: 2 });
   run.tune(now, before, { currentRoundTripTime: 0.01 });
   before = now;
 }
-check(run.target() < 60, `it came down from 60: ${run.target()}ms`);
+check(run.target() < raised, `it came down from ${raised}: ${run.target()}ms`);
 check(run.target() >= run.limits.FLOOR_MS,
       `and stopped at the floor: ${run.target()}ms`);
+// The target moving and the target being pushed are two different things: a
+// deadband wider than a decay step meant each window worked out a figure ten
+// milliseconds lower, found the change too small to push, and returned
+// without remembering it -- so a link that had once been jittery stayed at
+// its worst figure for the rest of the session.
+check(run.limits.DEADBAND_MS > run.limits.DOWN_MS,
+      "the deadband is wider than a decay step, which is only safe because "
+      + "the two are kept apart");
 const downs = held.length;
-check(downs > 0 && downs < 40,
-      `in steps rather than every window: ${downs} changes in 40`);
+check(downs > 0 && downs < 60,
+      `in steps rather than every window: ${downs} changes in 60`);
 
 console.log("\na freeze puts it up at once");
 held.length = 0;

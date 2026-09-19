@@ -3551,7 +3551,18 @@ function heldBackMs(now, before) {
  * link's worth of jitter.
  */
 const JITTER = {
-  FLOOR_MS: 20,        // never less; a buffer of nothing has no slack at all
+  // Nothing at all on a link that is not jittering.
+  //
+  // This was twenty, on the reasoning that a buffer of nothing has no slack.
+  // True, and it was twenty milliseconds of delay charged to every guest on
+  // every link whether or not anything had ever gone wrong. The WebCodecs
+  // work settled the argument: moonlight-web's pacer holds exactly zero until
+  // it has measured a late tail, and a deadband snaps a negligible reserve
+  // back to zero so a clean link is bit-for-bit the immediate path. The same
+  // reasoning applies here -- this controller already raises on a freeze, on
+  // loss and on measured jitter, all of which happen before a guest could
+  // notice the slack was missing.
+  FLOOR_MS: 0,
   CEILING_MS: 300,     // never more; past this it is a recording, not a game
   ON_FREEZE_MS: 50,    // a freeze was seen by somebody, so move properly
   ON_LOSS_MS: 30,      // loss is a freeze that has not happened yet
@@ -3559,20 +3570,26 @@ const JITTER = {
   FROM_RTT: 0.4,       // times the round trip, when the link is losing
   CALM_TICKS: 5,       // quiet windows before coming down at all
   DOWN_MS: 10,         // and then this much per window
-  DEADBAND_MS: 5,      // below this, leave it alone rather than thrash
+  // Fifteen rather than five, which is moonlight-web's. Every change pushed
+  // to the receiver disturbs its playout a little, so a change too small to
+  // be felt costs more than it buys.
+  DEADBAND_MS: 15,
   LOSS_ENOUGH: 0.005,  // half a percent is where loss starts to be felt
 };
 
-let jitterTarget = 0;
+let jitterTarget = null;
+let jitterSaidLast = 0;   // the last figure actually pushed
 let jitterSmoothed = 0;
 let jitterCalm = 0;
 
 function tuneTheBuffer(picture, before, path) {
   // The page's own drawing does its own holding back; see frames.js.
   if (painter || !picture || !before) return;
-  if (!jitterTarget) {
-    jitterTarget = Math.max(JITTER.FLOOR_MS,
-                            (streamNow && Number(streamNow.jitter_ms)) || 60);
+  // A sentinel rather than a falsy zero: zero is now a real target -- the
+  // right one on a clean link -- so `if (!jitterTarget)` would have re-primed
+  // it from the host's guess on every single tick.
+  if (jitterTarget === null) {
+    jitterTarget = JITTER.FLOOR_MS;
   }
   const froze = (picture.freezeCount || 0) - (before.freezeCount || 0);
   const had = (picture.packetsReceived || 0) - (before.packetsReceived || 0);
@@ -3602,9 +3619,19 @@ function tuneTheBuffer(picture, before, path) {
   }
 
   want = Math.max(JITTER.FLOOR_MS, Math.min(JITTER.CEILING_MS, Math.round(want)));
-  if (Math.abs(want - jitterTarget) < JITTER.DEADBAND_MS) return;
+  // The target moves every window; only the *pushing* of it is deadbanded.
+  //
+  // These were one thing, and with a deadband wider than a decay step the
+  // decay could never be applied at all: each window worked out a target ten
+  // milliseconds lower, found the change too small to push, and returned
+  // without remembering it -- so a link that had once been jittery stayed at
+  // its worst figure for the rest of the session. moonlight-web keeps the two
+  // apart for this reason, and the test caught it the moment the deadband
+  // grew past the step.
   const was = jitterTarget;
   jitterTarget = want;
+  if (Math.abs(want - jitterSaidLast) < JITTER.DEADBAND_MS) return;
+  jitterSaidLast = want;
   holdVideoBack(want);
   report("holding video back " + want + "ms now (was " + was + "): "
          + (froze > 0 ? froze + " freeze(s), " : "")
