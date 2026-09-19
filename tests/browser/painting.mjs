@@ -317,6 +317,21 @@ check(paintFile.includes("startFromTrack(receiver, codec)"),
 check(app.includes('if (event.track.kind === "video") startPainting();'),
       "at the one moment it may be attached: a receiver that exists and has "
       + "no frames yet");
+// Attached any later it delivers nothing at all, and "later" is measured in
+// frames rather than seconds. Waiting for the decoder to be built cost
+// exactly that: "the media track's frames were routed to the decoder"
+// followed by "0 handed over by the transform", for ever.
+check(paintFile.indexOf("viaTrack.transform = new RTCRtpScriptTransform")
+      < paintFile.indexOf("it.postMessage({ start:"),
+      "and before the worker is even given its canvas, rather than after the "
+      + "decoder is built");
+// And a receiver that has already carried a picture will take a transform and
+// then ignore it, so choosing this mid-session has to rebuild the connection.
+check(app.includes('paintMethod === "rtp" && lastBytes > 0'),
+      "choosing it on a connection that is already carrying video rebuilds "
+      + "that connection first");
+check(app.includes("renewSoon(0, true);\n    return;"),
+      "and lets the track handler start the painting on the new one");
 check(!app.includes("receiver.transform"),
       "and none left in the page either");
 

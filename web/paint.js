@@ -565,14 +565,13 @@ function makePainter(canvas, say) {
         return false;
       }
       fromTrack = receiver;
-      const ok = this.start(null, codec);
-      fromTrack = null;
-      return ok;
+      return this.start(null, codec);
     },
 
     start(channel, codec) {
       if (running) return false;
       const viaTrack = fromTrack;
+      fromTrack = null;                  // one start, one receiver
       if (!viaTrack && (!channel || channel.readyState !== "open")) {
         say("the picture channel is not open yet");
         return false;
@@ -601,18 +600,16 @@ function makePainter(canvas, say) {
       worker.onmessage = (event) => {
         const m = event.data || {};
         if (m.ready) {
-          it.postMessage({ start: { canvas: surface, codec,
-                                    smoothing: smoothingWanted(),
-                                    flat: paintFlat } },
-                         [surface]);
-          return;
-        }
-        if (m.started) {
+          // The transform goes on here, at the first instant the worker can
+          // receive one -- not after the decoder is built.
+          //
+          // Attached any later it delivers nothing at all, and "later" is
+          // measured in frames, not seconds: the receiver had begun. Waiting
+          // for the decoder cost exactly that, and read as a transform that
+          // said it was attached and then handed over nothing for ever. The
+          // frames that arrive before there is a decoder are dropped by
+          // take(), which is the cheaper of the two mistakes.
           if (viaTrack) {
-            // The decoder exists, so the frames may start coming. Attached
-            // here rather than earlier for the same reason the channel is
-            // asked here: frames arriving before there is a decoder are
-            // frames thrown away.
             try {
               viaTrack.transform = new RTCRtpScriptTransform(it, { kind: "video" });
               say("the media track's frames were routed to the decoder");
@@ -621,7 +618,24 @@ function makePainter(canvas, say) {
                   + ((err && err.message) || "no reason given"));
               this.stop();
               if (onGone) onGone();
+              return;
             }
+          }
+          it.postMessage({ start: { canvas: surface, codec,
+                                    smoothing: smoothingWanted(),
+                                    flat: paintFlat } },
+                         [surface]);
+          return;
+        }
+        if (m.started) {
+          if (viaTrack) {
+            // Nothing to ask the host for -- it is already sending the
+            // picture on this line -- except a keyframe, because the decoder
+            // has just been built and the browser's own decoder is no longer
+            // there to ask on its behalf.
+            try {
+              if (channel && channel.readyState === "open") channel.send("key");
+            } catch (_) {}
             return;
           }
           // Only now: frames arriving before there is a decoder are frames

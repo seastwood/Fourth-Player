@@ -9659,6 +9659,19 @@ function setPaintMethod(id) {
   // So switching to it rebuilds the connection and the track handler starts
   // the painting when the new one arrives. On a connection that has not
   // carried anything yet there is nothing to rebuild and it starts here.
+  //
+  // The rebuild was described here and never done, which is why choosing the
+  // media track mid-session produced a transform that attached, reported
+  // itself attached, and handed over nothing for ever: "the media track's
+  // frames were routed to the decoder" followed by "0 handed over by the
+  // transform". A receiver already carrying a picture will take a transform
+  // and then ignore it.
+  if (paintMethod === "rtp" && lastBytes > 0) {
+    report("a fresh media connection, because an encoded transform only "
+           + "delivers on a receiver that has not started yet");
+    renewSoon(0, true);
+    return;
+  }
   startPainting();
 }
 
