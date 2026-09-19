@@ -836,7 +836,7 @@ async function answer(message) {
       pictureChannel = event.channel;
       pictureChannel.binaryType = "arraybuffer";
       pictureChannel.addEventListener("open", () => {
-        if (paintMethod === "here") startPainting();
+        if (paintsHere()) startPainting();
       });
       pictureChannel.addEventListener("close", () => {
         pictureChannel = null;
@@ -3940,7 +3940,7 @@ async function watchMedia() {
   tellAboutTheRate(picture);
   // Chosen but not started: a codec that was not known when the track
   // arrived, or a receiver that was not ready. Cheap to ask again.
-  if (paintMethod === "here" && !painter) startPainting();
+  if (paintsHere() && !painter) startPainting();
   tellAboutSound();
   tellAboutTheShape();
   tellAboutThePicture();
@@ -8821,7 +8821,30 @@ const PAINT_METHODS = [
        + "it can.",
     ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
   },
+  {
+    id: "flat",
+    label: "WebCodecs (2D canvas)",
+    why: "The same, drawn with the canvas's own 2D context instead of WebGL. "
+       + "WebGL uploads each frame into a texture; 2D hands the frame "
+       + "straight to the canvas and lets the browser decide how. Which is "
+       + "faster depends on the machine, and on some of them the difference "
+       + "is not subtle.",
+    ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
+  },
 ];
+
+/* Whether the chosen way of drawing is one this page does itself.
+ *
+ * Two of them are: WebGL and the 2D context differ only in how a decoded
+ * frame reaches the canvas, and everything else -- the channel, the worker,
+ * the decoder, the pacing -- is the same code. Asking "is it 'here'" was
+ * true of one and false of the other, which would have left the second
+ * option looking chosen and doing nothing.
+ */
+function paintsHere(id) {
+  const which = id || paintMethod;
+  return which === "here" || which === "flat";
+}
 
 function paintMethodById(id) {
   for (const one of PAINT_METHODS) if (one.id === id) return one;
@@ -9341,7 +9364,7 @@ function tryAnotherSpelling(codec) {
 }
 
 async function startPainting() {
-  if (paintMethod !== "here" || painter || paintStarting) return;
+  if (!paintsHere() || painter || paintStarting) return;
   if (paintGaveUp) return;          // already tried everything on this one
   if (!paintMethodById("here").ok()) {
     setPaintMethod("browser");
@@ -9367,7 +9390,7 @@ async function startPainting() {
       ? (paintTried < all.length ? all[paintTried] : "")
       : await pickCodec(shape.mime, shape.fmtp);
   } finally { paintStarting = false; }
-  if (painter || paintMethod !== "here") return;   // changed while asking
+  if (painter || !paintsHere()) return;            // changed while asking
   if (!codec) {
     // Two different cases and they must not be treated alike.
     //
@@ -9425,6 +9448,7 @@ async function startPainting() {
   watchThePictureBox();
   fitPainted();
   painter = makePainter(canvas, report);
+  if (painter.useFlat) painter.useFlat(paintMethod === "flat");
   if (!painter.start(pictureChannel, codec)) {
     giveTheVideoBack();
     painter = null;
@@ -9562,11 +9586,11 @@ function paintPaintMethod() {
   }
   const note = el("stream-paint-note");
   if (note) {
-    note.textContent = (paintGaveUp && paintChoice === "here")
+    note.textContent = (paintGaveUp && paintsHere(paintChoice))
       ? "You asked for the page to draw it and this browser produced no "
         + "picture, so the browser is drawing it. Reloading tries again."
       : paintMethodById(paintMethod).why;
-    note.classList.toggle("warn", paintGaveUp && paintChoice === "here");
+    note.classList.toggle("warn", paintGaveUp && paintsHere(paintChoice));
   }
 }
 
@@ -9582,7 +9606,7 @@ function setPaintMethod(id) {
   paintMethod = wantedPaintMethod();
   savePaintMethod();
   paintPaintMethod();
-  if (paintMethod !== "here") {
+  if (!paintsHere()) {
     stopPainting("WebRTC was chosen");
     return;
   }

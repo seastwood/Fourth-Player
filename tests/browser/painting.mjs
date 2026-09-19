@@ -47,8 +47,10 @@ const gaveUp = app.slice(app.indexOf("paintGaveUp = true"),
                          app.indexOf("paintGaveUp = true") + 400);
 check(gaveUp.includes("paintMethod = PAINT_METHODS[0].id"),
       "giving up makes the browser the mode, because it is what is drawing");
-check(app.includes('paintGaveUp && paintChoice === "here"'),
-      "while the note still speaks for what was asked for");
+check(app.includes("paintGaveUp && paintsHere(paintChoice)"),
+      "while the note still speaks for what was asked for -- for either way "
+      + "of drawing here, since they differ only in how a frame reaches the "
+      + "canvas");
 
 console.log("and every option names what actually does the drawing");
 // "The browser" and "this page" said who to blame and nothing about how,
@@ -234,8 +236,16 @@ check(app.includes("if (shape.mime) {"),
       "a known codec that is not H.264 switches back and says so");
 check(app.includes("waiting to draw here"),
       "one that is not known yet waits instead");
-check(app.includes('if (paintMethod === "here" && !painter) startPainting()'),
+check(app.includes("if (paintsHere() && !painter) startPainting()"),
       "and the watchdog keeps trying, so the choice starts when it can");
+// Two of the three ways of drawing are done by this page, and everything but
+// the last step -- a texture upload against handing the frame to a 2D context
+// -- is the same code. Asking "is it 'here'" was true of one and false of the
+// other, which would leave the second looking chosen and doing nothing.
+check(app.includes("function paintsHere("),
+      "and there is one place that knows which methods this page draws");
+check(!app.includes('paintMethod !== "here"'),
+      "with nothing left comparing against the one id");
 check(app.includes("lastCodec = { mime: codec.mimeType"),
       "the codec is remembered from the statistics, which always carry it");
 check(app.includes("return lastCodec;"),

@@ -155,8 +155,11 @@ for (let i = 1; i <= 30; i += 1) {
 }
 await refresh(6);
 check(painted === 31, `31 out, ${painted} painted`);
-check(workerSrc.includes("setTimeout(pump, 0)"),
-      "and the queue yields between paints rather than draining in one turn");
+check(workerSrc.includes("setTimeout(pump, refreshEvery() || 1000 / 60)"),
+      "and the queue is drained a refresh at a time rather than as fast as "
+      + "the event loop allows -- a stall leaves several frames due at once, "
+      + "and showing them all is showing them fast, which is the picture "
+      + "racing to catch up");
 check(canvas.width === 1280 && canvas.height === 720,
       `the canvas took the picture's size: ${canvas.width}x${canvas.height}`);
 
@@ -224,8 +227,9 @@ check(workerSrc.includes("gl.getContext") === false
       "asked for first");
 check(workerSrc.includes("function makeFlatPainter"),
       "and a 2D one behind it, so a browser without WebGL still gets a picture");
-check(workerSrc.includes("makeGlPainter(state.canvas) || makeFlatPainter"),
-      "in that order");
+check(workerSrc.includes("m.start.flat ? null : makeGlPainter(state.canvas)"),
+      "in that order, unless the page asked for the 2D one -- which is a "
+      + "choice because which is faster is a property of the machine");
 check(workerSrc.includes("gl_VertexID"),
       "the triangle comes from the vertex shader, so there is nothing to bind "
       + "and nothing to keep in step with the canvas size");
@@ -314,12 +318,19 @@ check(workerSrc.includes("state.pacer.ranDry()"),
 check(workerSrc.includes("now - state.waiting[0].due > slipped"),
       "the queue is bounded by time as well, so the delay stays the reserve "
       + "whatever the two frame rates are");
-check(workerSrc.includes("(refreshEvery() || 1000 / 60) * 1.5"),
+check(workerSrc.includes("const slipped = refresh * 1.5;"),
       "at more than a whole refresh, because the head is legitimately a "
       + "little overdue at equilibrium -- anything less throws away one of "
       + "every pair on a link that delivers in pairs");
 check(workerSrc.includes("state.waiting.length > 1 && now -"),
       "and never the last frame in hand");
+// Lateness alone cannot see the case a long stall leaves: the pacer rebases,
+// so every queued frame's deadline becomes "now" -- they are not late, they
+// are all due at once, and the only way to show them all is to show them
+// fast. The reserve says how many are worth holding.
+check(workerSrc.includes("state.waiting.length > hold"),
+      "with the depth bounded by the reserve as well, since a rebase leaves "
+      + "a queue that is deep without being late");
 
 console.log("the counters name every stage, including the one before us");
 sent.length = 0;

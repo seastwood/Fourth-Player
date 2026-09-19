@@ -499,6 +499,7 @@ function makePainter(canvas, say) {
   let beating = 0;                       // the animation-frame loop
   let onGone = null, onShape = null;
   let chunks = 0;                        // pieces off the channel, ever
+  let paintFlat = false;                 // 2D instead of WebGL
   let chunkAt = 0, chunkGap = 0;         // and the worst gap between them
   let beatAt = 0, beatGap = 0;           // the same, for animation frames
   const now = () => ((typeof performance !== "undefined" && performance.now)
@@ -520,6 +521,10 @@ function makePainter(canvas, say) {
   }
 
   return {
+    /* Draw with the 2D context rather than WebGL. Set before start(); the
+       context belongs to the canvas and the canvas is handed over once. */
+    useFlat(yes) { paintFlat = Boolean(yes); },
+
     start(channel, codec) {
       if (running) return false;
       if (!channel || channel.readyState !== "open") {
@@ -551,7 +556,8 @@ function makePainter(canvas, say) {
         const m = event.data || {};
         if (m.ready) {
           it.postMessage({ start: { canvas: surface, codec,
-                                    smoothing: smoothingWanted() } },
+                                    smoothing: smoothingWanted(),
+                                    flat: paintFlat } },
                          [surface]);
           return;
         }

@@ -359,8 +359,22 @@ function tick() {
   // frame due just after the last look is up to a refresh old by this one.
   // Dropping at anything less throws away one of every pair on a link that
   // delivers in pairs, which is most of them, and reads as skipping.
-  const slipped = (refreshEvery() || 1000 / 60) * 1.5;
+  const refresh = refreshEvery() || 1000 / 60;
+  const slipped = refresh * 1.5;
   while (state.waiting.length > 1 && now - state.waiting[0].due > slipped) {
+    state.waiting.shift().frame.close();
+    state.behind += 1;
+  }
+  // And by depth, because lateness alone cannot see this case.
+  //
+  // A stall long enough to make the pacer rebase gives every frame behind it
+  // a deadline of "now" -- they are not late, they are all due at once. So
+  // the rule above finds nothing to drop while the queue holds a second of
+  // pictures, and the only way to show them all is to show them fast. The
+  // reserve says how many are worth holding: anything past it is a backlog,
+  // and a backlog is delay nobody asked for.
+  const hold = Math.ceil((state.pacer ? state.pacer.reserve() : 0) / refresh) + 2;
+  while (state.waiting.length > hold) {
     state.waiting.shift().frame.close();
     state.behind += 1;
   }
@@ -409,7 +423,17 @@ function pump() {
   // Yielding after each is what makes a painted frame a shown frame -- which
   // is the difference between "361 painted" in the counters and one frozen
   // picture on the screen.
-  if (state.waiting.length) state.timer = setTimeout(pump, 0);
+  // A refresh apart, never back to back.
+  //
+  // This re-armed at zero, so a queue with several frames due -- which is
+  // what a stall leaves behind -- was drained as fast as the event loop
+  // allowed. Every frame shown, in a fraction of the time they were captured
+  // over: the picture races to catch up, which is exactly how it was
+  // described. Frames that are late are dropped by the rule in tick(); they
+  // are never shown faster than a screen can show them.
+  if (state.waiting.length) {
+    state.timer = setTimeout(pump, refreshEvery() || 1000 / 60);
+  }
 }
 
 /* Keep the timer alive while the page is not sending animation frames.
@@ -815,7 +839,12 @@ self.onmessage = (event) => {
     // that fails is a drawImage inside a try -- which is exactly the shape of
     // failure this has produced twice already, so it is said out loud rather
     // than caught and swallowed.
-    state.context = makeGlPainter(state.canvas) || makeFlatPainter(state.canvas);
+    // WebGL first unless the page asked for the other one. They differ only
+    // in how a decoded frame reaches the canvas -- a texture upload against
+    // handing the frame straight to the 2D context -- and which is faster is
+    // a property of the machine, not of the code.
+    state.context = (m.start.flat ? null : makeGlPainter(state.canvas))
+                    || makeFlatPainter(state.canvas);
     if (!state.context) {
       self.postMessage({ failed: "this browser gave the worker no way to "
                                  + "draw on the canvas" });
