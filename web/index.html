@@ -804,31 +804,6 @@
               <option value="1">Raw, for games</option>
             </select>
           </div>
-          <div class="acct-row">
-            <label class="tune-label" for="desk-send">Pointer sends</label>
-            <select id="desk-send" class="chip"
-                    aria-label="Whether the console is sent movement or a position">
-              <option value="move">Movement</option>
-              <option value="place">Where it should be</option>
-            </select>
-          </div>
-          <p class="footnote">Movement lets the console apply its own pointer
-             speed and acceleration on top of this machine&rsquo;s &mdash; two
-             curves, one hand. Sending a position instead means only this
-             machine&rsquo;s curve is felt, which is what the pointer does when
-             it is sitting in front of you.</p>
-          <div class="acct-row">
-            <label class="tune-label" for="desk-local">Local pointer</label>
-            <select id="desk-local" class="chip"
-                    aria-label="Whether this page draws the pointer itself">
-              <option value="0">From the console</option>
-              <option value="1">Drawn here</option>
-            </select>
-          </div>
-          <p class="footnote">Drawn here, the pointer moves the instant your
-             hand does rather than after a round trip through the video. The
-             console stops drawing its own while you hold the keyboard and
-             mouse, so nobody else watching sees a cursor.</p>
           <p class="footnote">Raw sends the mouse exactly as the hardware
              reports it, with none of this machine&rsquo;s acceleration, which
              is what a game aiming expects &mdash; the console applies its own.
@@ -1225,8 +1200,6 @@
        until it suddenly was not. Drawn at the pointer rather than in a corner,
        because that is where the eye already is. -->
   <div id="hold-hint" class="hold-hint" hidden aria-hidden="true"><i></i></div>
-  <!-- The pointer, drawn here rather than waited for. See drawsPointer. -->
-  <div id="local-pointer" class="local-pointer" hidden aria-hidden="true"></div>
 
   <div id="touch" class="touch" hidden aria-label="On-screen controller">
     <div class="shoulders shoulders-left" id="shoulders-left"></div>

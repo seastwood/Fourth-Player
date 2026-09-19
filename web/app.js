@@ -5070,18 +5070,8 @@ function deskFlush() {
   const dx = Math.trunc(deskPending.dx), dy = Math.trunc(deskPending.dy);
   deskPending.dx -= dx; deskPending.dy -= dy;
   if (dx || dy) {
-    if (sendsPlace()) {
-      // Where it should be, rather than how far it moved. deskMoved has
-      // already folded this movement into the estimate, so the estimate is
-      // the answer -- and sending it makes the estimate true rather than
-      // merely close, which nothing else in this file can claim.
-      out.push({ t: "p",
-                 x: Math.round(Math.max(0, Math.min(1, cursorU)) * POINT_MAX),
-                 y: Math.round(Math.max(0, Math.min(1, cursorV)) * POINT_MAX) });
-    } else {
-      out.push({ t: "m", dx: deskClamp(dx, DESK_MOTION_LIMIT),
-                 dy: deskClamp(dy, DESK_MOTION_LIMIT) });
-    }
+    out.push({ t: "m", dx: deskClamp(dx, DESK_MOTION_LIMIT),
+               dy: deskClamp(dy, DESK_MOTION_LIMIT) });
   }
   const wx = Math.trunc(deskPending.wdx), wy = Math.trunc(deskPending.wdy);
   deskPending.wdx -= wx; deskPending.wdy -= wy;
@@ -5174,7 +5164,6 @@ function deskMoved(dx, dy) {
     cursorV = Math.max(0, Math.min(1, cursorV + dy / (pic.height * zoom)));
   }
   deskSoon();
-  paintLocalPointer();
 }
 
 /* Where that guess is on the screen, in the coordinates zoomAbout wants.
@@ -5350,78 +5339,6 @@ function deskButtonsAllUp() {
  * funky. So it is offered rather than imposed, with the speed setting next to
  * it to put back what it changes. */
 const RAW_KEY = "fp:raw-mouse";
-
-/* Whether the console is sent movement or a position.
- *
- * Movement means the console applies its own pointer speed and acceleration
- * on top of whatever this machine already applied -- two curves composed, one
- * hand, and the reason a remote pointer does not go where it is sent even
- * when the latency is fine. A position has no curve to apply: the console
- * puts the pointer exactly where it is told, so the only curve felt is this
- * machine's, which is the one the hand is calibrated to.
- *
- * It costs nothing in accuracy either way -- this page already tracks where
- * the pointer has got to, because the zoom follows it -- and it gains
- * something: with a position on the wire the estimate cannot drift from the
- * real pointer, because it *is* the real pointer. */
-const SEND_KEY = "fp:pointer-sends";
-
-function sendsPlace() {
-  try { return localStorage.getItem(SEND_KEY) === "place"; } catch (_) { return false; }
-}
-
-function setSends(how) {
-  try { localStorage.setItem(SEND_KEY, how === "place" ? "place" : "move"); }
-  catch (_) {}
-}
-
-/* Whether this page draws the pointer itself.
- *
- * Drawn here it moves the instant the hand does. Drawn by the console it
- * moves a whole pipeline later -- capture, encode, send, decode, paint --
- * which is every millisecond this project has been shaving, all of them at
- * once, on the one thing the eye is watching most closely.
- *
- * The console stops drawing its own while this is on, because two cursors on
- * one picture is worse than a late one. That is a shared capture, so it takes
- * the cursor away from everybody else watching too, and only the guest
- * holding the keyboard and mouse may ask for it. */
-const LOCAL_KEY = "fp:local-pointer";
-
-function drawsPointer() {
-  try { return localStorage.getItem(LOCAL_KEY) === "1"; } catch (_) { return false; }
-}
-
-function setDrawsPointer(on) {
-  try { localStorage.setItem(LOCAL_KEY, on ? "1" : "0"); } catch (_) {}
-  askAboutPointer();
-  paintLocalPointer();
-}
-
-/* Tell the host whether to keep drawing its own. Only meaningful while this
-   page is holding the keyboard and mouse, which is the only time it is
-   allowed to ask. */
-function askAboutPointer() {
-  if (!deskHeld) return;
-  act({ t: "pointer", show: !drawsPointer() });
-}
-
-/* Put the drawn pointer where the estimate says it is. */
-function paintLocalPointer() {
-  const mark = el("local-pointer");
-  if (!mark) return;
-  if (!drawsPointer() || !deskHeld || !pictureIsShowing()) {
-    mark.hidden = true;
-    return;
-  }
-  const stage = el("stage");
-  if (!stage) return;
-  const box = stage.getBoundingClientRect();
-  const at = cursorClientPoint();
-  mark.style.left = Math.round(at.x - box.left) + "px";
-  mark.style.top = Math.round(at.y - box.top) + "px";
-  mark.hidden = false;
-}
 
 function wantsRawMouse() {
   try { return localStorage.getItem(RAW_KEY) === "1"; } catch (_) { return false; }
@@ -5743,7 +5660,6 @@ function cursorMove(du, dv) {
   if (cursorU === wasU && cursorV === wasV) return false;
   cursorSend();
   cursorFollow();
-  paintLocalPointer();
   return true;
 }
 
@@ -5991,8 +5907,6 @@ function deskPaintKeys() {
   // picture, which is right for watching and wrong for this: it resizes the
   // video element, and the pointer's geometry is measured from that.
   stage.classList.toggle("driving", cursorDriving());
-  askAboutPointer();
-  paintLocalPointer();
   // The keyboard's buttons decide where the black stops, and they have just
   // appeared, gone, or moved with the keyboard. Both of those are layout, so
   // the remembered measurement goes with them.
@@ -8845,20 +8759,6 @@ if (el("desk-speed")) {
   el("desk-speed").addEventListener("change", (event) => {
     setDeskSpeed(event.target.value);
     el("desk-speed").value = String(deskSpeed);
-  });
-}
-
-if (el("desk-send")) {
-  el("desk-send").value = sendsPlace() ? "place" : "move";
-  el("desk-send").addEventListener("change", (event) => {
-    setSends(event.target.value);
-  });
-}
-
-if (el("desk-local")) {
-  el("desk-local").value = drawsPointer() ? "1" : "0";
-  el("desk-local").addEventListener("change", (event) => {
-    setDrawsPointer(event.target.value === "1");
   });
 }
 
