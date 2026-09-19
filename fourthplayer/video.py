@@ -2844,10 +2844,24 @@ class Peer:
         # says which frame it belongs to, so a frame that cannot be completed
         # is dropped and the run ends until a keyframe restarts it.
         #
-        # A lifetime cannot be set as well: SCTP takes one partial-reliability
-        # policy, and "never retransmit" is the stronger of the two.
+        # Timed rather than counted, which is the one combination not yet
+        # tried and the only one whose abandonment is decided by a clock.
+        #
+        # "Never retransmit" sounds stronger and is not: it means give up when
+        # you *would* have retransmitted once, and when a loss is found by
+        # timeout rather than by fast retransmit that is a full second first.
+        # Which is why none of ordered, then unordered, then unreliable moved
+        # the number -- 1049, 1062, 1069, 1073, 1085ms -- they all left SCTP's
+        # loss *detection* in the path, and detection is where the second is
+        # spent. The media track bundled on the very same socket never stalls,
+        # because RTP does not detect loss at all.
+        #
+        # A lifetime is a clock: past it the message is abandoned whether or
+        # not anything has noticed it missing, and the receiver is told to
+        # skip past it on the next packet out. Fifty milliseconds is three
+        # frames -- long past the point where a frame was worth having.
         video_options = Gst.Structure.new_from_string(
-            "options, ordered=(boolean)false, max-retransmits=(int)0")
+            "options, ordered=(boolean)false, max-packet-lifetime=(int)50")
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
                                               video_options)
         if self.frame_channel is not None:

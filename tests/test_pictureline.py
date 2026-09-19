@@ -192,15 +192,19 @@ print("a frame with a piece missing is dropped rather than decoded")
 # 1049, 1062, 1069, 1085ms -- while the guest's page beat steadily at 18ms and
 # nothing was ever lost. That number is SCTP's minimum retransmission timeout,
 # and it is the price of asking for a retransmission at all.
-check("max-retransmits=(int)0" in video,
-      "so the picture channel never asks for one: a video frame that arrives "
-      "a second late is not a picture, it is a freeze with a picture at the "
-      "end of it")
-check("ordered=(boolean)false, max-retransmits" in video,
+check("max-packet-lifetime=(int)50" in video,
+      "so a piece is abandoned by a clock rather than by a retransmission "
+      "that has not happened: 'never retransmit' means give up when you "
+      "would have retransmitted once, and a loss found by timeout costs the "
+      "full second first, which is where every one of these went")
+check("ordered=(boolean)false, max-packet-lifetime" in video,
       "and unordered with it, so one frame's pieces never wait on another's")
-check("max-packet-lifetime" not in video,
-      "and no lifetime beside it, because SCTP takes one partial-reliability "
-      "policy and never-retransmit is the stronger")
+# Scoped to the picture channel: the input channel legitimately counts,
+# because a pad snapshot is worthless the moment the next one exists.
+spot = video.find("video_options = Gst.Structure.new_from_string")
+check("max-retransmits" not in video[spot:spot + 200],
+      "and not counted as well, because SCTP takes one policy and only the "
+      "timed one is decided by a clock")
 check("made.have === made.pieces" in worker,
       "so pieces are collected by which frame they belong to, in any order")
 check("wantSeq" in worker,
