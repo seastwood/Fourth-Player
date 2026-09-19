@@ -28,7 +28,7 @@ const body = app.slice(app.indexOf("const JITTER = {"),
                        app.indexOf("function noteFreezes"));
 const said = [];
 const held = [];
-const run = new Function("said", "held", `
+const build = new Function("said", "held", `
   let painter = null;
   let streamNow = { jitter_ms: 60 };
   const report = (t) => said.push(t);
@@ -39,10 +39,46 @@ const run = new Function("said", "held", `
     target: () => jitterTarget,
     limits: JITTER,
   };
-`)(said, held);
+`);
+
+/* A fresh controller, so one case cannot leave its state in another's way.
+   The single `run` below is the original one, kept as it was. */
+const makeRun = () => build(said, held);
+const run = makeRun();
 
 const stat = (n) => ({ freezeCount: n.froze || 0, packetsLost: n.lost || 0,
                        packetsReceived: n.got || 0, jitter: (n.jitter || 0) / 1000 });
+
+console.log("\na link losing a little is not a link losing a lot");
+// One threshold at half a percent was used both for "bump" and for "calm
+// enough to decay", so a single window at 0.69% lost bought a flat thirty
+// milliseconds -- on a local network with jitter steady at four. It then
+// decayed ten at a time: 2, 43, 23, 3. Every one of those changes disturbs
+// the receiver's playout, so the buffer was the jitter.
+{
+  const small = makeRun();
+  let was = stat({ got: 0 });
+  for (let i = 1; i <= 12; i += 1) {
+    // Under a percent, which is a link with nothing much wrong with it.
+    const now = stat({ got: i * 1000, lost: i * 7, jitter: 4 });
+    small.tune(now, was, { currentRoundTripTime: 0.01 });
+    was = now;
+  }
+  check(small.target() < 20,
+        `a fraction of a percent does not buy thirty milliseconds: `
+        + `${small.target()}ms`);
+
+  const big = makeRun();
+  was = stat({ got: 0 });
+  for (let i = 1; i <= 12; i += 1) {
+    const now = stat({ got: i * 1000, lost: i * 50, jitter: 4 });
+    big.tune(now, was, { currentRoundTripTime: 0.01 });
+    was = now;
+  }
+  check(big.target() > small.target(),
+        `while real loss still does: ${big.target()}ms against `
+        + `${small.target()}ms`);
+}
 
 console.log("\na quiet link comes down, slowly");
 // Primed by a jittery spell first, because a clean link now starts at

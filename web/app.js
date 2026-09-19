@@ -3574,7 +3574,22 @@ const JITTER = {
   // to the receiver disturbs its playout a little, so a change too small to
   // be felt costs more than it buys.
   DEADBAND_MS: 15,
-  LOSS_ENOUGH: 0.005,  // half a percent is where loss starts to be felt
+  // Two thresholds, not one, which is moonlight-web's arrangement and the
+  // fix for a buffer that sawtooths on a link with nothing wrong with it.
+  //
+  // There was one figure at half a percent, used both for "bump" and for "not
+  // calm enough to decay". Measured on a local network with jitter steady at
+  // four milliseconds: a single window at 0.69% lost bought a flat thirty
+  // milliseconds, which then decayed ten at a time -- 2, 43, 23, 3 -- and
+  // every one of those changes disturbs the receiver's playout. The buffer
+  // was the jitter.
+  //
+  // Two percent to bump, because that is where loss is worth thirty
+  // milliseconds of everybody's latency; a third of a percent to allow the
+  // decay, so a link that is merely imperfect is not held up for ever. The
+  // gap between them is what stops it hunting.
+  LOSS_HI: 0.02,
+  LOSS_LO: 0.003,
 };
 
 let jitterTarget = null;
@@ -3603,14 +3618,14 @@ function tuneTheBuffer(picture, before, path) {
     ? path.currentRoundTripTime * 1000 : 0;
 
   let want = Math.max(JITTER.FLOOR_MS, JITTER.FROM_JITTER * jitterSmoothed);
-  if (share > JITTER.LOSS_ENOUGH) {
+  if (share > JITTER.LOSS_HI) {
     want = Math.max(want, JITTER.FROM_RTT * rtt, jitterTarget + JITTER.ON_LOSS_MS);
   }
   if (froze > 0) want = Math.max(want, jitterTarget + JITTER.ON_FREEZE_MS);
 
   if (want > jitterTarget) {
     jitterCalm = 0;
-  } else if (froze === 0 && share <= JITTER.LOSS_ENOUGH) {
+  } else if (froze === 0 && share <= JITTER.LOSS_LO) {
     jitterCalm += 1;
     want = jitterCalm >= JITTER.CALM_TICKS
       ? jitterTarget - JITTER.DOWN_MS : jitterTarget;
