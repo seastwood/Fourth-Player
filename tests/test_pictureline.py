@@ -307,12 +307,21 @@ check("_said_blind" in video,
       "and a queue depth that cannot be read says so, because a signal that "
       "silently reads zero looks like a link that is keeping up")
 
-print("nothing anywhere still reaches for a transform")
-for name, text in (("the host", video),
-                   ("the worker", worker),
-                   ("the page", paint)):
-    check("RtpScriptTransform" not in text and "onrtctransform" not in text,
-          "%s has none" % name)
+print("the host still carries whole frames for the guests that want them")
+# An encoded transform is back, as a third way of drawing here rather than a
+# replacement -- see tests/browser/painting.mjs. It was rejected for lifecycle
+# reasons which are obeyed rather than argued with, and what it buys is the
+# transport: SCTP answers a lost packet by detecting it, which costs a second
+# with nothing delivered, and RTP does not detect loss at all. The host end is
+# untouched by that -- the frames it sends down the channel are the same
+# frames -- so what matters here is that the channel is still built and still
+# fed for the guests that use it.
+check("RtpScriptTransform" not in video and "onrtctransform" not in video,
+      "the host knows nothing about it, and does not need to")
+check("onrtctransform" in worker,
+      "the worker takes frames from a transform as well as from the channel")
+check("RTCRtpScriptTransform" in paint,
+      "and the page attaches one when that is the way chosen")
 
 print("FAILED" if fails else "PASSED")
 sys.exit(1 if fails else 0)

@@ -823,6 +823,49 @@ function hand(made) {
   take(made.key ? "key" : "delta", made.stamp, whole.buffer);
 }
 
+/* The encoded frames, taken off the media track instead of a data channel.
+ *
+ * This is where the picture should always have come from. A data channel is
+ * SCTP, and SCTP answers a lost packet by detecting it -- which, when the
+ * loss is found by timeout rather than by fast retransmit, is a full second
+ * with nothing delivered. Measured on the guest's page as 1049, 1062, 1069,
+ * 1073 and 1085ms gaps between pieces arriving, while its animation frames
+ * carried on at eighteen. Ordered, unordered, unreliable and time-limited all
+ * gave the same number, because they change what happens after a loss is
+ * found and the second is spent finding it.
+ *
+ * RTP does not detect loss at all, which is why the media track bundled on
+ * the very same socket has never once done this. So the frames are taken from
+ * there: the same bytes, arriving by the transport that does not stop.
+ *
+ * The transform has to exist before the receiver has frames to give it --
+ * attached mid-flight it delivers nothing -- and must never be taken off
+ * again, which permanently breaks the receiver. Both are why the page builds
+ * this worker when the track arrives rather than when somebody chooses.
+ */
+self.onrtctransform = (event) => {
+  const from = event.transformer && event.transformer.readable;
+  if (!from) return;
+  say("taking the encoded frames off the media track");
+  const reader = from.getReader();
+  const pull = () => reader.read().then(({ done, value }) => {
+    if (done) return;
+    try {
+      // An RTCEncodedVideoFrame: the assembled frame, its type, and the RTP
+      // timestamp at ninety kilohertz -- which is the capture clock the
+      // pacer wants, in the units it wants, without a header of our own.
+      state.handed += 1;
+      state.gotAll += 1;
+      take(value.type === "key" ? "key" : "delta",
+           Math.round((value.timestamp || 0) / 90) * 1000, value.data);
+    } catch (err) {
+      state.refused += 1;
+    }
+    pull();
+  }).catch(() => {});
+  pull();
+};
+
 self.onmessage = (event) => {
   const m = event.data || {};
   if (m.start) {

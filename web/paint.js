@@ -504,6 +504,7 @@ function makePainter(canvas, say) {
   let onGone = null, onShape = null;
   let chunks = 0;                        // pieces off the channel, ever
   let paintFlat = false;                 // 2D instead of WebGL
+  let fromTrack = null;                  // a receiver, while starting
   let chunkAt = 0, chunkGap = 0;         // and the worst gap between them
   const stalls = [];                     // when the long ones began
 
@@ -547,9 +548,32 @@ function makePainter(canvas, say) {
        context belongs to the canvas and the canvas is handed over once. */
     useFlat(yes) { paintFlat = Boolean(yes); },
 
+    /* Start from a receiver rather than from a data channel.
+     *
+     * Everything past the first step is identical -- the same worker, the
+     * same decoder, the same pacing -- so this hands `receiver` where the
+     * other hands a channel and the worker is told which to listen on.
+     *
+     * The transform must be attached before the receiver has frames to give
+     * it, so this is called the moment the track arrives, and it is never
+     * detached: removing one permanently stops the receiver delivering. */
+    startFromTrack(receiver, codec) {
+      if (running) return false;
+      if (typeof RTCRtpScriptTransform === "undefined") {
+        say("this browser has no encoded transform, so the frames cannot be "
+            + "taken off the media track");
+        return false;
+      }
+      fromTrack = receiver;
+      const ok = this.start(null, codec);
+      fromTrack = null;
+      return ok;
+    },
+
     start(channel, codec) {
       if (running) return false;
-      if (!channel || channel.readyState !== "open") {
+      const viaTrack = fromTrack;
+      if (!viaTrack && (!channel || channel.readyState !== "open")) {
         say("the picture channel is not open yet");
         return false;
       }
@@ -584,6 +608,22 @@ function makePainter(canvas, say) {
           return;
         }
         if (m.started) {
+          if (viaTrack) {
+            // The decoder exists, so the frames may start coming. Attached
+            // here rather than earlier for the same reason the channel is
+            // asked here: frames arriving before there is a decoder are
+            // frames thrown away.
+            try {
+              viaTrack.transform = new RTCRtpScriptTransform(it, { kind: "video" });
+              say("the media track's frames were routed to the decoder");
+            } catch (err) {
+              say("this browser would not take an encoded transform: "
+                  + ((err && err.message) || "no reason given"));
+              this.stop();
+              if (onGone) onGone();
+            }
+            return;
+          }
           // Only now: frames arriving before there is a decoder are frames
           // thrown away, and the host holds them back until it is asked.
           try { channel.send("on"); } catch (_) {}
@@ -635,6 +675,10 @@ function makePainter(canvas, say) {
         beating = requestAnimationFrame(beat);
       };
       beating = requestAnimationFrame(beat);
+      if (viaTrack) {
+        running = true;
+        return true;                     // nothing to listen to here
+      }
       channel.binaryType = "arraybuffer";
       carrying = channel;
       const onPictureChunk = (event) => {

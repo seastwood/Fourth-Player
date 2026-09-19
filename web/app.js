@@ -816,6 +816,8 @@ async function answer(message) {
     startPlayback();
     // A receiver exists now, which is the first moment the frames can be
     // taken. Does nothing unless this viewer chose to draw them here.
+    // The one moment an encoded transform may be attached: a receiver exists
+    // and has no frames yet. Attached later it delivers nothing at all.
     if (event.track.kind === "video") startPainting();
   });
 
@@ -8839,6 +8841,18 @@ const PAINT_METHODS = [
        + "is not subtle.",
     ok: () => typeof canPaintDirectly === "function" && canPaintDirectly(),
   },
+  {
+    id: "rtp",
+    label: "WebCodecs (media track)",
+    why: "The same again, with the encoded frames taken off the media track "
+       + "rather than sent down a data channel. A data channel is SCTP, and "
+       + "SCTP answers a lost packet by detecting it, which costs a second "
+       + "with nothing delivered; RTP does not detect loss at all, which is "
+       + "why the video line has never stalled that way. Needs an encoded "
+       + "transform, which Chrome and Safari have.",
+    ok: () => typeof canPaintDirectly === "function" && canPaintDirectly()
+              && typeof RTCRtpScriptTransform !== "undefined",
+  },
 ];
 
 /* Whether the chosen way of drawing is one this page does itself.
@@ -8851,7 +8865,19 @@ const PAINT_METHODS = [
  */
 function paintsHere(id) {
   const which = id || paintMethod;
-  return which === "here" || which === "flat";
+  return which === "here" || which === "flat" || which === "rtp";
+}
+
+/* The receiver carrying the picture, which is what an encoded transform is
+   attached to. There is one video line, so the first one is it. */
+function videoReceiver() {
+  if (!pc || !pc.getReceivers) return null;
+  try {
+    for (const one of pc.getReceivers()) {
+      if (one.track && one.track.kind === "video") return one;
+    }
+  } catch (_) {}
+  return null;
 }
 
 function paintMethodById(id) {
@@ -9457,7 +9483,10 @@ async function startPainting() {
   fitPainted();
   painter = makePainter(canvas, report);
   if (painter.useFlat) painter.useFlat(paintMethod === "flat");
-  if (!painter.start(pictureChannel, codec)) {
+  const began = paintMethod === "rtp"
+    ? painter.startFromTrack(videoReceiver(), codec)
+    : painter.start(pictureChannel, codec);
+  if (!began) {
     giveTheVideoBack();
     painter = null;
     setPaintMethod("browser");

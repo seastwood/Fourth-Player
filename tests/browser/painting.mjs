@@ -258,8 +258,13 @@ console.log("the codec is read from the offer, which is the agreement itself");
 // to be handed. That is what "Decoder failure" was.
 check(app.includes("function codecFromSdp"), "the offer is parsed");
 check(app.includes("lastSdp = String(message.sdp"), "and kept when it arrives");
-check(app.indexOf("const offered = codecFromSdp()")
-      < app.indexOf("if (!pc || !pc.getReceivers)"),
+// Within the function that picks the codec, rather than by position in the
+// file: another function has since been added above it that also guards on
+// getReceivers, and comparing indexes across the whole file made this a test
+// of where things happen to sit.
+const picking = app.slice(app.indexOf("const offered = codecFromSdp()"));
+check(picking.indexOf("codecFromSdp()")
+      < picking.indexOf("pc.getReceivers"),
       "and asked before the browser's own accessors, not after them");
 
 console.log("and the level asked for is a ceiling, so a high one is offered too");
@@ -295,8 +300,23 @@ check(paintFile.includes('channel.send("on")'),
       "and asks for frames only once there is a decoder for them");
 check(paintFile.includes('carrying.send("off")'),
       "and says when to stop, so nothing is sent into nothing");
-check(!paintFile.includes("RTCRtpScriptTransform"),
-      "no transform anywhere in it");
+// And the transform as well, now, as a third way of drawing here rather than
+// a replacement. The reasons it was rejected were lifecycle ones and they are
+// obeyed rather than argued with: it is attached the moment the track
+// arrives, never mid-flight, and never removed. What it buys is the transport
+// -- a data channel is SCTP, and SCTP answers a lost packet by *detecting*
+// it, which is a second with nothing delivered; ordered, unordered,
+// unreliable and time-limited all gave the same second, because they change
+// what happens after a loss is found. RTP does not detect loss at all, which
+// is why the video line bundled on the same socket has never stalled.
+check(paintFile.includes("RTCRtpScriptTransform"),
+      "with an encoded transform as the other way in");
+check(paintFile.includes("startFromTrack(receiver, codec)"),
+      "started from a receiver rather than a channel, everything past the "
+      + "first step being the same worker and decoder and pacing");
+check(app.includes('if (event.track.kind === "video") startPainting();'),
+      "at the one moment it may be attached: a receiver that exists and has "
+      + "no frames yet");
 check(!app.includes("receiver.transform"),
       "and none left in the page either");
 
