@@ -348,16 +348,22 @@ FRAMES_ARRIVING_GOOD = 0.97
 # this streams. Above it, nobody gets a picture at all, which is worse than
 # anybody's idea of a quality setting.
 #
-# Twenty thousand was the first number and it was too high: the association
-# went into an error state twice at that setting -- "Could not write to
-# resource ... SCTP association went into error state" -- after backing up
-# around 470 kB at 13.6 Mb/s. An association that errors is gone for good, and
-# a guest whose data channel is gone while the media line is deliberately
-# silent has a black screen and no way to say so. Eight is comfortably under
-# where it has been seen to break, and a picture at eight beats no picture at
-# twenty. Anybody who wants the whole of a fast link should be watching the
-# media track, which is what RTP is for.
-DATA_CHANNEL_CEILING_KBPS = 8000
+# Twenty thousand was the first number and the association went into an error
+# state twice at it -- "Could not write to resource ... SCTP association went
+# into error state" -- after backing up around 470 kB at 13.6 Mb/s. So it came
+# down to eight, which stopped the errors and was far too low a price: at
+# 2560x1600 eight megabits is a soft picture, and a guest who asks for fifty
+# on a local network and is quietly given eight is being told nothing and
+# shown the result. That is a worse fault than the one it fixed.
+#
+# Thirty now, because what broke the association has since been addressed
+# directly. There is a pacer between the encoder and the socket -- a whole
+# frame used to go down in one call as a burst of forty-odd packets -- and the
+# rate comes down on the browser's own count of what arrives, which is the
+# signal that was broken when eight was chosen. If the association starts
+# erroring again this is the first number to look at, and the log says so
+# plainly when it happens.
+DATA_CHANNEL_CEILING_KBPS = 30000
 
 # What the encoder is allowed to do about a link that cannot carry what it is
 # being given.
