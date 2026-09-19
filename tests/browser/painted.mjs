@@ -393,7 +393,7 @@ check(built[0].chunks.length === beforeHole,
 self_.onmessage({ data: { chunk: framed(keyframe, true, 8, true, true) } });
 check(built[0].chunks.length === beforeHole,
       "nor does the one behind it, while the first might still arrive");
-clock += 400;                           // past PATCH_MS
+clock += 900;                           // past PATCH_MS
 await refresh(1);                       // a tick drains it
 check(built[0].chunks.length === beforeHole + 1,
       "but once it plainly is not coming, the one behind it goes in");
@@ -437,7 +437,7 @@ const beforeGap = built[0].chunks.length;
 clock += 1000;
 framedSeq += 5;                        // five frames that never arrived
 self_.onmessage({ data: { chunk: framed(deltaFrame, false, 20, true, true) } });
-clock += 400;
+clock += 900;
 await refresh(1);
 check(built[0].chunks.length === beforeGap,
       "the frame after the gap is not fed to the decoder");
