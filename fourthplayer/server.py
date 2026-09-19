@@ -558,6 +558,30 @@ class Server:
             await outbox.put({"t": "reshared", "url": self.join_url(token),
                               "pin": pin})
             return
+        if kind == "pointer" and guest is not None:
+            # Whether the host draws its own cursor into the picture.
+            #
+            # A guest drawing one on its own page wants this off, because the
+            # whole point of drawing it there is that it moves the instant the
+            # hand does rather than a pipeline later -- and two cursors on one
+            # picture is worse than a late one. Only the guest holding the
+            # keyboard and mouse may ask, because the capture is shared: this
+            # takes the cursor away from everybody else watching, and only the
+            # person driving has any business making that trade.
+            if self.session.desk_driver is None \
+                    or self.session.desk_driver != guest.slot:
+                return
+            want = bool(message.get("show", True))
+            if self.session.stage is not None:
+                try:
+                    self.session.stage.show_pointer(want)
+                    log.info("%s asked for the host's own cursor to be %s, "
+                             "because it is drawing one itself",
+                             guest.label, "shown" if want else "hidden")
+                except Exception:
+                    log.exception("could not change whether the pointer shows")
+            return
+
         if kind == "desk":
             # Taking it and putting it down are the same action, because they
             # are the same permission and the page has one button. Putting it

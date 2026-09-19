@@ -33,14 +33,18 @@ function harness(stored) {
     setItem: (k, v) => store.set(k, v),
   };
   let flushes = 0;
+  // deskMoved also asks the page to move the pointer it draws for itself, and
+  // this harness lifts the function out of the page -- so that has to be
+  // handed in like the rest of what it reaches for.
   const fns = new Function(
     "deskPending", "deskSoon", "pictureBox", "zoom", "localStorage",
+    "paintLocalPointer",
     "let cursorU = 0.5, cursorV = 0.5;"
     + app.slice(from, until)
     + "; return { deskMoved, setDeskSpeed, speed: () => deskSpeed,"
     + " cursor: () => [cursorU, cursorV] };")(
       pending, () => { flushes++; }, () => ({ width: 1000, height: 1000 }), 1,
-      localStorage);
+      localStorage, () => {});
   return { pending, fns, store, flushed: () => flushes };
 }
 
