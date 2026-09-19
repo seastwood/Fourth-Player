@@ -172,8 +172,26 @@ _SW = ("videoscale add-borders=true ! videoconvert ! "
 # Windows' equivalent of _VA: the desktop arrives from d3d11screencapturesrc
 # already in D3D11 memory, and d3d11convert does the format and the resize
 # there, so the frame is never copied out of the GPU on its way to NVENC.
+# Full range, and said so.
+#
+# The pipeline negotiated 2:3:7:1 on its own: limited range, BT.709 matrix,
+# sRGB transfer, BT.709 primaries. A desktop is full-range RGB, so "limited"
+# means every frame has its 0-255 squeezed into 16-235 before it is sent and
+# stretched back at the other end -- which is lossy in the shadows and the
+# highlights, and is the ordinary reason a remote desktop looks flatter than
+# the desktop does. Asking for full range keeps all two hundred and
+# fifty-six levels and puts the flag in the bitstream that tells the browser
+# so.
+#
+# The transfer is pinned to BT.709 with it, because a browser decoding video
+# assumes BT.709 whatever the file says, and content converted as sRGB and
+# shown as BT.709 has its midtones lifted -- which is the other half of
+# looking flat. Naming it makes the conversion and the assumption agree.
+_FULL_RANGE = "colorimetry=(string)1:3:5:1"
+
 _D3D11 = ("d3d11convert add-borders=true ! "
-          "video/x-raw(memory:D3D11Memory),format=NV12,width={w},height={h}")
+          "video/x-raw(memory:D3D11Memory),format=NV12,width={w},height={h},"
+          + _FULL_RANGE)
 # The same idea as _VA, for NVENC. cudaupload puts the frame in CUDA memory
 # and cudaconvertscale does the format and the resize there, so it is uploaded
 # once and never comes back; without them every frame is downloaded, converted
