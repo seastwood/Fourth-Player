@@ -622,8 +622,23 @@ _host_codecs = None
 # keyframe per this many seconds -- and KEYFRAME_BURST is how many may be
 # spent at once by a room that has been quiet. An isolated blip finds a full
 # bucket and is served immediately; a storm drains it and gets the refill rate.
-KEYFRAME_MIN_GAP = 1.5
-KEYFRAME_BURST = 2
+# Retuned when the picture channel stopped retransmitting. A keyframe used to
+# be what a guest asked for after losing the picture, which is rare; it is now
+# the *only* way back from a single lost piece, because nothing is resent. At
+# one and a half seconds a lost packet cost a second and a half of frozen
+# picture -- the limiter, not the loss. A quarter of a second with four in
+# hand is at worst four keyframes a second, which an eight megabit stream can
+# afford far more easily than it can afford the freeze.
+#
+# The burst is where that is bought, not the gap: test_budget holds the
+# long-run rate to at most forty percent of the frame budget, and it is right
+# to -- a keyframe is worth twenty-odd ordinary frames, so four a second is
+# twice the whole picture. So four in hand, answered at once, and then one a
+# second. An isolated loss, which is nearly all of them, is repaired
+# instantly; only sustained loss is made to wait, and sustained loss cannot be
+# repaired by spending the entire bitrate on keyframes anyway.
+KEYFRAME_MIN_GAP = 1.25
+KEYFRAME_BURST = 4
 
 # Video is the first feed a guest is given, so it is the first transceiver.
 VIDEO_TRANSCEIVER = 0

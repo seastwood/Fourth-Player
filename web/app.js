@@ -3873,7 +3873,15 @@ function tellAboutTheRate(picture) {
     const wait = painter.gaps ? painter.gaps() : null;
     report(painter.report()
            + (wait ? "; worst gap between pieces arriving " + wait.chunk
-                     + "ms, between animation frames " + wait.beat + "ms" : "")
+                     + "ms, between animation frames " + wait.beat + "ms"
+                     + (wait.every
+                        ? "; the stalls come every " + wait.every + "s like "
+                          + "clockwork (" + wait.stalls + " seen), which is "
+                          + "something taking this machine's radio rather "
+                          + "than a busy network"
+                        : wait.stalls ? "; " + wait.stalls + " stalls, at no "
+                                        + "regular spacing" : "")
+                   : "")
            + " over " + span.toFixed(0) + "s; this page is "
            + (document.hidden ? "hidden" : "visible") + " and has been called "
            + "hidden " + hiddenSpells + " time(s)");

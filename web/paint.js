@@ -491,6 +491,10 @@ function setSmoothing(frames) {
   return smoothingFrames;
 }
 
+/* A gap between pieces arriving that is long enough to be seen as a freeze
+   rather than felt as jitter. */
+const STALL_MS = 250;
+
 function makePainter(canvas, say) {
   let worker = null, running = false, mine = canvas;
   let last = null;                       // the worker's last set of counters
@@ -501,6 +505,24 @@ function makePainter(canvas, say) {
   let chunks = 0;                        // pieces off the channel, ever
   let paintFlat = false;                 // 2D instead of WebGL
   let chunkAt = 0, chunkGap = 0;         // and the worst gap between them
+  const stalls = [];                     // when the long ones began
+
+  /* How regularly the stalls come, in seconds, or 0 when they do not.
+   *
+   * Every interval within a sixth of the median is a metronome, and a
+   * metronome is not congestion -- it is something taking the radio on a
+   * schedule. Six of them before saying so, because a false "your machine is
+   * misbehaving" is worse than staying quiet. */
+  function stallPeriod() {
+    if (stalls.length < 6) return 0;
+    const gaps = [];
+    for (let i = 1; i < stalls.length; i += 1) gaps.push(stalls[i] - stalls[i - 1]);
+    const sorted = gaps.slice().sort((a, b) => a - b);
+    const middle = sorted[Math.floor(sorted.length / 2)];
+    if (!(middle > 0)) return 0;
+    const agree = gaps.every((g) => Math.abs(g - middle) <= middle * 0.167);
+    return agree ? Math.round(middle / 100) / 10 : 0;
+  }
   let beatAt = 0, beatGap = 0;           // the same, for animation frames
   const now = () => ((typeof performance !== "undefined" && performance.now)
                      ? performance.now() : Date.now());
@@ -631,7 +653,24 @@ function makePainter(canvas, say) {
         // service it, and those want opposite fixes. This one number
         // separates them, and none of the others could.
         const at = now();
-        if (chunkAt && at - chunkAt > chunkGap) chunkGap = at - chunkAt;
+        if (chunkAt) {
+          const gap = at - chunkAt;
+          if (gap > chunkGap) chunkGap = gap;
+          // When a stall began, kept so the spacing between them can be
+          // looked at. moonlight-web's PeriodicStallDetector is the idea:
+          // congestion is random, a radio being time-shared is not. On a Mac
+          // that is AWDL -- AirDrop, Handoff, AirPlay, Sidecar and Continuity
+          // share the Wi-Fi chip with the infrastructure link and leave it at
+          // periodic availability windows -- and it sits below the
+          // application, so no amount of changing this code touches it. The
+          // regularity is the whole signal, and it is the difference between
+          // "your network is busy" and "something on this machine is taking
+          // the radio", which the person at the keyboard can actually fix.
+          if (gap > STALL_MS) {
+            stalls.push(at);
+            if (stalls.length > 12) stalls.shift();
+          }
+        }
         chunkAt = at;
         // Transferred rather than copied: it is this page's last contact with
         // the bytes, and the worker is the only thing that reads them.
@@ -760,7 +799,8 @@ function makePainter(canvas, say) {
        frames. Reading them clears them, so each answer describes the window
        just gone. */
     gaps() {
-      const was = { chunk: Math.round(chunkGap), beat: Math.round(beatGap) };
+      const was = { chunk: Math.round(chunkGap), beat: Math.round(beatGap),
+                    stalls: stalls.length, every: stallPeriod() };
       chunkGap = 0;
       beatGap = 0;
       return was;

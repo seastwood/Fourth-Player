@@ -505,6 +505,22 @@ check(paintFile.includes("chunkGap = 0;\n      beatGap = 0;"),
       + "gone rather than the worst since the page loaded");
 check(app.includes("worst gap between pieces arriving"),
       "and the report carries both");
+// Congestion is random; a radio being time-shared is not. On a Mac that is
+// AWDL -- AirDrop, Handoff, AirPlay, Sidecar and Continuity share the Wi-Fi
+// chip with the infrastructure link and leave it at periodic availability
+// windows -- and it sits below the application, so no amount of changing this
+// code touches it. The regularity is the whole signal, and it separates "your
+// network is busy" from "something on this machine is taking the radio",
+// which the person at the keyboard can actually do something about. The
+// freezes here are rate-independent, which is what makes this worth asking.
+check(paintFile.includes("function stallPeriod()"),
+      "and whether the stalls come at a regular spacing");
+check(paintFile.includes("stalls.length < 6"),
+      "over enough of them to mean something, because a false 'your machine "
+      + "is misbehaving' is worse than staying quiet");
+check(paintFile.includes("middle * 0.167"),
+      "with every interval close to the median before it is called a "
+      + "metronome");
 
 console.log("\nthe timer takes over whenever the beats stop, not only if none came");
 // Measured: 244 refreshes in eleven seconds where sixty a second is 660, with
