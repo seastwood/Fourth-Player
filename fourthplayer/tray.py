@@ -445,7 +445,12 @@ def _run_pystray(tray):
         menu=pystray.Menu(
             pystray.MenuItem(lambda _i: tray.title(), None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Set up this machine...",
+            # "Open the settings page", not "Set up this machine". They are
+            # the same page and always have been, but next to "Open the guest
+            # page" the old wording read as a first-run wizard rather than as
+            # the place the stream is configured -- so it was reported as
+            # missing by somebody who had been using it.
+            pystray.MenuItem("Open the settings page...",
                              lambda _i, _m: tray.open_setup(), default=True),
             pystray.MenuItem("Open the guest page...",
                              lambda _i, _m: tray.open_guest(),
@@ -552,7 +557,7 @@ def _run_appindicator(tray):
             items[key] = item
             return item
 
-        add("setup", "Set up this machine\u2026", tray.open_setup)
+        add("setup", "Open the settings page\u2026", tray.open_setup)
         add("guest", "Open the guest page\u2026", tray.open_guest)
         made.append(Gtk.SeparatorMenuItem())
         add("restart", "Restart Fourth Player", tray.restart)

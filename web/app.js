@@ -9903,10 +9903,17 @@ async function setMic(on) {
 function paintMic() {
   // The bandwidth choice is only worth showing to somebody who may use the
   // microphone at all.
+  // And only where the host offered a line to speak on. Clearing the guest
+  // microphone device in the settings page is how a host says "no
+  // microphone", and the host already honours it -- it does not offer the
+  // m-line at all. These two rows were the one place that did not notice, so
+  // switching it off left a quality picker and a noise-reduction tick behind,
+  // for a microphone that could not be turned on.
+  const offered = may("mic") && !!micLine();
   const row = el("mic-quality-row");
-  if (row) row.hidden = !may("mic");
+  if (row) row.hidden = !offered;
   const cleanRow = el("mic-clean-row");
-  if (cleanRow) cleanRow.hidden = !may("mic");
+  if (cleanRow) cleanRow.hidden = !offered;
   const clean = el("mic-clean");
   if (clean && clean.checked !== micClean) clean.checked = micClean;
   const picker = el("mic-quality");
@@ -9915,7 +9922,7 @@ function paintMic() {
   if (!chip) return;
   // Only for somebody the host has given it to, and only where the host
   // offered a line to speak on.
-  chip.hidden = !may("mic") || !micLine();
+  chip.hidden = !offered;
   chip.classList.toggle("ok", micOn);
   chip.setAttribute("aria-pressed", micOn ? "true" : "false");
   chip.textContent = micOn ? "\u{1F3A4} On" : "\u{1F3A4} Mic";
@@ -10117,9 +10124,20 @@ function streamFields() {
   };
 }
 
+/** Kilobits, as the host counts them, written the way people read them. */
+function megabits(kbps) {
+  const mb = Number(kbps) / 1000;
+  // One decimal up to 10, none above it: "2.5 Mb/s" is worth the digit and
+  // "28.5 Mb/s" is, but "60.0 Mb/s" is not.
+  return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + " Mb/s";
+}
+
 function paintStreamValues() {
   const say = (id, text) => { const n = el(id); if (n) n.textContent = text; };
-  say("stream-bitrate-value", el("stream-bitrate").value + " kb/s");
+  // Megabits. A stream is quoted in Mb/s everywhere else somebody meets one
+  // -- an internet plan, a television, a speed test -- and "28500" is a
+  // number nobody can place against any of them.
+  say("stream-bitrate-value", megabits(el("stream-bitrate").value));
   say("stream-jitter-value", el("stream-jitter").value + " ms");
   say("stream-queue-value", el("stream-queue").value + " ms");
   say("stream-cpb-value", el("stream-cpb").value + " ms");

@@ -147,8 +147,18 @@ check("nowhere to play it" in video,
 print()
 print("the client only shows it to somebody who may use it")
 app = open(os.path.join(ROOT, "web", "app.js")).read()
-check('chip.hidden = !may("mic") || !micLine()' in app,
-      "hidden without the permission, and without a line to speak on")
+check('const offered = may("mic") && !!micLine();' in app,
+      "the two conditions are worked out once: the permission, and a line to "
+      "speak on")
+check('chip.hidden = !offered;' in app,
+      "the chip is hidden without both")
+# The rows used to ask only about the permission, so clearing the guest
+# microphone device -- which is how a host says "no microphone", and which the
+# host already honours by not offering the m-line -- left a quality picker and
+# a noise-reduction tick behind for a microphone that could not be turned on.
+check(app.count("hidden = !offered") >= 3,
+      "and so are the quality and noise-reduction rows, got %d place(s)"
+      % app.count("hidden = !offered"))
 check("micTrack.stop()" in app,
       "and the microphone is stopped, not merely detached: a detached track "
       "leaves the browser's recording light on, which tells somebody they are "

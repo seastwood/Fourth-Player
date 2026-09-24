@@ -48,15 +48,21 @@ print("and the page does not disagree with it")
 box = re.search(r'<input id="set-bitrate"[^>]*>', page)
 check(box is not None, "the bitrate box exists")
 if box:
-    attr = re.search(r'max="(\d+)"', box.group(0))
+    # The box is in megabits and the host counts kilobits, so the two agree
+    # about the number and not about the unit. The conversion is the thing
+    # worth checking: a page offering 100 where the host means 100000 would
+    # let somebody ask for a tenth of what they typed.
+    attr = re.search(r'max="([\d.]+)"', box.group(0))
     check(attr is not None, "it has a max at all")
-    check(attr and int(attr.group(1)) == high,
-          "its max matches the host's ceiling (page %s, host %d)"
+    check(attr and abs(float(attr.group(1)) * 1000 - high) < 1,
+          "its max is the host's ceiling in Mb/s (page %s Mb/s, host %d kb/s)"
           % (attr.group(1) if attr else "none", high))
-    floor = re.search(r'min="(\d+)"', box.group(0))
-    check(floor and int(floor.group(1)) == low,
-          "and its min matches the host's floor (page %s, host %d)"
+    floor = re.search(r'min="([\d.]+)"', box.group(0))
+    check(floor and abs(float(floor.group(1)) * 1000 - low) < 1,
+          "and its min is the host's floor in Mb/s (page %s Mb/s, host %d kb/s)"
           % (floor.group(1) if floor else "none", low))
+    check("Mb/s" in page,
+          "and the page says which unit it means, next to the box")
 
 print()
 print("the page takes the limits from the host rather than keeping its own")

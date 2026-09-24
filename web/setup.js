@@ -239,12 +239,17 @@ function fillPicture(stream, policies) {
                             ["guest_mic_latency_ms", "set-mic-latency"]]) {
     const box = el(id), bound = limits[field];
     if (!box || !bound || bound.length !== 2) continue;
-    box.min = bound[0];
-    box.max = bound[1];
+    // The host counts every bitrate in kilobits. The video box is in
+    // megabits, because that is the unit an internet plan and a television
+    // are quoted in and "28500" is a number nobody can place against either.
+    // Audio stays in kilobits: 0.128 Mb/s is not a helpful way to say 128.
+    const scale = id === "set-bitrate" ? 1000 : 1;
+    box.min = bound[0] / scale;
+    box.max = bound[1] / scale;
   }
   set("set-size", stream.height);
   set("set-fps", stream.fps);
-  set("set-bitrate", stream.bitrate_kbps);
+  set("set-bitrate", Math.round(stream.bitrate_kbps / 100) / 10);
   const codec = el("set-codec");
   if (codec && !codec.dataset.built) {
     codec.innerHTML = ["auto", "h264", "h265"].map((c) => `<option>${c}</option>`).join("");
@@ -546,7 +551,8 @@ const ACTIONS = {
     heard(await post("/api/stream", {settings: {
       height: Number(el("set-size").value),
       fps: Number(el("set-fps").value),
-      bitrate_kbps: Number(el("set-bitrate").value),
+      // Back to kilobits for the host, which is the only unit it knows.
+      bitrate_kbps: Math.round(Number(el("set-bitrate").value) * 1000),
       // A real boolean. Sending the string "off" once turned a setting on,
       // because bool("off") is true at the other end.
       audio: Boolean(el("set-audio") && el("set-audio").checked),
