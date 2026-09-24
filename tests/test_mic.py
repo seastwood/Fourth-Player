@@ -179,8 +179,20 @@ check('guest_mic_device' in sess and "has no audio output called" in sess,
       "and refuses a device it does not have, rather than accepting a name "
       "that matches nothing and leaving somebody talking into it")
 check('id="set-mic-device"' in page, "the page has the picker")
-check("guest_mic_device: el(\"set-mic-device\")" in script,
-      "and sends it")
+check('id="set-guest-mic"' in page,
+      "and a switch above it, because \"where does it go\" and \"should "
+      "there be one at all\" are two questions -- answering the second "
+      "inside the answers to the first is why somebody asked where the "
+      "microphone switch was while looking straight at it")
+check('el("set-mic-device").value' in script, "the picker is what is sent")
+check('!el("set-guest-mic").checked' in script,
+      "unless the switch is off, which wins over whatever is still selected "
+      "underneath it")
+check('mic.disabled = !micOn.checked' in script,
+      "and the picker goes inert while nobody is being heard")
+check("mic.dataset.suggestion" in script,
+      "switching it on with the picker on \"Nowhere\" takes the host's own "
+      "suggestion, rather than applying nothing and reading as broken")
 check("Nowhere" in script,
       "with an explicit off, because off is a real choice and the default one")
 

@@ -215,10 +215,29 @@
         <label>Sound buffer <input id="set-audio-queue" type="number"
                min="20" max="500" step="10" style="width:5rem"> ms</label>
       </div>
+      <!-- Said here because it is not guessable and it is alarming. Capturing
+           what the speakers are playing is, to the operating system, a
+           recording stream: Windows shows the microphone indicator in the tray
+           the whole time this is on, and it flickers whenever the capture
+           resets. Somebody watching that reasonably concludes they are being
+           listened to. -->
+      <div class="row"><span class="hint">Recording what the speakers play is a
+        capture stream, so Windows shows a microphone in the tray while this is
+        on. Untick it to send a silent picture and to stop that
+        indicator.</span></div>
       <!-- Where a guest's microphone is played, so the machine hears it as a
            recording device and a call can use it. Windows has no virtual
            microphone, so this is the playback half of a loopback cable and
            whatever wants to listen selects the recording half. -->
+      <div class="row">
+        <!-- A switch, not only an option buried in the list below it. "Where
+             does it go" and "should there be one at all" are two questions,
+             and answering the second inside the answers to the first is why
+             somebody asked where the microphone switch was while looking
+             straight at it. -->
+        <label><input id="set-guest-mic" type="checkbox"> Let guests be
+          heard</label>
+      </div>
       <div class="row">
         <label>Guest microphone goes to
           <select id="set-mic-device" style="max-width:20rem"></select></label>

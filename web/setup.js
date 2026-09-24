@@ -322,7 +322,26 @@ function fillPicture(stream, policies) {
           ? `off — sending this machine's own screen, ${desk[0]}x${desk[1]}`
           : "off — sending this machine's own screen";
   }
+  // The switch and the picker are one setting on the host -- an empty device
+  // means "nobody is heard" -- so the switch reflects it and drives it.
+  const micOn = el("set-guest-mic");
+  if (micOn) micOn.checked = !!stream.guest_mic_device;
   const mic = el("set-mic-device");
+  if (micOn && mic && !micOn.dataset.wired) {
+    micOn.dataset.wired = "1";
+    micOn.addEventListener("change", () => {
+      // Switching it on with the picker still on "Nowhere" would apply
+      // nothing at all, which reads as the switch being broken. Take the
+      // host's own suggestion, which is the device it would have chosen.
+      if (micOn.checked && !mic.value) {
+        const want = mic.dataset.suggestion || "";
+        if (want) mic.value = want;
+      }
+      // And off means off: the picker has nothing to say while nobody is
+      // being heard.
+      mic.disabled = !micOn.checked;
+    });
+  }
   if (mic) {
     const list = Array.isArray(stream.mic_sinks) ? stream.mic_sinks : [];
     const built = JSON.stringify(list);
@@ -341,6 +360,8 @@ function fillPicture(stream, policies) {
       mic.dataset.built = built;
     }
     mic.value = stream.guest_mic_device || "";
+    mic.dataset.suggestion = stream.mic_suggestion || "";
+    mic.disabled = !stream.guest_mic_device;
   }
   set("set-mic-latency", stream.guest_mic_latency_ms);
   const micNote = el("mic-now");
@@ -565,7 +586,10 @@ const ACTIONS = {
       draw_with: el("set-draw") ? el("set-draw").value : "browser",
       audio_bitrate_kbps: Number(el("set-audio-bitrate").value),
       audio_queue_ms: Number(el("set-audio-queue").value),
-      guest_mic_device: el("set-mic-device") ? el("set-mic-device").value : "",
+      // Off wins: unticking is how a host says "no microphone", whatever is
+      // still selected in the picker underneath it.
+      guest_mic_device: (el("set-guest-mic") && !el("set-guest-mic").checked)
+        ? "" : (el("set-mic-device") ? el("set-mic-device").value : ""),
       guest_mic_latency_ms: Number(el("set-mic-latency").value),
       codec: el("set-codec").value,
     }}), "the picture is being rebuilt — about a second of held picture");
