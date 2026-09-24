@@ -50,6 +50,27 @@ START_TIMEOUT = 10 * Gst.SECOND if hasattr(Gst, "SECOND") else 10_000_000_000
 # about to finish and calling it a leak.
 TEARDOWN_TIMEOUT = 10 * Gst.SECOND if hasattr(Gst, "SECOND") else 10_000_000_000
 
+# How long the capture keeps running after the last guest leaves.
+#
+# It used to keep running for ever. The pipeline follows the *session*, not
+# the guests -- session.py starts it when a session opens and stops it when
+# the session closes -- so a console with a session that never expires
+# captured and encoded its screen around the clock for nobody. Measured on two
+# machines with zero guests connected: 47% and 60% of a core, continuously,
+# and fifteen hours of CPU between restarts. On a games console that is taken
+# straight out of the emulator.
+#
+# Paused rather than stopped. stop() is one-way -- it takes the pipeline to
+# NULL and the Stage is rebuilt rather than restarted -- and it is the path
+# that has to destroy webrtcbin, which is delicate enough to have its own
+# timeout above. PAUSED costs nothing while idle, keeps every element built,
+# and add_peer already calls ensure_playing() before attaching anybody, so
+# waking up was written long before this.
+#
+# Not instant, because a guest who reloads is back within milliseconds and
+# pausing between the two would add a state change to every reload.
+IDLE_AFTER = 30.0
+
 _initialised = False
 
 
@@ -1036,6 +1057,15 @@ def _caps(width, height):
 class Stage:
     """Capture, encode once, and fan the result out."""
 
+    # Pausing the capture when the last guest leaves. Class attributes, not
+    # set in __init__, because a Stage is built by __new__ in the suites --
+    # __init__ wants a real display -- and take_peer must answer on one of
+    # those too. `_attaching` counts guests part-way through add_peer: they
+    # are not in self.peers yet, and idling on top of one would hand it a
+    # paused pipeline.
+    _idle_timer = None
+    _attaching = 0
+
     def __init__(self, cfg, loop, codec=None):
         init()
         self.cfg = cfg
@@ -1792,6 +1822,7 @@ class Stage:
         # encode for as long as the process lives. Stopping the two sources is
         # immediate and ends that cost even if the rest hangs -- by name,
         # because which elements they are depends on the machine.
+        self._cancel_idle()
         for name in ("capture", "sound"):
             element = self.pipeline.get_by_name(name)
             if element is not None:
@@ -1926,6 +1957,50 @@ class Stage:
 
     # -- peers --------------------------------------------------------------
 
+    def watchers(self):
+        """How many guests are actually being sent a picture.
+
+        A peer built with media=False is a second controller on a machine that
+        already has one: it has an input channel and no video, so it is not a
+        reason to keep encoding.
+        """
+        return sum(1 for peer in self.peers.values() if getattr(peer, "media", True))
+
+    def _cancel_idle(self):
+        timer, self._idle_timer = self._idle_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _arm_idle(self):
+        """Pause the capture in a little while, if nobody has arrived by then."""
+        self._cancel_idle()
+        timer = threading.Timer(IDLE_AFTER,
+                                lambda: self.worker.submit(self.idle_if_empty))
+        timer.daemon = True
+        self._idle_timer = timer
+        timer.start()
+
+    def idle_if_empty(self):
+        """Take the capture to PAUSED, unless somebody turned up meanwhile.
+
+        Runs on the worker, because every state change does: two threads in
+        the GPU driver at once is something this process has segfaulted over.
+        The count is re-read here rather than trusted from when the timer was
+        armed -- thirty seconds is a long time in a session.
+        """
+        if self.watchers() or self._attaching:
+            return False
+        pipeline = self.pipeline
+        if pipeline is None:
+            return False
+        _change, state, _pending = pipeline.get_state(0)
+        if state != Gst.State.PLAYING:
+            return False
+        log.info("no guests for %.0fs; pausing the capture", IDLE_AFTER)
+        pipeline.set_state(Gst.State.PAUSED)
+        return True
+
+
     def add_peer(self, peer_id, on_signal, configure=None, media=True):
         """Attach one guest. `on_signal(kind, payload)` is called on the asyncio loop.
 
@@ -1936,6 +2011,19 @@ class Stage:
         `media=False` builds a peer with the input channel and no picture, for
         a second controller on a machine that already has one.
         """
+        # Before ensure_playing below, not after: an idle that fires between
+        # the two would pause the pipeline this guest is about to be given.
+        # The counter is what keeps it held off for the whole attach, which
+        # takes long enough to matter -- there is a warning below for one that
+        # takes over a second.
+        self._cancel_idle()
+        self._attaching += 1
+        try:
+            return self._attach_peer(peer_id, on_signal, configure, media)
+        finally:
+            self._attaching -= 1
+
+    def _attach_peer(self, peer_id, on_signal, configure, media):
         started = time.monotonic()
         # A peer left over under this name is wreckage, not a guest: the only
         # way one survives is an attach that failed partway. Clear it out
@@ -2002,7 +2090,13 @@ class Stage:
             log.warning("peer %s was asked for by somebody holding an older "
                         "one; leaving the current peer where it is", peer_id)
             return None
-        return self.peers.pop(peer_id, None)
+        peer = self.peers.pop(peer_id, None)
+        if peer is not None and not self.watchers():
+            # The last guest just left. Nothing is stopped yet -- a reload is
+            # back within milliseconds, and IDLE_AFTER is what tells the two
+            # apart.
+            self._arm_idle()
+        return peer
 
     def remove_peer(self, peer_id):
         peer = self.take_peer(peer_id)
