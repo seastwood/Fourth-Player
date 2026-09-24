@@ -169,6 +169,19 @@ if systemctl --user is-active --quiet fourth-player; then
   else
     echo "could not restart it; run: systemctl --user restart fourth-player"
   fi
+else
+  # A first install enables it and nothing starts it, because the branch above
+  # only ever restarts something already running. `enable` alone takes effect
+  # at the next login, so a machine installed this afternoon has a streaming
+  # host that is enabled, correct, and not running -- and nothing says so.
+  # Found by the health check on a freshly installed machine, which is the
+  # only place it shows: on a reinstall it is already up and the branch above
+  # covers it.
+  if systemctl --user start fourth-player >/dev/null 2>&1; then
+    echo "started, so it is serving now rather than after the next login"
+  else
+    echo "could not start it; run: systemctl --user start fourth-player"
+  fi
 fi
 
 say "the Kodi add-on"
