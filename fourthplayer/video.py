@@ -1736,6 +1736,14 @@ class Stage:
                         "genuinely sharper stream.",
                         self.sending_width, self.sending_height,
                         desktop[0], desktop[1], desktop[0], desktop[1])
+        # A session almost always opens before anybody joins it, and one that
+        # is restored at boot may never be joined at all -- which is the case
+        # this was written for. Arming only when the last guest leaves meant
+        # the clock was never started on a session nobody had joined yet, so
+        # the console went on encoding for nobody exactly as before. Measured
+        # after deploying the first version of this: 46% of a core, still.
+        if not self.watchers():
+            self._arm_idle()
 
     def _match_refresh(self, chosen):
         """Put the captured screen at the frame rate being sent, if it can.

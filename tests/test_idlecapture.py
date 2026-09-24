@@ -206,8 +206,20 @@ try:
 finally:
     video.IDLE_AFTER = was
 
-print("\n-- waking up was already written --")
+print("\n-- a session nobody has joined yet also starts the clock --")
+# The hole in the first version of this. take_peer was the only thing that
+# armed the clock, so a session that opened with no guests -- which is every
+# session, for its first moments, and a restored one for ever -- never started
+# it. The console went on encoding for nobody after the change shipped.
 import inspect                                             # noqa: E402
+start = inspect.getsource(video.Stage.start)
+check("_arm_idle" in start,
+      "start() arms it too, so a session that is never joined still settles")
+check("watchers()" in start,
+      "and only when nobody is watching, so a restart mid-session does not "
+      "pause under the guests it just came back for")
+
+print("\n-- waking up was already written --")
 attach = inspect.getsource(video.Stage.add_peer)
 check("_cancel_idle" in attach,
       "add_peer calls the clock off before it does anything else")
