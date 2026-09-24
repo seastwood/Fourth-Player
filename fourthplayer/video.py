@@ -23,6 +23,7 @@ import collections
 import concurrent.futures
 import json
 import logging
+import os
 import re
 import struct
 import threading
@@ -74,10 +75,59 @@ IDLE_AFTER = 30.0
 _initialised = False
 
 
+# Let a GObject assertion be a log line instead of a dead process.
+#
+# PyGObject installs its own handler for GLib's logging and turns a warning
+# into a *Python* warning, through PyErr_WarnEx. That is helpful in a test run
+# and lethal here. The host segfaults about once a day on the console, and the
+# last five cores all die in the same place:
+#
+#     Python -> _gi -> g_object_get_qdata      <- on an object already freed
+#            -> g_log "assertion 'G_IS_OBJECT (object)' failed"
+#            -> _gi's log handler -> PyErr_WarnEx
+#            -> crash in PyObject_GC_UnTrack
+#
+# Raising a Python warning means allocating, filtering and possibly collecting,
+# on whichever thread GStreamer happened to be on. Doing that on top of a heap
+# that a use-after-free has already disturbed is what turns a survivable
+# complaint into SIGSEGV.
+#
+# Handing the domain to GLib's own C handler takes Python out of that path
+# entirely: the assertion is printed to stderr -- which systemd keeps, so
+# nothing is hidden, and it is still the signal that the underlying bug
+# happened -- and the process carries on. Measured before and after on the
+# console: same message, no Python warning, pipeline still usable.
+#
+# **This does not fix the use-after-free.** It removes one of the two places
+# the corruption has been seen to kill the process; earlier cores died in
+# g_object_unref from libgstwebrtc's dispose instead, and that path is
+# untouched. Set FOURTH_PLAYER_PYTHON_GLIB_WARNINGS=1 to leave PyGObject's
+# handler in place, which is what to do when hunting the root cause: the
+# Python warning carries a traceback naming whoever touched the dead object.
+_GLIB_DOMAINS = ("GLib-GObject", "GLib", "GObject")
+
+
+def _quieten_glib_warnings():
+    if os.environ.get("FOURTH_PLAYER_PYTHON_GLIB_WARNINGS"):
+        log.info("leaving GLib warnings on PyGObject's Python path, as asked")
+        return
+    try:
+        mask = (GLib.LogLevelFlags.LEVEL_MASK
+                | GLib.LogLevelFlags.FLAG_FATAL
+                | GLib.LogLevelFlags.FLAG_RECURSION)
+        for domain in _GLIB_DOMAINS:
+            GLib.log_set_handler(domain, mask, GLib.log_default_handler, None)
+    except Exception:
+        # Instrumentation must never be the fault. An older PyGObject without
+        # log_set_handler simply keeps the behaviour it had.
+        log.debug("could not take the GLib log domains back", exc_info=True)
+
+
 def init():
     global _initialised
     if not _initialised:
         Gst.init([])
+        _quieten_glib_warnings()
         _initialised = True
 
 
