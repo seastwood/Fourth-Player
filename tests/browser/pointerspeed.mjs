@@ -125,6 +125,25 @@ check(!/id="desk-speed"/.test(padPanel),
       "and not in the controller panel, where it was and where nobody with a "
       + "mouse would look");
 
+console.log("\nthe speeds offered reach low enough for raw counts");
+// Raw movement is in whatever units the mouse reports, not screen pixels, so
+// a high-DPI one is five or ten times as fast at a setting meant for pixels.
+// The list stopped at a quarter, which is nowhere near enough to judge raw at
+// -- and raw was tried and called terrible, at a sensitivity it was never
+// going to be usable at. VoidLink's captured mode is raw and feels right,
+// which is the comparison worth matching.
+// Scoped to the one select: the page is full of option lists, and a match
+// across all of them said the speeds reached zero, which is every list except
+// this one.
+const speedList = html.slice(html.indexOf('id="desk-speed"'),
+                             html.indexOf("</select>",
+                                          html.indexOf('id="desk-speed"')));
+const speeds = [...speedList.matchAll(/<option value="([\d.]+)">/g)]
+  .map((m) => Number(m[1]));
+check(speeds.length > 0, `the speeds are in the page: ${speeds.join()}`);
+check(Math.min(...speeds) <= 0.1,
+      `and reach down to a tenth: ${Math.min(...speeds)}`);
+
 console.log("\nthe movements a mouse made are kept apart, not summed");
 // The browser had already summed them: Chrome delivers mousemove once per
 // animation frame with everything since the last one folded in, whatever rate

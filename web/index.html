@@ -786,6 +786,8 @@
             <label class="tune-label" for="desk-speed">Pointer speed</label>
             <select id="desk-speed" class="chip"
                     aria-label="How fast the console pointer moves">
+              <option value="0.1">Slowest</option>
+              <option value="0.15">Very slow</option>
               <option value="0.25">Much slower</option>
               <option value="0.5">Slower</option>
               <option value="1">Normal</option>
@@ -805,11 +807,17 @@
             </select>
           </div>
           <p class="footnote">Raw sends the mouse exactly as the hardware
-             reports it, with none of this machine&rsquo;s acceleration, which
-             is what a game aiming expects &mdash; the console applies its own.
-             It changes how fast the pointer feels, so set the speed above to
-             taste after switching. Not every browser offers it; Safari does
-             not, and falls back.</p>
+             reports it, with none of this machine&rsquo;s acceleration &mdash;
+             the console then applies its own, once, which is what a native
+             client does and what a game aiming expects. Anything else means
+             two acceleration curves composed, one on top of the other.</p>
+          <p class="footnote"><strong>Raw counts are not screen pixels.</strong>
+             They come in whatever units the mouse reports, so a high-DPI one
+             will fly at normal speed. Expect to set the speed above to
+             <em>Slowest</em> or <em>Very slow</em> and work up from there
+             &mdash; judging raw at a speed meant for pixels is judging it at
+             five or ten times the sensitivity you want. Safari has no raw
+             mode and falls back on its own.</p>
         </section>
 
         <section class="acct-block" id="session-reshare" hidden>

@@ -47,8 +47,14 @@ check(build_module.LOADED == first,
 print("touching a file changes it, which is the whole point")
 mark = os.path.join(ROOT, "web", "app.js")
 was = os.stat(mark).st_mtime
+# Past the newest file in the tree, not past this one's own time. The stamp is
+# the newest modification anywhere, so bumping a file that is not already the
+# newest changes nothing -- and which file is newest depends on whatever was
+# edited last, which made this pass or fail by the order of the day's work.
+import time as _time
+ahead = _time.time() + 10000
 try:
-    os.utime(mark, (was + 10000, was + 10000))
+    os.utime(mark, (ahead, ahead))
     check(build_module.stamp() != first,
           "a newer file in web/ is a different build, because guests are "
           "served those files too")
