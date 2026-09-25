@@ -2928,11 +2928,62 @@ function hudButtonShowing() {
   return getComputedStyle(el("hudbtn")).display !== "none";
 }
 
-el("screen").addEventListener("click", () => {
+/* Double-tapping the picture to zoom into what was tapped.
+ *
+ * A phone shows a television about as wide as two fingers, and the part
+ * somebody wants is often a corner of it -- a health bar, a lap counter, a map
+ * in the top right. There is a zoom control, but reaching for it means
+ * stopping playing; a tap on the thing itself does not.
+ *
+ * Only while nothing is being driven. With the keyboard or the pointer live, a
+ * double tap on the picture is a double *click* somebody is sending to the
+ * machine, and swallowing it to zoom would take away the gesture that opens
+ * everything on a desktop.
+ *
+ * The rules are the ones the on-screen sticks arrived at the hard way: two
+ * taps close in time, but not so close that they are one press arriving twice,
+ * and near enough to each other in space to be the same gesture rather than
+ * two deliberate taps in different places.
+ */
+const TAP_ZOOM_MS = 320;
+const TAP_ZOOM_MIN_MS = 40;
+// How far apart two taps may be and still be one gesture, in CSS pixels. A
+// thumb does not land twice in exactly the same place, and on a picture this
+// small a generous slop is still far less than the distance between the two
+// things anybody would zoom at.
+const TAP_ZOOM_SLOP = 44;
+// Where a double tap zooms to. Far enough in to read a corner of a television
+// at arm's length, short of ZOOM_MAX so there is somewhere left to pinch to.
+const TAP_ZOOM_TO = 2.5;
+let lastPictureTap = null;
+
+function isPictureDoubleTap(x, y, at, last) {
+  if (!last) return false;
+  const gap = at - last.at;
+  if (gap < TAP_ZOOM_MIN_MS || gap > TAP_ZOOM_MS) return false;
+  return Math.hypot(x - last.x, y - last.y) <= TAP_ZOOM_SLOP;
+}
+
+el("screen").addEventListener("click", (event) => {
   // A drag that ends over the picture is not a tap on it. Browsers do not
   // agree about whether a click follows a pointer that moved, so this is
   // decided here rather than hoped for.
-  if (dragged) { dragged = false; return; }
+  if (dragged) { dragged = false; lastPictureTap = null; return; }
+  const at = Date.now();
+  const x = event.clientX, y = event.clientY;
+  if (!cursorDriving() && isPictureDoubleTap(x, y, at, lastPictureTap)) {
+    lastPictureTap = null;              // spent: three taps are not two
+    // Zoomed, so this one puts it back. Out rather than further in: getting
+    // back to the whole picture is the thing somebody wants in a hurry, and
+    // pinching is there for the in-between.
+    if (zoom > ZOOM_MIN) zoomAbout(ZOOM_MIN, x, y);
+    else zoomAbout(TAP_ZOOM_TO, x, y);
+    // The hud toggled on the first of these two taps and again on this one,
+    // so it is back where it started and nothing more is owed. Returning here
+    // is what stops the second tap leaving it inside out.
+    return;
+  }
+  lastPictureTap = { x, y, at };
   if (hudButtonShowing()) return;
   toggleHud();
 });
