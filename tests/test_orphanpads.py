@@ -23,6 +23,7 @@ def check(cond, msg):
 
 try:
     from fourthplayer.session import LiveSession
+    from fourthplayer import pads
 except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
     sys.exit(0)
@@ -33,9 +34,33 @@ class Pad:
 
 
 class Seats:
+    """A stand-in that keeps the real grace period rather than skipping it.
+
+    unplug_idle is borrowed from the real PadSet instead of being written out
+    here, so the timing this suite depends on is the timing that ships. A
+    hand-written copy was how the last three of these stubs quietly stopped
+    describing the thing they stood in for.
+    """
+
+    unplug_idle = pads.PadSet.unplug_idle
+
     def __init__(self, count):
         self.devices = {i: Pad() for i in range(count)}
         self.names = ["Fourth Player %d" % (i + 1) for i in range(count)]
+        self._empty_at = {}
+        self.clock = [0.0]
+
+    def _now(self):
+        return self.clock[0]
+
+    def wait(self, seconds):
+        self.clock[0] += seconds
+
+    # unplug_idle reads self.pads[index] before releasing, to hand the caller
+    # the device it unplugged.
+    @property
+    def pads(self):
+        return {i: self.devices.get(i) for i in range(len(self.names))}
 
     def live(self):
         return list(self.devices.items())
@@ -54,10 +79,19 @@ class Guest:
         self.label = "guest %d" % slot
 
 
-print("a seat nobody is on loses its device")
+print("a seat nobody is on keeps its device for a moment, then loses it")
+# Unplugging is something an emulator notices and does not always undo: it
+# binds a game's motion controls to a particular device, and a pad that goes
+# away and comes back is a different one to it. So an empty seat is given a
+# grace period -- long enough to cover leaving a stream and returning, which
+# is a thing people do constantly.
 session = LiveSession.__new__(LiveSession)
 session.pads = Seats(4)
 session.guests = {1: Guest(1, 1)}
+session._unplug_orphans()
+check(sorted(session.pads.devices) == [0, 1, 2, 3],
+      "nothing goes immediately: %r" % sorted(session.pads.devices))
+session.pads.wait(pads.LINGER_SECONDS + 1)
 session._unplug_orphans()
 check(sorted(session.pads.devices) == [1],
       "only the seat somebody is on keeps one: %r" % sorted(session.pads.devices))
@@ -66,12 +100,16 @@ print("\nand one that is occupied keeps it")
 session.pads = Seats(4)
 session.guests = {0: Guest(0, 0), 2: Guest(2, 2)}
 session._unplug_orphans()
+session.pads.wait(pads.LINGER_SECONDS + 1)
+session._unplug_orphans()
 check(sorted(session.pads.devices) == [0, 2],
       "both occupied seats keep theirs: %r" % sorted(session.pads.devices))
 
 print("\nwith nobody here at all, nothing is plugged in")
 session.pads = Seats(4)
 session.guests = {}
+session._unplug_orphans()
+session.pads.wait(pads.LINGER_SECONDS + 1)
 session._unplug_orphans()
 check(session.pads.devices == {}, "every device goes: %r" % session.pads.devices)
 
