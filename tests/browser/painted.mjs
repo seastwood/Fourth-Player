@@ -88,9 +88,24 @@ const boot = new Function("self", ...names, `
 `);
 boot(self_, ...names.map((n) => world[n]));
 
-console.log("the worker says it is ready before anything else");
-check(sent.length === 1 && sent[0].ready === true,
-      "one ready message and nothing before it");
+console.log("the worker announces itself twice, in order, and says nothing else");
+/* "listening" first, from the first line of the file, because an rtctransform
+ * event is fired at this worker the instant the page constructs the transform
+ * and is NOT queued the way a message is. A worker whose script has not run
+ * has no handler and the event is simply lost -- which reads exactly like a
+ * transform attached too late, "0 handed over by the transform", while the
+ * page's own measurement of the receiver shows hundreds of packets arriving
+ * with the transform still on.
+ *
+ * "ready" last, as it always was, because it means every handler below
+ * exists. Attaching a transform on *that* is too late: it is the last line of
+ * a fifty-eight kilobyte script, and on any connection where the host is
+ * already streaming the receiver has carried frames long before it. */
+check(sent.length === 2, "two messages, got " + sent.length);
+check(sent[0] && sent[0].listening === true,
+      "listening first, which is the earliest moment an attach can be safe");
+check(sent[1] && sent[1].ready === true,
+      "then ready, which means the rest of the file exists");
 
 console.log("and builds a decoder when the page hands over a canvas");
 sent.length = 0;

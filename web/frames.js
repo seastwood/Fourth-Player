@@ -18,6 +18,32 @@
  * The page keeps what only it can do: choosing the codec, deciding what to do
  * when this cannot work, and putting the numbers on screen.
  */
+
+/* Before anything else in this file, because an rtctransform event is not a
+ * message and is not queued.
+ *
+ * postMessage queues: a worker runs its own script before any message reaches
+ * it, so the page can post at will. The `rtctransform` event does not work
+ * that way -- it is fired at this global scope when the page constructs the
+ * transform, and if no handler is installed at that instant it is simply
+ * gone. The receiver then carries RTP with nowhere to put it, which reads
+ * exactly like a transform that was attached too late: "0 handed over by the
+ * transform", with the page's own measurement of the receiver showing
+ * hundreds of packets arriving, the transform still on, and no frames
+ * anywhere.
+ *
+ * The real handler is a long way down this file, after everything it uses.
+ * This stub stands in for it from the first line and hands over whatever
+ * arrived early, so the page can attach as soon as the worker exists rather
+ * than waiting for the whole script to run. */
+let takeTransform = null;
+const transformsWaiting = [];
+self.onrtctransform = (event) => {
+  if (takeTransform) takeTransform(event);
+  else transformsWaiting.push(event);
+};
+// Said at once, so the page knows the earliest safe moment to attach.
+self.postMessage({ listening: true });
 importScripts("/static/paint.js");
 
 const LIMITS = PACE;
@@ -1157,7 +1183,7 @@ function checkForGap(frame) {
             + ", so a reference picture never arrived");
 }
 
-self.onrtctransform = (event) => {
+takeTransform = (event) => {
   const from = event.transformer && event.transformer.readable;
   if (!from) return;
   say("taking the encoded frames off the media track");
@@ -1337,6 +1363,11 @@ self.onmessage = (event) => {
   if (m.chunk) { chunk(m.chunk); return; }
   if (m.stop) { close(); building.clear(); wantSeq = 0; }
 };
+
+// Anything that arrived while the stub at the top of this file was standing
+// in. Drained before `ready`, so the page's first frame is never behind its
+// first message.
+for (const early of transformsWaiting.splice(0)) takeTransform(early);
 
 // Last, so nothing can be sent before the handlers above exist.
 self.postMessage({ ready: true });

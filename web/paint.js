@@ -765,10 +765,32 @@ function makePainter(canvas, say) {
        * handler frames.js installs at the top level is in place before the
        * first frame is dispatched. Messages posted to it queue in the same
        * way, which is why the start message below can still follow later. */
-      if (viaTrack) {
+      /* The transform waits for one message and no more.
+       *
+       * It cannot go on in this turn: an rtctransform event is fired at the
+       * worker the instant the transform is constructed and is NOT queued the
+       * way a message is, so a worker whose script has not run yet has no
+       * handler and the event is lost. That looks identical to attaching too
+       * late -- "0 handed over by the transform" -- while the page's own
+       * measurement of the receiver shows hundreds of packets arriving and
+       * the transform still attached. Which is exactly what it showed.
+       *
+       * Nor can it wait for "ready", which is the last line of a fifty-eight
+       * kilobyte script: by then the receiver has long since carried a frame
+       * on any connection where the host is already streaming, and a
+       * transform attached after that delivers nothing for ever.
+       *
+       * So the worker says "listening" from its first line, as soon as it has
+       * a handler for the event and before it does anything else. That is the
+       * earliest moment this can possibly be safe, and it is early enough. */
+      let attached = false;
+      const attach = () => {
+        if (attached || !viaTrack) return true;
+        attached = true;
         try {
           viaTrack.transform = new RTCRtpScriptTransform(it, { kind: "video" });
           say("the media track's frames were routed to the decoder");
+          return true;
         } catch (err) {
           say("this browser would not take an encoded transform: "
               + ((err && err.message) || "no reason given"));
@@ -776,7 +798,7 @@ function makePainter(canvas, say) {
           if (onGone) onGone();
           return false;
         }
-      }
+      };
       worker.onerror = (err) => {
         say("the frame worker would not load: "
             + ((err && err.message) || "no reason given"));
@@ -785,6 +807,7 @@ function makePainter(canvas, say) {
       };
       worker.onmessage = (event) => {
         const m = event.data || {};
+        if (m.listening) { attach(); return; }
         if (m.ready) {
           // The transform is already on -- see where the worker is made. Only
           // the start message waits for "ready", and the frames that arrive

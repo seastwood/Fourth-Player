@@ -230,23 +230,41 @@ check("paintStarting = false;" in stop,
 # once, so the receiver had begun before the worker said a word. That is
 # "media track works when I join and never again", and the log said "0 handed
 # over by the transform, 0 fed to the decoder, 0 came out" every time.
-made = paint[paint.index('worker = new Worker("/static/frames.js");'):]
-check("new RTCRtpScriptTransform(it" in made[:2200],
-      "the transform is attached where the worker is created")
-check(made.index("new RTCRtpScriptTransform(it")
-      < made.index("worker.onmessage"),
-      "before any message from it is even listened for, let alone answered")
+# It goes on when the worker says it is listening, which is neither of the two
+# obvious moments and both of those are wrong.
+#
+# Not in the turn the worker is made: an rtctransform event is fired at the
+# worker the instant the transform is constructed and is NOT queued the way a
+# message is, so a worker whose script has not run has no handler and the
+# event is lost. That reads exactly like attaching too late -- "0 handed over
+# by the transform" -- while the page's own measurement of the receiver showed
+# hundreds of packets arriving with the transform still attached.
+#
+# Not on "ready" either, which is the last line of a 58 KB script: by then the
+# receiver has carried frames on any connection where the host is already
+# streaming, and a transform attached after that delivers nothing for ever.
+frames = open(os.path.join(REPO, "web", "frames.js"), encoding="utf-8").read()
+check("if (m.listening) { attach(); return; }" in paint,
+      "the transform goes on when the worker says it is listening")
+check("self.postMessage({ listening: true });" in frames,
+      "which the worker says as soon as it has a handler for the event")
+check(frames.index("self.onrtctransform") < frames.index("let decode")
+      if "let decode" in frames else True,
+      "installed near the top of the file rather than after everything it "
+      "uses")
+check(frames.index("self.postMessage({ listening: true });")
+      < frames.index("self.postMessage({ ready: true });"),
+      "and long before ready, which is the last line of the script")
+check("const transformsWaiting = [];" in frames
+      and "for (const early of transformsWaiting.splice(0))" in frames,
+      "anything that arrives before the real handler exists is held and "
+      "handed over, not dropped")
 ready = paint[paint.index("if (m.ready) {"):]
 check("new RTCRtpScriptTransform" not in ready[:900],
-      "and not on the ready message, which is a script load too late")
+      "and the transform is not attached on ready, which is too late")
 check("it.postMessage({ start:" in ready[:900],
       "only the start message waits for ready, and frames arriving before "
       "there is a decoder are dropped by take()")
-# Safe because a worker runs its own script before any event reaches it.
-frames = open(os.path.join(REPO, "web", "frames.js"), encoding="utf-8").read()
-check("\nself.onrtctransform" in frames,
-      "frames.js installs its handler at the top level, so it is in place "
-      "before the first frame is dispatched to it")
 
 # And nothing is awaited in front of the painter in this mode.
 #
