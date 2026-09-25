@@ -455,7 +455,9 @@ function connect(hello) {
       // The host answers with what the seat actually became, which is not
       // always what was asked for: an unrecognised name falls back rather
       // than failing, and the page must show the truth.
-      case "padkind":  return padKindFrom(null, message.kind);
+      // Sent to everybody when it changes, because it is one setting and
+      // every page showing it is otherwise showing the old answer.
+      case "padkind":  return padKindFrom(padKindOffered, message.kind);
       case "offer":    return await answer(message);
       case "ice":      return pc && pc.addIceCandidate({
                                 candidate: message.candidate,
@@ -748,15 +750,33 @@ function send(message) {
  * to the page. Hidden entirely when the host offers no choice at all. */
 const PAD_KIND_NAMES = { xbox360: "Xbox pad", ds4: "DualShock 4" };
 let padKindNow = "";
+/* What the host said it can make, kept so the control can be drawn again when
+   an account signs in -- the list arrives once, with the welcome, and signing
+   in happens later. Without this, an admin who logged in after joining never
+   saw the control at all. */
+let padKindOffered = null;
 
 function padKindFrom(kinds, now) {
   const row = el("pads-kind-row");
   const box = el("pads-kind");
   if (!row || !box) return;
+  // One setting for the machine, so only an account trusted with the
+  // machine's settings may move it -- the same door the picture settings use.
+  // Hidden rather than disabled for everybody else: a control that cannot be
+  // used is a question somebody spends time on. This is drawing, not
+  // enforcing; the host refuses it regardless of what a page sends.
+  const note = el("pads-kind-note");
+  if (!may("stream")) {
+    row.hidden = true;
+    if (note) note.hidden = true;
+    return;
+  }
+  if (note) note.hidden = false;
   // A null list means "only the value changed" -- the host's answer to a
   // choice carries no list, and rebuilding from an empty one would hide the
   // control the moment it was used.
-  const offered = Array.isArray(kinds) ? kinds.filter(Boolean) : null;
+  const offered = Array.isArray(kinds) ? kinds.filter(Boolean) : padKindOffered;
+  if (Array.isArray(kinds)) padKindOffered = offered;
   if (offered) {
     // One choice is not a choice. A host that can only make one kind of pad
     // should not show a dropdown that cannot be changed.
@@ -783,6 +803,9 @@ function tellHostPadKind(kind) {
   if (!kind || kind === padKindNow) return;
   try {
     if (socket && socket.readyState === 1) {
+      // An action, so the host checks the account behind it rather than
+      // trusting that the control was only drawn for somebody allowed to see
+      // it. It also changes the setting for everybody and is remembered.
       socket.send(JSON.stringify({ t: "padkind", kind }));
     }
   } catch (_) { /* the host keeps the pad it already made */ }
@@ -812,15 +835,11 @@ function watchGyro() {
     const became = await setGyro(box.checked);
     box.checked = became;
   });
-  // What was chosen last time. Not turned on here: the permission cannot be
-  // asked for outside a tap, so a remembered "on" only takes effect once it
-  // is granted -- which on iOS means the first tap after a reload. Where no
-  // asking is needed, starting it now is right.
-  if (gyroWanted() && gyroPossible() && !gyroNeedsAsking()) {
-    gyroOn = true;
-    startGyro();
-  }
+  // What was chosen last time, honoured without being asked for again. See
+  // resumeGyro: a remembered yes is re-asked and expected to pass silently,
+  // and where a gesture is still needed the next tap anywhere does it.
   paintGyro();
+  resumeGyro();
 }
 
 function watchPadKind() {
@@ -4831,6 +4850,78 @@ function stopGyro() {
   motionSaidAt = 0;
 }
 
+/* Getting motion back on a fresh load, without making anybody ask again.
+ *
+ * Safari remembers a grant per site, and once it has been given,
+ * requestPermission() resolves "granted" straight away -- no prompt, and in
+ * most versions no gesture needed either. So the remembered choice is honoured
+ * by simply asking again and expecting a yes.
+ *
+ * Where a gesture *is* still required the call rejects, and that rejection is
+ * not a refusal of the permission -- it only means "not from here". Treating
+ * it as a refusal is what made this need re-enabling by hand every time. So
+ * the next touch anywhere on the page is used instead: the first tap on the
+ * picture, a button, anything. Nobody has to find the switch again.
+ *
+ * A real "denied" is different and is taken at its word. Safari remembers that
+ * too, so asking again cannot succeed, and the remembered preference is
+ * cleared rather than left to prompt on every load for ever. */
+let gyroArmed = false;
+
+function armGyroGesture() {
+  if (gyroArmed) return;
+  gyroArmed = true;
+  const once = async () => {
+    window.removeEventListener("pointerdown", once, true);
+    window.removeEventListener("keydown", once, true);
+    window.removeEventListener("touchend", once, true);
+    gyroArmed = false;
+    await setGyro(true);
+    paintGyro();
+  };
+  // Capture, and three kinds of gesture, because the picture and the on-screen
+  // pad both swallow events on their way through. touchend as well as
+  // pointerdown: older Safari counts the end of a touch as the gesture and not
+  // the beginning of it.
+  window.addEventListener("pointerdown", once, true);
+  window.addEventListener("keydown", once, true);
+  window.addEventListener("touchend", once, true);
+  report("motion is on for this device; it will come back on your first tap");
+}
+
+async function resumeGyro() {
+  if (gyroOn || !gyroWanted() || !gyroPossible()) return;
+  if (!gyroNeedsAsking()) {
+    // Nothing to ask. Every browser but Safari's.
+    gyroOn = true;
+    startGyro();
+    paintGyro();
+    return;
+  }
+  let answer = null;
+  try {
+    answer = await DeviceMotionEvent.requestPermission();
+  } catch (_) {
+    // "Not from here", not "no". Wait for a gesture and ask then.
+    armGyroGesture();
+    return;
+  }
+  if (answer === "granted") {
+    gyroOn = true;
+    startGyro();
+    paintGyro();
+    return;
+  }
+  // Refused, and remembered by Safari -- so asking on every load would be a
+  // prompt nobody can ever say yes to from here. Forget the preference and
+  // say why, rather than leaving a switch that looks on and does nothing.
+  try { localStorage.setItem(GYRO_KEY, "0"); } catch (_) {}
+  report("motion is refused for this site, so it stays off; Safari keeps that "
+         + "answer, and it is cleared under Settings › Safari › Motion & "
+         + "Orientation Access");
+  paintGyro();
+}
+
 /* Turning it on, from a tap. Returns what it became, so the control can show
    the truth rather than what was asked for -- a refusal on iOS is permanent
    for the page and a switch that stayed on would be a lie. */
@@ -5201,6 +5292,11 @@ function paintAccount() {
   // as it was opened, and wrong in the moment before.
   paintLogin();
   paintSession();
+  // The pad-kind control depends on the account, and the account arrives after
+  // the welcome does. Without this, an admin who signed in *after* joining
+  // never saw the control at all -- the list of kinds had already come and
+  // gone while nobody was allowed to see it.
+  padKindFrom(padKindOffered, padKindNow);
   // And the desk bar, which is not in this panel at all -- it sits over the
   // picture. paintSession stops early on a closed panel, which is right for
   // everything inside it and wrong for this: the panel is shut whenever

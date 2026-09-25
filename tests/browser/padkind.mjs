@@ -25,7 +25,7 @@ const check = (cond, what) => {
 const body = src.slice(src.indexOf("const PAD_KIND_NAMES"),
                        src.indexOf("function joined("));
 
-function page() {
+function page(allowed = true) {
   const nodes = {
     "pads-kind-row": { hidden: true },
     "pads-kind": {
@@ -35,14 +35,17 @@ function page() {
     },
   };
   const sent = [];
-  const run = new Function("nodes", "sent", `
+  const run = new Function("nodes", "sent", "allowed", `
     const el = (id) => nodes[id];
+    // One setting for the machine, so the control is only drawn for an
+    // account trusted with the machine's settings.
+    const may = () => allowed;
     const document = { activeElement: null,
                        createElement: () => ({ value: "", textContent: "" }) };
     const socket = { readyState: 1, send: (t) => sent.push(JSON.parse(t)) };
     ${body}
     return { padKindFrom, tellHostPadKind, watchPadKind };
-  `)(nodes, sent);
+  `)(nodes, sent, allowed);
   return { nodes, sent, run };
 }
 
@@ -70,6 +73,27 @@ check(nodes["pads-kind-row"].hidden === true, "so nothing is shown");
 ({ nodes, run } = page());
 run.padKindFrom([], "xbox360");
 check(nodes["pads-kind-row"].hidden === true, "and neither is none");
+
+console.log("\nand it is not drawn for somebody who may not change it");
+// It moves everybody's controller and is remembered on the host, so it is
+// gated like the picture settings. Hidden rather than disabled: a control
+// that cannot be used is a question somebody spends time on. This is drawing
+// only -- the host refuses the message regardless of what a page sends.
+({ nodes, run } = page(false));
+run.padKindFrom(["xbox360", "ds4"], "xbox360");
+check(nodes["pads-kind-row"].hidden === true,
+      "a guest with no say does not see it");
+
+console.log("\nthe offered list survives until an account arrives");
+// The list comes with the welcome and signing in happens later, so an admin
+// who logs in after joining would otherwise never see the control: the kinds
+// had already been and gone while nobody was allowed to look.
+({ nodes, run } = page(true));
+run.padKindFrom(["xbox360", "ds4"], "xbox360");
+run.padKindFrom(null, "ds4");
+check(nodes["pads-kind-row"].hidden === false
+      && nodes["pads-kind"].kids.length === 2,
+      "a later call with no list keeps the one it was given");
 
 console.log("\nchoosing tells the host, once");
 let sent;

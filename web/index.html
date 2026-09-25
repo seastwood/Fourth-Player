@@ -516,9 +516,11 @@
          for A. Swapping the letters above moves what is sent; this moves what
          the game thinks it is talking to, and then nothing needs swapping.
 
-         Per guest, not per session: two people at the same game may want
-         different pads, and the one who cares is the one holding it. The host
-         sets what everybody starts with. -->
+         One setting for the machine rather than a preference per seat, and
+         remembered: it started out per seat, which read well and was wrong
+         twice over -- a guest's own page is not where a host-wide decision
+         belongs, and it was forgotten when the session closed, so anybody who
+         wanted a DualShock chose it again every evening. -->
     <!-- The gesture has to be said somewhere. A double tap in the middle of a
          well is not something anybody guesses, and the two buttons it stands
          for are the ones an on-screen stick has nowhere else to put. -->
@@ -541,12 +543,17 @@
        the game as a DualShock's. Turn the screen and the axes follow it, so
        tilting away is the same movement in portrait or landscape. Needs the
        controller set to DualShock 4 above — an Xbox pad has nowhere to put
-       it.</p>
+       it. Stays on between visits; if this device asks permission again, your
+       first tap anywhere is enough.</p>
     <p class="browse-note pads-feel" id="pads-kind-row" hidden>
-      <span class="switch-name">Send my pad as</span>
+      <span class="switch-name">Controllers are</span>
       <select id="pads-kind" class="chip"
-              aria-label="What the game is told this controller is"></select>
+              aria-label="What the game is told controllers are"></select>
     </p>
+    <p class="footnote" id="pads-kind-note" hidden>One setting for the whole
+       machine, remembered between sessions, and it moves everybody's
+       controller. Only an account trusted with the picture settings can
+       change it.</p>
     <!-- Which way round the screen sits. Not marked as belonging to the
          on-screen pad: a guest holding a real controller is still looking at
          the picture, and the picture has a shape. Hidden where the browser

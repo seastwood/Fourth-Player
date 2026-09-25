@@ -425,17 +425,6 @@ class Server:
                         self.session.stage.request_keyframe(
                             "%s (drawing its own)" % guest.label,
                             starting=bool(message.get("starting")))
-                elif kind == "padkind" and guest is not None:
-                    # A guest choosing what their own controller says it is.
-                    #
-                    # Their seat, not the session's: two people at the same
-                    # game may want different pads, and the one who cares is
-                    # the one holding it. The host's setting is the default
-                    # they start from.
-                    if self.session is not None:
-                        now = self.session.set_pad_kind(
-                            guest, message.get("kind"))
-                        await outbox.put({"t": "padkind", "kind": now})
                 elif kind == "painting" and guest is not None:
                     # The page says whether it is decoding the picture itself.
                     #
@@ -506,7 +495,12 @@ class Server:
     # from being a shell.
     ACTIONS = {"limit": "slots", "lock": "lock", "kick": "kick",
                "reshare": "reshare", "grant": "grant", "desk": "desk",
-               "stream": "stream"}
+               "stream": "stream",
+               # What a guest's controller says it is. Gated like the picture
+               # settings and for the same reason: it is one setting for the
+               # whole machine, it is remembered, and it moves everybody's pad
+               # -- not a preference somebody keeps to themselves.
+               "padkind": "stream"}
 
     async def _act(self, guest, kind, message, outbox):
         from . import accounts
@@ -533,6 +527,13 @@ class Server:
             # Using it is being there, so the clock starts again.
             self.session.touch_presence(guest)
 
+        if kind == "padkind":
+            now = self.session.set_pad_kind_default(message.get("kind"),
+                                                    by=guest)
+            # Everybody, not just whoever asked: it is one setting and every
+            # page showing it is now showing the old answer.
+            self.session.notify({"t": "padkind", "kind": now})
+            return
         if kind == "stream":
             try:
                 result = await self.session.set_stream(

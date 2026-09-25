@@ -1089,6 +1089,31 @@ class LiveSession:
         await self._recapture(shared)
         return shared
 
+    def set_pad_kind_default(self, kind, by=None):
+        """What every guest's controller says it is, remembered.
+
+        One setting for the machine rather than a preference per seat. It
+        started out per seat, which read well and was wrong twice over: a
+        guest's own page is not where a host-wide decision belongs, and it was
+        forgotten the moment the session closed -- so anybody who wanted a
+        DualShock chose it again every evening.
+
+        Written to the config here rather than left to the caller, because a
+        setting that is not remembered is the fault being fixed.
+        """
+        want = padlib.kind_or_default(kind)
+        self.cfg.guest_pad_kind = want
+        try:
+            self.cfg.save()
+        except OSError as exc:
+            log.warning("could not remember the pad kind: %s", exc)
+        if self.pads is not None:
+            for index in range(len(self.pads)):
+                self.pads.set_kind(index, want)
+        log.info("controllers are now %s%s", padlib.KINDS[want]["label"],
+                 " (set by %s)" % getattr(by, "label", "") if by else "")
+        return want
+
     def set_pad_kind(self, guest, kind):
         """Give one guest's seat a different kind of controller.
 
