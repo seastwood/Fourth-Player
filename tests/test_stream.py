@@ -87,6 +87,15 @@ def ask(s, **settings):
     return LOOP.run_until_complete(s.set_stream(settings))
 
 
+# What this host can encode is pinned rather than probed, for the same reason
+# test_codecback pins it: host_codecs() asks the machine, and on one that
+# cannot encode H.265 -- an Intel HD 530 decodes it and cannot encode it --
+# every case below would pass by being vacuous. The question here is what
+# set_stream does with a choice, not what the card in this particular machine
+# can do.
+from fourthplayer import video                               # noqa: E402
+video._host_codecs = ["h265", "h264"]
+
 print("choosing automatic works the codec out, rather than keeping this one")
 # The fault that made this stub incomplete in the first place: "auto" used to
 # resolve to whatever the stage was already running, so a session pinned to
