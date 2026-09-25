@@ -248,6 +248,27 @@ check("\nself.onrtctransform" in frames,
       "frames.js installs its handler at the top level, so it is in place "
       "before the first frame is dispatched to it")
 
+# And nothing is awaited in front of the painter in this mode.
+#
+# pickCodec awaits VideoDecoder.isConfigSupported -- tens of milliseconds --
+# and in this mode the transform has to be attached before the receiver has
+# carried a single frame. On a renewal the host is already streaming, so the
+# receiver began during that await every time and the transform was handed
+# nothing. Moving the attach earlier inside the painter did not help while
+# this await still stood in front of the painter being made at all.
+check('if (paintMethod === "rtp") {' in start,
+      "the media-track path is told apart where the codec is chosen")
+rtp = start[start.index('if (paintMethod === "rtp") {'):]
+rtp = rtp[:rtp.index("} else {")]
+# The code, not the prose: the comment above it explains what awaiting cost.
+code = "\n".join(line for line in rtp.splitlines()
+                 if not line.lstrip().startswith(("*", "/*", "//")))
+check("await" not in code,
+      "and nothing is awaited on it: being wrong for one attempt is cheap, "
+      "being late is not recoverable")
+check("codec = paintTried < all.length ? all[paintTried] : \"\";" in rtp,
+      "the spelling list is walked instead, which is what it is for")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))

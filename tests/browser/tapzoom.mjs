@@ -152,6 +152,22 @@ const slop = Number((/const PAN_SLOP = (\d+);/.exec(src) || [])[1]);
 check(slop > 0 && slop <= 20,
       "and it forgives a thumb, not a nudge: " + slop + " pixels");
 
+console.log("\nand one finger gets one tap, however it ends");
+/* A pointer is supposed to end in exactly one of pointerup and pointercancel.
+ * iOS sends both for the same finger often enough to matter, tens of
+ * milliseconds apart -- and once both ran this handler, one physical tap
+ * paired with itself and zoomed in, and the next did the same and zoomed back
+ * out. That is the picture flashing in and out, and it arrived with the
+ * change that let a cancelled tap count at all: before that there was nothing
+ * for a tap to pair with but a different finger. */
+check(/const tapDone = new Map\(\);/.test(src),
+      "a finger that has been counted is remembered");
+check(/if \(tapDone\.has\(event\.pointerId\)\) return;/.test(src),
+      "and a second ending for it is ignored, so a tap cannot pair with "
+      + "itself");
+check(/const TAP_DONE_MS = (\d+);/.test(src),
+      "briefly, because pointer ids are reused");
+
 console.log("\nand a finger the browser never finished is forgotten");
 /* `held` is emptied by pointerup and pointercancel, and on iOS a touch
  * sometimes produces neither. One phantom wedges every gesture after it, in

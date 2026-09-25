@@ -3058,7 +3058,7 @@ function hudButtonShowing() {
  * second is still plainly one gesture rather than two thoughts, and ninety
  * pixels is under half a fingertip on a phone -- far less than the distance
  * between two things anybody would pick out of a television. */
-const TAP_ZOOM_MS = 600;
+const TAP_ZOOM_MS = 800;
 /* Low, because it is no longer the thing keeping duplicates out.
  *
  * It was 40ms, guarding against iOS's compatibility mouse event arriving as
@@ -3124,6 +3124,19 @@ function isPictureDoubleTap(x, y, at, kind, last) {
  * which guard it hit, rather than a seventh theory about which one it
  * probably is. */
 let tapWhyAt = 0;
+/* Pointers whose tap has already been counted.
+ *
+ * A pointer is supposed to end in exactly one of pointerup and pointercancel.
+ * iOS sends both for the same finger often enough to matter, a few tens of
+ * milliseconds apart -- and once both ran this handler, one physical tap
+ * paired with *itself* and zoomed. The next tap did the same and zoomed back
+ * out, which is the picture flashing in and out, and it was my own doing:
+ * before pointercancel ran this handler there was nothing to pair with.
+ *
+ * So a finger gets one tap. The id is remembered briefly rather than for
+ * ever, because ids are reused. */
+const tapDone = new Map();
+const TAP_DONE_MS = 2000;
 function tapRefused(why) {
   const now = Date.now();
   if (now - tapWhyAt < 3000) return;
@@ -3138,6 +3151,13 @@ function pictureTapEnded(event) {
   // held.size alone therefore answered "one" for every single tap and
   // returned, which is why nothing zoomed in. Counting the others is right
   // whichever order the listeners end up in.
+  // One tap per finger, however many ways the browser chooses to end it.
+  const stamp = event.timeStamp;
+  for (const [id, when] of tapDone) {
+    if (stamp - when > TAP_DONE_MS) tapDone.delete(id);
+  }
+  if (tapDone.has(event.pointerId)) return;
+  tapDone.set(event.pointerId, stamp);
   // A finger the browser never finished is not a finger. Pruned here as well
   // as at pointerdown, because this runs first for the very tap that would
   // otherwise be refused on account of a phantom.
@@ -4127,7 +4147,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25i";
+const CLIENT_BUILD = "2026-09-25j";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -10775,9 +10795,28 @@ async function startPainting() {
     // more: it already said yes to something that then failed, so the list
     // is walked in order rather than asked about again.
     const all = codecCandidates(shape.mime, shape.fmtp);
-    codec = paintTried > 0
-      ? (paintTried < all.length ? all[paintTried] : "")
-      : await pickCodec(shape.mime, shape.fmtp);
+    if (paintMethod === "rtp") {
+      /* Not asked, because asking costs the only thing this mode cannot
+       * spend: time.
+       *
+       * pickCodec awaits VideoDecoder.isConfigSupported, which is tens of
+       * milliseconds. In this mode the transform has to be attached before
+       * the receiver has carried a single frame, and on a renewal the host is
+       * already streaming -- so the receiver began during that await, every
+       * time, and the transform was handed nothing for ever. Moving the
+       * attach earlier inside the painter was not enough while this await
+       * still stood in front of the painter being made at all.
+       *
+       * The list is walked instead. That is what it is for, and what the
+       * retries already do past the first attempt: a spelling the browser
+       * cannot take fails quickly and the next one is tried. Being wrong for
+       * one attempt is cheap; being late is not recoverable. */
+      codec = paintTried < all.length ? all[paintTried] : "";
+    } else {
+      codec = paintTried > 0
+        ? (paintTried < all.length ? all[paintTried] : "")
+        : await pickCodec(shape.mime, shape.fmtp);
+    }
   } finally { paintStarting = false; }
   // The connection this belonged to has gone while the browser was answering,
   // so this attempt is about a receiver nobody is reading any more. The new
