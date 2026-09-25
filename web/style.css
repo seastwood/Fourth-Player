@@ -757,6 +757,13 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   transition: none;
   background: var(--accent);
 }
+/* The stick pressed in, which on glass has to be shown or there is no way to
+   know it took. A ring rather than a colour change: the knob is already
+   recoloured while a thumb is on it, and a second colour there would be two
+   states fighting over one signal. */
+.stick.clicked .stick-knob {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent);
+}
 
 /* Shoulders sit above the hand they belong to, triggers furthest out, the way
    they are reached for on a real pad. */

@@ -1344,7 +1344,10 @@ const LAYOUTS = {
    is shared with the layout above rather than copied, so a change to the
    diamond cannot land on one pad and not the other. */
 LAYOUTS.nintendo_sticks = {
-  name: "Super Nintendo + sticks",
+  // Called after the pad it is shaped like rather than after its parts. The
+  // key stays `nintendo_sticks` because guests have it saved in their
+  // browsers and a rename there would silently put them back on the default.
+  name: "Switch Pro",
   faceAspect: 1,
   // The same diamond as the Super Nintendo pad, because that is the layout
   // most people can name the buttons of without being told.
@@ -1849,7 +1852,10 @@ function buildTouchPad(layout) {
     well.dataset.axes = spec ? spec.axes.join(",") : "";
     centreKnob(well);
   }
-
+  // Only where there are sticks to double-tap. A layout with none would
+  // otherwise carry an instruction for a gesture it has nowhere to make.
+  const note = el("stick-click-note");
+  if (note) note.hidden = sticks.length === 0;
 }
 
 /* ---- on-screen sticks ----
@@ -1862,6 +1868,63 @@ function buildTouchPad(layout) {
  */
 let touchAxes = [0, 0, 0, 0];
 const stickHeld = {};                    // pointer id -> the well being dragged
+
+/* Pressing the stick in, on a piece of glass that cannot be pressed in.
+ *
+ * L3 and R3 are the two buttons an on-screen stick has nowhere to put: the
+ * well is already the stick, and a separate button beside it is one more thing
+ * to hunt for with a thumb that is busy. So the gesture is a quick double tap
+ * in the *middle* of the well -- the one part of it that means nothing while
+ * steering, since a thumb resting there is inside the dead zone anyway.
+ *
+ * And it holds rather than pulses. On a real pad you push the stick in and
+ * keep steering: click-to-sprint, click-to-crouch, click to zoom and then
+ * track a target. A tap that fired once and let go would be useless for every
+ * one of those, so the second tap presses the button and keeps it pressed
+ * until that finger leaves -- and the stick keeps moving under it, which is
+ * the whole point.
+ *
+ * CENTRE is generous and DOUBLE_MS is not. Missing the gesture costs a tap;
+ * firing it by accident costs a crouch in the middle of a fight. */
+const STICK_CLICK_CENTRE = 0.45;         // of the well's radius
+const STICK_CLICK_MS = 320;
+const STICK_CLICK_BIT = { "stick-left": 10, "stick-right": 11 };
+const stickTapped = {};                  // well id -> when it was last tapped
+const stickClicked = {};                 // pointer id -> the bit being held
+
+function stickOffset(well, event) {
+  const rect = well.getBoundingClientRect();
+  const radius = rect.width / 2;
+  if (!radius) return 2;                 // unmeasurable: never the centre
+  const x = (event.clientX - (rect.left + radius)) / radius;
+  const y = (event.clientY - (rect.top + radius)) / radius;
+  return Math.hypot(x, y);
+}
+
+/* Whether this touch is the second half of a double tap in the middle.
+ *
+ * Kept as a decision over plain numbers so the rule can be tested without a
+ * browser and a thumb: the timing and the two positions are the whole of it,
+ * and every one of them is easy to get wrong in a way only a finger notices. */
+function isStickClick(id, offset, at, taps) {
+  // Absence is `undefined`, never 0. A zero timestamp is a real one -- the
+  // first tap of a freshly started clock -- and treating it as "never tapped"
+  // silently swallowed it. Date.now() never returns 0 in a browser, so this
+  // would only ever have been luck rather than correctness.
+  const last = Object.prototype.hasOwnProperty.call(taps, id)
+    ? taps[id] : undefined;
+  if (offset > STICK_CLICK_CENTRE) {
+    // A tap out at the edge is steering. It also must not count as the first
+    // half of a double tap, or a flick to the rim followed by a tap in the
+    // middle would press the stick in.
+    delete taps[id];
+    return false;
+  }
+  taps[id] = at;
+  if (last === undefined || at - last > STICK_CLICK_MS) return false;
+  delete taps[id];                       // spent: three taps are not two
+  return true;
+}
 
 function centreKnob(well) {
   const knob = well.querySelector(".stick-knob");
@@ -1897,6 +1960,7 @@ function moveStick(well, event) {
 function releaseStick(well) {
   for (const axis of stickAxesOf(well)) touchAxes[axis] = 0;
   well.classList.remove("live");
+  well.classList.remove("clicked");
   centreKnob(well);
 }
 
@@ -1905,9 +1969,18 @@ function releaseAllSticks() {
   for (const id of ["stick-left", "stick-right"]) {
     const well = el(id);
     well.classList.remove("live");
+    well.classList.remove("clicked");
     centreKnob(well);
   }
   for (const key of Object.keys(stickHeld)) delete stickHeld[key];
+  // A stick pressed in must not stay pressed in. This runs when the page lets
+  // go of everything, and a held L3 outliving that is a character stuck
+  // crouching with nothing on screen to explain it.
+  for (const key of Object.keys(stickClicked)) {
+    setBit(stickClicked[key], false);
+    delete stickClicked[key];
+  }
+  for (const key of Object.keys(stickTapped)) delete stickTapped[key];
 }
 
 function wireSticks() {
@@ -1919,6 +1992,15 @@ function wireSticks() {
       buzz();                       // before the work, for the same reason
       stickHeld[event.pointerId] = well;
       well.classList.add("live");
+      const bit = STICK_CLICK_BIT[id];
+      if (bit !== undefined
+          && isStickClick(id, stickOffset(well, event), Date.now(),
+                          stickTapped)) {
+        stickClicked[event.pointerId] = bit;
+        setBit(bit, true);
+        well.classList.add("clicked");
+        buzz();                     // said twice, because it did two things
+      }
       moveStick(well, event);
     });
     well.addEventListener("pointermove", (event) => {
@@ -1929,6 +2011,10 @@ function wireSticks() {
     const letGo = (event) => {
       if (stickHeld[event.pointerId] !== well) return;
       delete stickHeld[event.pointerId];
+      if (stickClicked[event.pointerId] !== undefined) {
+        setBit(stickClicked[event.pointerId], false);
+        delete stickClicked[event.pointerId];
+      }
       releaseStick(well);
     };
     well.addEventListener("pointerup", letGo);
@@ -8661,9 +8747,19 @@ function paintPads() {
 }
 
 /* Learning a pad. Only the buttons somebody can name are asked for: the sticks
-   are axes and are not remapped, and a pad that reports its d-pad as a hat has
-   nothing to press for those either. */
-const REMAP_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+   themselves are axes and are not remapped, and a pad that reports its d-pad as
+   a hat has nothing to press for those either.
+
+   The stick *clicks* are asked for, at the end, and they were missing. L3 and
+   R3 are buttons like any other -- a thumb pressing the stick in, not an axis
+   -- and a guest whose pad reports them in an unusual place had no way to say
+   so. They go last and they are optional, because plenty of pads have no
+   stick click at all: a SNES-style pad, an arcade stick, most things with a
+   d-pad and no thumbsticks. Being asked for a button that does not exist must
+   not be the end of the walk, so once the ten that every pad has are learned,
+   the map can be saved as it stands -- see REMAP_REQUIRED. */
+const REMAP_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const REMAP_REQUIRED = 10;
 
 /* One step of learning a pad, as a decision rather than a side effect, so the
    rule can be checked without a browser and a controller.
@@ -8692,6 +8788,13 @@ function learnPress(state, hit) {
 
 function promptFor(step) {
   const [name, note] = STANDARD_KEYS[REMAP_ORDER[step]];
+  // The optional tail says so, or being asked for a button a pad has not got
+  // reads as the thing having jammed.
+  if (step >= REMAP_REQUIRED) {
+    return "Press the button you use for " + name + "  (" + note + ")"
+           + " — or press \u201cFix my buttons\u201d again to finish without"
+           + " it, if this pad has no stick click.";
+  }
   return "Press the button you use for " + name + "  (" + note + ")"
     + "   \u2014   " + (step + 1) + " of " + REMAP_ORDER.length;
 }
@@ -8701,6 +8804,17 @@ function remapPrompt() {
 }
 
 function startRemap() {
+  // Part-way through, past the buttons every pad has: this finishes rather
+  // than starting again.
+  //
+  // Without it, asking for a stick click is a trap -- a pad with no L3 has
+  // nothing to press, and the only way out was to close the panel and lose
+  // the nine answers already given. The button that started the walk is the
+  // one somebody will reach for, and it already says what it does.
+  if (remapStep >= REMAP_REQUIRED) {
+    finishRemap();
+    return;
+  }
   if (!livePad()) {
     el("pads-hint").textContent =
       "Press a button on your controller first, so the browser can see it.";
