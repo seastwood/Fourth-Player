@@ -58,6 +58,25 @@ KINDS = {
 DEFAULT_KIND = "xbox360"
 
 
+# How a phone's rotations reach the pad, as indices into (pitch, yaw, roll).
+#
+# Only the three cyclic orders are offered, because only those are rotations:
+# swapping two axes is a mirror, and no object can be held that way. Written
+# as names here because "1,2,0" in a config file says nothing to anybody.
+GYRO_ORDERS = {
+    "pitch,yaw,roll": (0, 1, 2),
+    "yaw,roll,pitch": (1, 2, 0),
+    "roll,pitch,yaw": (2, 0, 1),
+}
+DEFAULT_GYRO_ORDER = "yaw,roll,pitch"
+
+
+def gyro_order(name):
+    """The named order, or the default. Never an error, for the usual reason."""
+    key = str(name or "").strip().lower().replace(" ", "")
+    return GYRO_ORDERS.get(key, GYRO_ORDERS[DEFAULT_GYRO_ORDER])
+
+
 def kind_or_default(kind):
     """The named kind, or the default -- never an error.
 
@@ -207,7 +226,7 @@ class VirtualPad:
     motion = True
 
     def __init__(self, name, now=None, guide=True, kind=DEFAULT_KIND,
-                 motion=True):
+                 motion=True, order=None):
         self.name = name
         self.guide = guide
         self.motion = motion
@@ -216,6 +235,14 @@ class VirtualPad:
         self._ui = UInput(capabilities(guide), name=name,
                           vendor=spec["vendor"], product=spec["product"],
                           version=spec["version"], bustype=BUSTYPE)
+        # Which way round a guest's rotations reach this pad. Set on the
+        # device rather than passed to it: evdev's UInput has a fixed
+        # signature, and this is one more thing with nowhere to go in it.
+        if order is not None:
+            try:
+                self._ui.gyro_order(order)
+            except AttributeError:
+                pass                 # a device with no motion to order
         self._last = {}
         # Per sender, not per pad. One counter was enough while a pad had one
         # guest; several on one pad interleave their counters, and each
@@ -406,7 +433,7 @@ class PadSet:
     """
 
     def __init__(self, count, label="Fourth Player", now=None, guide=True,
-                 kind=DEFAULT_KIND, motion=True):
+                 kind=DEFAULT_KIND, motion=True, order=None):
         self._now = now or time.monotonic
         self._label = label
         # What a seat's pad declares itself to be. A default for the session;
@@ -414,6 +441,7 @@ class PadSet:
         # pad below rather than read from here when the device is made.
         self._kind = kind_or_default(kind)
         self._motion = bool(motion)
+        self._order = order
         # Whether these pads have a guide button at all. See capabilities():
         # it is the Steam button and RetroArch's menu button, and a guest has
         # no business opening either.
@@ -489,7 +517,7 @@ class PadSet:
         if pad is None:
             pad = VirtualPad(self.names[index], now=self._now,
                              guide=self._guide, kind=self.kinds[index],
-                             motion=self._motion)
+                             motion=self._motion, order=self._order)
             self.pads[index] = pad
             # Said, because a controller appearing is not free: Steam
             # re-enumerates when one does and may hand a running game to it.

@@ -53,6 +53,10 @@ try:
         def motion(self, values):
             return False
 
+        def gyro_order(self, order):
+            """Nothing to order until Linux gyro exists. See motion()."""
+            return False
+
 except ImportError:
     BACKEND = "vigem"
     import collections
@@ -413,15 +417,57 @@ except ImportError:
         # door, which is a controller's yaw, steers nothing.
         #
         # Part frame conversion and part preference, and the two cannot be
-        # separated from here: which wrist should steer is the guest's to say,
-        # and this is what was asked for. Indices into the wire's
-        # (pitch, yaw, roll).
+        # separated from here: which wrist should steer is the guest's to say.
+        #
+        # Two things learned the hard way while arriving at it, both of which
+        # made the second attempt worse rather than better:
+        #
+        # The accelerometer must be permuted the same way. A game works out
+        # which way is up from gravity and reads rotation relative to it, so a
+        # rotation in one frame and a gravity in another do not describe any
+        # posture at all -- and then changing the order moves *both* axes
+        # unpredictably instead of the one being aimed at.
+        #
+        # And the order has to be a rotation, not merely a permutation.
+        # Swapping two axes, as (2, 1, 0) does, flips handedness: it is a
+        # mirror, and nothing can be held that way. Only the cyclic orders --
+        # (0, 1, 2), (1, 2, 0), (2, 0, 1) -- are postures, optionally with
+        # signs flipped. That is why "fix the horizontal by swapping two" kept
+        # disturbing the vertical.
+        #
+        # Indices into the wire's (pitch, yaw, roll).
         GYRO_ORDER = (1, 2, 0)
         # A DS4's report timestamp counts in units of about 5.33 microseconds
         # and wraps at 16 bits. Games that integrate rotation into an aim use
         # it as their clock, so a report with a frozen timestamp is a report
         # they may read as no time having passed.
         TICK_SECONDS = 5.33e-6
+
+        def gyro_order(self, order):
+            """Choose which way round the phone's rotations reach the pad.
+
+            Settable because it cannot be worked out from here. It is part
+            frame conversion -- a controller is held face up, a phone face
+            toward you -- and part preference about which wrist should steer,
+            and the only instrument for either is somebody playing a game and
+            saying what moved. Three attempts at guessing it from this end
+            each changed the wrong axis.
+
+            Refused unless it is a rotation. Swapping two axes is a mirror and
+            nothing can be held that way, which is exactly the trap: it looks
+            like a fix for one axis and quietly disturbs another.
+            """
+            try:
+                want = tuple(int(v) for v in order)
+            except (TypeError, ValueError):
+                return False
+            if want not in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):
+                log.warning("%r is not a posture anything can be held in "
+                            "(only 0,1,2 / 1,2,0 / 2,0,1 are); keeping %r",
+                            order, self.GYRO_ORDER)
+                return False
+            self.GYRO_ORDER = want
+            return True
 
         def motion(self, values):
             """Six wire values: gyro x, y, z then accelerometer x, y, z.
@@ -499,13 +545,13 @@ except ImportError:
                 0xFF,
                 gyro[self.GYRO_ORDER[0]], gyro[self.GYRO_ORDER[1]],
                 gyro[self.GYRO_ORDER[2]],
-                # The accelerometer is left in the order it arrived. Nothing
-                # visible reads it yet -- it says which way is down, which
-                # matters to a game that draws a tilting object and to nothing
-                # else here -- so permuting it to match would be a guess with
-                # no way to check it. Worth revisiting the day something uses
-                # it.
-                accel[0], accel[1], accel[2])
+                # The same rotation, because the two sensors describe one
+                # object. Left alone, the gravity said the phone was upright
+                # while the rotation said it had been turned on its side, and
+                # a game reconciling those aims somewhere neither of them
+                # pointed.
+                accel[self.GYRO_ORDER[0]], accel[self.GYRO_ORDER[1]],
+                accel[self.GYRO_ORDER[2]])
             # Into the union's byte view, which is the same memory as the
             # struct and the only way to put these where the wire wants them.
             ctypes.memmove(report.ReportBuffer, packed, len(packed))

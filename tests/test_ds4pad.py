@@ -446,8 +446,10 @@ ui.syn()
 check(pad.extended is not None, "an extended report is what carries it")
 gyro, accel = pad.extended
 check(gyro[2] == 160, "10 deg/s stays 160, got %r" % (gyro[2],))
-# One gravity is 1000 on the wire and about 8192 on a DS4.
-check(accel[2] == 8192, "1 g becomes 8192, got %r" % (accel[2],))
+# One gravity is 1000 on the wire and about 8192 on a DS4. On the wire's z,
+# which GYRO_ORDER moves to the pad's y -- gravity rides the same rotation as
+# the rotation does.
+check(accel[1] == 8192, "1 g becomes 8192, got %r" % (accel[1],))
 
 print("\n-- at the offsets a DualShock really uses, not the aligned ones --")
 # The fault this replaced. ViGEm declares its report structs packed -- they
@@ -487,8 +489,22 @@ check(virtual.UInput.GYRO_ORDER == (1, 2, 0),
 check(sorted(virtual.UInput.GYRO_ORDER) == [0, 1, 2],
       "and it is a permutation -- every rotation goes somewhere and none goes "
       "twice, which a hand-edited tuple can quietly stop being")
-check(pad.extended[1] == [0, 0, 8192],
-      "and acceleration, scaled into the pad's units: %r" % (pad.extended[1],))
+# Gravity is permuted with the rotation, because the two describe one object.
+# One gravity on the wire's z leaves on the pad's y, since GYRO_ORDER puts the
+# wire's third component second.
+check(pad.extended[1] == [0, 8192, 0],
+      "gravity rides the same rotation as the gyro, scaled into the pad's "
+      "units: %r" % (pad.extended[1],))
+
+# And the order has to be a rotation rather than any old permutation: swapping
+# two axes is a mirror, and nothing can be held that way. Only the cyclic ones
+# are postures.
+order = virtual.UInput.GYRO_ORDER
+cyclic = [(0, 1, 2), (1, 2, 0), (2, 0, 1)]
+check(tuple(order) in cyclic,
+      "the order is one a real object could be in -- a swap of two axes flips "
+      "handedness, which is why fixing the horizontal that way kept "
+      "disturbing the vertical. Got %r" % (order,))
 check(pad.battery == 0xFF,
       "with a charge that does not read as flat: %r" % (pad.battery,))
 # The struct's own fields must now disagree, or the padding is not being
@@ -499,6 +515,33 @@ check(aligned.Report.wGyroX != -877,
       "and reading it back through the aligned fields gives the wrong answer "
       "(%d), which is what proves the padding is being stepped over rather "
       "than the stub being packed" % aligned.Report.wGyroX)
+
+print("\n-- and the order can be set, but only to a posture --")
+# It cannot be worked out from the host: part frame conversion, part
+# preference about which wrist steers, and the only instrument for either is
+# somebody playing a game. Three goes at guessing it from this end each moved
+# the wrong axis, so it is settable.
+check(sorted(pads.GYRO_ORDERS.values()) == [(0, 1, 2), (1, 2, 0), (2, 0, 1)],
+      "the three on offer are the cyclic ones, which are the rotations: %r"
+      % (sorted(pads.GYRO_ORDERS.values()),))
+check(pads.gyro_order("roll,pitch,yaw") == (2, 0, 1), "a name is honoured")
+check(pads.gyro_order("Roll, Pitch, Yaw") == (2, 0, 1),
+      "spelled loosely, still honoured")
+for bad in ("", None, "sideways", "pitch,roll,yaw", 7):
+    check(pads.gyro_order(bad) == pads.GYRO_ORDERS[pads.DEFAULT_GYRO_ORDER],
+          "%r falls back rather than raising" % (bad,))
+# "pitch,roll,yaw" above is the trap: a real-looking name that is a swap of
+# two axes, which is a mirror rather than a posture. It must not be offered.
+check("pitch,roll,yaw" not in pads.GYRO_ORDERS,
+      "and a mirror is not one of the names, however plausible it reads")
+
+ui, pad = a_pad("ds4")
+check(ui.gyro_order((2, 0, 1)) is True, "the device takes a rotation")
+check(ui.GYRO_ORDER == (2, 0, 1), "and uses it")
+check(ui.gyro_order((2, 1, 0)) is False,
+      "and refuses a mirror rather than quietly accepting it")
+check(ui.GYRO_ORDER == (2, 0, 1), "keeping what it had")
+check(ui.gyro_order("nonsense") is False, "and refuses nonsense")
 
 print("\n-- the buttons and sticks still land where they were --")
 ui, pad = a_pad("ds4")
