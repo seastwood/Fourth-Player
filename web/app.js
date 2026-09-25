@@ -9486,13 +9486,30 @@ function tryAnotherSpelling(codec) {
 async function startPainting() {
   if (!paintsHere() || painter || paintStarting) return;
   if (paintGaveUp) return;          // already tried everything on this one
-  if (!paintMethodById("here").ok()) {
+  // The method that was chosen, not "here". Three of them draw here and they
+  // do not all need the same things: "rtp" needs an encoded transform and the
+  // other two do not, so asking about "here" skipped the one check that
+  // matters for the one mode that was failing.
+  if (!paintMethodById(paintMethod).ok()) {
     setPaintMethod("browser");
     showToast("This browser cannot draw the picture itself");
     return;
   }
   const canvas = paintCanvas();
-  if (!pictureChannel || pictureChannel.readyState !== "open" || !canvas) {
+  if (!canvas) return;
+  // The picture *channel* is only needed by the modes that read from it.
+  //
+  // This is why "WebCodecs (media track)" never worked. It takes its frames
+  // off the media track and has no use for the channel at all -- but this
+  // returned early until the channel was open, and a datachannel event
+  // arrives after a track event. So the call made from the track handler,
+  // which is the one moment an encoded transform can still be attached, did
+  // nothing at all; the only later call came from the channel's own open
+  // handler, by which time the receiver had been delivering for some time and
+  // a transform attached to it delivers nothing for ever. A black picture,
+  // and "0 handed over by the transform" in the report.
+  if (paintMethod !== "rtp"
+      && (!pictureChannel || pictureChannel.readyState !== "open")) {
     return;                                  // the channel will start it
   }
   const shape = videoCodecNow();

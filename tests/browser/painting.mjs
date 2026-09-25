@@ -220,8 +220,12 @@ check(app.includes("paintTried = 0"),
 
 console.log("there is exactly one way back to the browser's element");
 check(app.includes("function stopPainting"), "stopPainting exists");
+// The support check asks about the chosen method rather than always about
+// "here": three modes draw here and they do not need the same things, and
+// asking about the wrong one skipped the encoded-transform check that the
+// media-track mode depends on.
 for (const spot of ["painter.start(pictureChannel, codec)", "if (!codec)",
-                    "!paintMethodById(\"here\").ok()"]) {
+                    "!paintMethodById(paintMethod).ok()"]) {
   check(app.includes(spot), "every failure goes through it (" + spot + ")");
 }
 check((app.match(/setPaintMethod\("browser"\)/g) || []).length >= 3,
