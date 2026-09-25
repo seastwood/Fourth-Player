@@ -35,6 +35,8 @@ except Exception as exc:                                  # noqa: BLE001
     print("SKIPPED: fourthplayer.video will not import (%s)" % exc)
     sys.exit(0)
 
+import inspect
+
 fails = []
 
 
@@ -92,6 +94,28 @@ def a_stage(peers=None, state=None, attaching=0):
 
 PLAYING = video.Gst.State.PLAYING
 PAUSED = video.Gst.State.PAUSED
+
+print("-- it is off unless somebody asks for it --")
+# Shipped on, on the strength of a round trip tested in isolation, and the
+# very next guest to join the Windows host could not be given video:
+# d3d11screencapturesrc does not come back from PAUSED. The saving was real
+# and the trade was not close -- an idle encoder costs 47% of a core, a host
+# nobody can connect to costs everything it does.
+check(video.IDLE_CAPTURE is False,
+      "IDLE_CAPTURE defaults to off, so a pipeline that cannot resume is not "
+      "the default behaviour of anybody's console")
+check("FOURTH_PLAYER_IDLE_CAPTURE" in inspect.getsource(video),
+      "and there is a named way to turn it on for another attempt")
+_stage = video.Stage.__new__(video.Stage)
+_stage.peers = {}
+_stage.worker = FakeWorker()
+_stage.pipeline = FakePipeline(video.Gst.State.PLAYING)
+_stage._arm_idle()
+check(_stage._idle_timer is None,
+      "arming does nothing while it is off, got %r" % _stage._idle_timer)
+
+# From here on the mechanism itself is under test, so it is switched on.
+video.IDLE_CAPTURE = True
 
 print("-- who counts as somebody watching --")
 stage = a_stage({"slot0": FakePeer(media=True),
