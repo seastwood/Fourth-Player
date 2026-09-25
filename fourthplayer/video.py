@@ -3782,11 +3782,38 @@ class Peer:
         self._sources[kind] = src
 
     def _on_upstream(self, _pad, info):
-        """Pass a guest's request for a keyframe across to the encoder."""
+        """Pass a guest's request for a keyframe across to the encoder.
+
+        Except from a guest taking the frames off the media track before its
+        browser's own decoder sees them. That decoder is starved on purpose --
+        it is the point of the mode -- and a starved receiver asks for a
+        keyframe for ever, several times a second, having no way to know that
+        somebody else is drawing its picture.
+
+        Those requests are meaningless and they are not free: they were
+        draining the rate limiter that the *page's* real requests come out of,
+        which is why a page that needed one keyframe to start was refused ten
+        or eleven times running. Worse, read from the host's log they look
+        exactly like a link losing packets badly -- which sent this
+        investigation after a bandwidth problem that did not exist, on a
+        stream the same guest carries perfectly well in every other mode.
+
+        The page asks over the websocket when it genuinely needs one, and that
+        path is untouched.
+        """
         event = info.get_event()
         if event is not None and event.type == Gst.EventType.CUSTOM_UPSTREAM:
             structure = event.get_structure()
             if structure is not None and structure.has_name("GstForceKeyUnit"):
+                if self.id in (self.stage._drawing or ()):
+                    self._pli_ignored = getattr(self, "_pli_ignored", 0) + 1
+                    if self._pli_ignored in (1, 50) or \
+                            self._pli_ignored % 500 == 0:
+                        log.info("peer %s: ignoring its browser's %dth request "
+                                 "for a keyframe -- that decoder is starved on "
+                                 "purpose while the page draws its own picture",
+                                 self.id, self._pli_ignored)
+                    return Gst.PadProbeReturn.OK
                 self.stage.request_keyframe(self.id)
         return Gst.PadProbeReturn.OK
 

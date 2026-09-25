@@ -227,6 +227,79 @@ check("drawing_own" in inspect.getsource(video.Peer._on_picture_asked),
       "the picture-channel mode reports through the same door, so the beat is "
       "not something only the media-track mode gets")
 
+print("\na starved browser's endless asking is not passed on")
+# The mode takes frames off the media track before the browser's own decoder
+# sees them, so that decoder never completes a frame and asks for a keyframe
+# several times a second, for ever. Those asks are meaningless -- somebody else
+# is drawing its picture -- and they were draining the bucket the page's own
+# requests come out of, which is why a page needing one keyframe to start was
+# refused ten or eleven times running.
+#
+# They also read exactly like heavy packet loss in the host's log, which sent a
+# whole investigation after a bandwidth problem that did not exist.
+import types                                                 # noqa: E402
+
+
+class FakeProbeStage:
+    def __init__(self, drawing):
+        self.worker = FakeWorker()
+        self.forced = 0
+        self.asked = []
+        self._drawing = set(drawing)
+
+    def request_keyframe(self, who="", now=None, starting=False):
+        self.asked.append(who)
+
+
+def a_peer(stage, peer_id):
+    peer = video.Peer.__new__(video.Peer)
+    peer.id = peer_id
+    peer.stage = stage
+    return peer
+
+
+class FakeEvent:
+    type = video.Gst.EventType.CUSTOM_UPSTREAM
+
+    def __init__(self, name):
+        self._name = name
+
+    def get_structure(self):
+        return video.Gst.Structure.new_empty(self._name)
+
+
+class FakeInfo:
+    def __init__(self, event):
+        self._event = event
+
+    def get_event(self):
+        return self._event
+
+
+stage = FakeProbeStage(["slot0"])
+drawing = a_peer(stage, "slot0")
+drawing._on_upstream(None, FakeInfo(FakeEvent("GstForceKeyUnit")))
+check(stage.asked == [],
+      "a guest drawing its own picture has its browser's ask dropped, got %r"
+      % stage.asked)
+
+watching = a_peer(stage, "slot1")
+watching._on_upstream(None, FakeInfo(FakeEvent("GstForceKeyUnit")))
+check(stage.asked == ["slot1"],
+      "while a guest whose browser really is drawing still gets one, got %r"
+      % stage.asked)
+
+# And going back to the browser drawing restores it, or switching away would
+# leave a guest unable to recover for the rest of the session.
+stage._drawing.discard("slot0")
+drawing._on_upstream(None, FakeInfo(FakeEvent("GstForceKeyUnit")))
+check(stage.asked == ["slot1", "slot0"],
+      "and it comes back when that page stops drawing, got %r" % stage.asked)
+
+stage.asked = []
+drawing._on_upstream(None, FakeInfo(FakeEvent("SomethingElse")))
+check(stage.asked == [], "an unrelated upstream event asks for nothing")
+
 print("\nthe event a browser's request arrives as is the one being watched for")
 # Built the same way webrtcbin builds it, so a rename upstream fails here
 # rather than silently going back to two seconds of black.

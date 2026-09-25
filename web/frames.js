@@ -710,9 +710,42 @@ function nextRung() {
   return false;
 }
 
+/* Build a decoder again for parameter sets that have changed.
+ *
+ * A WebCodecs decoder is configured for one set of them. Feeding it a keyframe
+ * carrying different ones is not defined to work: Chrome tolerates it, and
+ * nothing obliges a decoder to. The stream's SPS can change mid-session
+ * without the codec string changing at all -- a different resolution, a
+ * different reference structure -- so the three-byte comparison that says "the
+ * stream agrees" agrees about a stream the decoder has never been told about.
+ *
+ * Cheap and silent when they do not change, which on a steady capture is
+ * always: the fingerprint is compared and nothing happens. */
+function rebuildFor(annexb) {
+  const want = keyFingerprint(annexb);
+  if (!want || !state.builtFor || want === state.builtFor) return true;
+  const description = state.feedAs === "avcc" ? avcDescription(annexb) : null;
+  if (state.feedAs === "avcc" && !description) return false;
+  const codec = description ? exactCodec(description) : state.codec;
+  try {
+    if (state.decoder && state.decoder.state !== "closed") {
+      state.decoder.close();
+    }
+  } catch (_) {}
+  try {
+    state.decoder = buildDecoder(codec, description, state.latency);
+  } catch (_) {
+    return false;
+  }
+  state.codec = codec;
+  state.builtFor = want;
+  say("the stream's parameter sets changed, so the decoder was built again "
+      + "for them (" + codec + ")");
+  return true;
+}
+
 function take(type, timestamp, data) {
-  const decoder = state.decoder;
-  if (!decoder || decoder.state !== "configured") return;
+  if (!state.decoder || state.decoder.state !== "configured") return;
   const key = type === "key";
   if (!state.started) {
     if (!key) { state.skipped += 1; return; }
@@ -727,11 +760,27 @@ function take(type, timestamp, data) {
       state.shape = shaped.shape;
       say("the encoded frames are " + state.shape);
     }
-    if (key) { state.lastKey = bytes; state.keysSeen += 1; }
+    if (key) {
+      state.lastKey = bytes;
+      state.keysSeen += 1;
+      // Before it is handed over, not after it has failed.
+      if (!rebuildFor(bytes) && !nextRung()) {
+        self.postMessage({
+          failed: "the stream's parameter sets changed and no decoder would "
+                  + "take the new ones",
+        });
+        close();
+        return;
+      }
+    }
     if (state.feedAs === "avcc") bytes = toLengthPrefixed(bytes);
   } catch (_) { /* hand it over as it came */ }
   // A saturated decoder is not helped by more. Keyframes always go in:
   // dropping one costs every frame until the next.
+  // Re-read rather than captured at the top: a keyframe whose parameter sets
+  // moved has just replaced it.
+  const decoder = state.decoder;
+  if (!decoder || decoder.state !== "configured") return;
   if (!key && decoder.decodeQueueSize >= QUEUE_MAX) {
     state.refused += 1;
     return;
