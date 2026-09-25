@@ -133,6 +133,15 @@ check(/\.desk-bar \{[^}]*position: relative/.test(css),
       "anchored to the bar, or an absolutely positioned list lands somewhere "
       + "else entirely");
 
+console.log("\nand holding it does not select its own labels");
+/* iOS reads a long press on anything selectable as "select this word", so the
+ * gesture that opens this menu also put a blue highlight and two drag handles
+ * over the entries it had just revealed. */
+check(/\.desk-bar \{[^}]*-webkit-user-select: none/.test(css),
+      "the corner refuses selection, Safari's spelling included");
+check(/\.desk-bar \{[^}]*-webkit-touch-callout: none/.test(css),
+      "and the magnifier and share sheet that come with a long press");
+
 console.log("\nand the gesture that opens it cannot also close it");
 /* Reported twice. The first fix stopped the click that ends the hold, which
  * was enough on a desktop and not on a phone: iOS also sends compatibility

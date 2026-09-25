@@ -136,12 +136,35 @@ class Host:
         Started fresh once it is big enough to be unhelpful: this is for
         reading after something went wrong, and scrolling through four
         megabytes to find the end is its own obstacle.
+
+        Rotating and opening are two attempts, not one, and that is the whole
+        design of this. Rotation is a convenience; the log is the point. They
+        used to share a try, so a rename that failed took the logging down
+        with it and the host ran with its output discarded -- which is exactly
+        what happened on Windows, where the host that had just been killed
+        still held the file open for a moment and `os.replace` raised
+        WinError 32. The tray said so once, in its own log, and the host then
+        ran for four hours saying nothing anywhere. A stream was reported
+        broken in that window and there was nothing at all to read.
+
+        So a failed rotation now costs a big log file and nothing else.
         """
         path = self.log_path()
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
+        except OSError as exc:
+            log.warning("no host log (%s); its output will be discarded", exc)
+            return None
+        try:
             if os.path.exists(path) and os.path.getsize(path) > self.LOG_LIMIT:
                 os.replace(path, path + ".1")
+        except OSError as exc:
+            # Said plainly, because the next person to read this file will
+            # find two runs in it and should know why rather than wonder.
+            log.warning("could not start a fresh host log (%s); appending to "
+                        "the old one instead, so it will be longer than the "
+                        "limit and hold more than one run", exc)
+        try:
             return open(path, "ab", buffering=0)
         except OSError as exc:
             log.warning("no host log (%s); its output will be discarded", exc)

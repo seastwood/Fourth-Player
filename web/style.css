@@ -2705,6 +2705,15 @@ input.name {
   display: flex;
   flex: 0 0 auto;
   gap: .4rem;
+  /* Nothing in the corner is text, and holding the button is a gesture here.
+     iOS reads a long press on anything selectable as "select this word" and
+     puts the blue highlight and its handles over the menu that the same press
+     just opened, so the gesture that reaches the pointer settings also
+     selects their labels. -webkit-touch-callout stops the magnifier and the
+     share sheet that come with it. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   /* The cursor list is positioned against this, so it has to be the thing
      that "absolute" means. Without it the list anchors to the page and lands
      somewhere else entirely. */
