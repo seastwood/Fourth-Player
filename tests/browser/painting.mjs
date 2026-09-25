@@ -389,8 +389,12 @@ check(app.includes('paintMethod === "rtp" && lastBytes > 0'),
       + "that connection first");
 check(app.includes("renewSoon(0, true);\n    return;"),
       "and lets the track handler start the painting on the new one");
-check(!app.includes("receiver.transform"),
-      "and none left in the page either");
+// Attaching, not reading. The page may ask a receiver whether it still has a
+// transform -- that is a diagnostic, and a needed one -- but it must never be
+// the thing that puts one on: paint.js does that, in the one turn where it is
+// still early enough to work.
+check(!/receiver\.transform\s*=[^=]/.test(app),
+      "and none attached from the page either");
 
 console.log("which makes leaving it free");
 // "the frame worker is ready and the transform is attached" and then no first
