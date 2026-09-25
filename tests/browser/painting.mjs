@@ -114,8 +114,20 @@ check(app.includes("function watchTheTab"), "the page notices going away");
 check(app.includes("paintPaused = true"), "and puts the drawing down");
 check(app.includes("document.hidden") && app.includes("watchThePainting();"),
       "the deadline waits rather than judging while nobody is watching");
-check(app.includes("paintRecoveries = 0;\n    paintGaveUp = false;\n    startPainting();"),
+check(app.includes("paintRecoveries = 0;\n    paintGaveUp = false;\n"),
       "and coming back starts it again with every counter reset");
+// Through restartTheDrawing, not startPainting. The drawing was put down while
+// the page was away, so by the time it comes back the receiver has been
+// delivering to nobody for as long as the page was gone -- and an encoded
+// transform attached to a receiver that has started delivers nothing at all.
+// It attached, said so, painted nothing for four seconds and handed the
+// picture back, so minimising the page and returning to it switched to WebRTC
+// every single time.
+check(app.includes("paintGaveUp = false;\n    // Not startPainting"),
+      "and it is said why this one cannot simply start again");
+check(/paintGaveUp = false;[\s\S]{0,600}?restartTheDrawing\(\);/.test(app),
+      "the resume goes through restartTheDrawing, which gets a fresh receiver "
+      + "where this mode needs one");
 
 console.log("and how many frames to hold is the viewer's to choose");
 // The one real trade in drawing it here: every frame held is a frame of
@@ -248,8 +260,19 @@ check(app.includes("if (shape.mime) {"),
       "a known codec that is not H.264 switches back and says so");
 check(app.includes("waiting to draw here"),
       "one that is not known yet waits instead");
-check(app.includes("if (paintsHere() && !painter) startPainting()"),
-      "and the watchdog keeps trying, so the choice starts when it can");
+check(app.includes("if (paintsHere() && !painter) restartTheDrawing()"),
+      "and the watchdog keeps trying, so the choice starts when it can -- "
+      + "through the restart that knows this mode needs a fresh receiver");
+// This one is polled, so the guard matters more here than anywhere: without
+// it, a page that had given up would ask the host to rebuild the media
+// connection on every stats tick.
+const restart = app.slice(app.indexOf("function restartTheDrawing"),
+                          app.indexOf("function restartTheDrawing") + 900);
+check(restart.includes("paintGaveUp"),
+      "and it refuses once this page has given up, so a poll cannot become a "
+      + "loop of renegotiations");
+check(restart.includes("!paintsHere()"),
+      "or once the viewer has chosen the browser");
 // Two of the three ways of drawing are done by this page, and everything but
 // the last step -- a texture upload against handing the frame to a 2D context
 // -- is the same code. Asking "is it 'here'" was true of one and false of the

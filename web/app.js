@@ -4024,8 +4024,12 @@ async function watchMedia() {
   noteFreezes(picture);
   tellAboutTheRate(picture);
   // Chosen but not started: a codec that was not known when the track
-  // arrived, or a receiver that was not ready. Cheap to ask again.
-  if (paintsHere() && !painter) startPainting();
+  // arrived, or a receiver that was not ready. Cheap to ask again -- and in
+  // media-track mode asking again in place is not enough, because the receiver
+  // has started by now. restartTheDrawing refuses when this page has given up
+  // or the viewer has chosen the browser, so a poll cannot turn into a loop of
+  // renegotiations.
+  if (paintsHere() && !painter) restartTheDrawing();
   tellAboutSound();
   tellAboutTheShape();
   tellAboutThePicture();
@@ -9373,7 +9377,13 @@ function watchTheTab() {
     paintKeyAsks = 0;
     paintRecoveries = 0;
     paintGaveUp = false;
-    startPainting();
+    // Not startPainting: the drawing was put down while the page was away, so
+    // the receiver has been delivering to nobody ever since, and an encoded
+    // transform attached to one that has started delivers nothing at all. It
+    // attaches, says it attached, paints nothing for four seconds and hands
+    // the picture back -- which is why minimising the page and returning to it
+    // switched to WebRTC every single time.
+    restartTheDrawing();
   });
 }
 let saidBrowser = false;            // the user agent, said once
@@ -9567,6 +9577,11 @@ function paintNextSpelling() {
  * one path known to work -- because it is the path the first attempt takes. */
 function restartTheDrawing() {
   stopPainting(null);
+  // The same guards startPainting keeps, checked before anything is asked of
+  // the host: a page that has given up, or whose viewer has chosen the
+  // browser, must not renegotiate -- least of all from the polled caller,
+  // which would do it over and over.
+  if (!paintsHere() || paintGaveUp) return;
   if (paintMethod !== "rtp") {
     startPainting();
     return;
