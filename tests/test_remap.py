@@ -48,9 +48,14 @@ def lift(name):
 
 consts = re.search(r"const STANDARD_KEYS = \[.*?\];", source, re.S).group(0)
 order = re.search(r"const REMAP_ORDER = \[.*?\];", source, re.S).group(0)
+# How many of those the walk insists on. The tail is optional -- plenty of
+# pads have no stick click -- and promptFor says so, so it needs this number.
+# Lifted rather than copied: a test carrying its own idea of where the required
+# part ends would agree with the page today and quietly stop agreeing later.
+required = re.search(r"const REMAP_REQUIRED = \d+;", source).group(0)
 
-HARNESS = consts + "\n" + order + "\n" + lift("learnPress") + "\n" \
-    + lift("promptFor") + "\n" + """
+HARNESS = consts + "\n" + order + "\n" + required + "\n" \
+    + lift("learnPress") + "\n" + lift("promptFor") + "\n" + """
 const steps = JSON.parse(require("fs").readFileSync(0, "utf8"));
 let state = { map: STANDARD_KEYS.map(() => null), step: 0, armed: false };
 const seen = [];
@@ -105,9 +110,29 @@ check(out["state"]["map"][:4] == [0, 1, 2, 3],
       "each in its own place: %s" % out["state"]["map"][:4])
 
 print("the prompt counts up, so it is clear how many are left")
+# Out of however many the page asks for, read from the page. Hard-coded here
+# as ten, it broke the moment the two stick clicks were added -- which is a
+# test disagreeing with a change rather than catching one.
+how_many = len(re.findall(r"\d+", order))
 out = run([-1, 0])
-check("2 of 10" in (out["seen"][-1]["said"] or ""),
-      "after the first, it asks for the second: %r" % (out["seen"][-1]["said"],))
+check("2 of %d" % how_many in (out["seen"][-1]["said"] or ""),
+      "after the first, it asks for the second of %d: %r"
+      % (how_many, out["seen"][-1]["said"]))
+
+print("and the optional tail says it is optional")
+# The last two are stick clicks and plenty of pads have none. Being asked for
+# a button that does not exist must not read as the thing having jammed, so
+# the prompt for those says how to finish without them.
+required = int(re.search(r"const REMAP_REQUIRED = (\d+);", source).group(1))
+out = run([-1] + sum(([i, -1] for i in range(required)), []))
+# The entry before the trailing release: a frame with nothing held answers no
+# prompt, so the last one always says null.
+tail = out["seen"][-2]["said"] or ""
+check("finish without" in tail,
+      "the first optional prompt offers a way out: %r" % (tail,))
+check(out["state"]["step"] == required,
+      "and it is reached after exactly the required ones: %d"
+      % out["state"]["step"])
 
 
 
