@@ -992,20 +992,19 @@ function makePainter(canvas, say) {
        decode the stream -- so it must not be answered by walking to the next
        spelling of the codec and then giving up having never been tested.
 
-       No counters at all counts as nothing having arrived, and used to count
-       as the opposite. `last` is null until the worker's first reply, so a
-       painter that had been handed nothing whatsoever answered "not starving"
-       -- and the caller took that as a decoder worth doubting, walked the
-       spellings, ran out, and handed the picture to WebRTC.
+       Deliberately false when there are no counters at all. `last` is null
+       until the worker's first reply, and "no information yet" is not the
+       same claim as "nothing arrived" -- the caller answers this one by
+       waiting, and waiting on no information means waiting in front of a
+       black picture with nothing to end it.
 
-       That is what a restart looks like when it does not take: an encoded
-       transform only delivers on a receiver which has not carried a frame,
-       the fresh connection loses that race, and the report reads "0 handed
-       over by the transform, 0 fed, 0 came out, canvas none". Nothing there
-       is evidence about the decoder, which is what this predicate exists to
-       say. Waiting is bounded by the caller either way. */
+       Tried the other way and reverted the same hour: a transform that
+       attaches and is handed nothing sits at null for ever, so the page
+       waited instead of falling back and the screen stayed black on every
+       join. A picture by the other route beats no picture, which is the rule
+       the rest of this file already follows. */
     starving() {
-      return !last || !last.handed;
+      return Boolean(last && !last.handed);
     },
     drawnLately() { return last ? last.drawn : 0; },
     /* How much has come off the picture channel, ever.

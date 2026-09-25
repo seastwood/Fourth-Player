@@ -688,7 +688,7 @@ console.log("\nnothing arriving is not a decoder that cannot decode");
 // seconds.
 check(paintFile.includes("starving()"),
       "the painter can say that nothing has arrived at all");
-check(paintFile.includes("return !last || !last.handed;"),
+check(paintFile.includes("return Boolean(last && !last.handed);"),
       "which is what nothing handed over means, and says nothing whatever "
       + "about the decoder");
 // It used to read `Boolean(last && !last.handed)`, so a painter with no
@@ -700,8 +700,13 @@ check(paintFile.includes("return !last || !last.handed;"),
 // over by the transform, 0 fed, 0 came out, canvas none". Seen in the host's
 // log after two runs that painted 323 and 309 frames, so the drawing plainly
 // worked and only the restart did not.
-check(!paintFile.includes("Boolean(last && !last.handed)"),
-      "and having been handed nothing at all is not the opposite of that");
+// And NOT true when there are no counters at all. That was tried and
+// reverted within the hour: a transform that attaches and is handed nothing
+// sits at null for ever, so the watchdog waited instead of falling back and
+// the screen stayed black on every join -- worse than the fallback it was
+// meant to avoid. A picture by the other route beats no picture.
+check(!paintFile.includes("return !last || !last.handed;"),
+      "no information yet is not the same claim as nothing arrived");
 check(app.includes("if (painter.starving()) {"),
       "and the watchdog waits rather than blaming it");
 check(app.indexOf("if (painter.starving()) {")
