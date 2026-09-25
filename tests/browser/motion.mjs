@@ -77,10 +77,44 @@ check(String(F.toScreenFrame(1, 2, 37)) === String([1, 2]),
       "anything not a right angle is left alone rather than half-turned: a "
       + "screen is never at 37 degrees, and guessing is worse than not");
 
+console.log("\nthe same motion reads the same whichever way the screen is");
+// The orientation question, answered by not asking it.
+//
+// The specification says DeviceMotionEvent reports about the device's axes,
+// which would need rotating into the screen's. What was measured says
+// otherwise: with that rotation applied, portrait was correct and landscape
+// had x and y swapped -- which is the signature of rotating something already
+// rotated. In portrait the angle is zero and the correction is the identity,
+// so it can only ever have been wrong in landscape.
+//
+// So the readings are used as they come, and orientation needs no setting at
+// all: turning the phone changes nothing about what reaches the host.
+check(F.ROTATE_TO_SCREEN === false,
+      "the page does not rotate what the browser already rotated");
+const still = { beta: 40, gamma: -15, alpha: 7 };
+const gravity = { x: 1, y: -2, z: -9 };
+const shapes = [0, 90, 180, 270].map(
+  (a) => JSON.stringify(F.motionSample(still, gravity, a)));
+check(new Set(shapes).size === 1,
+      "one motion, four orientations, one answer: " + shapes[0]);
+
+console.log("\nbut the rotation is kept, for a browser that does need it");
+// Deleted, it would have to be worked out again from scratch the first time a
+// device reports in its own frame -- and the signs are the hard part.
+check(typeof F.toScreenFrame === "function", "toScreenFrame is still here");
+check(String(F.toScreenFrame(1, 0, 90)) !== String([1, 0]),
+      "and still a rotation rather than a stub that returns its input");
+
 console.log("\nthe screen's own normal is not moved by the screen turning");
 for (const a of [0, 90, 180, 270]) {
   check(F.motionSample({ alpha: 50 }, {}, a)[2] === 50 * F.GYRO_PER_DEG_SEC,
         "angle " + a + " leaves z alone");
+}
+// True of the rotation itself as well as of the path, which is what would
+// matter again if it were ever switched back on.
+for (const a of [0, 90, 180, 270]) {
+  const [x, y] = F.toScreenFrame(0, 0, a);
+  check(x === 0 && y === 0, "and a still device stays still at " + a);
 }
 
 console.log("\nand the angle is read from whichever the browser has");

@@ -4855,6 +4855,13 @@ function watchMotionValues(values) {
   motionPeak = [0, 0, 0, 0, 0, 0];
 }
 
+/* A phone being waved about -- and only that.
+ *
+ * A physical controller's own gyroscope, when WebHID can be used to read one,
+ * must NOT come through here. It already reports in the controller's frame,
+ * which is the frame a game expects, so the posture correction this path
+ * applies would be a second rotation of something already right. Such a pad
+ * should hand its readings to the wire as they come. */
 function onDeviceMotion(event) {
   // Rotation is the one that matters and the one a browser may withhold: a
   // device with an accelerometer and no gyroscope reports acceleration and

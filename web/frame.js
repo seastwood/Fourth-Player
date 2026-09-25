@@ -82,10 +82,34 @@
      accelerometer reads gravity too.
 
      `angle` is how far the screen is turned; see toScreenFrame. */
+  /* Whether to rotate the browser's readings into the screen's frame.
+   *
+   * Off, and the reasoning is worth keeping because it is not obvious.
+   *
+   * The specification says DeviceMotionEvent reports about the *device's*
+   * axes, which would need rotating. What was measured says otherwise: with
+   * the rotation applied, portrait was correct and landscape had x and y
+   * swapped -- and that is the signature of rotating something that was
+   * already rotated. In portrait the angle is zero and the correction is the
+   * identity, so it cannot do harm there; in landscape it is a right angle
+   * and it is the whole error.
+   *
+   * So this browser is handing over screen-relative values and they are used
+   * as they come. Kept as a switch rather than deleted because the next
+   * browser may not: a phone where portrait and landscape disagree in this
+   * exact way wants this turned back on.
+   *
+   * Note what this is *not* for. A physical controller's own gyroscope
+   * reports in the controller's frame and is already what a game expects --
+   * it must not come through here at all. This function exists for a phone
+   * being waved about, and only for that. */
+  const ROTATE_TO_SCREEN = false;
+
   function motionSample(rotation, accel, angle) {
     const g = (v) => clampShort(Math.round((v || 0) * GYRO_PER_DEG_SEC));
     const a = (v) => clampShort(Math.round((v || 0) / GRAVITY * ACCEL_PER_G));
-    const turn = angle === undefined ? screenAngle() : angle;
+    const turn = !ROTATE_TO_SCREEN ? 0
+                 : (angle === undefined ? screenAngle() : angle);
     // beta/gamma/alpha is x/y/z: beta is rotation about the device's x axis,
     // gamma about y, alpha about z.
     const [gx, gy] = toScreenFrame(g(rotation && rotation.beta),
@@ -184,7 +208,7 @@
   const api = { buildFrame, buildRaw, padState, direction, toAxis, TRIGGER_FULL,
                 DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT,
                 motionSample, MOTION_BYTES, FLAG_MOTION,
-                toScreenFrame, screenAngle,
+                toScreenFrame, screenAngle, ROTATE_TO_SCREEN,
                 GYRO_PER_DEG_SEC, ACCEL_PER_G, GRAVITY };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.FPFrame = api;
