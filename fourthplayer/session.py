@@ -1875,7 +1875,8 @@ class LiveSession:
         # a pad that goes away and comes back is a different one to it -- so
         # the gyroscope dies and stays dead until the emulator is restarted.
         # Leaving a stream and coming back is a thing people do constantly.
-        for index, pad in self.pads.unplug_idle(taken):
+        for index, pad in self.pads.unplug_idle(taken,
+                                                hold=self._a_game_is_up()):
             # A controller that is made and unmade over and over is not a
             # tidy-up, it is a fight: something keeps asking for a seat
             # nobody is sitting on, and this keeps taking it away. Seen
@@ -3375,6 +3376,22 @@ class LiveSession:
         """
         for guest in list(self.guests.values()):
             self.notify_one(guest, {"t": "hold", **self.hold_state(guest)})
+
+    def _a_game_is_up(self):
+        """Whether something is running that a controller should be kept for.
+
+        Answered from what is in front, which the host already reads on a
+        timer for a different reason: guest frames are withheld while a shell
+        has the screen, so "not held" is "something game-like is in front".
+
+        Only where the host is actually watching. With guest_input_needs_a_game
+        off it never holds anything, and reading that as "a game is always up"
+        would mean no controller was ever unplugged -- the opposite failure,
+        and a silent one.
+        """
+        if not getattr(self.cfg, "guest_input_needs_a_game", False):
+            return False
+        return not self.input_held
 
     def _hold_input(self, held, why=""):
         """Start or stop withholding guest frames, and say so once."""

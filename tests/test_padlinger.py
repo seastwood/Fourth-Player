@@ -113,6 +113,41 @@ check(first.released is True,
 check(seat.pads[0] is None, "the seat is empty")
 check(seat.unplug_idle(set()) == [], "and unplugging it again does nothing")
 
+print("\n-- while a game is running, nothing is unplugged at all --")
+# "I may step away from a game for half an hour then come back. I don't want
+# to be disrupted." A grace period measured in minutes does not cover that,
+# and it should not have to: the host already knows whether something
+# game-like is in front, because it withholds guest frames when one is not.
+clock[0] = 0.0
+seat = seats(now=lambda: clock[0])
+seat.pads[0] = FakePad("one")
+held = seat.pads[0]
+clock[0] = pads.LINGER_SECONDS * 20
+check(seat.unplug_idle(set(), hold=True) == [],
+      "twenty times the grace period, and it is still plugged in")
+check(seat.pads[0] is held, "the very same device")
+
+print("\n-- and the grace period starts when the game ends --")
+# Not when they walked away. Otherwise closing the game would unplug the
+# controller in the same instant, which is the interruption this avoids,
+# moved rather than removed.
+check(seat.unplug_idle(set()) == [],
+      "the moment the game stops, nothing goes yet")
+clock[0] += pads.LINGER_SECONDS - 1
+check(seat.unplug_idle(set()) == [], "nor most of the way through")
+clock[0] += 2
+check([i for i, _p in seat.unplug_idle(set())] == [0],
+      "and then it does, because an empty seat still takes a player port")
+
+print("\n-- a held seat is not disturbed by the hold either --")
+clock[0] = 0.0
+seat = seats(now=lambda: clock[0])
+seat.pads[0] = FakePad("one")
+clock[0] = pads.LINGER_SECONDS * 5
+check(seat.unplug_idle({0}, hold=True) == [],
+      "somebody sitting on it, with a game running: nothing happens")
+check(seat.pads[0] is not None, "and they keep their device")
+
 print("\n-- seats are independent --")
 clock[0] = 0.0
 seat = seats(now=lambda: clock[0])

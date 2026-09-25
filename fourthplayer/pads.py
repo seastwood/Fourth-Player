@@ -643,7 +643,7 @@ class PadSet:
         pad.close()
         return True
 
-    def unplug_idle(self, taken, after=LINGER_SECONDS, now=None):
+    def unplug_idle(self, taken, after=LINGER_SECONDS, now=None, hold=False):
         """Unplug pads for seats nobody has been on for `after` seconds.
 
         `taken` is the set of seat indices somebody is sitting on. Returns the
@@ -653,8 +653,24 @@ class PadSet:
         device, which is the whole point: to an emulator, a controller that
         goes away and comes back is a different controller, and the motion
         binding does not survive it.
+
+        `hold` says a game is running, and nothing is unplugged while one is.
+        The clock is restarted rather than merely paused, so a guest who steps
+        away mid-game still gets the whole grace period once the game ends,
+        instead of the remains of one that expired while they were gone.
         """
         stamp = self._now() if now is None else now
+        if hold:
+            # A game is running, so nothing is unplugged at all -- and every
+            # empty seat's clock is started again from now, so the grace
+            # period begins when the game *ends* rather than when somebody
+            # walked away from it. Stepping out for half an hour in the middle
+            # of a game and coming back to a controller the emulator has
+            # forgotten is not a tidy-up, it is an interruption.
+            for index, _pad in list(self.live()):
+                if index not in taken:
+                    self._empty_at[index] = stamp
+            return []
         gone = []
         for index, _pad in list(self.live()):
             if index in taken:
