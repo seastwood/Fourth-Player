@@ -63,12 +63,35 @@ class _PowerThrottlingState(ctypes.Structure):
                 ("StateMask", ctypes.c_uint32)]
 
 
+def _kernel32():
+    """kernel32 with every signature declared.
+
+    Not optional, and the reason is a pseudo-handle. GetCurrentProcess returns
+    -1, and ctypes defaults a return type to a 32-bit int -- so on 64-bit
+    Windows the handle is truncated on its way back out and every call made
+    with it fails. Quietly: GetPriorityClass answers 0, which is not a
+    priority class, and the first version of this reported "(0, 0)" and
+    changed nothing while looking like it had worked.
+    """
+    lib = ctypes.WinDLL("kernel32", use_last_error=True)
+    lib.GetCurrentProcess.restype = ctypes.c_void_p
+    lib.GetCurrentProcess.argtypes = []
+    lib.GetPriorityClass.restype = ctypes.c_uint32
+    lib.GetPriorityClass.argtypes = [ctypes.c_void_p]
+    lib.SetPriorityClass.restype = ctypes.c_bool
+    lib.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    lib.SetProcessInformation.restype = ctypes.c_bool
+    lib.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                          ctypes.c_void_p, ctypes.c_uint32]
+    return lib
+
+
 def raise_priority():
     """Returns (what it was, what it is now), or None where this does not apply."""
     if not sys.platform.startswith("win"):
         return None
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32()
         handle = kernel32.GetCurrentProcess()
         was = kernel32.GetPriorityClass(handle)
         if was == ABOVE_NORMAL_PRIORITY_CLASS:
@@ -90,7 +113,7 @@ def leave_eco_mode():
     if not sys.platform.startswith("win"):
         return False
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32()
         state = _PowerThrottlingState(
             Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION,
             # Say which knob is being set, and set it to off. Clearing the

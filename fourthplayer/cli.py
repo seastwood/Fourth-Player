@@ -231,12 +231,6 @@ def main(argv=None):
     cfg = Config.load()
 
     if args.command == "serve":
-        # Before anything is built. A capture at 60 frames a second is
-        # soft-real-time work, and a scheduled task that does not name a
-        # priority gets BELOW_NORMAL -- which is how this host came to lose
-        # the CPU to whatever game it was streaming.
-        from . import winpriority
-        winpriority.apply()
         # A preset first, so the individual flags can still override parts of it.
         if args.preset:
             for key, value in PRESETS[args.preset].items():
@@ -269,6 +263,17 @@ def main(argv=None):
             level=logging.DEBUG if args.verbose else logging.INFO,
             format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
             datefmt="%H:%M:%S")
+        # After logging is up and before the server is, which is the only
+        # window where both are true. Asked for earlier, it worked and said so
+        # into a logger nobody had configured yet -- so the first attempt at
+        # this looked like it had never run.
+        #
+        # A capture at 60 frames a second is soft-real-time work, and a
+        # scheduled task that does not name a priority gets BELOW_NORMAL,
+        # which is how this host came to lose the CPU to the game it was
+        # streaming.
+        from . import winpriority
+        winpriority.apply()
         try:
             asyncio.run(Server(cfg).run())
         except KeyboardInterrupt:

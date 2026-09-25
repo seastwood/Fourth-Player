@@ -58,6 +58,18 @@ check("StateMask=0" in source,
       "and turning it off rather than clearing the control mask, which would "
       "mean 'use the system default' -- the default being the thing escaped")
 
+print("\n-- every Windows call has its signature declared --")
+# A pseudo-handle and a default return type. GetCurrentProcess returns -1, and
+# ctypes defaults a restype to a 32-bit int, so on 64-bit Windows the handle
+# is truncated and every call made with it fails -- quietly, answering 0,
+# which is not a priority class. The first version of this changed nothing on
+# the real machine while reporting that it had.
+check("GetCurrentProcess.restype = ctypes.c_void_p" in source,
+      "the pseudo-handle comes back as a pointer, not an int")
+for fn in ("GetPriorityClass", "SetPriorityClass", "SetProcessInformation"):
+    check("%s.argtypes" % fn in source, "%s takes declared argument types" % fn)
+    check("%s.restype" % fn in source, "and declares what it returns" % ())
+
 print("\n-- nothing here may stop the host serving --")
 check("except Exception" in source, "every call is best effort")
 check("Never raises" in source, "and says so")
@@ -70,12 +82,17 @@ check(winpriority.leave_eco_mode() is False or sys.platform.startswith("win"),
 
 print("\n-- the host asks before it builds anything --")
 cli = open(os.path.join(REPO, "fourthplayer", "cli.py")).read()
-serve = cli.split('if args.command == "serve":')[1][:900]
-check("winpriority.apply()" in serve,
-      "serve asks on the way in")
-check(serve.index("winpriority.apply()") < serve.index("PRESETS"),
-      "before the settings are read and the pipeline is built, so the whole "
-      "of the startup runs at the priority it will keep")
+serve = cli.split('if args.command == "serve":')[1]
+serve = serve[:serve.index('if args.command == "write-config"')]
+check("winpriority.apply()" in serve, "serve asks")
+# After logging and before the server. Asked for before logging was set up,
+# it worked and said so into a logger nobody had configured -- so the first
+# attempt looked like it had never run at all.
+check(serve.index("basicConfig") < serve.index("winpriority.apply()"),
+      "after logging is configured, or what it says goes nowhere")
+check(serve.index("winpriority.apply()") < serve.index("Server(cfg).run()"),
+      "and before the server starts, so the whole of it runs at the priority "
+      "it will keep")
 
 print("\n-- and a fresh install does not start out below normal --")
 ps1 = open(os.path.join(REPO, "install", "windows", "install.ps1")).read()
