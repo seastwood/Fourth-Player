@@ -87,11 +87,13 @@ print("a seat nobody is on keeps its device for a moment, then loses it")
 # grace period -- long enough to cover leaving a stream and returning, which
 # is a thing people do constantly.
 session = LiveSession.__new__(LiveSession)
-# The config the janitor reads, and an invite it can ask which seats somebody
-# may still walk back into. Both real questions with real defaults; a stub
-# without them is a session that cannot be asked anything.
+# Everything the janitor asks a session, in one place rather than discovered
+# one AttributeError at a time: the config for the grace period, an invite for
+# which seats somebody may still walk back into, and whether guest input is
+# being withheld -- which is how it knows a game is in front.
 session.cfg = Config()
 session.invite = None
+session.input_held = True          # no game up, so nothing is held for one
 session.pads = Seats(4)
 session.guests = {1: Guest(1, 1)}
 session._unplug_orphans()
