@@ -1967,6 +1967,10 @@ const stickHeld = {};                    // pointer id -> the well being dragged
  * firing it by accident costs a crouch in the middle of a fight. */
 const STICK_CLICK_CENTRE = 0.45;         // of the well's radius
 const STICK_CLICK_MS = 320;
+/* And the shortest gap two deliberate taps can have. Below this they are not
+   two taps by one thumb, they are one press arriving twice: a finger cannot
+   leave the glass and come back in forty milliseconds. */
+const STICK_CLICK_MIN_MS = 40;
 const STICK_CLICK_BIT = { "stick-left": 10, "stick-right": 11 };
 const stickTapped = {};                  // well id -> when it was last tapped
 const stickClicked = {};                 // pointer id -> the bit being held
@@ -1985,7 +1989,7 @@ function stickOffset(well, event) {
  * Kept as a decision over plain numbers so the rule can be tested without a
  * browser and a thumb: the timing and the two positions are the whole of it,
  * and every one of them is easy to get wrong in a way only a finger notices. */
-function isStickClick(id, offset, at, taps) {
+function isStickClick(id, offset, at, taps, how) {
   // Absence is `undefined`, never 0. A zero timestamp is a real one -- the
   // first tap of a freshly started clock -- and treating it as "never tapped"
   // silently swallowed it. Date.now() never returns 0 in a browser, so this
@@ -1999,8 +2003,20 @@ function isStickClick(id, offset, at, taps) {
     delete taps[id];
     return false;
   }
-  taps[id] = at;
-  if (last === undefined || at - last > STICK_CLICK_MS) return false;
+  const kind = how || "";
+  taps[id] = { at, kind };
+  if (last === undefined) return false;
+  const gap = at - last.at;
+  // One press arriving twice is not two presses.
+  //
+  // iOS sends a compatibility *mouse* pointerdown a few hundred milliseconds
+  // after a touch, for pages written before pointer events existed. That is
+  // inside this window, so every single tap arrived as a pair and pressed the
+  // stick in -- which is what was reported. A finger that left the glass and
+  // came back would report the same kind of pointer, and could not do it in
+  // forty milliseconds either.
+  if (kind !== last.kind || gap < STICK_CLICK_MIN_MS) return false;
+  if (gap > STICK_CLICK_MS) return false;
   delete taps[id];                       // spent: three taps are not two
   return true;
 }
@@ -2074,7 +2090,7 @@ function wireSticks() {
       const bit = STICK_CLICK_BIT[id];
       if (bit !== undefined
           && isStickClick(id, stickOffset(well, event), Date.now(),
-                          stickTapped)) {
+                          stickTapped, event.pointerType)) {
         stickClicked[event.pointerId] = bit;
         setBit(bit, true);
         well.classList.add("clicked");
