@@ -134,11 +134,14 @@ print("a decoder that has nothing yet is not made to wait for a token")
 stage = FakeStage()
 stage._keyframe_tokens = 0.0
 stage.request_keyframe("slot0", now=time.monotonic())
-check(stage.forced == 0, "an ordinary request on an empty bucket is refused")
+check(stage.worker.jobs == [],
+      "an ordinary request on an empty bucket is refused")
 check(stage._keyframes_refused == 1, "and counted")
 stage.request_keyframe("slot0", now=time.monotonic(), starting=True)
-check(stage.forced == 1,
+check(len(stage.worker.jobs) == 1,
       "but one from a decoder with nothing to start from is answered")
+stage.worker.jobs[0]()
+check(stage.forced == 1, "and it is the encoder that is asked, as ever")
 check(stage._keyframes_refused == 0,
       "and the refusals since are reported rather than silently dropped")
 check(stage._keyframe_tokens < 0,
