@@ -28,6 +28,7 @@ import websockets
 
 from . import build
 from . import invites
+from . import pads as padlib
 from .config import Config
 from .session import LAUNCH_POLICIES, LiveSession, StaleGuest
 from .tls import ensure_certificate
@@ -424,6 +425,17 @@ class Server:
                         self.session.stage.request_keyframe(
                             "%s (drawing its own)" % guest.label,
                             starting=bool(message.get("starting")))
+                elif kind == "padkind" and guest is not None:
+                    # A guest choosing what their own controller says it is.
+                    #
+                    # Their seat, not the session's: two people at the same
+                    # game may want different pads, and the one who cares is
+                    # the one holding it. The host's setting is the default
+                    # they start from.
+                    if self.session is not None:
+                        now = self.session.set_pad_kind(
+                            guest, message.get("kind"))
+                        await outbox.put({"t": "padkind", "kind": now})
                 elif kind == "painting" and guest is not None:
                     # The page says whether it is decoding the picture itself.
                     #
@@ -997,6 +1009,10 @@ class Server:
         await outbox.put({
             "t": "joined", "slot": guest.slot, "label": guest.label,
             "guest": guest_token,
+            # What their controller currently says it is, so the page shows
+            # the right choice rather than guessing at the host's default.
+            "pad_kind": self.session.pad_kind_for(guest),
+            "pad_kinds": sorted(padlib.KINDS),
             "remaining": None if self.session.unlimited
                          else round(self.session.remaining()),
             "resumed_media": keep_media,
@@ -1275,6 +1291,24 @@ class Server:
                         log.warning("could not remember the slot count: %s", exc)
                     log.info("sessions will open with %d slots", self.cfg.slots)
                 return self._status()
+            if command == "padkind":
+                if request.get("set"):
+                    wanted = padlib.kind_or_default(request["set"])
+                    # The default every seat starts from. Seats already being
+                    # played on are moved too, so choosing here does something
+                    # visible rather than only affecting the next session --
+                    # which is how the launch policy read as broken.
+                    self.cfg.guest_pad_kind = wanted
+                    if self.session is not None and self.session.open:
+                        for guest in list(self.session.guests.values()):
+                            self.session.set_pad_kind(guest, wanted)
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the pad kind: %s", exc)
+                    log.info("guests are given a %s by default",
+                             padlib.KINDS[wanted]["label"])
+                return self._status()
             if command == "policy":
                 if request.get("set"):
                     wanted = str(request["set"])
@@ -1425,7 +1459,12 @@ class Server:
                     "share_pads": self.cfg.share_pads,
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
-                    "launch": {"policy": self.cfg.guest_launch, "pending": None}}
+                    "launch": {"policy": self.cfg.guest_launch, "pending": None},
+                    "pad": {"kind": padlib.kind_or_default(
+                                getattr(self.cfg, "guest_pad_kind", None)),
+                            "kinds": sorted(padlib.KINDS),
+                            "labels": {k: v["label"]
+                                       for k, v in padlib.KINDS.items()}}}
         clear = self.session.invite.clear_invite
         return {
             "ok": True,

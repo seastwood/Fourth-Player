@@ -509,6 +509,21 @@
         <span class="switch-name">Swap A/B and X/Y</span>
       </label>
     </p>
+    <!-- And the third way out, which is the one that fixes the cause rather
+         than the symptom: tell the game what pad this is. A game reads the
+         controller's identity and names its buttons from it, so a guest given
+         a DualShock is asked for Cross where one given an Xbox pad is asked
+         for A. Swapping the letters above moves what is sent; this moves what
+         the game thinks it is talking to, and then nothing needs swapping.
+
+         Per guest, not per session: two people at the same game may want
+         different pads, and the one who cares is the one holding it. The host
+         sets what everybody starts with. -->
+    <p class="browse-note pads-feel" id="pads-kind-row" hidden>
+      <span class="switch-name">Send my pad as</span>
+      <select id="pads-kind" class="chip"
+              aria-label="What the game is told this controller is"></select>
+    </p>
     <!-- Which way round the screen sits. Not marked as belonging to the
          on-screen pad: a guest holding a real controller is still looking at
          the picture, and the picture has a shape. Hidden where the browser

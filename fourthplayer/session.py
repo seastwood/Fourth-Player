@@ -597,7 +597,9 @@ class LiveSession:
         policy = (getattr(self.cfg, "guest_launch", "off") or "off").lower()
         self.launch_policy = policy if policy in LAUNCH_POLICIES else "off"
         self.pads = padlib.PadSet(self.slots,
-                                  guide=self.cfg.guest_guide_button)
+                                  guide=self.cfg.guest_guide_button,
+                                  kind=getattr(self.cfg, "guest_pad_kind",
+                                               padlib.DEFAULT_KIND))
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
         # The same answer the pads were built with, or RetroArch binds by
@@ -1085,6 +1087,38 @@ class LiveSession:
                  max(0, len(everyone) - 1))
         await self._recapture(shared)
         return shared
+
+    def set_pad_kind(self, guest, kind):
+        """Give one guest's seat a different kind of controller.
+
+        Returns what the seat is now, which is not always what was asked for:
+        an unrecognised name falls back rather than raising. A guest choosing
+        their own pad is not a place to hand out errors -- the wrong pad is a
+        button prompt showing the wrong letter, and a refusal is somebody
+        unable to play.
+
+        The device is unplugged and remade rather than altered; see
+        pads.PadSet.set_kind for why that is the only honest way to do it.
+        """
+        if self.pads is None:
+            return padlib.DEFAULT_KIND
+        index = getattr(guest, "pad_index", -1)
+        if not (0 <= index < len(self.pads)):
+            return padlib.DEFAULT_KIND
+        want = padlib.kind_or_default(kind)
+        if self.pads.set_kind(index, want):
+            log.info("%s is now playing on a %s",
+                     getattr(guest, "label", "a guest"),
+                     padlib.KINDS[want]["label"])
+        return self.pads.kind_for(index)
+
+    def pad_kind_for(self, guest):
+        """What this guest's seat is, for telling their page on arrival."""
+        index = getattr(guest, "pad_index", -1)
+        if self.pads is None or not (0 <= index < len(self.pads)):
+            return padlib.kind_or_default(
+                getattr(self.cfg, "guest_pad_kind", None))
+        return self.pads.kind_for(index)
 
     async def _codec_after_leaving(self):
         """Go back up to the better codec when the reason to be down has left.

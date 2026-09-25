@@ -294,6 +294,18 @@ class Config:
     # over a *running game*, so the game still has the foreground and the rule
     # below sees nothing wrong.
     guest_guide_button: bool = False
+    # What a guest's controller says it is: "xbox360" or "ds4".
+    #
+    # Not cosmetic. A game reads the pad's identity and names its buttons from
+    # it, so a guest on a DualShock told to "press A" is being told to press a
+    # button that is not there. Sunshine offers the same choice for the same
+    # reason.
+    #
+    # This is the default for the session; a guest may choose differently for
+    # their own seat, from the page they are playing on. Anything unrecognised
+    # falls back to the Xbox pad rather than refusing, because the wrong pad is
+    # a button prompt showing the wrong letter and no pad is an evening lost.
+    guest_pad_kind: str = "xbox360"
     guest_input_needs_a_game: bool = True
     # Matched against the focused window's class and name, lowercased. A
     # blocklist, and deliberately: the failure an allowlist produces is a

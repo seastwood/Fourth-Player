@@ -452,6 +452,10 @@ function connect(hello) {
     const message = JSON.parse(event.data);
     switch (message.t) {
       case "joined":   return joined(message);
+      // The host answers with what the seat actually became, which is not
+      // always what was asked for: an unrecognised name falls back rather
+      // than failing, and the page must show the truth.
+      case "padkind":  return padKindFrom(null, message.kind);
       case "offer":    return await answer(message);
       case "ice":      return pc && pc.addIceCandidate({
                                 candidate: message.candidate,
@@ -732,6 +736,65 @@ function send(message) {
   }
 }
 
+/* What the game is told this controller is.
+ *
+ * The letters printed on a pad only mean anything if the game agrees about
+ * which pad it is: a game reads the controller's identity and names its
+ * buttons from it. Swapping A/B moves what is *sent*; this moves what the
+ * game thinks it is talking to, which is the cause rather than the symptom.
+ *
+ * The host names the kinds it can make, so this list is never a second copy
+ * to keep in step -- a host that learns a new pad offers it here with no edit
+ * to the page. Hidden entirely when the host offers no choice at all. */
+const PAD_KIND_NAMES = { xbox360: "Xbox pad", ds4: "DualShock 4" };
+let padKindNow = "";
+
+function padKindFrom(kinds, now) {
+  const row = el("pads-kind-row");
+  const box = el("pads-kind");
+  if (!row || !box) return;
+  // A null list means "only the value changed" -- the host's answer to a
+  // choice carries no list, and rebuilding from an empty one would hide the
+  // control the moment it was used.
+  const offered = Array.isArray(kinds) ? kinds.filter(Boolean) : null;
+  if (offered) {
+    // One choice is not a choice. A host that can only make one kind of pad
+    // should not show a dropdown that cannot be changed.
+    if (offered.length < 2) { row.hidden = true; return; }
+    row.hidden = false;
+  }
+  if (offered && box.dataset.built !== offered.join(",")) {
+    box.innerHTML = "";
+    for (const kind of offered) {
+      const option = document.createElement("option");
+      option.value = kind;
+      option.textContent = PAD_KIND_NAMES[kind] || kind;
+      box.appendChild(option);
+    }
+    box.dataset.built = offered.join(",");
+  }
+  if (now) {
+    padKindNow = now;
+    if (document.activeElement !== box) box.value = now;
+  }
+}
+
+function tellHostPadKind(kind) {
+  if (!kind || kind === padKindNow) return;
+  try {
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ t: "padkind", kind }));
+    }
+  } catch (_) { /* the host keeps the pad it already made */ }
+}
+
+function watchPadKind() {
+  const box = el("pads-kind");
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = "1";
+  box.addEventListener("change", () => tellHostPadKind(box.value));
+}
+
 function joined(message) {
   retries = 0;
   resumeRefused = 0;
@@ -746,6 +809,8 @@ function joined(message) {
   if (message.guest) guestToken = message.guest;
   try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
+  watchPadKind();
+  padKindFrom(message.pad_kinds, message.pad_kind);
   seatsFrom(message.pads);
   // Who they proved they were at the door, if they did. Before the hold is
   // painted below: whether their controller reaches a Steam game depends on

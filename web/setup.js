@@ -202,6 +202,17 @@ function fillControls(s) {
   // "" rather than "off" when nothing is locked, which is what the host says.
   set("set-lock", s.locked || "off");
   set("set-policy", (s.launch || {}).policy);
+  // The kinds the host offers, named by the host. A list written here would be
+  // a second copy to keep in step, and the labels are the host's words.
+  const pad = s.pad || {};
+  const padBox = el("set-padkind");
+  if (padBox && pad.kinds && pad.kinds.length
+      && padBox.dataset.built !== String(pad.kinds)) {
+    padBox.innerHTML = pad.kinds.map(
+      (k) => `<option value="${k}">${(pad.labels || {})[k] || k}</option>`).join("");
+    padBox.dataset.built = String(pad.kinds);
+  }
+  set("set-padkind", pad.kind);
 }
 
 /* The picture, which comes from this page's own endpoint rather than from
@@ -534,6 +545,7 @@ const ACTIONS = {
       ["url", el("set-url").value.trim(), (s) => s.public_url || ""],
       ["share", el("set-share").value === "on", (s) => !!s.share_pads],
       ["policy", el("set-policy").value, (s) => (s.launch || {}).policy],
+      ["padkind", el("set-padkind").value, (s) => (s.pad || {}).kind],
     ];
     const pin = el("set-pin").value.trim();
     // A blank box means "leave it alone", not "clear it" -- clearing is what
