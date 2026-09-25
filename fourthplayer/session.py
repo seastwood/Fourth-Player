@@ -1869,35 +1869,38 @@ class LiveSession:
         if self.pads is None:
             return
         taken = {g.pad_index for g in self.guests.values()}
-        for index, pad in list(self.pads.live()):
-            if index in taken:
-                continue
-            if self.pads.release(index):
-                # A controller that is made and unmade over and over is not a
-                # tidy-up, it is a fight: something keeps asking for a seat
-                # nobody is sitting on, and this keeps taking it away. Seen
-                # once a second for forty minutes with a game on the
-                # television, which is what RetroArch and Steam both read as a
-                # controller being plugged and unplugged, forever.
-                #
-                # Counted rather than silent, because every one of these
-                # entries looks reasonable on its own and the fault is only
-                # visible in the rate.
-                self._orphan_unplugs = getattr(self, "_orphan_unplugs", 0) + 1
-                if self._orphan_unplugs == self.ORPHAN_ALARM:
-                    # Naming who made it, because that is the whole question
-                    # and it was not answerable before: the fight stops the
-                    # moment anybody restarts the service to look at it, so
-                    # the evidence has to be collected while it is happening.
-                    log.warning(
-                        "controller %d has been unplugged %d times for having "
-                        "nobody on it, and something keeps making it again -- "
-                        "to a game this looks like a controller connecting and "
-                        "disconnecting over and over. Last made by: %s",
-                        index, self._orphan_unplugs,
-                        getattr(pad, "made_by", "") or "(unrecorded)")
-                log.info("unplugged %s: nobody is sitting on it",
-                         self.pads.name_for(index))
+        # After a grace period, not the instant somebody stands up. Unplugging
+        # is something the far side notices and does not always undo: an
+        # emulator binds a game's motion controls to a particular device, and
+        # a pad that goes away and comes back is a different one to it -- so
+        # the gyroscope dies and stays dead until the emulator is restarted.
+        # Leaving a stream and coming back is a thing people do constantly.
+        for index, pad in self.pads.unplug_idle(taken):
+            # A controller that is made and unmade over and over is not a
+            # tidy-up, it is a fight: something keeps asking for a seat
+            # nobody is sitting on, and this keeps taking it away. Seen
+            # once a second for forty minutes with a game on the
+            # television, which is what RetroArch and Steam both read as a
+            # controller being plugged and unplugged, forever.
+            #
+            # Counted rather than silent, because every one of these
+            # entries looks reasonable on its own and the fault is only
+            # visible in the rate.
+            self._orphan_unplugs = getattr(self, "_orphan_unplugs", 0) + 1
+            if self._orphan_unplugs == self.ORPHAN_ALARM:
+                # Naming who made it, because that is the whole question
+                # and it was not answerable before: the fight stops the
+                # moment anybody restarts the service to look at it, so
+                # the evidence has to be collected while it is happening.
+                log.warning(
+                    "controller %d has been unplugged %d times for having "
+                    "nobody on it, and something keeps making it again -- "
+                    "to a game this looks like a controller connecting and "
+                    "disconnecting over and over. Last made by: %s",
+                    index, self._orphan_unplugs,
+                    getattr(pad, "made_by", "") or "(unrecorded)")
+            log.info("unplugged %s: nobody is sitting on it",
+                     self.pads.name_for(index))
 
     def reap_now(self, seconds=5.0):
         """Free slots whose connection has been dead for a few seconds.

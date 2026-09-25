@@ -138,6 +138,25 @@ def kind_or_default(kind):
 # an ordinary network hiccup at the 8 ms send interval.
 DEADMAN_SECONDS = 0.25
 
+# How long a pad nobody is sitting on is kept before it is unplugged.
+#
+# Not a tidy-up delay: unplugging is something the machine on the other side
+# *notices*, and some of what it notices it does not undo. An emulator binds
+# a game's motion controls to a particular device, and a DualShock that goes
+# away and comes back is a different device to it -- so the gyroscope stops
+# working and stays stopped until the emulator is restarted. Buttons survive
+# because they are re-matched by name; motion is not.
+#
+# Reported exactly that way: leave a stream, come back, and the gyro is dead
+# in Suyu until Suyu is restarted.
+#
+# So a seat somebody has just left keeps its device for a while. Long enough
+# to cover leaving and coming back -- a dropped connection, a reload, walking
+# out of the room -- and short enough that a pad nobody returns to still stops
+# taking a player port before it matters. The buttons are let go of
+# immediately either way; it is only the device that lingers.
+LINGER_SECONDS = 120
+
 _BUTTON_MAP = [
     (P.BTN_A, e.BTN_A), (P.BTN_B, e.BTN_B), (P.BTN_X, e.BTN_X), (P.BTN_Y, e.BTN_Y),
     (P.BTN_LB, e.BTN_TL), (P.BTN_RB, e.BTN_TR),
@@ -501,6 +520,10 @@ class PadSet:
         # different pads -- and on Windows the choice changes which ViGEm
         # target is opened, so it has to be settled before the device is made.
         self.kinds = [self._kind] * count
+        # When each seat was first seen with nobody on it, so a device can be
+        # kept for a moment rather than unplugged the instant somebody stands
+        # up. See LINGER_SECONDS.
+        self._empty_at = {}
 
     def __len__(self):
         return len(self.pads)
@@ -619,6 +642,32 @@ class PadSet:
             pass
         pad.close()
         return True
+
+    def unplug_idle(self, taken, after=LINGER_SECONDS, now=None):
+        """Unplug pads for seats nobody has been on for `after` seconds.
+
+        `taken` is the set of seat indices somebody is sitting on. Returns the
+        (index, pad) pairs actually unplugged, so the caller can say so.
+
+        A seat filled again inside the grace period keeps the very same
+        device, which is the whole point: to an emulator, a controller that
+        goes away and comes back is a different controller, and the motion
+        binding does not survive it.
+        """
+        stamp = self._now() if now is None else now
+        gone = []
+        for index, _pad in list(self.live()):
+            if index in taken:
+                self._empty_at.pop(index, None)
+                continue
+            since = self._empty_at.setdefault(index, stamp)
+            if stamp - since < after:
+                continue
+            pad = self.pads[index]
+            if self.release(index):
+                self._empty_at.pop(index, None)
+                gone.append((index, pad))
+        return gone
 
     def sweep(self, timeout=DEADMAN_SECONDS):
         """Release any pad that has gone quiet. Returns the ones it opened.
