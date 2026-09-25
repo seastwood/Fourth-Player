@@ -216,6 +216,38 @@ check("paintStarting = false;" in stop,
       "and clears the in-progress flag, or the next connection's one chance "
       "to attach a transform is refused as a start already under way")
 
+# The transform goes on in the same turn the worker is made, not when the
+# worker answers.
+#
+# It used to wait for the worker's "ready" message -- a whole script load and
+# run away, tens to hundreds of milliseconds on a phone. The rule it has to
+# beat is measured in frames: a transform attached to a receiver that has
+# already carried one is handed nothing, for ever.
+#
+# So whether it worked depended on something the page does not control. On a
+# fresh join the host has not started sending, and the worker got there first.
+# On a renewal the host is already streaming and the first packet arrives at
+# once, so the receiver had begun before the worker said a word. That is
+# "media track works when I join and never again", and the log said "0 handed
+# over by the transform, 0 fed to the decoder, 0 came out" every time.
+made = paint[paint.index('worker = new Worker("/static/frames.js");'):]
+check("new RTCRtpScriptTransform(it" in made[:2200],
+      "the transform is attached where the worker is created")
+check(made.index("new RTCRtpScriptTransform(it")
+      < made.index("worker.onmessage"),
+      "before any message from it is even listened for, let alone answered")
+ready = paint[paint.index("if (m.ready) {"):]
+check("new RTCRtpScriptTransform" not in ready[:900],
+      "and not on the ready message, which is a script load too late")
+check("it.postMessage({ start:" in ready[:900],
+      "only the start message waits for ready, and frames arriving before "
+      "there is a decoder are dropped by take()")
+# Safe because a worker runs its own script before any event reaches it.
+frames = open(os.path.join(REPO, "web", "frames.js"), encoding="utf-8").read()
+check("\nself.onrtctransform" in frames,
+      "frames.js installs its handler at the top level, so it is in place "
+      "before the first frame is dispatched to it")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))

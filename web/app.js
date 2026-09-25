@@ -3113,6 +3113,24 @@ function isPictureDoubleTap(x, y, at, kind, last) {
  * picture jumped at the wrong moment. Zooming out was reliable and zooming in
  * was finicky, because the gesture that zooms out starts from a picture
  * somebody is already holding still and the one that zooms in does not. */
+/* Why a tap did not become half of a double tap.
+ *
+ * Said rarely and only when something was actually refused, because the
+ * alternative is another evening of guessing. Every cheap explanation for
+ * "zooming out is reliable and zooming in is finicky" has been checked and
+ * ruled out -- the thresholds, iOS's compatibility mouse event, the drag
+ * slop, pointercancel, touch-action on the picture, pointer-events on the
+ * canvas over it, and the zoom clamp. What is left needs the phone to say
+ * which guard it hit, rather than a seventh theory about which one it
+ * probably is. */
+let tapWhyAt = 0;
+function tapRefused(why) {
+  const now = Date.now();
+  if (now - tapWhyAt < 3000) return;
+  tapWhyAt = now;
+  report("a tap on the picture was not counted: " + why);
+}
+
 function pictureTapEnded(event) {
   // Every finger *but this one*. This listener is registered before the one
   // that forgets the pointer -- letGoOfPicture, much further down -- so at
@@ -3121,8 +3139,15 @@ function pictureTapEnded(event) {
   // returned, which is why nothing zoomed in. Counting the others is right
   // whichever order the listeners end up in.
   const others = held.size - (held.has(event.pointerId) ? 1 : 0);
-  if (others > 0) return;               // still a finger down somewhere
-  if (dragged) { lastPictureTap = null; return; }
+  if (others > 0) {                     // still a finger down somewhere
+    tapRefused(others + " other finger(s) still down");
+    return;
+  }
+  if (dragged) {
+    tapRefused("it moved, so it was a drag");
+    lastPictureTap = null;
+    return;
+  }
   // Driving the machine: a double tap here is a double *click* being sent,
   // and swallowing it would take away the gesture that opens everything on a
   // desktop.
@@ -3153,7 +3178,25 @@ function pictureTapEnded(event) {
    * aimed. It did not. A stale record is still replaced: somebody who put the
    * phone down and picked up a mouse is not mid-gesture. */
   if (lastPictureTap && (lastPictureTap.kind || "") !== kind
-      && at - lastPictureTap.at <= TAP_ZOOM_MS) return;
+      && at - lastPictureTap.at <= TAP_ZOOM_MS) {
+    tapRefused("a " + kind + " event arrived while a " + lastPictureTap.kind
+               + " tap was still live");
+    return;
+  }
+  // Why this one could not pair with the one before it, which is the question
+  // when a double tap does nothing.
+  if (lastPictureTap) {
+    const gap = at - lastPictureTap.at;
+    const far = Math.round(Math.hypot(x - lastPictureTap.x,
+                                      y - lastPictureTap.y));
+    if (gap < TAP_ZOOM_MIN_MS) {
+      tapRefused("only " + gap + "ms after the last, read as one press twice");
+    } else if (gap > TAP_ZOOM_MS) {
+      tapRefused(gap + "ms after the last, too slow to be one gesture");
+    } else if (far > TAP_ZOOM_SLOP) {
+      tapRefused(far + " pixels from the last, too far to be one gesture");
+    }
+  }
   lastPictureTap = { x, y, at, kind };
 }
 
@@ -4049,7 +4092,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25g";
+const CLIENT_BUILD = "2026-09-25h";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte

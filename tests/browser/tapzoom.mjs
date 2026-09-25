@@ -99,7 +99,7 @@ check(/video\.addEventListener\("pointerup", pictureTapEnded\);/.test(src),
 check(/if \(cursorDriving\(\)\) \{ lastPictureTap = null; return; \}/
         .test(handler),
       "nothing happens while the keyboard or pointer is live");
-check(/if \(dragged\) \{ lastPictureTap = null; return; \}/.test(handler),
+check(/if \(dragged\) \{[\s\S]{0,160}lastPictureTap = null;/.test(handler),
       "and a drag is not a tap -- pointerup arrives after the move handlers, "
       + "so `dragged` is settled by the time this reads it");
 check(/const others = held\.size - \(held\.has\(event\.pointerId\) \? 1 : 0\);/
@@ -108,7 +108,7 @@ check(/const others = held\.size - \(held\.has\(event\.pointerId\) \? 1 : 0\);/
       + "one that forgets the pointer, so held still contains the finger that "
       + "is lifting -- asking for held.size alone answered 'one' for every "
       + "single tap and returned");
-check(/if \(others > 0\) return;/.test(handler),
+check(/if \(others > 0\) \{/.test(handler),
       "so letting go of one of two fingers is still not a tap");
 check(/zoom > ZOOM_MIN\) zoomAbout\(ZOOM_MIN/.test(handler),
       "zoomed in, a double tap goes all the way back out");
@@ -132,7 +132,7 @@ console.log("\nand a compatibility mouse event does not break the pair");
 check(/if \(lastPictureTap && \(lastPictureTap\.kind \|\| ""\) !== kind/
         .test(handler),
       "an event of another kind does not overwrite a live record");
-check(/&& at - lastPictureTap\.at <= TAP_ZOOM_MS\) return;/.test(handler),
+check(/&& at - lastPictureTap\.at <= TAP_ZOOM_MS\) \{/.test(handler),
       "though a stale one is replaced -- a phone put down and a mouse picked "
       + "up is not one gesture");
 
@@ -151,6 +151,22 @@ check(/panMoved = 0;/.test(src.slice(src.indexOf("dragged = false;\n    panMoved
 const slop = Number((/const PAN_SLOP = (\d+);/.exec(src) || [])[1]);
 check(slop > 0 && slop <= 20,
       "and it forgives a thumb, not a nudge: " + slop + " pixels");
+
+console.log("\nand it says which guard refused a tap");
+/* Because every cheap explanation for "zooming out is reliable and zooming in
+ * is finicky" has been checked and ruled out: the thresholds, iOS's
+ * compatibility mouse event, the drag slop, pointercancel, touch-action on
+ * the picture, pointer-events on the canvas over it, and the zoom clamp. What
+ * is left needs the phone to say which guard it hit. */
+check(/function tapRefused\(why\)/.test(src),
+      "there is one place that says so");
+check(/if \(now - tapWhyAt < 3000\) return;/.test(src),
+      "rarely, so a gesture cannot flood the host's log");
+for (const why of ["other finger", "it moved, so it was a drag",
+                   "read as one press twice", "too slow to be one gesture",
+                   "too far to be one gesture"]) {
+  check(src.includes(why), "and names it: " + why);
+}
 
 console.log("\nand a tap the system took away still counts");
 /* iOS hands a pointer to its own gesture recogniser and sends pointercancel

@@ -743,6 +743,40 @@ function makePainter(canvas, say) {
       }
       worker = new Worker("/static/frames.js");
       const it = worker;
+      /* The transform goes on NOW, in the same turn the worker is made.
+       *
+       * It used to wait for the worker's "ready" message, which is a whole
+       * script load and run away -- tens to hundreds of milliseconds on a
+       * phone. The rule it had to beat is measured in frames, not
+       * milliseconds: a transform attached to a receiver that has already
+       * carried one is handed nothing, for ever.
+       *
+       * Whether that race is won depended on something nothing here
+       * controls. On a fresh join the host has not started sending yet, so
+       * the worker got there first and drawing worked. On a renewal the host
+       * is already streaming and the very first packet arrives at once, so
+       * the receiver had begun long before the worker said a word -- and
+       * media track worked when you joined and never again, which is exactly
+       * how it was reported. The log said "0 handed over by the transform,
+       * 0 fed to the decoder, 0 came out" every single time.
+       *
+       * Attaching before the worker has run is safe: a worker's own script
+       * runs before any event is delivered to it, so the onrtctransform
+       * handler frames.js installs at the top level is in place before the
+       * first frame is dispatched. Messages posted to it queue in the same
+       * way, which is why the start message below can still follow later. */
+      if (viaTrack) {
+        try {
+          viaTrack.transform = new RTCRtpScriptTransform(it, { kind: "video" });
+          say("the media track's frames were routed to the decoder");
+        } catch (err) {
+          say("this browser would not take an encoded transform: "
+              + ((err && err.message) || "no reason given"));
+          this.stop();
+          if (onGone) onGone();
+          return false;
+        }
+      }
       worker.onerror = (err) => {
         say("the frame worker would not load: "
             + ((err && err.message) || "no reason given"));
@@ -752,27 +786,10 @@ function makePainter(canvas, say) {
       worker.onmessage = (event) => {
         const m = event.data || {};
         if (m.ready) {
-          // The transform goes on here, at the first instant the worker can
-          // receive one -- not after the decoder is built.
-          //
-          // Attached any later it delivers nothing at all, and "later" is
-          // measured in frames, not seconds: the receiver had begun. Waiting
-          // for the decoder cost exactly that, and read as a transform that
-          // said it was attached and then handed over nothing for ever. The
-          // frames that arrive before there is a decoder are dropped by
-          // take(), which is the cheaper of the two mistakes.
-          if (viaTrack) {
-            try {
-              viaTrack.transform = new RTCRtpScriptTransform(it, { kind: "video" });
-              say("the media track's frames were routed to the decoder");
-            } catch (err) {
-              say("this browser would not take an encoded transform: "
-                  + ((err && err.message) || "no reason given"));
-              this.stop();
-              if (onGone) onGone();
-              return;
-            }
-          }
+          // The transform is already on -- see where the worker is made. Only
+          // the start message waits for "ready", and the frames that arrive
+          // before there is a decoder are dropped by take(), which is much
+          // the cheaper of the two mistakes.
           it.postMessage({ start: { canvas: surface, codec,
                                     smoothing: smoothingWanted(),
                                     flat: paintFlat } },
