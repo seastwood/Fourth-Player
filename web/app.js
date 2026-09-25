@@ -4147,7 +4147,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25j";
+const CLIENT_BUILD = "2026-09-25k";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -10881,9 +10881,21 @@ async function startPainting() {
   fitPainted();
   painter = makePainter(canvas, report);
   if (painter.useFlat) painter.useFlat(paintMethod === "flat");
+  const takenOff = paintMethod === "rtp" ? videoReceiver() : null;
   const began = paintMethod === "rtp"
-    ? painter.startFromTrack(videoReceiver(), codec)
+    ? painter.startFromTrack(takenOff, codec)
     : painter.start(pictureChannel, codec);
+  // What the receiver was actually doing, a moment after the transform went
+  // on and again once it has had time to deliver.
+  //
+  // Every explanation for "0 handed over by the transform" so far has been
+  // reasoned from the outside and every one of them has been wrong. The rule
+  // is that a transform only delivers on a receiver which has not yet carried
+  // a frame -- so the question is simply whether this one had, and nothing
+  // has ever measured it. Said twice because the interesting case is a
+  // receiver that is plainly receiving RTP while the transform sees none of
+  // it, which one reading cannot show.
+  if (paintMethod === "rtp") tellAboutTheReceiver(takenOff);
   if (!began) {
     giveTheVideoBack();
     painter = null;
@@ -10987,6 +10999,43 @@ async function startPainting() {
   // nothing is feeding its decoder to notice. With keyframes sent only on
   // request this would otherwise be a black picture for a long time.
   askHostForKeyframe();
+}
+
+/* What the receiver the transform went on to is doing, now and shortly after.
+ *
+ * Reported rather than guessed. The rule an encoded transform lives by is
+ * that it must be attached before its receiver has carried a frame, and every
+ * theory about why this one delivers nothing has been argued from the log
+ * instead of measured at the receiver itself. `framesReceived` at the moment
+ * of attaching answers it outright: zero means the attach was in time and the
+ * fault is elsewhere; anything else means it was late. */
+async function tellAboutTheReceiver(receiver) {
+  const look = async (when) => {
+    if (!receiver) { report("receiver at " + when + ": there was none"); return; }
+    const track = receiver.track;
+    const bits = ["receiver at " + when + ":",
+                  "track " + (track ? track.readyState : "none")
+                  + (track && track.muted ? " (muted)" : ""),
+                  "transform " + (receiver.transform ? "on" : "OFF")];
+    try {
+      const stats = await pc.getStats(track || undefined);
+      stats.forEach((r) => {
+        if (r.type !== "inbound-rtp" || r.kind !== "video") return;
+        bits.push("frames received " + (r.framesReceived === undefined
+                                        ? "not counted" : r.framesReceived));
+        bits.push("bytes " + (r.bytesReceived || 0));
+        bits.push("packets " + (r.packetsReceived || 0));
+        if (r.framesDecoded !== undefined) {
+          bits.push("the browser decoded " + r.framesDecoded);
+        }
+      });
+    } catch (err) {
+      bits.push("no stats (" + ((err && err.message) || "no reason") + ")");
+    }
+    report(bits.join(" "));
+  };
+  await look("the moment it was attached");
+  setTimeout(() => { look("three seconds later"); }, 3000);
 }
 
 /* Say whether this page is decoding the picture itself.
