@@ -16,8 +16,16 @@ const paint = require("../../web/paint.js");
 const paintFile = readFileSync(new URL("../../web/paint.js", import.meta.url), "utf8");
 const css2 = readFileSync(new URL("../../web/style.css", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../../web/frames.js", import.meta.url), "utf8");
-const stopBody = app.slice(app.indexOf("function stopPainting"),
-                           app.indexOf("function startPainting"));
+/* stopPainting's own body, and only that.
+ *
+ * This used to run to "function startPainting", which is a long way further
+ * down and swallowed whatever was declared in between -- so a check that reads
+ * "stopPainting does not do X" quietly became "nothing between these two
+ * functions does X", and failed when something else was added there. A
+ * top-level `function` at column zero is the real end of it. */
+const stopAt = app.indexOf("function stopPainting");
+const stopBody = app.slice(stopAt,
+                           stopAt + app.slice(stopAt + 1).indexOf("\nfunction ") + 1);
 const stopBodyFor = (what) => stopBody.includes(what);
 
 let bad = 0;
