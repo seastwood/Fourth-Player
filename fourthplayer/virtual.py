@@ -24,8 +24,11 @@ device happily and XInput reports four, so a Windows host can seat four guests
 at most -- and every controller physically plugged into it takes one of the
 same four. Measured; see tools/winspike/README.md. Linux has no such ceiling.
 """
+import logging
 import sys
 import time
+
+log = logging.getLogger("fourthplayer.virtual")
 
 try:
     # Linux, and the only case where these are the real thing.
@@ -435,6 +438,24 @@ except ImportError:
                                + int((now - self._motion_at) / self.TICK_SECONDS)) & 0xFFFF
             self._motion_at = now
             report.Report.wTimestamp = self._ticks
+            # Said once, with the bytes, because everything above this point
+            # can be right and the report still be wrong -- and from the game's
+            # side a gyroscope that does nothing looks the same either way.
+            # The offsets are the answer to "is the host sending it, or is the
+            # game ignoring it", which is two different repairs.
+            if not getattr(self, "_said_report", False):
+                self._said_report = True
+                try:
+                    raw = bytes(bytearray(report.ReportBuffer)[:26])
+                    log.info("DS4 extended report: gyro %d %d %d accel %d %d %d"
+                             " stamp %d; first 26 bytes %s",
+                             report.Report.wGyroX, report.Report.wGyroY,
+                             report.Report.wGyroZ, report.Report.wAccelX,
+                             report.Report.wAccelY, report.Report.wAccelZ,
+                             report.Report.wTimestamp, raw.hex(" "))
+                except Exception:
+                    log.info("DS4 extended report built, but its bytes could "
+                             "not be read back", exc_info=True)
             self._pad.update_extended_report(report)
 
         def syn(self):
