@@ -522,7 +522,7 @@ except ImportError:
                 self._ticks = (self._ticks
                                + int((now - self._motion_at) / self.TICK_SECONDS)) & 0xFFFF
             self._motion_at = now
-            gyro, accel = self._motion
+            gyro, accel = self._motion or ([0, 0, 0], [0, 0, 0])
             packed = self.REPORT.pack(
                 short.bThumbLX, short.bThumbLY, short.bThumbRX, short.bThumbRY,
                 short.wButtons, short.bSpecial,
@@ -571,7 +571,23 @@ except ImportError:
                 self._impl.syn()
                 return
             if self._dirty:
-                if self._motion is not None:
+                if self._ds4:
+                    # Always the long report on a DualShock, even before any
+                    # motion has arrived.
+                    #
+                    # A real DualShock reports its gyroscope in every report it
+                    # sends. Ours used to send the short one -- which has no
+                    # motion fields at all -- until a guest turned motion on,
+                    # so anything enumerating the pad in that window could
+                    # reasonably decide it had no gyroscope, and that decision
+                    # sticks for as long as the game is running. Reported as
+                    # having to turn motion on before joining, or it would not
+                    # work at all that session.
+                    #
+                    # Zeros until the first sample. That is a moment, and a
+                    # pad that reads as perfectly still is a truer description
+                    # of one nobody is tilting than a pad with no sensor at
+                    # all.
                     self._send_extended()
                 else:
                     self._pad.update()

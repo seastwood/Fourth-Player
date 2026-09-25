@@ -584,23 +584,42 @@ check(pad.stamps[-1] != first,
       "the timestamp moved between two reports: %r then %r"
       % (first, pad.stamps[-1]))
 
-print("\n-- a pad with no motion still sends the short report --")
+print("\n-- a DualShock always reports a gyroscope, even before it is used --")
+# A real DualShock puts motion in every report it sends. Ours used to send the
+# *short* report -- which has no motion fields at all -- until a guest turned
+# motion on. Anything enumerating the pad in that window could reasonably
+# decide it had no gyroscope, and that decision sticks for as long as the game
+# is running: motion had to be switched on before joining or it would not work
+# at all that session.
 ui, pad = a_pad("ds4")
+ui.write(e.EV_KEY, e.BTN_A, 1)
+ui.syn()
+check(pad.extended is not None,
+      "the long report goes out with no motion to put in it")
+check(pad.extended == ([0, 0, 0], [0, 0, 0]),
+      "carrying zeros: a pad that reads as perfectly still is a truer "
+      "description of one nobody is tilting than a pad with no sensor at all. "
+      "Got %r" % (pad.extended,))
+check(pad.buttonword != 0, "with the button that was pressed still in it")
+
+print("\n-- an Xbox pad still sends the short one --")
+# There is no motion in an XUSB report and nothing to advertise.
+ui, pad = a_pad("xbox360")
 ui.write(e.EV_KEY, e.BTN_A, 1)
 ui.syn()
 check(pad.updates == 1 and pad.extended is None,
-      "update(), not update_extended_report(): a guest sending no motion is "
-      "unchanged by any of this")
+      "update(), not update_extended_report()")
 
 print("\n-- and nothing reaches the game until syn --")
 ui, pad = a_pad("ds4")
+reports = lambda: pad.updates + len(pad.stamps)
 ui.write(e.EV_KEY, e.BTN_A, 1)
 ui.write(e.EV_KEY, e.BTN_B, 1)
-check(pad.updates == 0, "two buttons in one frame send nothing yet")
+check(reports() == 0, "two buttons in one frame send nothing yet")
 ui.syn()
-check(pad.updates == 1,
+check(reports() == 1,
       "and one report when the frame ends, not one per button: %d"
-      % pad.updates)
+      % reports())
 
 print()
 if fails:

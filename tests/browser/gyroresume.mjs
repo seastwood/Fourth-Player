@@ -103,5 +103,24 @@ await p.resumeGyro();
 check(p.on() === false && p.state.listening === false,
       "a guest who never turned it on is not asked");
 
+/* And the reason it still had to be switched on by hand.
+ *
+ * Wiring the control and resuming motion were one function with a single
+ * early return, so the whole of it -- including the resume -- ran only on the
+ * first join a page ever made. Rejoining left motion off and the switch had
+ * to be found and tapped again, every time. */
+console.log("\nrejoining resumes it, not just the first join");
+const app = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
+const watch = app.slice(app.indexOf("function watchGyro()"),
+                        app.indexOf("function watchPadKind()"));
+check(/dataset\.wired\) \{[\s\S]{0,200}?resumeGyro\(\)/.test(watch),
+      "an already-wired control still resumes rather than returning early");
+check((watch.match(/resumeGyro\(\)/g) || []).length >= 2,
+      "on both paths through it -- the first join and every one after");
+check(watch.indexOf("dataset.wired = \"1\"")
+      > watch.indexOf("resumeGyro()"),
+      "and the early path comes first, so wiring is what happens once rather "
+      + "than resuming");
+
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

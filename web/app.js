@@ -850,7 +850,18 @@ function paintGyro() {
 
 function watchGyro() {
   const box = el("pads-gyro");
-  if (!box || box.dataset.wired) return;
+  if (!box) return;
+  // Wiring happens once; resuming happens on every join.
+  //
+  // These were one function with a single early return, so the whole of it --
+  // including the part that brings motion back -- ran only on the first join
+  // a page ever made. Rejoining therefore left motion off, and the switch had
+  // to be found and tapped again every time, which is what was reported.
+  if (box.dataset.wired) {
+    paintGyro();
+    resumeGyro();
+    return;
+  }
   box.dataset.wired = "1";
   box.addEventListener("change", async () => {
     // The handler is the gesture iOS requires, and setGyro answers with what
