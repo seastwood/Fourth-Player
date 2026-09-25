@@ -688,9 +688,20 @@ console.log("\nnothing arriving is not a decoder that cannot decode");
 // seconds.
 check(paintFile.includes("starving()"),
       "the painter can say that nothing has arrived at all");
-check(paintFile.includes("return Boolean(last && !last.handed);"),
+check(paintFile.includes("return !last || !last.handed;"),
       "which is what nothing handed over means, and says nothing whatever "
       + "about the decoder");
+// It used to read `Boolean(last && !last.handed)`, so a painter with no
+// counters at all -- `last` is null until the worker's first reply -- answered
+// "not starving", and the watchdog took that as a decoder worth doubting.
+// That is precisely the state a restart is in when it does not take: an
+// encoded transform only delivers on a receiver which has not carried a
+// frame, the fresh connection loses that race, and the report reads "0 handed
+// over by the transform, 0 fed, 0 came out, canvas none". Seen in the host's
+// log after two runs that painted 323 and 309 frames, so the drawing plainly
+// worked and only the restart did not.
+check(!paintFile.includes("Boolean(last && !last.handed)"),
+      "and having been handed nothing at all is not the opposite of that");
 check(app.includes("if (painter.starving()) {"),
       "and the watchdog waits rather than blaming it");
 check(app.indexOf("if (painter.starving()) {")
