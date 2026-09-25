@@ -54,10 +54,25 @@ class Stage:
     sending_width, sending_height = 1280, 720
 
 
-def session(**over):
+class Guest:
+    """A guest, as set_stream reads one: what it can decode, and whether it is
+    actually being sent a picture."""
+
+    def __init__(self, codecs=(), watching=True):
+        self.codecs = list(codecs)
+        self.peer = object() if watching else None
+
+
+def session(guests=(), **over):
     s = LiveSession.__new__(LiveSession)
     s.cfg = dataclasses.replace(Config(), **over)
     s.stage = Stage()
+    # Not optional. "auto" makes set_stream work the codec out against the
+    # guests who are watching, so a session built without them is not a
+    # session this function can be asked anything about -- it raised
+    # AttributeError rather than answering, which is the honest failure and is
+    # why this is here rather than a getattr default in the code.
+    s.guests = {i: g for i, g in enumerate(guests)}
     s.recaptured = []
     s.told = []
 
@@ -72,7 +87,28 @@ def ask(s, **settings):
     return LOOP.run_until_complete(s.set_stream(settings))
 
 
-print("it is a capability, and one that does not ask for a code")
+print("choosing automatic works the codec out, rather than keeping this one")
+# The fault that made this stub incomplete in the first place: "auto" used to
+# resolve to whatever the stage was already running, so a session pinned to
+# H.264 stayed on it however capable everybody watching was.
+s = session(guests=[Guest(["h265", "h264"])], codec="h264")
+out = ask(s, codec="auto")
+check(s.recaptured == ["h265"],
+      "a guest who can take h265 moves the session to it: %r" % (s.recaptured,))
+
+s = session(guests=[Guest(["h265", "h264"]), Guest(["h264"])], codec="h265")
+out = ask(s, codec="auto")
+check(s.recaptured == ["h264"],
+      "one guest who can only take h264 settles it for the room: %r"
+      % (s.recaptured,))
+
+s = session(guests=[Guest(["h265", "h264"], watching=False)], codec="h264")
+out = ask(s, codec="auto")
+check(s.recaptured == ["h264"],
+      "a guest with no picture yet is not somebody to choose for, so it stays "
+      "where it was: %r" % (s.recaptured,))
+
+print("\nit is a capability, and one that does not ask for a code")
 check("stream" in accounts.CAPABILITIES, "stream is a capability")
 check("stream" not in accounts.NEEDS_CODE,
       "and is not one of the ones that asks for six digits every time")
