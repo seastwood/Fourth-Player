@@ -525,6 +525,23 @@
     <p class="footnote" id="stick-click-note" hidden>Double-tap the middle of
        a stick to press it in (L3 or R3). It stays pressed while your thumb is
        down, so you can keep steering.</p>
+    <!-- The switch is the gesture. iOS will only take the asking for motion
+         from inside a tap, so this control is what asks -- a page that asked
+         on load would be refused for ever with a switch that looked fine. -->
+    <p class="browse-note pads-feel" id="gyro-row" hidden>
+      <label class="switch" for="pads-gyro">
+        <input id="pads-gyro" type="checkbox" switch>
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-knob"></span>
+        </span>
+        <span class="switch-name">Use this device's motion</span>
+      </label>
+    </p>
+    <p class="footnote" id="gyro-note" hidden>Sends this device's gyroscope to
+       the game as a DualShock's. Turn the screen and the axes follow it, so
+       tilting away is the same movement in portrait or landscape. Needs the
+       controller set to DualShock 4 above — an Xbox pad has nowhere to put
+       it.</p>
     <p class="browse-note pads-feel" id="pads-kind-row" hidden>
       <span class="switch-name">Send my pad as</span>
       <select id="pads-kind" class="chip"

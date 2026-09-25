@@ -599,7 +599,8 @@ class LiveSession:
         self.pads = padlib.PadSet(self.slots,
                                   guide=self.cfg.guest_guide_button,
                                   kind=getattr(self.cfg, "guest_pad_kind",
-                                               padlib.DEFAULT_KIND))
+                                               padlib.DEFAULT_KIND),
+                                  motion=getattr(self.cfg, "guest_motion", True))
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
         # The same answer the pads were built with, or RetroArch binds by

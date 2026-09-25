@@ -1291,6 +1291,23 @@ class Server:
                         log.warning("could not remember the slot count: %s", exc)
                     log.info("sessions will open with %d slots", self.cfg.slots)
                 return self._status()
+            if command == "motion":
+                if request.get("set") is not None:
+                    want = request["set"]
+                    # Read the way the other switches here are: bool("off") is
+                    # True, and a string from a page therefore turned
+                    # everything on once already.
+                    if isinstance(want, str):
+                        want = want.strip().lower() in ("1", "on", "yes", "true")
+                    self.cfg.guest_motion = bool(want)
+                    if self.session is not None and self.session.pads is not None:
+                        self.session.pads.allow_motion(bool(want))
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the motion setting: %s",
+                                    exc)
+                return self._status()
             if command == "padkind":
                 if request.get("set"):
                     wanted = padlib.kind_or_default(request["set"])
@@ -1460,6 +1477,7 @@ class Server:
                     "slots": self.cfg.slots,
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None},
+                    "motion": bool(getattr(self.cfg, "guest_motion", True)),
                     "pad": {"kind": padlib.kind_or_default(
                                 getattr(self.cfg, "guest_pad_kind", None)),
                             "kinds": sorted(padlib.KINDS),

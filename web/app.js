@@ -788,6 +788,41 @@ function tellHostPadKind(kind) {
   } catch (_) { /* the host keeps the pad it already made */ }
 }
 
+/* The motion switch, shown only where there is motion to read.
+ *
+ * Hidden on a desktop rather than shown and refused: a browser with no
+ * DeviceMotionEvent has nothing behind the switch, and an inert control is a
+ * question somebody spends time on. */
+function paintGyro() {
+  const row = el("gyro-row"), note = el("gyro-note"), box = el("pads-gyro");
+  const can = gyroPossible();
+  if (row) row.hidden = !can;
+  if (note) note.hidden = !can;
+  if (box) box.checked = gyroOn;
+}
+
+function watchGyro() {
+  const box = el("pads-gyro");
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = "1";
+  box.addEventListener("change", async () => {
+    // The handler is the gesture iOS requires, and setGyro answers with what
+    // it actually became -- a refusal is permanent for the page, and a switch
+    // left on would be a lie.
+    const became = await setGyro(box.checked);
+    box.checked = became;
+  });
+  // What was chosen last time. Not turned on here: the permission cannot be
+  // asked for outside a tap, so a remembered "on" only takes effect once it
+  // is granted -- which on iOS means the first tap after a reload. Where no
+  // asking is needed, starting it now is right.
+  if (gyroWanted() && gyroPossible() && !gyroNeedsAsking()) {
+    gyroOn = true;
+    startGyro();
+  }
+  paintGyro();
+}
+
 function watchPadKind() {
   const box = el("pads-kind");
   if (!box || box.dataset.wired) return;
@@ -810,6 +845,7 @@ function joined(message) {
   try { if (message.guest) localStorage.setItem(credKey(), message.guest); } catch (_) {}
   launchPolicy(message.launch);
   watchPadKind();
+  watchGyro();
   padKindFrom(message.pad_kinds, message.pad_kind);
   seatsFrom(message.pads);
   // Who they proved they were at the door, if they did. Before the hold is
@@ -4655,13 +4691,150 @@ function notePress(latency, backlog) {
   buffered = 0;
 }
 
-function changed(buttons, axes) {
+/* How much motion counts as having moved.
+ *
+ * A gyroscope at rest is not still: it reads a few counts of noise for ever,
+ * and the accelerometer reads gravity. Treating any difference as a change
+ * would make every guest with motion on send at the full rate while their
+ * phone sat on a table -- and treating none of it as a change would mean a
+ * slow, smooth turn never got sent at all. A few sixteenths of a degree per
+ * second is below what a hand does and above what a still phone reports. */
+const MOTION_EPSILON = 24;
+
+function changed(buttons, axes, motion) {
   if (!lastSent) return true;
   if (lastSent.buttons !== buttons) return true;
   for (let i = 0; i < axes.length; i++) {
     if (Math.abs(axes[i] - lastSent.axes[i]) > AXIS_EPSILON) return true;
   }
+  // Motion appearing or going away is a change in itself: a host has to be
+  // told that a guest stopped sending it, or it keeps the last attitude.
+  const was = lastSent.motion || null;
+  if (Boolean(was) !== Boolean(motion)) return true;
+  if (motion && was) {
+    for (let i = 0; i < motion.length; i++) {
+      if (Math.abs(motion[i] - was[i]) > MOTION_EPSILON) return true;
+    }
+  }
   return false;
+}
+
+/* ---- motion from the device itself ----
+ *
+ * A phone has a gyroscope and a controller made of glass cannot use it for
+ * anything, so it goes to the host as a DualShock's motion and a game reads it
+ * as one. Sunshine and every handheld do the same; this is the only sensor on
+ * the guest's side that the host cannot fake.
+ *
+ * Two things make this less simple than adding a listener.
+ *
+ * iOS will not give motion to a page that has not asked, and will only take
+ * the asking from inside a user gesture -- a tap, not a load. So the switch
+ * itself is the gesture, and turning it on is what asks. A page that asked at
+ * startup would be refused for ever, silently, with a switch that appeared to
+ * work.
+ *
+ * And motion is sampled by the browser on its own schedule, not on the pad's.
+ * Frames go out on a fixed clock and a `devicemotion` event arrives when it
+ * arrives, so the newest sample is kept here and whatever frame goes next
+ * carries it. Queuing them would build a lag that grows; dropping the frame
+ * would throw away buttons.
+ */
+const GYRO_KEY = "fp:gyro";
+let gyroOn = false;
+let gyroLatest = null;              // the newest sample, in wire units
+let gyroListening = false;
+let gyroSaid = false;
+
+function gyroWanted() {
+  try { return localStorage.getItem(GYRO_KEY) === "1"; } catch (_) { return false; }
+}
+
+/* Whether this browser has motion to give at all. Not the same question as
+   whether it will hand it over -- iOS has it and refuses until asked. */
+function gyroPossible() {
+  return typeof DeviceMotionEvent !== "undefined";
+}
+
+/* Whether the asking has to happen, which is an iOS thing and nowhere else. */
+function gyroNeedsAsking() {
+  return gyroPossible()
+    && typeof DeviceMotionEvent.requestPermission === "function";
+}
+
+function onDeviceMotion(event) {
+  // Rotation is the one that matters and the one a browser may withhold: a
+  // device with an accelerometer and no gyroscope reports acceleration and
+  // leaves rotationRate null. Sending acceleration alone is still worth doing
+  // -- it is what says which way is down -- so this does not refuse it.
+  gyroLatest = FPFrame.motionSample(event.rotationRate,
+                                    event.accelerationIncludingGravity);
+  if (!gyroSaid) {
+    gyroSaid = true;
+    report("this device is sending motion"
+           + (event.rotationRate ? "" : " (acceleration only: no gyroscope)"));
+  }
+}
+
+function startGyro() {
+  if (gyroListening || !gyroPossible()) return;
+  gyroListening = true;
+  window.addEventListener("devicemotion", onDeviceMotion);
+}
+
+function stopGyro() {
+  if (gyroListening) {
+    window.removeEventListener("devicemotion", onDeviceMotion);
+    gyroListening = false;
+  }
+  // Cleared, not left at its last value. A stale attitude is worse than none:
+  // the host would go on telling a game the pad is tilted exactly as it was
+  // when somebody switched this off.
+  gyroLatest = null;
+  gyroSaid = false;
+}
+
+/* Turning it on, from a tap. Returns what it became, so the control can show
+   the truth rather than what was asked for -- a refusal on iOS is permanent
+   for the page and a switch that stayed on would be a lie. */
+async function setGyro(want) {
+  if (!want) {
+    gyroOn = false;
+    try { localStorage.setItem(GYRO_KEY, "0"); } catch (_) {}
+    stopGyro();
+    return false;
+  }
+  if (!gyroPossible()) {
+    report("this browser has no motion sensor to read");
+    return false;
+  }
+  if (gyroNeedsAsking()) {
+    let answer = "denied";
+    try {
+      answer = await DeviceMotionEvent.requestPermission();
+    } catch (err) {
+      // Thrown when this is not called from a gesture, which is the mistake
+      // worth naming: it looks identical to a refusal from the outside.
+      report("motion was not allowed: "
+             + ((err && err.message) || "no reason given")
+             + " — it can only be asked for by tapping the switch");
+      return false;
+    }
+    if (answer !== "granted") {
+      report("motion was refused for this page; Safari remembers that, so it "
+             + "has to be cleared in Settings before asking again");
+      return false;
+    }
+  }
+  gyroOn = true;
+  try { localStorage.setItem(GYRO_KEY, "1"); } catch (_) {}
+  startGyro();
+  return true;
+}
+
+/* The sample to put in the next frame, or null. */
+function gyroForFrame() {
+  return gyroOn && gyroLatest ? gyroLatest : null;
 }
 
 function sendFrame(pad, releaseAll) {
@@ -4707,7 +4880,8 @@ function sendFrame(pad, releaseAll) {
   paintLatchedButtons();
 
   const now = Date.now();
-  const due = releaseAll || changed(buttons, axes) ||
+  const motion = gyroForFrame();
+  const due = releaseAll || changed(buttons, axes, motion) ||
               (now - lastSentAt) >= HEARTBEAT_MS;
   if (!due) return;
 
@@ -4729,11 +4903,16 @@ function sendFrame(pad, releaseAll) {
     return;
   }
 
-  const buffer = FPFrame.buildRaw(buttons, axes, seq, releaseAll);
+  // The newest motion sample, if this guest is sending any. buildRaw drops it
+  // from a release-everything frame on its own, for the same reason it drops
+  // the buttons: what somebody was last pointing at is not where anything
+  // should be left aiming.
+  const buffer = FPFrame.buildRaw(buttons, axes, seq, releaseAll, motion);
   seq = (seq + 1) & 0xffff;
   try {
     input.send(buffer);
-    lastSent = { buttons, axes: axes.slice() };
+    lastSent = { buttons, axes: axes.slice(),
+                 motion: motion ? motion.slice() : null };
     lastSentAt = now;
     if (pressedAt) {
       // performance.now() and a pointer event's timeStamp share an origin, so

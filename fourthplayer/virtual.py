@@ -25,11 +25,28 @@ at most -- and every controller physically plugged into it takes one of the
 same four. Measured; see tools/winspike/README.md. Linux has no such ceiling.
 """
 import sys
+import time
 
 try:
     # Linux, and the only case where these are the real thing.
-    from evdev import UInput, AbsInfo             # noqa: F401
+    from evdev import UInput as _KernelUInput, AbsInfo   # noqa: F401
     BACKEND = "uinput"
+
+    class UInput(_KernelUInput):
+        """evdev's UInput, plus the one call it has no equivalent for.
+
+        A real DualShock reports its gyroscope on a *second* evdev device --
+        "Wireless Controller Motion Sensors" -- rather than as extra axes on
+        the pad, because the pad's axes are already spoken for. Making that
+        second device is the Linux half of gyro and is not written yet, so
+        this says so by answering False rather than by raising: pads.py can
+        then hand motion to whatever device it has without asking which
+        platform it is on, and a guest tilting a phone at a Linux host loses
+        the tilt and keeps the pad.
+        """
+
+        def motion(self, values):
+            return False
 
 except ImportError:
     BACKEND = "vigem"
@@ -148,6 +165,13 @@ except ImportError:
             # DS4 at 0 is both sticks held hard up and left until the guest
             # touches them.
             self._lx = self._ly = self._rx = self._ry = 128 if self._ds4 else 0
+            # None until a guest sends any, because a pad held still reads as
+            # no rotation and one gravity -- "no sensor" has to be tellable
+            # from "not moving", or this would start claiming an attitude
+            # nobody reported.
+            self._motion = None
+            self._motion_at = 0.0
+            self._ticks = 0
             self._dirty = False
 
         def _button_map(self):
@@ -335,13 +359,94 @@ except ImportError:
                 else:
                     self._pad.release_button(button=flag)
 
+        # Turning the wire's units into the ones a DualShock reports.
+        #
+        # The wire carries sixteenths of a degree per second, and a DS4's
+        # gyroscope reads very close to sixteen counts per degree per second --
+        # so the rotation conversion is one to one. That is a coincidence and
+        # not a design, and it is named here rather than left as an absent
+        # multiply, because the next person to read this will want to know
+        # whether the scaling was considered or forgotten.
+        #
+        # Acceleration is not so lucky: the wire is thousandths of gravity and
+        # a DS4 reports about 8192 counts per gravity.
+        #
+        # Both figures are the commonly used ones rather than a calibration of
+        # a particular controller, which varies part to part. They decide how
+        # fast a game reads a given wrist movement, so anybody who wants it
+        # quicker or slower wants a sensitivity setting -- correcting the feel
+        # by mis-scaling the physics here would make the accelerometer lie
+        # about which way is down.
+        GYRO_SCALE = 1.0
+        ACCEL_SCALE = 8.192
+        # A DS4's report timestamp counts in units of about 5.33 microseconds
+        # and wraps at 16 bits. Games that integrate rotation into an aim use
+        # it as their clock, so a report with a frozen timestamp is a report
+        # they may read as no time having passed.
+        TICK_SECONDS = 5.33e-6
+
+        def motion(self, values):
+            """Six wire values: gyro x, y, z then accelerometer x, y, z.
+
+            False where this device cannot carry them, which is every pad that
+            is not a DualShock: an Xbox pad has no motion in its report at all,
+            and there is nowhere honest to put it.
+            """
+            if not self._ds4 or not values or len(values) < 6:
+                return False
+            gyro = [int(max(-32768, min(32767, round(v * self.GYRO_SCALE))))
+                    for v in values[:3]]
+            accel = [int(max(-32768, min(32767, round(v * self.ACCEL_SCALE))))
+                     for v in values[3:6]]
+            if self._motion == (gyro, accel):
+                return False
+            self._motion = (gyro, accel)
+            self._dirty = True
+            return True
+
+        def _send_extended(self):
+            """The whole DS4 report, motion included.
+
+            vgamepad's ordinary update() sends the short report, which has no
+            room for a gyroscope. The extended one does, and its fields are
+            named -- wGyroX and the rest -- so none of this is byte arithmetic
+            over a buffer whose layout could shift under it.
+            """
+            import vgamepad.win.vigem_commons as commons
+            report = commons.DS4_REPORT_EX()
+            short = self._pad.report
+            # Field by field from the report vgamepad has been filling, by
+            # name. The extended struct begins with the same fields, and
+            # copying them by name rather than by memcpy means a layout that
+            # ever differs fails loudly instead of sending nonsense.
+            for name, _type in type(short)._fields_:
+                if name.startswith("_"):
+                    continue
+                try:
+                    setattr(report.Report, name, getattr(short, name))
+                except (AttributeError, TypeError):
+                    pass
+            gyro, accel = self._motion
+            report.Report.wGyroX, report.Report.wGyroY, report.Report.wGyroZ = gyro
+            report.Report.wAccelX, report.Report.wAccelY, report.Report.wAccelZ = accel
+            now = time.monotonic()
+            if self._motion_at:
+                self._ticks = (self._ticks
+                               + int((now - self._motion_at) / self.TICK_SECONDS)) & 0xFFFF
+            self._motion_at = now
+            report.Report.wTimestamp = self._ticks
+            self._pad.update_extended_report(report)
+
         def syn(self):
             """Send the frame. Nothing reaches the game until this."""
             if self._impl is not None:
                 self._impl.syn()
                 return
             if self._dirty:
-                self._pad.update()
+                if self._motion is not None:
+                    self._send_extended()
+                else:
+                    self._pad.update()
                 self._dirty = False
 
         def close(self):

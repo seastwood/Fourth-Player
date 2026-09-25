@@ -29,23 +29,71 @@
   const ACCEL_PER_G = 1000;
   const GRAVITY = 9.80665;
 
+  /* The device's frame is not the player's frame.
+   *
+   * DeviceMotionEvent reports about the *device's* axes: x across the short
+   * edge, y along the long one, z out of the glass. Those are fixed to the
+   * hardware and take no notice of which way round anybody is holding it. Turn
+   * a phone to landscape and x now runs up the screen -- so tilting the top of
+   * the screen away from you, which is pitch however you hold it, arrives as
+   * rotation about x in portrait and about y in landscape.
+   *
+   * Left uncorrected, a guest who rotated their phone would find their aim
+   * had swapped pitch for roll, with nothing on either end to say why. So the
+   * pair is rotated into the frame the screen is actually in.
+   *
+   * z is untouched: the screen turning about its own normal does not move the
+   * normal.
+   *
+   * The angles are the ones screen.orientation.angle reports -- how far the
+   * *content* is rotated from the device's natural orientation -- and the
+   * mapping below is that rotation undone. Getting a sign wrong here is an
+   * axis that reads backwards in one orientation and correctly in another,
+   * which is why the four cases are written out and tested rather than
+   * derived from a sine at runtime. */
+  function toScreenFrame(x, y, angle) {
+    switch (((angle % 360) + 360) % 360) {
+      case 90: return [-y, x];
+      case 180: return [-x, -y];
+      case 270: return [y, -x];
+      default: return [x, y];
+    }
+  }
+
+  /* Which way round the screen is, from whichever of the two the browser has.
+     screen.orientation is the current one; window.orientation is what older
+     Safari has and is deprecated rather than absent. Neither means 0, which
+     is right for a desktop that cannot turn at all. */
+  function screenAngle(win) {
+    const w = win || (typeof window !== "undefined" ? window : null);
+    if (!w) return 0;
+    try {
+      const o = w.screen && w.screen.orientation;
+      if (o && typeof o.angle === "number") return o.angle;
+    } catch (_) { /* some browsers throw reading it in a frame */ }
+    const legacy = Number(w.orientation);
+    return Number.isFinite(legacy) ? legacy : 0;
+  }
+
   /* One motion sample from what a browser hands over, in wire units.
      `rotation` is a DeviceMotionEvent.rotationRate (deg/s) and `accel` an
      accelerationIncludingGravity (m/s^2) -- including gravity, deliberately:
      it is what tells a game which way is down, and a DualShock's
-     accelerometer reads gravity too. */
-  function motionSample(rotation, accel) {
+     accelerometer reads gravity too.
+
+     `angle` is how far the screen is turned; see toScreenFrame. */
+  function motionSample(rotation, accel, angle) {
     const g = (v) => clampShort(Math.round((v || 0) * GYRO_PER_DEG_SEC));
     const a = (v) => clampShort(Math.round((v || 0) / GRAVITY * ACCEL_PER_G));
-    return [
-      // beta/gamma/alpha is x/y/z: beta is pitch about the device's x axis,
-      // gamma roll about y, alpha yaw about z. Naming them in that order here
-      // is the whole translation, and getting it wrong is a stick that turns
-      // the wrong way for a reason nothing in a log would show.
-      g(rotation && rotation.beta), g(rotation && rotation.gamma),
-      g(rotation && rotation.alpha),
-      a(accel && accel.x), a(accel && accel.y), a(accel && accel.z),
-    ];
+    const turn = angle === undefined ? screenAngle() : angle;
+    // beta/gamma/alpha is x/y/z: beta is rotation about the device's x axis,
+    // gamma about y, alpha about z.
+    const [gx, gy] = toScreenFrame(g(rotation && rotation.beta),
+                                   g(rotation && rotation.gamma), turn);
+    const [ax, ay] = toScreenFrame(a(accel && accel.x),
+                                   a(accel && accel.y), turn);
+    return [gx, gy, g(rotation && rotation.alpha),
+            ax, ay, a(accel && accel.z)];
   }
 
   const clampShort = (v) => Math.max(-32768, Math.min(32767, v | 0));
@@ -136,6 +184,7 @@
   const api = { buildFrame, buildRaw, padState, direction, toAxis, TRIGGER_FULL,
                 DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT,
                 motionSample, MOTION_BYTES, FLAG_MOTION,
+                toScreenFrame, screenAngle,
                 GYRO_PER_DEG_SEC, ACCEL_PER_G, GRAVITY };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.FPFrame = api;

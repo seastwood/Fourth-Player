@@ -201,10 +201,16 @@ class VirtualPad:
     # `guide` is: a test that builds one without calling __init__ still has to
     # be able to ask.
     kind = DEFAULT_KIND
+    # Whether motion from a guest is carried at all. Class-level for the same
+    # reason as the two above: a pad built by a test without __init__ is still
+    # asked.
+    motion = True
 
-    def __init__(self, name, now=None, guide=True, kind=DEFAULT_KIND):
+    def __init__(self, name, now=None, guide=True, kind=DEFAULT_KIND,
+                 motion=True):
         self.name = name
         self.guide = guide
+        self.motion = motion
         self.kind = kind_or_default(kind)
         spec = KINDS[self.kind]
         self._ui = UInput(capabilities(guide), name=name,
@@ -258,10 +264,12 @@ class VirtualPad:
             if not self._senders:
                 self.release_all()
             else:
-                self._write(to_events(self._merged(), self.guide))
+                merged = self._merged()
+                self._write(to_events(merged, self.guide), merged.motion)
             return True
         self._senders[key] = [state.seq, state]
-        self._write(to_events(self._merged(), self.guide))
+        merged = self._merged()
+        self._write(to_events(merged, self.guide), merged.motion)
         self.released = False
         return True
 
@@ -272,7 +280,8 @@ class VirtualPad:
         if not self._senders:
             self.release_all()
         else:
-            self._write(to_events(self._merged(), self.guide))
+            merged = self._merged()
+            self._write(to_events(merged, self.guide), merged.motion)
 
     def _merged(self):
         """One pad state from everybody currently on this pad.
@@ -287,13 +296,26 @@ class VirtualPad:
         if len(states) == 1:
             return states[0]
         buttons = 0
+        # Attitude does not add up. Two people cannot both be holding the
+        # phone, and averaging or or-ing two attitudes describes a position
+        # neither of them is in -- so whoever is actually moving wins, which
+        # is the same rule the axes use and for the same reason: somebody
+        # sitting still must not cancel somebody playing.
+        motion = None
+        best = -1
+        for state in states:
+            if not state.motion:
+                continue
+            turning = sum(abs(v) for v in state.motion[:3])
+            if turning > best:
+                best, motion = turning, state.motion
         axes = [0] * len(P.PadState().axes)
         for state in states:
             buttons |= state.buttons
             for i, value in enumerate(state.axes):
                 if abs(value) > abs(axes[i]):
                     axes[i] = value
-        return P.PadState(seq=0, buttons=buttons, axes=axes)
+        return P.PadState(seq=0, buttons=buttons, axes=axes, motion=motion)
 
     def adopt_new_sender(self, sender=None):
         """Forget the sequence number, because a fresh browser restarts at zero.
@@ -329,7 +351,7 @@ class VirtualPad:
         self._write(to_events(P.PadState(), self.guide))
         self.released = True
 
-    def _write(self, events):
+    def _write(self, events, motion=None):
         changed = False
         for etype, code, value in events:
             key = (etype, code)
@@ -338,6 +360,20 @@ class VirtualPad:
             self._last[key] = value
             self._ui.write(etype, code, value)
             changed = True
+        # Motion is not an evdev event and has no code to compare against, so
+        # it is handed over separately and the device says whether it could
+        # take it. False from a pad with no place to put a gyroscope -- which
+        # is every Xbox pad, and every pad on Linux until the second device a
+        # real DualShock uses is written -- so a guest tilting a phone at one
+        # of those loses the tilt and keeps the pad.
+        if motion and self.motion:
+            try:
+                if self._ui.motion(motion):
+                    changed = True
+            except AttributeError:
+                # A device from before this existed. Nothing to do, and not
+                # worth a broken pad.
+                pass
         if changed:
             self._ui.syn()
 
@@ -370,13 +406,14 @@ class PadSet:
     """
 
     def __init__(self, count, label="Fourth Player", now=None, guide=True,
-                 kind=DEFAULT_KIND):
+                 kind=DEFAULT_KIND, motion=True):
         self._now = now or time.monotonic
         self._label = label
         # What a seat's pad declares itself to be. A default for the session;
         # a guest may be given a different one, which is why it is passed per
         # pad below rather than read from here when the device is made.
         self._kind = kind_or_default(kind)
+        self._motion = bool(motion)
         # Whether these pads have a guide button at all. See capabilities():
         # it is the Steam button and RetroArch's menu button, and a guest has
         # no business opening either.
@@ -397,6 +434,24 @@ class PadSet:
     def name_for(self, index):
         """What the seat is called, whether or not anybody is sitting in it."""
         return self.names[index]
+
+    def allow_motion(self, on):
+        """Carry guest motion, or do not. Takes effect on the pads that exist.
+
+        No device is remade for this, unlike a change of kind: motion is not
+        part of what a pad declares itself to be, it is something that arrives
+        or does not, and a game reading a DualShock's gyroscope is perfectly
+        happy for it to read zero.
+        """
+        want = bool(on)
+        if want == self._motion:
+            return False
+        self._motion = want
+        for pad in self.pads:
+            if pad is not None:
+                pad.motion = want
+        log.info("guest motion is %s", "carried" if want else "not carried")
+        return True
 
     def kind_for(self, index):
         """What this seat's pad says it is, whether or not one exists yet."""
@@ -433,7 +488,8 @@ class PadSet:
         pad = self.pads[index]
         if pad is None:
             pad = VirtualPad(self.names[index], now=self._now,
-                             guide=self._guide, kind=self.kinds[index])
+                             guide=self._guide, kind=self.kinds[index],
+                             motion=self._motion)
             self.pads[index] = pad
             # Said, because a controller appearing is not free: Steam
             # re-enumerates when one does and may hand a running game to it.

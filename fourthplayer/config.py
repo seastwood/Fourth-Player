@@ -306,6 +306,14 @@ class Config:
     # falls back to the Xbox pad rather than refusing, because the wrong pad is
     # a button prompt showing the wrong letter and no pad is an evening lost.
     guest_pad_kind: str = "xbox360"
+    # Whether a guest's own device motion is passed on to their pad.
+    #
+    # The host cannot turn a phone's gyroscope on -- only the page in somebody's
+    # hand can do that, and only when they tap for it. What the host decides is
+    # whether it is carried once it arrives, which is the half that belongs
+    # here: a machine whose games are all two-dimensional has no use for it,
+    # and a guest waving a phone about should not be steering anything.
+    guest_motion: bool = True
     guest_input_needs_a_game: bool = True
     # Matched against the focused window's class and name, lowercased. A
     # blocklist, and deliberately: the failure an allowlist produces is a

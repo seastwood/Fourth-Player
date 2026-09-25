@@ -213,6 +213,7 @@ function fillControls(s) {
     padBox.dataset.built = String(pad.kinds);
   }
   set("set-padkind", pad.kind);
+  set("set-motion", s.motion === false ? "off" : "on");
 }
 
 /* The picture, which comes from this page's own endpoint rather than from
@@ -546,6 +547,7 @@ const ACTIONS = {
       ["share", el("set-share").value === "on", (s) => !!s.share_pads],
       ["policy", el("set-policy").value, (s) => (s.launch || {}).policy],
       ["padkind", el("set-padkind").value, (s) => (s.pad || {}).kind],
+      ["motion", el("set-motion").value === "on", (s) => s.motion !== false],
     ];
     const pin = el("set-pin").value.trim();
     // A blank box means "leave it alone", not "clear it" -- clearing is what

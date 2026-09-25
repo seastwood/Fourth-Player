@@ -24,9 +24,11 @@ counts down as positive too, so the same flip would be wrong -- and wrong in
 the way that is hardest to catch from a log, because the picture is fine, the
 game responds, and up is down.
 """
+import ctypes
 import importlib
 import importlib.util
 import os
+import time
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -127,6 +129,49 @@ XUSB_BUTTON = _Enum({n: n for n in (
     "XUSB_GAMEPAD_DPAD_UP", "XUSB_GAMEPAD_DPAD_DOWN")})
 
 
+class _ShortReport(ctypes.Structure):
+    """The fields vgamepad fills, which the extended report starts with."""
+
+    _fields_ = [("bThumbLX", ctypes.c_ubyte), ("bThumbLY", ctypes.c_ubyte),
+                ("bThumbRX", ctypes.c_ubyte), ("bThumbRY", ctypes.c_ubyte),
+                ("wButtons", ctypes.c_ushort), ("bSpecial", ctypes.c_ubyte),
+                ("bTriggerL", ctypes.c_ubyte), ("bTriggerR", ctypes.c_ubyte)]
+
+
+class _SubReportEx(ctypes.Structure):
+    """As much of ViGEm's extended report as this checks, at its real offsets.
+
+    Taken from the struct on the host rather than invented: gyro at 14 and
+    acceleration at 20, with the short report's fields at the front. Building
+    it here with ctypes means the copy-by-name in virtual.py is exercised
+    against a layout shaped like the real one.
+    """
+
+    _fields_ = [("bThumbLX", ctypes.c_ubyte), ("bThumbLY", ctypes.c_ubyte),
+                ("bThumbRX", ctypes.c_ubyte), ("bThumbRY", ctypes.c_ubyte),
+                ("wButtons", ctypes.c_ushort), ("bSpecial", ctypes.c_ubyte),
+                ("bTriggerL", ctypes.c_ubyte), ("bTriggerR", ctypes.c_ubyte),
+                ("_pad0", ctypes.c_ubyte), ("wTimestamp", ctypes.c_ushort),
+                ("bBatteryLvl", ctypes.c_ubyte), ("_pad1", ctypes.c_ubyte),
+                ("wGyroX", ctypes.c_short), ("wGyroY", ctypes.c_short),
+                ("wGyroZ", ctypes.c_short), ("wAccelX", ctypes.c_short),
+                ("wAccelY", ctypes.c_short), ("wAccelZ", ctypes.c_short)]
+
+
+class _ReportEx(ctypes.Structure):
+    _fields_ = [("Report", _SubReportEx)]
+
+
+class FakeCommons:
+    DS4_REPORT_EX = _ReportEx
+
+
+class FakeWin:
+    """`vgamepad.win`, which is how the extended report is reached."""
+
+    vigem_commons = FakeCommons
+
+
 class Recorder:
     """A vgamepad pad that writes down what it was asked to do."""
 
@@ -137,6 +182,9 @@ class Recorder:
         self.triggers = {}
         self.dpad = None
         self.updates = 0
+        self.extended = None
+        self.stamps = []
+        self.report = _ShortReport()
 
     def press_button(self, button): self.down.add(button)
 
@@ -158,12 +206,24 @@ class Recorder:
 
     def directional_pad(self, direction): self.dpad = direction
 
+    # vgamepad fills this as the buttons and sticks are set, and the extended
+    # report is built from it.
+    report = None
+
     def update(self): self.updates += 1
+
+    def update_extended_report(self, report):
+        self.extended = ([report.Report.wGyroX, report.Report.wGyroY,
+                          report.Report.wGyroZ],
+                         [report.Report.wAccelX, report.Report.wAccelY,
+                          report.Report.wAccelZ])
+        self.stamps.append(report.Report.wTimestamp)
 
     def reset(self): self.__init__()
 
 
 class FakeVgamepad:
+    win = FakeWin
     DS4_BUTTONS = DS4_BUTTONS
     DS4_SPECIAL_BUTTONS = DS4_SPECIAL_BUTTONS
     DS4_DPAD_DIRECTIONS = DS4_DPAD_DIRECTIONS
@@ -212,6 +272,11 @@ check(virtual.BACKEND == "vigem",
       "it took the ViGEm branch, got %r" % virtual.BACKEND)
 
 sys.modules["vgamepad"] = FakeVgamepad
+# virtual.py reaches the extended report through `import
+# vgamepad.win.vigem_commons`, which is a submodule import and does not go
+# through the top-level object -- so it needs registering by name too.
+sys.modules["vgamepad.win"] = FakeWin
+sys.modules["vgamepad.win.vigem_commons"] = FakeCommons
 from fourthplayer.codes import ecodes as e                    # noqa: E402
 
 
@@ -295,6 +360,51 @@ for x, y, want in ((0, 0, "NONE"), (0, -1, "NORTH"), (1, -1, "NORTHEAST"),
     ui.write(e.EV_ABS, e.ABS_HAT0Y, y)
     check(pad.dpad == "DS4_BUTTON_DPAD_" + want,
           "(%d,%d) is %s, got %r" % (x, y, want, pad.dpad))
+
+print("\n-- motion, which only a DualShock has anywhere to put --")
+ui, pad = a_pad("xbox360")
+check(ui.motion([100, 0, 0, 0, 0, 1000]) is False,
+      "an Xbox pad refuses it rather than dropping it silently: there is no "
+      "motion in an XUSB report and nowhere honest to put it")
+ui, pad = a_pad("ds4")
+check(ui.motion(None) is False, "no values is not motion")
+check(ui.motion([1, 2]) is False, "and neither is a short list")
+check(ui.motion([160, -320, 480, 0, 0, 1000]) is True, "six values are taken")
+check(ui.motion([160, -320, 480, 0, 0, 1000]) is False,
+      "and the same six again change nothing, so an unmoving hand does not "
+      "send a report per frame")
+
+print("\n-- the wire's units become the pad's --")
+ui, pad = a_pad("ds4")
+# 10 deg/s is 160 on the wire, and a DS4's gyroscope reads about sixteen
+# counts per degree per second, so that is 160 there too -- a coincidence,
+# which is why the scale is a named 1.0 rather than an absent multiply.
+ui.motion([160, 0, 0, 0, 0, 1000])
+ui.syn()
+check(pad.extended is not None, "an extended report is what carries it")
+gyro, accel = pad.extended
+check(gyro[0] == 160, "10 deg/s stays 160, got %r" % (gyro[0],))
+# One gravity is 1000 on the wire and about 8192 on a DS4.
+check(accel[2] == 8192, "1 g becomes 8192, got %r" % (accel[2],))
+
+print("\n-- and a report with motion says time is passing --")
+# A game integrating rotation into an aim uses the report timestamp as its
+# clock. Frozen, it may read as no time having passed at all.
+first = pad.stamps[-1]
+time.sleep(0.02)
+ui.motion([200, 0, 0, 0, 0, 1000])
+ui.syn()
+check(pad.stamps[-1] != first,
+      "the timestamp moved between two reports: %r then %r"
+      % (first, pad.stamps[-1]))
+
+print("\n-- a pad with no motion still sends the short report --")
+ui, pad = a_pad("ds4")
+ui.write(e.EV_KEY, e.BTN_A, 1)
+ui.syn()
+check(pad.updates == 1 and pad.extended is None,
+      "update(), not update_extended_report(): a guest sending no motion is "
+      "unchanged by any of this")
 
 print("\n-- and nothing reaches the game until syn --")
 ui, pad = a_pad("ds4")
