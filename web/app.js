@@ -210,7 +210,17 @@ function videoProfiles() {
  * Kept in storage because it is a fact about this browser on this device, not
  * about this session: learning it again on every reload means failing again
  * on every reload. Per origin, so a different host does not inherit it. */
-const BAD_DRAW_CODECS_KEY = "fourthplayer.badDrawCodecs";
+/* The key carries a generation, and bumping it throws away what was learned.
+ *
+ * What a browser cannot draw with is worth remembering, but only if it was
+ * learned honestly. The first thing this list ever recorded was H.265 on
+ * iOS -- and that turned out to be `rebuildFor` never noticing a parameter-set
+ * change, not a limit of Safari's decoder at all. Keeping that entry would
+ * have left every iPhone permanently on H.264 for a fault that no longer
+ * exists, and nothing short of clearing site data would have undone it.
+ *
+ * So: fix the cause, bump the generation, let the page find out again. */
+const BAD_DRAW_CODECS_KEY = "fourthplayer.badDrawCodecs.2";
 let badDrawCodecs = new Set();
 try {
   const saved = JSON.parse(localStorage.getItem(BAD_DRAW_CODECS_KEY) || "[]");

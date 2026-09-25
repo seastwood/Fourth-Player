@@ -18,6 +18,7 @@
  * coded slice -- is the part that would break silently. */
 import { strict as assert } from "node:assert";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const paint = require("../../web/paint.js");
@@ -201,6 +202,50 @@ check(after === "35 32 33 34 19",
 const cleanH = frame([HAUD, VPS, HSPS, HPPS, HIDR]);
 check(tidyParameterSets(cleanH, true).data === cleanH,
       "and a clean H.265 frame is handed back untouched");
+
+console.log("\nand a change to them is actually noticed");
+/* The guard that was not one. `rebuildFor` compared the stream's parameter
+ * sets against the ones the decoder was built for, and read:
+ *
+ *     if (!want || !state.builtFor || want === state.builtFor) return true;
+ *
+ * `builtFor` is only filled in when a decoder is built with a keyframe
+ * already in hand, and in media-track mode there is never one -- the decoder
+ * is built when the transform attaches, before any frame has arrived. So it
+ * started empty, the only other place that fills it in sits below this guard,
+ * and it stayed empty for the whole session. Every later change was accepted
+ * in silence by a decoder that had not been told.
+ *
+ * The symptom is a picture that decodes perfectly and then dies on a delta:
+ * 492 good frames on an iPhone over WireGuard, then EncodingError, with the
+ * host reporting nothing lost. Away from home is where it shows, because that
+ * is where congestion control leans on the encoder and the sets get rewritten.
+ */
+const framesSrc = readFileSync(new URL("../../web/frames.js", import.meta.url),
+                               "utf8");
+const guard = framesSrc.slice(framesSrc.indexOf("function rebuildFor"));
+const head = guard.slice(0, 3000);
+check(!/if \(!want \|\| !state\.builtFor \|\| want === state\.builtFor\)/
+        .test(head),
+      "the guard no longer treats 'never compared' as 'unchanged'");
+check(/if \(!state\.builtFor\) \{\s*\n\s*state\.builtFor = want;\s*\n\s*return true;/
+        .test(head),
+      "the first sets seen are adopted, so the next change has something to "
+      + "be different from");
+check(/if \(want === state\.builtFor\) return true;/.test(head),
+      "and an unchanged stream still costs nothing");
+check(head.indexOf("state.builtFor = want;")
+        < head.indexOf("state.decoder.close()"),
+      "adopting happens before any rebuilding, not instead of it");
+
+console.log("\nand the report says which of the three it was");
+const why = framesSrc.slice(framesSrc.indexOf("function whyItStopped"));
+check(/parameter sets never compared, now/.test(why.slice(0, 3000)),
+      "'never compared' is said out loud -- both branches used to want "
+      + "builtFor, so the one mode where it was empty was the one mode that "
+      + "reported nothing, and that silence was the bug hiding");
+check(/no parameter sets in the last keyframe/.test(why.slice(0, 3000)),
+      "and a keyframe carrying none is not the same thing");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

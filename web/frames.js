@@ -634,6 +634,14 @@ function whyItStopped(err) {
                 + state.builtFor + " -> " + now + ")");
     } else if (state.builtFor && now) {
       bits.push("parameter sets unchanged");
+    } else if (now) {
+      // Said even with nothing to compare it to. Both branches above wanted
+      // `builtFor`, so the one mode where it was empty -- which was the one
+      // mode that was failing -- reported nothing at all about the parameter
+      // sets, and their being unexamined was invisible.
+      bits.push("parameter sets never compared, now " + now);
+    } else {
+      bits.push("no parameter sets in the last keyframe");
     }
   }
   return bits.join("; ");
@@ -746,7 +754,33 @@ function nextRung() {
  * always: the fingerprint is compared and nothing happens. */
 function rebuildFor(annexb) {
   const want = keyFingerprint(annexb);
-  if (!want || !state.builtFor || want === state.builtFor) return true;
+  if (!want) return true;
+  /* The first parameter sets this decoder has ever seen are adopted rather
+   * than compared against nothing.
+   *
+   * This line used to read `!state.builtFor || ...`, which returned true and
+   * did nothing -- and `builtFor` is only filled in when a decoder is built
+   * with a keyframe already in hand. In media-track mode there is never one:
+   * the decoder is built when the transform attaches, which is before any
+   * frame has arrived. So `builtFor` started empty, the only other place that
+   * fills it in sits below this guard, and it stayed empty for the whole
+   * session -- every later change to the stream's parameter sets was accepted
+   * in silence by a decoder that had not been told about them.
+   *
+   * What that looks like is a picture that decodes perfectly and then dies on
+   * a delta frame, which is what it did: 492 good frames on an iPhone and
+   * then `EncodingError`, with nothing lost on the way. It shows up away from
+   * home because that is where the bitrate moves -- congestion control leans
+   * on the encoder, the encoder rewrites its sets, and the decoder is still
+   * built for the old ones.
+   *
+   * Adopting is right rather than rebuilding here: there is no evidence
+   * anything has changed, only that this is the first time anybody looked. */
+  if (!state.builtFor) {
+    state.builtFor = want;
+    return true;
+  }
+  if (want === state.builtFor) return true;
   const description = state.feedAs === "avcc" ? avcDescription(annexb) : null;
   if (state.feedAs === "avcc" && !description) return false;
   const codec = description ? exactCodec(description) : state.codec;
