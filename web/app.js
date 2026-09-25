@@ -3003,7 +3003,14 @@ function isPictureDoubleTap(x, y, at, kind, last) {
  * sends a compatibility mouse event after a touch, and without this every
  * single tap would look like a pair. */
 video.addEventListener("pointerup", (event) => {
-  if (held.size) return;                // still a finger down somewhere
+  // Every finger *but this one*. This listener is registered before the one
+  // that forgets the pointer -- letGoOfPicture, much further down -- so at
+  // this moment `held` still contains the finger that is lifting. Asking for
+  // held.size alone therefore answered "one" for every single tap and
+  // returned, which is why nothing zoomed in. Counting the others is right
+  // whichever order the listeners end up in.
+  const others = held.size - (held.has(event.pointerId) ? 1 : 0);
+  if (others > 0) return;               // still a finger down somewhere
   if (dragged) { lastPictureTap = null; return; }
   // Driving the machine: a double tap here is a double *click* being sent,
   // and swallowing it would take away the gesture that opens everything on a

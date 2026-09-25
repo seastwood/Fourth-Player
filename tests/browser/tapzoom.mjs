@@ -89,8 +89,14 @@ check(/if \(cursorDriving\(\)\) \{ lastPictureTap = null; return; \}/
 check(/if \(dragged\) \{ lastPictureTap = null; return; \}/.test(handler),
       "and a drag is not a tap -- pointerup arrives after the move handlers, "
       + "so `dragged` is settled by the time this reads it");
-check(/if \(held\.size\) return;/.test(handler),
-      "nor is letting go of one of two fingers");
+check(/const others = held\.size - \(held\.has\(event\.pointerId\) \? 1 : 0\);/
+        .test(handler),
+      "and it counts every finger but this one: this listener runs before the "
+      + "one that forgets the pointer, so held still contains the finger that "
+      + "is lifting -- asking for held.size alone answered 'one' for every "
+      + "single tap and returned");
+check(/if \(others > 0\) return;/.test(handler),
+      "so letting go of one of two fingers is still not a tap");
 check(/zoom > ZOOM_MIN\) zoomAbout\(ZOOM_MIN/.test(handler),
       "zoomed in, a double tap goes all the way back out");
 check(/else zoomAbout\(TAP_ZOOM_TO, x, y\)/.test(handler),
