@@ -1,26 +1,35 @@
 """Which guests the sweep is allowed to hang up on.
 
 Three limits, and getting them wrong is not a tidy-up problem: freeing a seat
-takes the guest's controller away with it and hands their reconnect a
-different one.
+takes the guest's controller with it and hands their reconnect a different
+one.
 
-The case this exists for: a guest switching to media-track drawing closes and
-reopens signalling as part of starting up, so for a moment their socket is
-gone while their ICE is up and the host is still sending them the picture.
-They were being hung up on three seconds into it -- the transform was handed
-nothing, the page blamed its own decoder, and it fell back to WebRTC. From
-the chair that is "media track just black screens and fails over".
+The case this exists for, from the host's own log:
+
+    08:47:38  the media track's frames were routed to the decoder
+    08:47:38  taking the encoded frames off the media track
+    08:47:38  painting with webgl
+    08:47:41  Guest 2 had no video for 8s; freeing the slot
+
+Switching to media-track drawing closes and reopens signalling as part of
+starting up, so for a moment the socket is gone while ICE is up and the host
+is still sending the picture. The sweep applied the closed-tab limit and hung
+up three seconds into it. The transform was handed nothing, the page blamed
+its own decoder, and it fell back to WebRTC -- reported as "media track just
+black screens and fails over".
+
+Read rather than run: importing the session pulls in GstWebRTC, which is not
+present on the machines this suite runs on (it skipped on both). The rule is
+small and the reasons for each branch are the valuable part, so they are
+asserted where they are written.
 """
 import os
+import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
-try:
-    from fourthplayer import session as sessionlib
-except Exception as exc:                      # pragma: no cover
-    print("SKIPPED: cannot import the host here (%s)" % exc)
-    sys.exit(0)
+HERE = os.path.dirname(os.path.realpath(__file__))
+SRC = open(os.path.join(os.path.dirname(HERE), "fourthplayer", "session.py"),
+           encoding="utf-8").read()
 
 bad = 0
 
@@ -32,75 +41,43 @@ def check(ok, what):
         bad += 1
 
 
-class Peer:
-    def __init__(self, ice_ok):
-        self.ice_ok = ice_ok
-        self.sent = {}
+def constant(name):
+    found = re.search(r"^%s = ([0-9.]+)" % name, SRC, re.M)
+    return float(found.group(1)) if found else None
 
 
-class Guest:
-    def __init__(self, socket, peer, media_since):
-        self.socket = socket
-        self.peer = peer
-        self.media_since = media_since
-        self.label = "Guest 1"
-        self.input_only = False
-        self.last_input = 0.0
+sweep = SRC[SRC.index("def _reap_ghosts"):]
+sweep = sweep[:sweep.index("\n    # How many pointless")]
 
-    def has_media(self, now=None):
-        return False              # the whole point: they are quiet
+print("the three limits are told apart")
+check("if guest.socket is not None:" in sweep
+      and "limit = HELD_SECONDS" in sweep,
+      "a socket still open buys the long one")
+check(re.search(r"alive = guest\.peer is not None and getattr\(\s*"
+                r"guest\.peer, \"ice_ok\", False\)", sweep) is not None,
+      "a peer with ICE up is recognised as still connected")
+check("elif alive:\n                limit = seconds" in sweep,
+      "and buys the ordinary deadline -- not the closed-tab one, which is "
+      "what hung up on a guest three seconds into starting media track")
+check("limit = min(seconds, LEFT_SECONDS)" in sweep,
+      "while no socket and no ICE is somebody who closed the tab")
 
+print("\nand they are ordered, so each means something")
+held, ghost, left = (constant("HELD_SECONDS"), constant("GHOST_SECONDS"),
+                     constant("LEFT_SECONDS"))
+check(left is not None and ghost is not None and held is not None,
+      "all three are named constants: %s, %s, %s" % (left, ghost, held))
+check(left < ghost < held,
+      "closed tab < ordinary < holding a socket open (%.0f < %.0f < %.0f)"
+      % (left, ghost, held))
+check(held >= 900,
+      "and the long one is long enough to step away from a game and come "
+      "back: %.0fs" % held)
 
-class Room:
-    """Just enough session to run the sweep."""
-
-    _reap_ghosts = sessionlib.LiveSession._reap_ghosts
-
-    def __init__(self, guest):
-        self.guests = {0: guest}
-        self.dropped = []
-
-    def _now(self):
-        return 1000.0
-
-    def drop(self, slot, reason=""):
-        self.dropped.append(slot)
-        self.guests.pop(slot, None)
-
-
-def swept(socket, ice_ok, quiet_for):
-    guest = Guest(socket, Peer(ice_ok), 1000.0 - quiet_for)
-    room = Room(guest)
-    room._reap_ghosts()
-    return bool(room.dropped)
-
-
-print("a guest holding a socket open keeps their seat for a long time")
-# A phone freezes a backgrounded tab, so everything has_media listens for
-# stops within a second or two. The socket is a real connection a vanished
-# guest cannot hold open.
-check(not swept(socket=object(), ice_ok=True, quiet_for=60),
-      "a minute of silence with the socket up is not gone")
-check(not swept(socket=object(), ice_ok=True, quiet_for=600),
-      "nor ten minutes -- stepping away from a game and coming back must not "
-      "cost the seat")
-check(swept(socket=object(), ice_ok=True,
-            quiet_for=sessionlib.HELD_SECONDS + 1),
-      "but it does end: %.0fs" % sessionlib.HELD_SECONDS)
-
-print("\nand a peer that is plainly still connected is not a closed tab")
-check(not swept(socket=None, ice_ok=True, quiet_for=10),
-      "ten seconds quiet with ICE up does NOT free the seat -- this is the "
-      "media-track startup, and hanging up here is what broke it")
-check(swept(socket=None, ice_ok=True, quiet_for=sessionlib.GHOST_SECONDS + 1),
-      "though it still ends at the ordinary deadline, because webrtcbin sits "
-      "at 'completed' long after somebody has gone")
-
-print("\nbut somebody who really did close the tab goes quickly")
-check(swept(socket=None, ice_ok=False, quiet_for=sessionlib.LEFT_SECONDS + 1),
-      "no socket and no ICE is gone, at %.0fs" % sessionlib.LEFT_SECONDS)
-check(not swept(socket=None, ice_ok=False, quiet_for=1),
-      "and not so quickly that a blink counts")
+print("\nand none of them is forever")
+check("if now - guest.media_since > limit:" in sweep,
+      "every branch still ends in a deadline, because webrtcbin sits at "
+      "'completed' long after a guest has vanished")
 
 print("\n%d FAILED" % bad if bad else "\nall ok")
 sys.exit(1 if bad else 0)
