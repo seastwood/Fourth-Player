@@ -174,9 +174,14 @@ print("\n-- and the caller may choose its own --")
 clock[0] = 0.0
 seat = seats(now=lambda: clock[0])
 seat.pads[0] = FakePad("one")
+# The clock starts when the seat is first *seen* empty, not when the test's
+# clock started -- so these are measured from the first call, not from zero.
 clock[0] = 30
-check(seat.unplug_idle(set(), after=60) == [], "not yet, at thirty of sixty")
-clock[0] = 61
+check(seat.unplug_idle(set(), after=60) == [],
+      "the first look starts the clock and unplugs nothing")
+clock[0] = 30 + 59
+check(seat.unplug_idle(set(), after=60) == [], "not yet, at fifty-nine of sixty")
+clock[0] = 30 + 61
 check([i for i, _p in seat.unplug_idle(set(), after=60)] == [0],
       "and then it goes, so a machine where ports are contended can say so")
 
