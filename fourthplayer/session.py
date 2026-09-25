@@ -2917,7 +2917,31 @@ class LiveSession:
         if self.stage is not None:
             want = self.cfg.codec
             if want == "auto":
-                want = getattr(self.stage, "codec", "h264")
+                # "auto" means work out the best codec now, not keep whatever
+                # happens to be running.
+                #
+                # This read the stage's current codec, so choosing "auto" was
+                # a no-op: a session pinned to H.264 -- by an earlier explicit
+                # choice, or by a guest who could only take it -- recaptured as
+                # H.264 and stayed there. Reported as "automatic doesn't seem
+                # to be using h265 when it should be", and it never would have:
+                # nothing else reconsiders until somebody joins or leaves, and
+                # a guest sitting still does neither.
+                #
+                # The same calculation _codec_after_leaving makes, for the same
+                # reason, against the guests who are actually watching.
+                watching = [g for g in self.guests.values()
+                            if g.peer is not None]
+                if watching:
+                    want = best_shared_codec(_common(watching),
+                                             self.cfg.hardware_encode)
+                    log.info("automatic: %d guest(s) watching can share %s",
+                             len(watching), want)
+                else:
+                    # Nobody to please and nothing to measure against. Leave it
+                    # where it is; the next guest to arrive settles it from
+                    # scratch through agree_codec.
+                    want = getattr(self.stage, "codec", "h264")
             await self._recapture(want)
         out = self.stream_settings()
         self.notify({"t": "stream", **out})
