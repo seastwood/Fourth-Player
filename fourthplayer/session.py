@@ -144,6 +144,12 @@ GHOST_SECONDS = 25.0
 
 # Once their signalling has gone too, there is nothing left to wait for.
 LEFT_SECONDS = 8.0
+# How long a seat is held for a guest whose signalling socket is still open.
+# Generous on purpose: this is the case where somebody has minimised the page
+# or locked the phone, which freezes the tab and stops everything the host
+# listens for, while the socket itself stays up. Seth's words for why it must
+# be long: "I may step away from a Suyu game for half an hour then come back."
+HELD_SECONDS = 1800.0
 
 # How long a guest may be silent before their connection is presumed dead. The
 # browser heartbeats its pad state every 50 ms whether or not anything is
@@ -1865,7 +1871,22 @@ class LiveSession:
                 continue
             # Their socket has gone as well, so they are not mid-reconnect --
             # they closed the tab or walked out of range.
-            limit = seconds if guest.socket is not None else min(seconds, LEFT_SECONDS)
+            #
+            # While it is open they get far longer, because a page that is
+            # merely minimised looks exactly like one that has died: a phone
+            # freezes a backgrounded tab, so the pad state that has_media
+            # listens for stops arriving within a second or two. Twenty-five
+            # of those and the seat was gone -- so stepping away from a game
+            # and coming back cost the seat, and the reconnect landed on a
+            # different one, which plugged in a second controller.
+            #
+            # The socket is the evidence, and it is good evidence: it is a
+            # real connection that a vanished guest cannot keep open. That is
+            # the fault the docstring above warns about -- ICE sitting at
+            # `completed` for ever with nobody behind it -- and a socket does
+            # not have it.
+            limit = (HELD_SECONDS if guest.socket is not None
+                     else min(seconds, LEFT_SECONDS))
             if now - guest.media_since > limit:
                 log.info("%s had no video for %.0fs; freeing the slot",
                          guest.label, now - guest.media_since)

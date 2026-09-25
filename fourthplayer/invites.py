@@ -502,7 +502,26 @@ class Session:
             raise UnknownGuest("nothing to reclaim")
 
         wanted = claim[0]
-        slot = wanted if wanted not in self.guests else self.free_slot()
+        # Your own stale entry must never push you to a different seat.
+        #
+        # This read `wanted if wanted not in self.guests else free_slot()`, and
+        # a guest coming straight back can easily outrun the tidying of the
+        # entry they just left: the seat then looks taken, they are sent to the
+        # next free one, and it plugs in a controller of its own. From the sofa
+        # that is a second gamepad appearing out of a single browser, and being
+        # made to set yourself to player two to carry on a single-player game.
+        #
+        # Seen on this host as slot 1, then slot 0, then slot 1 again, with a
+        # "Fourth Player 1" plugged in six seconds after "Fourth Player 2" was
+        # freed -- one phone, two pads. The digest settles it: an entry holding
+        # the same token is this guest, so the seat is theirs to take back.
+        held = self.guests.get(wanted)
+        if held is not None and hmac.compare_digest(digest, held.token_digest):
+            slot = wanted
+        elif wanted not in self.guests:
+            slot = wanted
+        else:
+            slot = self.free_slot()
         if slot is None:
             raise SessionFull("every slot is taken")
 

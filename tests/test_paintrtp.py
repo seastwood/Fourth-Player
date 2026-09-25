@@ -136,6 +136,30 @@ check("datachannel event arrives after a track event" in start
       "the ordering that caused it is stated, so the check is not tightened "
       "back up by somebody tidying")
 
+# The mode goes back to the one the viewer asked for whenever a new offer
+# arrives.
+#
+# giveUpPainting sets paintMethod to "browser" and deliberately leaves
+# paintChoice alone, so a failure does not overwrite the choice. Nothing put
+# the mode back -- and the track handler reads paintMethod to decide whether
+# the <video> element may have the video track. Handing the element the track
+# starts the receiver, and a transform attached to a started receiver is
+# handed nothing for ever. So one give-up made every later connection fail the
+# same way on a connection with nothing wrong with it.
+#
+# Reported as three separate things: media track only works when you first
+# join, it cannot be switched on mid-stream, and a picture that stops never
+# comes back without a reload.
+offer = app[app.index("paintGaveUp = false;"):]
+check("paintMethod = wantedPaintMethod();" in offer[:1400],
+      "a new offer puts the drawing mode back to the chosen one")
+check(offer.index("paintMethod = wantedPaintMethod();")
+      < offer.index("stopPainting("),
+      "before the old painter is put down, so the track handler that follows "
+      "reads the restored mode")
+check("paintGaveUp = false;" in offer[:200],
+      "and giving up is not what a new connection inherits")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))

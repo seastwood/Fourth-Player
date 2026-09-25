@@ -1186,6 +1186,22 @@ async function answer(message) {
   // are walked again from the top.
   paintGaveUp = false;
   paintTried = 0;
+  /* And the mode goes back to the one this viewer actually asked for.
+   *
+   * giveUpPainting sets paintMethod to "browser" while deliberately leaving
+   * paintChoice alone, so the choice survives a failure. Nothing put the mode
+   * back, and the track handler below reads paintMethod to decide whether the
+   * <video> element may have the video track -- so after a single give-up
+   * every later connection handed the element the track, which starts the
+   * receiver, and an encoded transform attached to a started receiver is
+   * handed nothing for ever.
+   *
+   * So one failure made every following attempt fail the same way, on a fresh
+   * connection that had nothing wrong with it. From the chair: media track
+   * works when you first join and cannot be turned back on afterwards, and a
+   * picture that stops never comes back without a reload. Both are this line
+   * being missing. */
+  paintMethod = wantedPaintMethod();
   // Whatever was reading the old receiver is reading something that is about
   // to be thrown away. It is started again when the new track arrives.
   stopPainting("");
@@ -4001,7 +4017,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25b";
+const CLIENT_BUILD = "2026-09-25c";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
