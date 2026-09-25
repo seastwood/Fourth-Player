@@ -191,6 +191,48 @@ function videoProfiles() {
   }
 }
 
+/* Codecs this browser can receive but demonstrably cannot *draw with*, and
+ * where that is written down.
+ *
+ * These are two different questions and only one of them was ever asked.
+ * RTCRtpReceiver.getCapabilities says what the browser's own video pipeline
+ * decodes, which is what the host needs to know for an ordinary guest. A
+ * guest drawing its own picture decodes through WebCodecs instead, and the
+ * two do not have to agree -- on iOS 18.7 they do not. Safari receives H.265
+ * happily on a <video> element and its WebCodecs H.265 decoder dies with
+ * `EncodingError` on a delta frame, after anything from twenty to five
+ * hundred good ones, in every one of the four spellings of the codec string.
+ *
+ * So the host agreed on H.265 in good faith, every drawing mode failed, and
+ * the page handed the picture back to the browser -- which worked, because
+ * that is the pipeline that could decode it all along.
+ *
+ * Kept in storage because it is a fact about this browser on this device, not
+ * about this session: learning it again on every reload means failing again
+ * on every reload. Per origin, so a different host does not inherit it. */
+const BAD_DRAW_CODECS_KEY = "fourthplayer.badDrawCodecs";
+let badDrawCodecs = new Set();
+try {
+  const saved = JSON.parse(localStorage.getItem(BAD_DRAW_CODECS_KEY) || "[]");
+  if (Array.isArray(saved)) badDrawCodecs = new Set(saved.map(String));
+} catch (_) { /* private window, or nonsense in there; start empty */ }
+
+function ruleOutDrawCodec(name) {
+  if (!name || badDrawCodecs.has(name)) return false;
+  badDrawCodecs.add(name);
+  try {
+    localStorage.setItem(BAD_DRAW_CODECS_KEY, JSON.stringify([...badDrawCodecs]));
+  } catch (_) { /* it still holds for this session, which is the urgent part */ }
+  return true;
+}
+
+/* Which family a mime type belongs to, in the host's spelling. */
+function drawCodecFamily(mime) {
+  if (/H265|HEV/i.test(String(mime || ""))) return "h265";
+  if (/H264|AVC/i.test(String(mime || ""))) return "h264";
+  return "";
+}
+
 function videoCodecs() {
   try {
     const caps = RTCRtpReceiver.getCapabilities("video");
@@ -199,6 +241,20 @@ function videoCodecs() {
     for (const codec of caps.codecs) {
       const name = (codec.mimeType || "").split("/")[1];
       if (name) seen.add(name.toLowerCase());
+    }
+    // Anything this page has proved it cannot draw with is left out while the
+    // page is drawing. Not otherwise: the browser decodes it perfectly well,
+    // and telling the host it does not would cost everybody a better codec
+    // for a limit that only applies to the page's own decoder.
+    //
+    // Never all of them. If that is somehow all this browser has, saying
+    // nothing at all is what the host reads as "give me H.264", and being
+    // offered something that might not work beats being offered nothing.
+    let drawing = "";
+    try { drawing = paintChoice; } catch (_) { drawing = ""; }
+    if (drawing && drawing !== "browser" && badDrawCodecs.size) {
+      const left = [...seen].filter((name) => !badDrawCodecs.has(name));
+      if (left.length) return left;
     }
     return [...seen];
   } catch (_) {
@@ -10348,9 +10404,30 @@ function watchThePainting() {
       report("nothing was painted in " + (PAINT_PROVE_MS / 1000)
              + "s; trying " + more);
       tryAnotherSpelling(more);
-    } else {
-      giveUpPainting();
+      return;
     }
+    /* Every spelling of this codec has failed, which says something about the
+     * codec rather than about how it was named. Before handing the picture
+     * back, ask the host for a different one.
+     *
+     * This is the difference between "drawing it here does not work on my
+     * phone" and "drawing it here does not work on my phone *in H.265*". The
+     * second is true and fixable; the first is what it looked like, because
+     * nothing ever asked the host to try anything else. Once per codec: it is
+     * written down, so the next connection is offered H.264 from the start
+     * and there is no loop here to get stuck in. */
+    const family = drawCodecFamily(videoCodecNow().mime);
+    if (family && ruleOutDrawCodec(family)) {
+      const left = videoCodecs();
+      if (left.length && left.indexOf(family) < 0) {
+        report("every spelling of " + family + " failed to decode here, so "
+               + "this browser cannot draw with it however it is named; "
+               + "asking the host for " + left.join(" or ") + " instead");
+        reviveNow("the decoder here cannot use " + family);
+        return;
+      }
+    }
+    giveUpPainting();
   }, PAINT_PROVE_MS);
 }
 
