@@ -330,6 +330,19 @@ class Config:
     # quietly disturbing another. Insisting on unsigned orders was worse still
     # -- it excluded the right answer, which needs a negation.
     guest_gyro_order: str = "pitch,roll,-yaw"
+    # How long a seat keeps its controller after its guest leaves, in seconds.
+    #
+    # Nothing is unplugged at all while a game is in front, so this is what
+    # covers the case where one loses focus -- to a search box, or a desktop --
+    # while somebody is out of the room.
+    #
+    # Generous on purpose. A pad kept for somebody who comes back costs a
+    # player port nobody else was going to use; a pad unplugged from somebody
+    # who comes back costs them their game's motion controls until they
+    # restart it, because an emulator binds those to a particular device.
+    # Those are not the same size of mistake. Lower it on a machine where
+    # several people really do contend for ports.
+    guest_pad_linger_seconds: int = 1800
     guest_input_needs_a_game: bool = True
     # Matched against the focused window's class and name, lowercased. A
     # blocklist, and deliberately: the failure an allowlist produces is a

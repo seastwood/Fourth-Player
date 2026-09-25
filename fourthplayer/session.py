@@ -1875,8 +1875,11 @@ class LiveSession:
         # a pad that goes away and comes back is a different one to it -- so
         # the gyroscope dies and stays dead until the emulator is restarted.
         # Leaving a stream and coming back is a thing people do constantly.
-        for index, pad in self.pads.unplug_idle(taken,
-                                                hold=self._a_game_is_up()):
+        after = getattr(self.cfg, "guest_pad_linger_seconds", None)
+        for index, pad in self.pads.unplug_idle(
+                taken,
+                after=padlib.LINGER_SECONDS if not after else max(0, int(after)),
+                hold=self._a_game_is_up()):
             # A controller that is made and unmade over and over is not a
             # tidy-up, it is a fight: something keeps asking for a seat
             # nobody is sitting on, and this keeps taking it away. Seen

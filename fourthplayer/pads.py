@@ -155,7 +155,20 @@ DEADMAN_SECONDS = 0.25
 # out of the room -- and short enough that a pad nobody returns to still stops
 # taking a player port before it matters. The buttons are let go of
 # immediately either way; it is only the device that lingers.
-LINGER_SECONDS = 120
+# Half an hour, and deliberately generous.
+#
+# The first version was two minutes, on the reasoning that it only had to cover
+# leaving and coming back. It does not: "I may step away from a game for half
+# an hour then come back, and I don't want to be disrupted." A pad kept for
+# somebody who returns costs a player port that nobody else was going to use;
+# a pad unplugged from somebody who returns costs them their game's motion
+# controls until they restart it. Those are not the same size of mistake.
+#
+# There is a second guard above this -- nothing is unplugged at all while a
+# game is in front -- but that reads the *foreground* window, and a game can
+# lose focus to a search box or a desktop while somebody is out of the room.
+# This is what covers that.
+LINGER_SECONDS = 1800
 
 _BUTTON_MAP = [
     (P.BTN_A, e.BTN_A), (P.BTN_B, e.BTN_B), (P.BTN_X, e.BTN_X), (P.BTN_Y, e.BTN_Y),

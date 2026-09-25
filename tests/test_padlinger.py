@@ -160,9 +160,25 @@ check([i for i, _p in gone] == [0],
 check(seat.pads[1] is not None, "seat two still has its device")
 
 print("\n-- the grace period is long enough to be worth having --")
-check(pads.LINGER_SECONDS >= 60,
-      "at least a minute, or it does not cover walking out of the room: %r"
-      % (pads.LINGER_SECONDS,))
+# Two minutes was the first guess and it was too short: the case is "I may
+# step away for half an hour then come back", and the foreground check above
+# does not cover a game that loses focus while somebody is out of the room.
+#
+# The asymmetry is what sets it. A pad kept for somebody who returns costs a
+# player port nobody else was going to use; a pad unplugged from somebody who
+# returns costs them their game's motion controls until they restart it.
+check(pads.LINGER_SECONDS >= 1800,
+      "at least half an hour: %r" % (pads.LINGER_SECONDS,))
+
+print("\n-- and the caller may choose its own --")
+clock[0] = 0.0
+seat = seats(now=lambda: clock[0])
+seat.pads[0] = FakePad("one")
+clock[0] = 30
+check(seat.unplug_idle(set(), after=60) == [], "not yet, at thirty of sixty")
+clock[0] = 61
+check([i for i, _p in seat.unplug_idle(set(), after=60)] == [0],
+      "and then it goes, so a machine where ports are contended can say so")
 
 print()
 if fails:
