@@ -1322,6 +1322,51 @@ class Server:
                         log.warning("could not remember the motion setting: %s",
                                     exc)
                 return self._status()
+            if command == "motionaccel":
+                # What the accelerometer half of a motion pad reports. It is
+                # not the gyroscope and it does not answer the same question:
+                # rotation rate does not care which way is down, and gravity is
+                # nothing but which way is down. A game fusing the two resolved
+                # the same flick of the wrist differently sitting up and lying
+                # on one side. See config.guest_motion_accel.
+                if request.get("set") is not None:
+                    want = str(request["set"]).strip().lower()
+                    if want not in ("steady", "device", "off"):
+                        return {"ok": False,
+                                "error": "steady, device or off"}
+                    self.cfg.guest_motion_accel = want
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the accelerometer "
+                                    "setting: %s", exc)
+                    log.info("the accelerometer a guest's pad reports is now "
+                             "%s (it takes effect on the next controller)",
+                             want)
+                return self._status()
+            if command == "gyroorder":
+                # Which way round a phone's rotations reach the pad. Refused
+                # rather than quietly corrected: a name that cannot be used is
+                # almost always a mirror -- "invert one axis" always is -- and
+                # silently substituting the default changes three axes when
+                # somebody asked to change one.
+                if request.get("set") is not None:
+                    want = str(request["set"]).strip().lower()
+                    if padlib.parse_gyro_order(want) is None:
+                        return {"ok": False,
+                                "error": "each of pitch, yaw and roll exactly "
+                                         "once, and the whole thing has to be "
+                                         "a rotation -- negating one axis is a "
+                                         "mirror, so negate two or reorder"}
+                    self.cfg.guest_gyro_order = want
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the motion order: %s",
+                                    exc)
+                    log.info("the controller motion order is now %s (it takes "
+                             "effect on the next controller)", want)
+                return self._status()
             if command == "padkind":
                 if request.get("set"):
                     wanted = padlib.kind_or_default(request["set"])
@@ -1492,6 +1537,11 @@ class Server:
                     "max_slots": self.cfg.max_slots,
                     "launch": {"policy": self.cfg.guest_launch, "pending": None},
                     "motion": bool(getattr(self.cfg, "guest_motion", True)),
+                    "motion_accel": str(getattr(self.cfg,
+                                                "guest_motion_accel",
+                                                "steady")),
+                    "gyro_order": str(getattr(self.cfg, "guest_gyro_order",
+                                              padlib.DEFAULT_GYRO_ORDER)),
                     "pad": {"kind": padlib.kind_or_default(
                                 getattr(self.cfg, "guest_pad_kind", None)),
                             "kinds": sorted(padlib.KINDS),

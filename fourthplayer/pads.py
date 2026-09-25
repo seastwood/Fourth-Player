@@ -119,8 +119,26 @@ def parse_gyro_order(name):
 
 
 def gyro_order(name):
-    """The named order, or the default. Never an error."""
-    return parse_gyro_order(name) or parse_gyro_order(DEFAULT_GYRO_ORDER)
+    """The named order, or the default. Never an error, but never silent.
+
+    Falling back quietly was worse than an error. An order that is refused --
+    most often because it is a mirror, which is what "just invert one axis"
+    always is -- was replaced by a default that is not a small correction of
+    what was asked for but a different mapping entirely. So somebody trying to
+    flip one axis got three changed, tested that, and reasoned from it.
+    """
+    want = parse_gyro_order(name)
+    if want is not None:
+        return want
+    fell_back = parse_gyro_order(DEFAULT_GYRO_ORDER)
+    if name:
+        log.warning(
+            "the controller motion order %r cannot be used, so %r is in force "
+            "instead. Three axes, each of pitch, yaw and roll exactly once, "
+            "and the whole thing has to be a rotation: negating a single axis "
+            "is a mirror, which no way of holding a phone produces. Negate "
+            "two, or reorder.", name, DEFAULT_GYRO_ORDER)
+    return fell_back
 
 
 def kind_or_default(kind):

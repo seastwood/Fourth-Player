@@ -91,5 +91,36 @@ check('accel=getattr(self.cfg,\n                                                
       in SESSION or "guest_motion_accel" in SESSION,
       "the session passes what the config says")
 
+print("\nand both motion settings are on the setup page")
+# Because the answer to "the x axis is inverted" should not be somebody
+# editing JSON over ssh. Seth's words: "i dont know where theae settings are".
+HTML = open(os.path.join(ROOT, "web", "setup.html"), encoding="utf-8").read()
+JS = open(os.path.join(ROOT, "web", "setup.js"), encoding="utf-8").read()
+SERVER = open(os.path.join(ROOT, "fourthplayer", "server.py"),
+              encoding="utf-8").read()
+for what in ("set-motion-accel", "set-gyro-order"):
+    check(what in HTML, what + " is on the page")
+    check(what in JS, "and read back into it")
+check('["motionaccel", el("set-motion-accel").value' in JS
+      and '["gyroorder", el("set-gyro-order").value.trim()' in JS,
+      "and both are applied with the other access settings")
+check('if command == "motionaccel":' in SERVER
+      and 'if command == "gyroorder":' in SERVER,
+      "the host answers for both")
+check('"motion_accel":' in SERVER and '"gyro_order":' in SERVER,
+      "and reports them, so the page can show what is in force")
+
+print("\nand a motion order that cannot be used is refused, not swapped")
+# Silently falling back was worse than an error: an order that is refused is
+# almost always a mirror -- "invert one axis" always is -- and the default is
+# not a small correction of what was asked for but a different mapping
+# entirely. So somebody flipping one axis got three changed and tested that.
+check("if padlib.parse_gyro_order(want) is None:" in SERVER,
+      "the page is told no rather than given something else")
+check("negating one axis is a " in SERVER or "a mirror" in SERVER,
+      "and told why, in terms of what to do instead")
+check("cannot be used, so %r is in force" in PADS,
+      "and a config file that names one says so in the log")
+
 print("\n%d FAILED" % bad if bad else "\nall ok")
 sys.exit(1 if bad else 0)
