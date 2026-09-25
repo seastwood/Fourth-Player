@@ -75,6 +75,10 @@ except ImportError:
         """
 
         _made = 0
+        # Only a pad is ever a DS4, and only _open_pad decides. Class-level so
+        # the pointer, mouse and keyboard paths -- which never call it -- can
+        # still be asked without raising.
+        _ds4 = False
 
         def __init__(self, capabilities, name="", vendor=0, product=0,
                      version=0, bustype=0, **_ignored):
@@ -91,7 +95,7 @@ except ImportError:
             # it. The same four things desk.py and pads.py ask for.
             self._impl = None
             if e.ABS_X in axes and e.BTN_A in keys:
-                self._open_pad()
+                self._open_pad(vendor)
                 return
             # Imported here rather than at the top: windesk pulls in
             # ctypes.wintypes, which does not exist off Windows, and this
@@ -112,7 +116,15 @@ except ImportError:
                 self._impl = windesk.Keyboard(name)
             self.device = self._impl.device
 
-        def _open_pad(self):
+        def _open_pad(self, vendor=0):
+            """Open the ViGEm target this pad declared itself to be.
+
+            The kind is read from the declared vendor rather than passed as an
+            argument, because evdev's UInput -- which this stands in for -- has
+            a fixed signature with nowhere to put one. pads.py declares Sony's
+            vendor id for a DualShock and Microsoft's for an Xbox pad, SDL and
+            Windows key off exactly those two numbers, and so does this.
+            """
             try:
                 import vgamepad
             except ImportError as exc:      # pragma: no cover - install-time
@@ -122,19 +134,46 @@ except ImportError:
                     "driver)") from exc
             self._vg = vgamepad
             self._impl = None
-            self._pad = vgamepad.VX360Gamepad()
+            self._ds4 = vendor == 0x054C
+            self._pad = (vgamepad.VDS4Gamepad() if self._ds4
+                         else vgamepad.VX360Gamepad())
             UInput._made += 1
-            self.device = _Node("vigem:x360:%d" % UInput._made)
+            self.device = _Node("vigem:%s:%d"
+                                % ("ds4" if self._ds4 else "x360", UInput._made))
             self._buttons = self._button_map()
             self._hat = {}               # ABS_HAT0X/Y -> -1, 0, 1
             # Both sticks are two-dimensional and arrive one axis at a time,
             # so each needs the other's last value to send a position at all.
-            self._lx = self._ly = self._rx = self._ry = 0
+            # Centred, which is 0 on an Xbox pad and 128 on a DS4. Starting a
+            # DS4 at 0 is both sticks held hard up and left until the guest
+            # touches them.
+            self._lx = self._ly = self._rx = self._ry = 128 if self._ds4 else 0
             self._dirty = False
 
         def _button_map(self):
-            """evdev button code -> the XUSB flag that means the same button."""
+            """evdev button code -> the flag that means the same button."""
             from .codes import ecodes as e
+            if self._ds4:
+                # The face buttons are matched by *position*, not by letter.
+                # Xbox's X is the western button and so is Sony's square;
+                # Xbox's Y is the northern one and so is triangle. A guest
+                # pressing the left-hand face button gets the left-hand face
+                # button, which is what their thumb meant.
+                D = self._vg.DS4_BUTTONS
+                return {
+                    e.BTN_A: D.DS4_BUTTON_CROSS,
+                    e.BTN_B: D.DS4_BUTTON_CIRCLE,
+                    e.BTN_X: D.DS4_BUTTON_SQUARE,
+                    e.BTN_Y: D.DS4_BUTTON_TRIANGLE,
+                    e.BTN_TL: D.DS4_BUTTON_SHOULDER_LEFT,
+                    e.BTN_TR: D.DS4_BUTTON_SHOULDER_RIGHT,
+                    e.BTN_TL2: D.DS4_BUTTON_TRIGGER_LEFT,
+                    e.BTN_TR2: D.DS4_BUTTON_TRIGGER_RIGHT,
+                    e.BTN_SELECT: D.DS4_BUTTON_SHARE,
+                    e.BTN_START: D.DS4_BUTTON_OPTIONS,
+                    e.BTN_THUMBL: D.DS4_BUTTON_THUMB_LEFT,
+                    e.BTN_THUMBR: D.DS4_BUTTON_THUMB_RIGHT,
+                }
             B = self._vg.XUSB_BUTTON
             return {
                 e.BTN_A: B.XUSB_GAMEPAD_A,
@@ -157,6 +196,18 @@ except ImportError:
                 self._impl.write(etype, code, value)
                 return
             if etype == e.EV_KEY:
+                if self._ds4 and code == e.BTN_MODE:
+                    # The PS button is a "special" one on a DS4 -- it lives in
+                    # a different byte of the report and vgamepad gives it its
+                    # own call. pads.py only ever writes it when the session
+                    # allows the guide button at all.
+                    special = self._vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS
+                    if value:
+                        self._pad.press_special_button(special_button=special)
+                    else:
+                        self._pad.release_special_button(special_button=special)
+                    self._dirty = True
+                    return
                 flag = self._buttons.get(code)
                 if flag is None:
                     # BTN_TL2 and BTN_TR2 land here: an Xbox pad reports its
@@ -173,8 +224,23 @@ except ImportError:
                 self._axis(code, value)
                 self._dirty = True
 
+        @staticmethod
+        def _to_byte(value):
+            """An evdev stick reading as a DS4 byte: 0..255, 128 in the middle.
+
+            No inversion, unlike the Xbox path. evdev counts down as positive
+            on a stick and so does a DualShock -- 0 is up and 255 is down --
+            so the flip that XInput needs would be wrong here, and wrong in the
+            way that is hardest to notice from a log: the picture is fine, the
+            game responds, and up is down.
+            """
+            return max(0, min(255, (int(value) + 32768) >> 8))
+
         def _axis(self, code, value):
             from .codes import ecodes as e
+            if self._ds4:
+                self._ds4_axis(code, value)
+                return
             pad = self._pad
             if code == e.ABS_X:
                 self._lx = value
@@ -196,12 +262,67 @@ except ImportError:
                 self._hat[code] = value
                 self._press_hat()
 
+        def _ds4_axis(self, code, value):
+            from .codes import ecodes as e
+            pad = self._pad
+            if code == e.ABS_X:
+                self._lx = self._to_byte(value)
+                pad.left_joystick(x_value=self._lx, y_value=self._ly)
+            elif code == e.ABS_Y:
+                self._ly = self._to_byte(value)
+                pad.left_joystick(x_value=self._lx, y_value=self._ly)
+            elif code == e.ABS_RX:
+                self._rx = self._to_byte(value)
+                pad.right_joystick(x_value=self._rx, y_value=self._ry)
+            elif code == e.ABS_RY:
+                self._ry = self._to_byte(value)
+                pad.right_joystick(x_value=self._rx, y_value=self._ry)
+            elif code in (e.ABS_Z, e.ABS_RZ):
+                amount = max(0, min(255, value))
+                left = code == e.ABS_Z
+                if left:
+                    pad.left_trigger(value=amount)
+                else:
+                    pad.right_trigger(value=amount)
+                # A real DS4 sets the digital trigger button as well as the
+                # analog value, and games read either. Sending only the axis
+                # is a trigger that reads as untouched to anything watching
+                # the buttons.
+                D = self._vg.DS4_BUTTONS
+                flag = (D.DS4_BUTTON_TRIGGER_LEFT if left
+                        else D.DS4_BUTTON_TRIGGER_RIGHT)
+                if amount:
+                    pad.press_button(button=flag)
+                else:
+                    pad.release_button(button=flag)
+            elif code in (e.ABS_HAT0X, e.ABS_HAT0Y):
+                self._hat[code] = value
+                self._press_hat()
+
         def _press_hat(self):
             """The d-pad, which is two signed axes here and four buttons there."""
             from .codes import ecodes as e
-            B = self._vg.XUSB_BUTTON
             x = self._hat.get(e.ABS_HAT0X, 0)
             y = self._hat.get(e.ABS_HAT0Y, 0)
+            if self._ds4:
+                # One of eight directions and a neutral, not four independent
+                # flags: that is how the DS4 report carries it, and the
+                # diagonals have to be named rather than implied.
+                D = self._vg.DS4_DPAD_DIRECTIONS
+                where = {
+                    (0, 0): D.DS4_BUTTON_DPAD_NONE,
+                    (0, -1): D.DS4_BUTTON_DPAD_NORTH,
+                    (1, -1): D.DS4_BUTTON_DPAD_NORTHEAST,
+                    (1, 0): D.DS4_BUTTON_DPAD_EAST,
+                    (1, 1): D.DS4_BUTTON_DPAD_SOUTHEAST,
+                    (0, 1): D.DS4_BUTTON_DPAD_SOUTH,
+                    (-1, 1): D.DS4_BUTTON_DPAD_SOUTHWEST,
+                    (-1, 0): D.DS4_BUTTON_DPAD_WEST,
+                    (-1, -1): D.DS4_BUTTON_DPAD_NORTHWEST,
+                }[(max(-1, min(1, x)), max(-1, min(1, y)))]
+                self._pad.directional_pad(direction=where)
+                return
+            B = self._vg.XUSB_BUTTON
             for flag, on in (
                 (B.XUSB_GAMEPAD_DPAD_LEFT, x < 0),
                 (B.XUSB_GAMEPAD_DPAD_RIGHT, x > 0),

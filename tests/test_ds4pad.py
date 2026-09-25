@@ -1,0 +1,315 @@
+"""A guest given a DualShock instead of an Xbox pad.
+
+Sunshine offers this and the reason is not cosmetic: a game reads the pad's
+identity and names its buttons accordingly, so a guest on a DualShock told to
+"press A" is being told to press a button that is not there.
+
+Two halves, and they are tested differently.
+
+The identity is chosen in pads.py and carried as the USB vendor and product
+the device declares -- not as a flag -- because evdev's UInput has a fixed
+signature with nowhere to put one, and because vendor and product are what SDL,
+Windows and virtual.py all key off already.
+
+The translation is in virtual.py, at the one edge where evdev's vocabulary
+becomes ViGEm's. test_winpad.py tests the Xbox half against real XInput and
+says, rightly, that there is no point faking that: XInput is the thing being
+asked. But XInput cannot see a DS4 at all -- it is not an XInput device -- and
+the decisions here are the kind a stub does catch: which face button a thumb
+lands on, a stick scaled into a byte, and a flip that must *not* happen.
+
+That last one is why this file exists. The Xbox path inverts every vertical
+axis because evdev counts down as positive and XInput counts up. A DualShock
+counts down as positive too, so the same flip would be wrong -- and wrong in
+the way that is hardest to catch from a log, because the picture is fine, the
+game responds, and up is down.
+"""
+import importlib
+import importlib.util
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+
+fails = []
+
+
+def check(cond, msg):
+    print(("  ok   " if cond else "  FAIL ") + msg)
+    if not cond:
+        fails.append(msg)
+
+
+# ---- the identity, which needs no backend at all ----
+
+from fourthplayer import pads                                 # noqa: E402
+
+print("-- the kinds on offer --")
+check(set(pads.KINDS) == {"xbox360", "ds4"},
+      "two, named: %s" % sorted(pads.KINDS))
+check(pads.KINDS["xbox360"]["vendor"] == 0x045E
+      and pads.KINDS["xbox360"]["product"] == 0x028E,
+      "the Xbox pad keeps the identity SDL already has a mapping for")
+check(pads.KINDS["ds4"]["vendor"] == 0x054C
+      and pads.KINDS["ds4"]["product"] == 0x09CC,
+      "and the DualShock declares Sony's, which is what everything keys on")
+
+print("\n-- a name that is not a kind is not a reason to have no pad --")
+check(pads.kind_or_default("ds4") == "ds4", "a good name is kept")
+check(pads.kind_or_default("DS4 ") == "ds4", "spelled loosely, still kept")
+for bad in ("", None, "switch", "ds5", 7):
+    check(pads.kind_or_default(bad) == "xbox360",
+          "%r falls back rather than raising -- the wrong pad is a button "
+          "prompt showing the wrong letter, no pad is an evening lost" % (bad,))
+
+print("\n-- a seat's kind, and what changing it does --")
+seats = pads.PadSet.__new__(pads.PadSet)
+seats._kind = "xbox360"
+seats.names = ["one", "two"]
+seats.pads = [None, None]
+seats.kinds = ["xbox360", "xbox360"]
+seats.released = []
+seats.release = lambda i: seats.released.append(i)
+check(seats.kind_for(0) == "xbox360", "a seat starts as the session's kind")
+check(pads.PadSet.set_kind(seats, 0, "ds4") is True, "changing it says so")
+check(seats.kind_for(0) == "ds4", "and it took")
+check(seats.released == [],
+      "with no device yet there is nothing to unplug")
+check(pads.PadSet.set_kind(seats, 0, "ds4") is False,
+      "setting it to what it already is changes nothing")
+seats.pads[0] = object()
+pads.PadSet.set_kind(seats, 0, "xbox360")
+check(seats.released == [0],
+      "but a seat that has a device has it unplugged: what a pad *is* cannot "
+      "be changed once the kernel has it, so the device goes and the next "
+      "frame makes a new one")
+check(seats.kind_for(1) == "xbox360", "and the other seat is left alone")
+
+# ---- the translation, with ViGEm stubbed ----
+#
+# The stub proves the mapping, not ViGEm. That distinction is worth keeping:
+# test_winpad.py asks real XInput because XInput's semantics are the question
+# there. Here the question is which of vgamepad's calls we make and with what,
+# and a recorder answers that exactly.
+
+class _Enum(dict):
+    """Stands in for vgamepad's IntEnum members, by name."""
+
+    def __getattr__(self, name):
+        if name not in self:
+            raise AttributeError(name)
+        return self[name]
+
+
+DS4_BUTTONS = _Enum({n: n for n in (
+    "DS4_BUTTON_CROSS", "DS4_BUTTON_CIRCLE", "DS4_BUTTON_SQUARE",
+    "DS4_BUTTON_TRIANGLE", "DS4_BUTTON_SHOULDER_LEFT",
+    "DS4_BUTTON_SHOULDER_RIGHT", "DS4_BUTTON_TRIGGER_LEFT",
+    "DS4_BUTTON_TRIGGER_RIGHT", "DS4_BUTTON_SHARE", "DS4_BUTTON_OPTIONS",
+    "DS4_BUTTON_THUMB_LEFT", "DS4_BUTTON_THUMB_RIGHT")})
+DS4_SPECIAL_BUTTONS = _Enum({n: n for n in
+                             ("DS4_SPECIAL_BUTTON_PS",
+                              "DS4_SPECIAL_BUTTON_TOUCHPAD")})
+DS4_DPAD_DIRECTIONS = _Enum({n: n for n in (
+    "DS4_BUTTON_DPAD_NONE", "DS4_BUTTON_DPAD_NORTH",
+    "DS4_BUTTON_DPAD_NORTHEAST", "DS4_BUTTON_DPAD_EAST",
+    "DS4_BUTTON_DPAD_SOUTHEAST", "DS4_BUTTON_DPAD_SOUTH",
+    "DS4_BUTTON_DPAD_SOUTHWEST", "DS4_BUTTON_DPAD_WEST",
+    "DS4_BUTTON_DPAD_NORTHWEST")})
+XUSB_BUTTON = _Enum({n: n for n in (
+    "XUSB_GAMEPAD_A", "XUSB_GAMEPAD_B", "XUSB_GAMEPAD_X", "XUSB_GAMEPAD_Y",
+    "XUSB_GAMEPAD_LEFT_SHOULDER", "XUSB_GAMEPAD_RIGHT_SHOULDER",
+    "XUSB_GAMEPAD_BACK", "XUSB_GAMEPAD_START", "XUSB_GAMEPAD_LEFT_THUMB",
+    "XUSB_GAMEPAD_RIGHT_THUMB", "XUSB_GAMEPAD_GUIDE",
+    "XUSB_GAMEPAD_DPAD_LEFT", "XUSB_GAMEPAD_DPAD_RIGHT",
+    "XUSB_GAMEPAD_DPAD_UP", "XUSB_GAMEPAD_DPAD_DOWN")})
+
+
+class Recorder:
+    """A vgamepad pad that writes down what it was asked to do."""
+
+    def __init__(self):
+        self.down = set()
+        self.special = set()
+        self.left = self.right = None
+        self.triggers = {}
+        self.dpad = None
+        self.updates = 0
+
+    def press_button(self, button): self.down.add(button)
+
+    def release_button(self, button): self.down.discard(button)
+
+    def press_special_button(self, special_button):
+        self.special.add(special_button)
+
+    def release_special_button(self, special_button):
+        self.special.discard(special_button)
+
+    def left_joystick(self, x_value, y_value): self.left = (x_value, y_value)
+
+    def right_joystick(self, x_value, y_value): self.right = (x_value, y_value)
+
+    def left_trigger(self, value): self.triggers["l"] = value
+
+    def right_trigger(self, value): self.triggers["r"] = value
+
+    def directional_pad(self, direction): self.dpad = direction
+
+    def update(self): self.updates += 1
+
+    def reset(self): self.__init__()
+
+
+class FakeVgamepad:
+    DS4_BUTTONS = DS4_BUTTONS
+    DS4_SPECIAL_BUTTONS = DS4_SPECIAL_BUTTONS
+    DS4_DPAD_DIRECTIONS = DS4_DPAD_DIRECTIONS
+    XUSB_BUTTON = XUSB_BUTTON
+    made = []
+
+    @staticmethod
+    def VDS4Gamepad():
+        FakeVgamepad.made.append("ds4")
+        return Recorder()
+
+    @staticmethod
+    def VX360Gamepad():
+        FakeVgamepad.made.append("x360")
+        return Recorder()
+
+
+def windows_backend():
+    """virtual.py as it is on Windows, on whatever machine this runs.
+
+    evdev is set to None in sys.modules, which makes `from evdev import ...`
+    raise ImportError -- the exact condition the module branches on -- and the
+    module is then loaded fresh under its own name so the real one is left
+    alone for everything else in the suite.
+    """
+    saved = sys.modules.get("evdev", "absent")
+    sys.modules["evdev"] = None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "fourthplayer._virtual_windows",
+            os.path.join(ROOT, "fourthplayer", "virtual.py"))
+        mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = "fourthplayer"
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        if saved == "absent":
+            sys.modules.pop("evdev", None)
+        else:
+            sys.modules["evdev"] = saved
+
+
+virtual = windows_backend()
+print("-- the Windows backend, loaded as Windows loads it --")
+check(virtual.BACKEND == "vigem",
+      "it took the ViGEm branch, got %r" % virtual.BACKEND)
+
+sys.modules["vgamepad"] = FakeVgamepad
+from fourthplayer.codes import ecodes as e                    # noqa: E402
+
+
+def a_pad(kind):
+    spec = pads.KINDS[kind]
+    FakeVgamepad.made = []
+    ui = virtual.UInput(pads.capabilities(True), name="test",
+                        vendor=spec["vendor"], product=spec["product"],
+                        version=spec["version"], bustype=0x0003)
+    return ui, ui._pad
+
+
+print("\n-- the declared vendor is what picks the target --")
+ui, pad = a_pad("ds4")
+check(FakeVgamepad.made == ["ds4"],
+      "Sony's vendor opens a DS4 target, got %r" % FakeVgamepad.made)
+check("ds4" in ui.device.path, "and says so in its path: %s" % ui.device.path)
+ui2, _ = a_pad("xbox360")
+check(FakeVgamepad.made == ["x360"],
+      "Microsoft's opens an Xbox one, got %r" % FakeVgamepad.made)
+
+print("\n-- the face buttons go by position, not by letter --")
+ui, pad = a_pad("ds4")
+for code, want in ((e.BTN_A, "DS4_BUTTON_CROSS"), (e.BTN_B, "DS4_BUTTON_CIRCLE"),
+                   (e.BTN_X, "DS4_BUTTON_SQUARE"),
+                   (e.BTN_Y, "DS4_BUTTON_TRIANGLE")):
+    pad.down.clear()
+    ui.write(e.EV_KEY, code, 1)
+    check(pad.down == {want},
+          "%s lands on %s, got %r" % (code, want, pad.down))
+
+print("\n-- and the PS button is a special one, in its own byte --")
+ui, pad = a_pad("ds4")
+ui.write(e.EV_KEY, e.BTN_MODE, 1)
+check(pad.special == {"DS4_SPECIAL_BUTTON_PS"} and not pad.down,
+      "press_special_button, not press_button: %r / %r" % (pad.special, pad.down))
+ui.write(e.EV_KEY, e.BTN_MODE, 0)
+check(pad.special == set(), "and it lets go")
+
+print("\n-- sticks become bytes, and are NOT flipped --")
+ui, pad = a_pad("ds4")
+check(pad.left == (128, 128) or ui._lx == 128,
+      "a new pad's sticks sit in the middle at 128, not at 0 -- which on a "
+      "DS4 is both sticks held hard up and left")
+ui.write(e.EV_ABS, e.ABS_X, 32767)
+ui.write(e.EV_ABS, e.ABS_Y, 32767)
+check(pad.left == (255, 255),
+      "hard right and hard *down* both read 255: evdev and a DualShock agree "
+      "that down is positive, so the flip XInput needs would put up at the "
+      "bottom. Got %r" % (pad.left,))
+ui.write(e.EV_ABS, e.ABS_X, -32768)
+ui.write(e.EV_ABS, e.ABS_Y, -32768)
+check(pad.left == (0, 0), "and the other corner is 0, got %r" % (pad.left,))
+ui.write(e.EV_ABS, e.ABS_X, 0)
+check(pad.left[0] == 128, "centre is 128, got %r" % (pad.left[0],))
+# The Xbox path must still invert, or fixing one broke the other.
+ui3, x360 = a_pad("xbox360")
+ui3.write(e.EV_ABS, e.ABS_Y, 32767)
+check(x360.left == (0, -32767),
+      "the Xbox pad still inverts, because XInput counts up: got %r"
+      % (x360.left,))
+
+print("\n-- a trigger is an axis and a button at once --")
+ui, pad = a_pad("ds4")
+ui.write(e.EV_ABS, e.ABS_Z, 200)
+check(pad.triggers.get("l") == 200, "the analog value goes out")
+check("DS4_BUTTON_TRIGGER_LEFT" in pad.down,
+      "and the digital bit with it -- a real DS4 sets both, and games read "
+      "either")
+ui.write(e.EV_ABS, e.ABS_Z, 0)
+check(pad.triggers.get("l") == 0 and "DS4_BUTTON_TRIGGER_LEFT" not in pad.down,
+      "and both let go together")
+
+print("\n-- the d-pad is one of eight directions, diagonals named --")
+ui, pad = a_pad("ds4")
+for x, y, want in ((0, 0, "NONE"), (0, -1, "NORTH"), (1, -1, "NORTHEAST"),
+                   (1, 0, "EAST"), (1, 1, "SOUTHEAST"), (0, 1, "SOUTH"),
+                   (-1, 1, "SOUTHWEST"), (-1, 0, "WEST"),
+                   (-1, -1, "NORTHWEST")):
+    ui.write(e.EV_ABS, e.ABS_HAT0X, x)
+    ui.write(e.EV_ABS, e.ABS_HAT0Y, y)
+    check(pad.dpad == "DS4_BUTTON_DPAD_" + want,
+          "(%d,%d) is %s, got %r" % (x, y, want, pad.dpad))
+
+print("\n-- and nothing reaches the game until syn --")
+ui, pad = a_pad("ds4")
+ui.write(e.EV_KEY, e.BTN_A, 1)
+ui.write(e.EV_KEY, e.BTN_B, 1)
+check(pad.updates == 0, "two buttons in one frame send nothing yet")
+ui.syn()
+check(pad.updates == 1,
+      "and one report when the frame ends, not one per button: %d"
+      % pad.updates)
+
+print()
+if fails:
+    print("FAILURES: %d" % len(fails))
+    for line in fails:
+        print("  " + line)
+    sys.exit(1)
+print("test_ds4pad: all ok")

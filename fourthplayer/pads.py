@@ -29,6 +29,45 @@ from . import protocol as P
 
 VENDOR, PRODUCT, BUSTYPE, VERSION = 0x045E, 0x028E, 0x0003, 0x0110
 
+# What kind of pad a guest is given, as an identity rather than as a flag.
+#
+# A guest's controller reaches the host as buttons and axes with no brand on
+# them, and what the machine then sees is decided here. Sunshine offers the
+# same choice, and for the same reason: some games read the pad's identity and
+# change what they show. A DualShock asks for Cross where an Xbox pad asks for
+# A, and a game that has decided you are on an Xbox pad will tell you to press
+# A for the rest of the evening whatever is actually in your hands.
+#
+# The kind is carried as the USB vendor and product it declares, not as a
+# separate argument, and that is deliberate. evdev's UInput has a fixed
+# signature with nowhere to put an extra keyword, and the identity is what
+# every layer below already keys on: SDL matches a controller by vendor and
+# product and applies its own mapping, and virtual.py -- which has no uinput
+# to hand on Windows -- reads the same two numbers to decide which ViGEm
+# target to open. One fact, declared once, understood the same way the whole
+# way down.
+#
+# 054C:09CC is the second-generation DualShock 4, the one SDL, Steam and
+# Windows all have mappings for.
+KINDS = {
+    "xbox360": {"vendor": 0x045E, "product": 0x028E, "version": 0x0110,
+                "label": "Xbox 360 pad"},
+    "ds4": {"vendor": 0x054C, "product": 0x09CC, "version": 0x8111,
+            "label": "DualShock 4"},
+}
+DEFAULT_KIND = "xbox360"
+
+
+def kind_or_default(kind):
+    """The named kind, or the default -- never an error.
+
+    A pad is made at the moment somebody sits down to play. A name that does
+    not match anything must not be the reason they cannot: the wrong pad is a
+    button prompt showing the wrong letter, and no pad is an evening lost.
+    """
+    name = str(kind or "").strip().lower()
+    return name if name in KINDS else DEFAULT_KIND
+
 # How long a pad may hear nothing before it is forced open. Short enough that a
 # dropped guest does not run into a wall for long, and long enough to survive
 # an ordinary network hiccup at the 8 ms send interval.
@@ -158,11 +197,19 @@ class VirtualPad:
     # claims to have it hands guests the Steam menu.
     guide = False
 
-    def __init__(self, name, now=None, guide=True):
+    # Which pad this is pretending to be. Class-level for the same reason
+    # `guide` is: a test that builds one without calling __init__ still has to
+    # be able to ask.
+    kind = DEFAULT_KIND
+
+    def __init__(self, name, now=None, guide=True, kind=DEFAULT_KIND):
         self.name = name
         self.guide = guide
-        self._ui = UInput(capabilities(guide), name=name, vendor=VENDOR,
-                          product=PRODUCT, version=VERSION, bustype=BUSTYPE)
+        self.kind = kind_or_default(kind)
+        spec = KINDS[self.kind]
+        self._ui = UInput(capabilities(guide), name=name,
+                          vendor=spec["vendor"], product=spec["product"],
+                          version=spec["version"], bustype=BUSTYPE)
         self._last = {}
         # Per sender, not per pad. One counter was enough while a pad had one
         # guest; several on one pad interleave their counters, and each
@@ -322,9 +369,14 @@ class PadSet:
     playing, in whatever mixture.
     """
 
-    def __init__(self, count, label="Fourth Player", now=None, guide=True):
+    def __init__(self, count, label="Fourth Player", now=None, guide=True,
+                 kind=DEFAULT_KIND):
         self._now = now or time.monotonic
         self._label = label
+        # What a seat's pad declares itself to be. A default for the session;
+        # a guest may be given a different one, which is why it is passed per
+        # pad below rather than read from here when the device is made.
+        self._kind = kind_or_default(kind)
         # Whether these pads have a guide button at all. See capabilities():
         # it is the Steam button and RetroArch's menu button, and a guest has
         # no business opening either.
@@ -334,6 +386,10 @@ class PadSet:
         # against them, and the picker reads them out of pad-names.json.
         self.names = [f"{label} {i + 1}" for i in range(count)]
         self.pads = [None] * count
+        # Per seat, not per session. Two people playing the same game may want
+        # different pads -- and on Windows the choice changes which ViGEm
+        # target is opened, so it has to be settled before the device is made.
+        self.kinds = [self._kind] * count
 
     def __len__(self):
         return len(self.pads)
@@ -341,6 +397,32 @@ class PadSet:
     def name_for(self, index):
         """What the seat is called, whether or not anybody is sitting in it."""
         return self.names[index]
+
+    def kind_for(self, index):
+        """What this seat's pad says it is, whether or not one exists yet."""
+        return self.kinds[index]
+
+    def set_kind(self, index, kind):
+        """Give a seat a different kind of pad. True if anything changed.
+
+        An existing device is unplugged rather than altered. What a pad is
+        cannot be changed once the kernel -- or ViGEm -- has it: the identity
+        is read when the device is created and never again, and a game that has
+        already seen it has already decided which buttons to name. So the
+        device goes and the next frame makes a new one, which is the same thing
+        that happens when somebody unplugs a controller and plugs another in,
+        and is exactly what it should look like from the game's side.
+        """
+        want = kind_or_default(kind)
+        if want == self.kinds[index]:
+            return False
+        self.kinds[index] = want
+        if self.pads[index] is not None:
+            log.info("seat %d becomes a %s; unplugging the old pad so the new "
+                     "identity is the one anything sees",
+                     index + 1, KINDS[want]["label"])
+            self.release(index)
+        return True
 
     def __getitem__(self, index):
         """The device for a seat, made on first use.
@@ -351,7 +433,7 @@ class PadSet:
         pad = self.pads[index]
         if pad is None:
             pad = VirtualPad(self.names[index], now=self._now,
-                             guide=self._guide)
+                             guide=self._guide, kind=self.kinds[index])
             self.pads[index] = pad
             # Said, because a controller appearing is not free: Steam
             # re-enumerates when one does and may hand a running game to it.
