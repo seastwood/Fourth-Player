@@ -110,6 +110,45 @@ check('if command == "motionaccel":' in SERVER
 check('"motion_accel":' in SERVER and '"gyro_order":' in SERVER,
       "and reports them, so the page can show what is in force")
 
+print("\nand a phone held sideways gets its own order")
+# Two orders rather than one correction, because neither end knows enough to
+# work one out. The page knows the screen angle but not which device axis the
+# host feeds to which pad axis; the host knows the order but not how the phone
+# is held. Rotating on the page was tried and moved the wrong pair: it turns
+# the device's own x and y, which is right in principle and useless for an
+# order whose first axis is the device's z. Reported as "you changed rolling
+# to yaw".
+APP = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+FRAME = open(os.path.join(ROOT, "web", "frame.js"), encoding="utf-8").read()
+check('guest_gyro_order_landscape: str = ""' in CONFIG,
+      "there is a second order, blank meaning 'the same as upright'")
+check("const ROTATE_TO_SCREEN = false;" in FRAME,
+      "and the page does not rotate anything itself")
+check('socket.send(JSON.stringify({ t: "orient", angle }));' in APP,
+      "it tells the host the angle instead")
+check("tellHostOrientation(true);" in APP,
+      "on every connection, since the host remembers nothing of it -- a guest "
+      "who joined sideways would be given the upright order until they turned "
+      "the phone")
+check('window.addEventListener("orientationchange"' in APP,
+      "and whenever it changes, by the older event")
+check('.addEventListener(\n        "change"' in APP
+      or "screen.orientation" in APP,
+      "and the newer one, since which a browser has is not knowable ahead of "
+      "time")
+
+SERVER_ = open(os.path.join(ROOT, "fourthplayer", "server.py"),
+               encoding="utf-8").read()
+check('elif kind == "orient"' in SERVER_, "the host takes the angle")
+check("sideways = angle in (90, 270)" in SERVER_,
+      "and calls a quarter turn either way sideways")
+check("set_gyro_order(order)" in SERVER_,
+      "and moves the live pads onto the order for it")
+check("def set_gyro_order(self, order):" in PADS,
+      "which changes them in place rather than unplugging anything -- "
+      "answering somebody turning their screen by taking their controller "
+      "away would be worse than the fault")
+
 print("\nand the orders it offers are all ones it accepts")
 # The set of answers is small and not obvious, so the page offers them rather
 # than leaving somebody to type into the dark. Every one has to be valid or

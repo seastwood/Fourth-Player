@@ -953,6 +953,12 @@ function watchPadKind() {
 function joined(message) {
   retries = 0;
   resumeRefused = 0;
+  // Which way the phone is held, on every connection rather than only when it
+  // changes. The host has no memory of it, so a guest who joined sideways
+  // would be given the upright axis order until they happened to turn over.
+  // Forced, because the last value told is about a connection that has gone.
+  toldAngle = null;
+  tellHostOrientation(true);
   // It got somebody in, so it is worth keeping: this is what makes the icon on
   // a home screen work on its own next time.
   if (linkKey) rememberKey(linkKey);
@@ -4147,7 +4153,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25m";
+const CLIENT_BUILD = "2026-09-25n";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -11051,6 +11057,45 @@ function tellHostPainting(on, how) {
       socket.send(JSON.stringify({ t: "painting", on: !!on, how: how || "" }));
     }
   } catch (_) { /* the host falls back to asking, as it did before */ }
+}
+
+/* Which way the screen is turned, told to the host so it can pick the axis
+ * order for it.
+ *
+ * The page deliberately does not rotate anything itself. It knows the angle
+ * and nothing else; which device axis becomes which pad axis is the host's
+ * business, and rotating the device's own x and y before that was tried and
+ * moved the wrong pair -- an order whose first axis is the device's z has its
+ * aim built from a pair this could not touch.
+ *
+ * Sent whenever it changes and again on every connection, because the host
+ * has no memory of it: a guest who joined sideways would otherwise be given
+ * the upright order until they turned the phone. */
+let toldAngle = null;
+function tellHostOrientation(force) {
+  const angle = FPFrame.screenAngle();
+  if (!force && angle === toldAngle) return;
+  try {
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ t: "orient", angle }));
+      toldAngle = angle;
+    }
+  } catch (_) { /* it keeps the order it has, which is the upright one */ }
+}
+
+if (typeof window !== "undefined") {
+  // Both, because which one a browser has is not knowable in advance:
+  // screen.orientation is the modern one and older Safari has the event on
+  // the window instead.
+  try {
+    if (window.screen && window.screen.orientation
+        && window.screen.orientation.addEventListener) {
+      window.screen.orientation.addEventListener(
+        "change", () => tellHostOrientation(false));
+    }
+  } catch (_) {}
+  window.addEventListener("orientationchange",
+                          () => tellHostOrientation(false));
 }
 
 function askHostForKeyframe() {

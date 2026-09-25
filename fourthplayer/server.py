@@ -425,6 +425,32 @@ class Server:
                         self.session.stage.request_keyframe(
                             "%s (drawing its own)" % guest.label,
                             starting=bool(message.get("starting")))
+                elif kind == "orient" and guest is not None:
+                    # Which way the guest is holding their phone.
+                    #
+                    # The host keeps two axis orders and picks between them,
+                    # rather than the page rotating anything. Neither end
+                    # knows enough alone: the page knows the screen angle but
+                    # not which device axis the host feeds to which pad axis,
+                    # and the host knows the order but not how the phone is
+                    # being held. Rotating on the page was tried and moved the
+                    # wrong pair.
+                    if self.session is not None and self.session.pads is not None:
+                        try:
+                            angle = int(message.get("angle") or 0) % 360
+                        except (TypeError, ValueError):
+                            angle = 0
+                        sideways = angle in (90, 270)
+                        wanted = (getattr(self.cfg,
+                                          "guest_gyro_order_landscape", "")
+                                  if sideways else "")
+                        name = wanted or getattr(self.cfg, "guest_gyro_order",
+                                                 None)
+                        order = padlib.gyro_order(name)
+                        if self.session.pads.set_gyro_order(order):
+                            log.info("%s turned their screen to %d degrees, so "
+                                     "the motion axes are %s now",
+                                     guest.label, angle, name)
                 elif kind == "painting" and guest is not None:
                     # The page says whether it is decoding the picture itself.
                     #
@@ -1367,6 +1393,27 @@ class Server:
                     log.info("the controller motion order is now %s (it takes "
                              "effect on the next controller)", want)
                 return self._status()
+            if command == "gyroorderlandscape":
+                # Blank means "use the upright one in both", which is the
+                # honest default: a host nobody has tested sideways should not
+                # pretend to know.
+                if request.get("set") is not None:
+                    want = str(request["set"]).strip().lower()
+                    if want and padlib.parse_gyro_order(want) is None:
+                        return {"ok": False,
+                                "error": "each of pitch, yaw and roll exactly "
+                                         "once, and the whole thing has to be "
+                                         "a rotation -- negating one axis is a "
+                                         "mirror, so negate two or reorder"}
+                    self.cfg.guest_gyro_order_landscape = want
+                    try:
+                        self.cfg.save()
+                    except OSError as exc:
+                        log.warning("could not remember the sideways motion "
+                                    "order: %s", exc)
+                    log.info("the sideways motion order is now %s",
+                             want or "the same as upright")
+                return self._status()
             if command == "padkind":
                 if request.get("set"):
                     wanted = padlib.kind_or_default(request["set"])
@@ -1542,6 +1589,8 @@ class Server:
                                                 "steady")),
                     "gyro_order": str(getattr(self.cfg, "guest_gyro_order",
                                               padlib.DEFAULT_GYRO_ORDER)),
+                    "gyro_order_landscape": str(
+                        getattr(self.cfg, "guest_gyro_order_landscape", "")),
                     "pad": {"kind": padlib.kind_or_default(
                                 getattr(self.cfg, "guest_pad_kind", None)),
                             "kinds": sorted(padlib.KINDS),

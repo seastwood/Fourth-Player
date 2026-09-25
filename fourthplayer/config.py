@@ -350,6 +350,21 @@ class Config:
     # reading, which is what a game wanting genuine tilt needs. "off" sends
     # nothing.
     guest_motion_accel: str = "steady"
+    # The same, for a phone held sideways, and blank to use the one above in
+    # both.
+    #
+    # Two orders rather than one correction, because a correction has to be
+    # applied somewhere and neither end knows enough to apply it. The page
+    # knows which way the screen is turned but not which device axis the host
+    # will feed to which pad axis; the host knows the order but has no idea
+    # how the phone is being held. Rotating on the page was tried and moved
+    # the wrong pair -- it rotates the device's own x and y, which is right in
+    # principle and wrong for an order whose first axis is the device's z.
+    #
+    # And they are separately testable, which is the whole reason the portrait
+    # one is right: somebody played a game and said what moved. An order that
+    # cannot be tested on its own cannot be found.
+    guest_gyro_order_landscape: str = ""
     # How long a seat keeps its controller after its guest leaves, in seconds.
     #
     # Nothing is unplugged at all while a game is in front, so this is what

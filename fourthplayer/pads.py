@@ -590,6 +590,27 @@ class PadSet:
         log.info("guest motion is %s", "carried" if want else "not carried")
         return True
 
+    def set_gyro_order(self, order):
+        """Which way round rotations reach every pad. True if anything moved.
+
+        Live, and on the devices that already exist, because this is what a
+        phone being turned sideways changes -- and unplugging a controller to
+        answer somebody rotating their screen would cost them the game. A pad
+        carries the order as a property; nothing about the device itself
+        depends on it.
+        """
+        if not order or order == self._order:
+            return False
+        self._order = order
+        for pad in self.pads:
+            if pad is None:
+                continue
+            try:
+                pad._ui.gyro_order(order)
+            except AttributeError:
+                pass                 # a pad with no motion to order
+        return True
+
     def kind_for(self, index):
         """What this seat's pad says it is, whether or not one exists yet."""
         return self.kinds[index]

@@ -82,26 +82,29 @@
      accelerometer reads gravity too.
 
      `angle` is how far the screen is turned; see toScreenFrame. */
-  /* Whether to rotate the browser's readings into the screen's frame. On.
+  /* Whether to rotate the browser's readings into the screen's frame. Off.
    *
-   * It was off, on the strength of this reasoning: "with the rotation
-   * applied, portrait was correct and landscape had x and y swapped, which is
-   * the signature of rotating something already rotated". The observation was
-   * real. The conclusion did not follow, and the giveaway is that turning it
-   * off produced *the same symptom*: portrait correct, landscape swapped,
-   * reported in those words. A switch whose two positions have the same
-   * effect is not the thing being measured -- the axis order on the host was,
-   * and it has since been worked out by playing: roll,-pitch,-yaw.
+   * The reasoning is below, on the switch itself. */
+  /* Turned on once and reverted: it rotates the wrong pair.
    *
-   * In portrait the angle is zero and this correction is the identity, so it
-   * cannot touch an order somebody has just confirmed in portrait. Landscape
-   * is the only case it changes, which is the case that is wrong.
+   * It rotates wire slots 0 and 1, which are beta and gamma -- rotation about
+   * the device's own x and y. That is the right pair in principle and the
+   * wrong pair here, because what a guest's aim is actually built from
+   * depends on the axis order the host applies afterwards, and this knows
+   * nothing about that. Applied to an order whose first axis is the device's
+   * z, it moved the axis that should not move and left the one that should.
+   * Reported as "you changed rolling to yaw".
+   *
+   * So orientation is handled where the axes are already named and already
+   * chosen by playing: the host keeps a second order for landscape and swaps
+   * to it when the page says the screen has turned. That is also the only
+   * place the two can be *tested* apart, which is how the portrait one was
+   * settled. See guest_gyro_order_landscape.
    *
    * Note what this is *not* for. A physical controller's own gyroscope
    * reports in the controller's frame and is already what a game expects --
-   * it must not come through here at all. This function exists for a phone
-   * being waved about, and only for that. */
-  const ROTATE_TO_SCREEN = true;
+   * it must not come through here at all. */
+  const ROTATE_TO_SCREEN = false;
 
   function motionSample(rotation, accel, angle) {
     const g = (v) => clampShort(Math.round((v || 0) * GYRO_PER_DEG_SEC));

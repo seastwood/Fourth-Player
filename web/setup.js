@@ -218,9 +218,10 @@ function fillControls(s) {
   // A text box, so only filled in while nobody is typing into it -- the same
   // rule the seat picker learned the hard way: repainting a control somebody
   // is using takes it away from them mid-edit.
-  const axes = el("set-gyro-order");
-  if (axes && document.activeElement !== axes) {
-    axes.value = s.gyro_order || "";
+  for (const [id, key] of [["set-gyro-order", "gyro_order"],
+                          ["set-gyro-order-landscape", "gyro_order_landscape"]]) {
+    const box = el(id);
+    if (box && document.activeElement !== box) box.value = s[key] || "";
   }
 }
 
@@ -558,6 +559,8 @@ const ACTIONS = {
       ["motion", el("set-motion").value === "on", (s) => s.motion !== false],
       ["motionaccel", el("set-motion-accel").value, (s) => s.motion_accel],
       ["gyroorder", el("set-gyro-order").value.trim(), (s) => s.gyro_order],
+      ["gyroorderlandscape", el("set-gyro-order-landscape").value.trim(),
+       (s) => s.gyro_order_landscape || ""],
     ];
     const pin = el("set-pin").value.trim();
     // A blank box means "leave it alone", not "clear it" -- clearing is what

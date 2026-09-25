@@ -77,37 +77,34 @@ check(String(F.toScreenFrame(1, 2, 37)) === String([1, 2]),
       "anything not a right angle is left alone rather than half-turned: a "
       + "screen is never at 37 degrees, and guessing is worse than not");
 
-console.log("\nturning the phone turns what it sends, so aim follows the picture");
+console.log("\nthe page sends what the browser gave it, and says how it is held");
+// Turned on once and reverted. It rotates wire slots 0 and 1 -- the device's
+// own x and y -- which is right in principle and the wrong pair here: what a
+// guest's aim is built from depends on the axis order the host applies
+// afterwards, and this knows nothing about that. Applied to an order whose
+// first axis is the device's z, it moved the axis that should not move and
+// left the one that should. Reported as "you changed rolling to yaw".
+//
+// So orientation is settled on the host, which has the axes named and can be
+// tested one orientation at a time -- which is the only way the upright order
+// was ever found.
 // This was off, on the reasoning that the browser had already rotated the
 // readings: "with that rotation applied, portrait was correct and landscape
 // had x and y swapped". The observation was real; the conclusion did not
 // follow. Turning it off produced the same symptom -- portrait correct,
 // landscape swapped -- and a switch whose two positions have the same effect
 // is not the thing being measured. The axis order on the host was.
-check(F.ROTATE_TO_SCREEN === true,
-      "the page rotates the readings into the frame the screen is in");
+check(F.ROTATE_TO_SCREEN === false,
+      "the page does not rotate the readings");
 const still = { beta: 40, gamma: -15, alpha: 7 };
 const gravity = { x: 1, y: -2, z: -9 };
 const shapes = [0, 90, 180, 270].map(
   (a) => JSON.stringify(F.motionSample(still, gravity, a)));
-check(new Set(shapes).size === 4,
-      "one motion, four orientations, four answers");
-
-// The property that makes this safe to turn on: portrait is untouched. An
-// axis order confirmed by somebody playing in portrait cannot be disturbed by
-// a correction that is the identity there.
-check(JSON.stringify(F.motionSample(still, gravity, 0))
-      === JSON.stringify(F.motionSample(still, gravity, undefined)),
-      "and portrait is the identity, so a confirmed portrait order stands");
-// A quarter turn swaps the pair and negates one of them -- a rotation, not a
-// swap. A plain swap would be a mirror, and no way of holding a phone makes
-// one.
-const flat = { beta: 10, gamma: 0, alpha: 0 };
-const upright = F.motionSample(flat, {}, 0);
-const turned = F.motionSample(flat, {}, 90);
-check(turned[1] === upright[0] && turned[0] === -upright[1],
-      "a quarter turn moves x into y and negates the other: "
-      + upright.slice(0, 2) + " -> " + turned.slice(0, 2));
+check(new Set(shapes).size === 1,
+      "one motion, four orientations, one answer: " + shapes[0]);
+// Which is what makes the host's two orders honest: what arrives depends only
+// on how the phone moved, so an order tested in one orientation means
+// something, and the other orientation can be tested apart from it.
 
 console.log("\nbut the rotation is kept, for a browser that does need it");
 // Deleted, it would have to be worked out again from scratch the first time a

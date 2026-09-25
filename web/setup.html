@@ -134,6 +134,7 @@
           <option value="off">nothing</option>
         </select></label>
         <label title="Which way round a phone's rotations reach the controller, named as what the pad's three axes should take. Each of pitch, yaw and roll exactly once, any of them negated with a leading minus. The whole thing has to be a rotation: negating a single axis is a mirror, which no way of holding a phone produces, so to flip one axis negate two or reorder. There is no way to work this out from here — the only instrument is somebody playing a game and saying what moved.">Motion axes <input id="set-gyro-order" list="gyro-orders" style="width:11rem" placeholder="pitch,roll,-yaw"></label>
+        <label title="The same, for a phone held sideways. Leave it blank to use the upright order in both. Two orders rather than one correction, because neither end knows enough to work one out: the page knows which way the screen is turned but not which device axis the host feeds to which pad axis, and the host knows the order but not how the phone is being held. They are also separately testable, which is the only way either was ever found — by somebody playing a game and saying what moved.">Sideways <input id="set-gyro-order-landscape" list="gyro-orders" style="width:11rem" placeholder="same as upright"></label>
         <!-- Offered rather than left to be typed, because the set of answers
              is small and not obvious. Each of pitch, yaw and roll appears once
              and the negations come in pairs: an odd number of them is a
