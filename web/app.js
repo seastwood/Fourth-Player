@@ -4001,7 +4001,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-10i";
+const CLIENT_BUILD = "2026-09-25a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -10287,6 +10287,8 @@ function watchTheTab() {
     paintTried = 0;
     paintKeyAsks = 0;
     paintRecoveries = 0;
+    paintGoodRuns = 0;
+    paintRunFrom = Date.now();
     paintGaveUp = false;
     // Not startPainting: the drawing was put down while the page was away, so
     // the receiver has been delivering to nobody ever since, and an encoded
@@ -10326,6 +10328,32 @@ let paintKeyAsks = 0;
    genuinely broken one retry for ever. */
 const PAINT_RECOVERIES = 3;
 let paintRecoveries = 0;
+
+/* A run long enough to prove the configuration, and how many such runs may
+ * buy back the budget above.
+ *
+ * Three recoveries and then a different spelling of the codec is right for a
+ * decoder that never works. It is wrong for one that works for ten minutes
+ * and then hiccups -- and both were counted the same, so a long session spent
+ * its budget on hiccups and ended up trying codec strings to fix something
+ * that was never a codec string.
+ *
+ * Measured on this host's own logs: 186 decoder failures in one evening at
+ * home, every one `EncodingError` on a delta with the parameter sets
+ * unchanged, each attempt lasting 193 to 602 frames. That was invisible,
+ * because each recovery cost a second and the picture came back. The same
+ * fault away from home kills an attempt every twenty frames, the budget is
+ * gone in seconds, and it hands back to WebRTC -- which is the difference
+ * between "it works at home" and "it does not work here". It is the same
+ * fault in both places.
+ *
+ * So a run that actually drew for a while resets the budget. Bounded, or a
+ * picture that dies every four seconds for ever is a worse offer than the
+ * browser drawing it. */
+const PAINT_GOOD_RUN_MS = 4000;
+const PAINT_GOOD_RUNS = 6;
+let paintGoodRuns = 0;
+let paintRunFrom = 0;
 
 /* Said once per dry spell rather than every four seconds, and timed so that
    waiting has an end. Long enough that an ordinary stall -- a keyframe being
@@ -10509,6 +10537,7 @@ function paintNextSpelling() {
  * one path known to work -- because it is the path the first attempt takes. */
 function restartTheDrawing() {
   stopPainting(null);
+  paintRunFrom = Date.now();
   // The same guards startPainting keeps, checked before anything is asked of
   // the host: a page that has given up, or whose viewer has chosen the
   // browser, must not renegotiate -- least of all from the polled caller,
@@ -10714,12 +10743,26 @@ async function startPainting() {
       stopPainting(null);
       return;
     }
-    if (painter && painter.painted() && paintRecoveries < PAINT_RECOVERIES) {
-      paintRecoveries += 1;
-      report("the drawing stopped after working; starting it again ("
-             + paintRecoveries + " of " + PAINT_RECOVERIES + ")");
-      restartTheDrawing();
-      return;
+    if (painter && painter.painted()) {
+      // A configuration that drew for this long is not the wrong one, and
+      // spending the budget on it is how a working setup gets swapped for a
+      // different codec string it never needed.
+      const ranFor = paintRunFrom ? Date.now() - paintRunFrom : 0;
+      if (ranFor >= PAINT_GOOD_RUN_MS && paintGoodRuns < PAINT_GOOD_RUNS) {
+        paintGoodRuns += 1;
+        paintRecoveries = 0;
+        report("the drawing ran " + Math.round(ranFor / 1000) + "s before it "
+               + "stopped, so this is a picture that works and interrupts "
+               + "rather than one that does not work; the budget is given "
+               + "back (" + paintGoodRuns + " of " + PAINT_GOOD_RUNS + ")");
+      }
+      if (paintRecoveries < PAINT_RECOVERIES) {
+        paintRecoveries += 1;
+        report("the drawing stopped after working; starting it again ("
+               + paintRecoveries + " of " + PAINT_RECOVERIES + ")");
+        restartTheDrawing();
+        return;
+      }
     }
     const more = paintNextSpelling();
     if (more) tryAnotherSpelling(more);

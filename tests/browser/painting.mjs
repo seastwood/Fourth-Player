@@ -114,8 +114,18 @@ check(app.includes("function watchTheTab"), "the page notices going away");
 check(app.includes("paintPaused = true"), "and puts the drawing down");
 check(app.includes("document.hidden") && app.includes("watchThePainting();"),
       "the deadline waits rather than judging while nobody is watching");
-check(app.includes("paintRecoveries = 0;\n    paintGaveUp = false;\n"),
-      "and coming back starts it again with every counter reset");
+// Each counter by name rather than by the shape of the block they sit in.
+// This used to match the two lines adjacent to each other, and a third
+// counter added between them failed a test whose point was that counters get
+// reset -- which the change had made more true, not less.
+const back = app.slice(app.indexOf("if (!paintPaused) return;"));
+for (const counter of ["paintTried", "paintKeyAsks", "paintRecoveries",
+                       "paintGoodRuns"]) {
+  check(new RegExp(counter + " = 0;").test(back.slice(0, 600)),
+        "and coming back resets " + counter);
+}
+check(/paintGaveUp = false;/.test(back.slice(0, 600)),
+      "and stops counting it as given up on");
 // Through restartTheDrawing, not startPainting. The drawing was put down while
 // the page was away, so by the time it comes back the receiver has been
 // delivering to nobody for as long as the page was gone -- and an encoded
@@ -151,8 +161,15 @@ console.log("something that was drawing and stops is started again, not abandone
 // changes size, a frame that arrives damaged -- and the answer is another
 // decoder and a keyframe, not the conclusion that this browser cannot do it.
 // Reported as switching itself to WebRTC while WebCodecs was working.
-check(app.includes("painter.painted() && paintRecoveries < PAINT_RECOVERIES"),
-      "a method that has painted gets started again");
+// Asked as two conditions rather than as one source line: a run that drew
+// for long enough now gives the recovery budget back before this is tested,
+// so the two no longer sit in one expression.
+const stopped = app.slice(app.indexOf("if (painter && painter.painted()) {"));
+check(/if \(painter && painter\.painted\(\)\) \{/.test(stopped.slice(0, 80)),
+      "a method that has painted is treated as one that works");
+check(/if \(paintRecoveries < PAINT_RECOVERIES\) \{[\s\S]{0,240}restartTheDrawing\(\);/
+        .test(stopped.slice(0, 1400)),
+      "and gets started again while it has budget left");
 check(/PAINT_RECOVERIES = (\d+)/.test(app), "a bounded number of times");
 check(Number(app.match(/PAINT_RECOVERIES = (\d+)/)[1]) <= 5,
       "few enough that a genuinely broken one does not retry for ever");

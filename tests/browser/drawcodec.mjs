@@ -74,5 +74,43 @@ check(/if \(!name \|\| badDrawCodecs\.has\(name\)\) return false;/
       + "happens once and the next connection is offered the other one from "
       + "the start");
 
+console.log("\nand a picture that works and interrupts is not a broken one");
+/* Measured on the host's own logs: 186 decoder failures in one evening at
+ * home, every one EncodingError on a delta with the parameter sets unchanged,
+ * each attempt lasting 193 to 602 frames. Invisible, because each recovery
+ * cost a second and the picture came back. The same fault away from home
+ * kills an attempt every twenty frames, the three recoveries are gone in
+ * seconds, and it hands back to WebRTC -- which is the whole of "it worked at
+ * home and does not work here". It is the same fault in both places. */
+const good = src.slice(src.indexOf("const PAINT_GOOD_RUN_MS"));
+check(/const PAINT_GOOD_RUN_MS = (\d+);/.test(good.slice(0, 200)),
+      "there is a length that counts as having worked");
+check(/const PAINT_GOOD_RUNS = (\d+);/.test(good.slice(0, 200)),
+      "and a bound on how often that may buy the budget back -- a picture "
+      + "dying every four seconds for ever is a worse offer than the browser "
+      + "drawing it");
+const stop = src.slice(src.indexOf("if (painter && painter.painted()) {"));
+check(/const ranFor = paintRunFrom \? Date\.now\(\) - paintRunFrom : 0;/
+        .test(stop.slice(0, 1200)),
+      "how long the run lasted is measured");
+check(/if \(ranFor >= PAINT_GOOD_RUN_MS && paintGoodRuns < PAINT_GOOD_RUNS\)/
+        .test(stop.slice(0, 1200)),
+      "a long enough run gives the recovery budget back");
+check(/paintRecoveries = 0;/.test(stop.slice(0, 1200)),
+      "so a hiccup after ten good minutes does not get answered by trying a "
+      + "different codec string");
+check(/paintRunFrom = Date\.now\(\);/.test(
+        src.slice(src.indexOf("function restartTheDrawing"), 
+                  src.indexOf("function restartTheDrawing") + 400)),
+      "and each restart begins a new run");
+
+console.log("\nand a report says which code it came from");
+/* It did not move all session, so a report from the old page and a report
+ * from the new one were indistinguishable -- which cost a round of "is this
+ * even deployed?" in the middle of a diagnosis. */
+const stamp = (/const CLIENT_BUILD = "([^"]+)";/.exec(src) || [])[1];
+check(!!stamp && stamp !== "2026-09-10i",
+      "the build stamp moved with the change: " + stamp);
+
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
