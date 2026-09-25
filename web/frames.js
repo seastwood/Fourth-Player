@@ -50,6 +50,8 @@ const state = {
   saidTidy: false,
   saidDisagree: false,
   setsOnly: 0,
+  saidMeta: false,
+  lastFrameId: null,
   started: false,
   shape: "",
   waiting: [],
@@ -758,6 +760,18 @@ function rebuildFor(annexb) {
 function take(type, timestamp, data) {
   if (!state.decoder || state.decoder.state !== "configured") return;
   const key = type === "key";
+  // Nothing after a missing reference picture is worth decoding: every delta
+  // that follows one refers to a frame the decoder never had, and its output
+  // is visibly wrong. Waiting costs a moment of still picture; decoding it
+  // anyway costs the artefacts that were reported.
+  //
+  // The reassembling path below sets this too and checks it for itself; this
+  // is here so the media-track path obeys it as well, which it did not.
+  if (state.awaitKey) {
+    if (!key) { state.skipped += 1; return; }
+    state.awaitKey = false;
+    say("a keyframe arrived, so decoding resumes");
+  }
   if (!state.started) {
     if (!key) { state.skipped += 1; return; }
     state.started = true;
@@ -1053,6 +1067,47 @@ function hand(made) {
  * again, which permanently breaks the receiver. Both are why the page builds
  * this worker when the track arrives rather than when somebody chooses.
  */
+/* A frame missing from the media track, named by the frame's own metadata.
+ *
+ * Returns nothing and acts through state: sets awaitKey and asks the host for
+ * a keyframe when a gap is found, which is the only honest answer -- every
+ * delta after a missing reference decodes to rubbish. */
+function checkForGap(frame) {
+  let meta = null;
+  try {
+    meta = frame.getMetadata ? frame.getMetadata() : null;
+  } catch (_) { meta = null; }
+  if (!state.saidMeta) {
+    state.saidMeta = true;
+    const keys = meta ? Object.keys(meta) : [];
+    const usable = meta && typeof meta.frameId === "number";
+    say("the media track's frames " + (usable ? "do" : "do NOT")
+        + " carry a frame id, so a missing frame "
+        + (usable ? "is detected exactly" : "cannot be detected here")
+        + " [metadata: " + (keys.length ? keys.join(",") : "none") + "]");
+  }
+  if (!meta || typeof meta.frameId !== "number") return;
+  const id = meta.frameId;
+  const was = state.lastFrameId;
+  state.lastFrameId = id;
+  if (was === null || id <= was) return;      // first frame, or a repeat
+  // dependencies, where they are given, say exactly which frames this one
+  // needs. A frame whose dependencies are all present is fine however far the
+  // ids have jumped -- a temporal layer being dropped on purpose looks like a
+  // gap and is not one.
+  const needs = Array.isArray(meta.dependencies) ? meta.dependencies : null;
+  const missing = needs
+    ? needs.some((on) => on > was)
+    : id > was + 1;
+  if (!missing) return;
+  state.gaps += 1;
+  // askForKey keeps the lost count; adding to it here would double it.
+  if (frame.type === "key") return;           // it repairs itself
+  state.awaitKey = true;
+  askForKey("frame " + id + " followed " + was
+            + ", so a reference picture never arrived");
+}
+
 self.onrtctransform = (event) => {
   const from = event.transformer && event.transformer.readable;
   if (!from) return;
@@ -1066,6 +1121,25 @@ self.onrtctransform = (event) => {
       // pacer wants, in the units it wants, without a header of our own.
       state.handed += 1;
       state.gotAll += 1;
+      // Whether a frame is missing, which is the one thing this path cannot
+      // otherwise know.
+      //
+      // WebRTC discards a frame it could not fully assemble and hands us the
+      // next one, so the decoder is given a delta whose reference picture
+      // never arrived. Its output is then wrong until a keyframe -- artefacts
+      // that clear and come back, which is what was reported once the blacking
+      // out was fixed.
+      //
+      // Nothing else here can see it. The RTP timestamp cannot: this host's
+      // videorate drops frames *before* the encoder, which is harmless and
+      // looks identical in the timestamps to loss after it. The host's own
+      // frame numbering exists only on the data-channel path -- which is why
+      // "gaps" and "lost" read zero in this mode and mean nothing at all.
+      //
+      // getMetadata() may carry frameId and dependencies. Where it does this
+      // is exact; where it does not, it is said once so nobody has to infer it
+      // from a clean-looking report again.
+      checkForGap(value);
       take(value.type === "key" ? "key" : "delta",
            Math.round((value.timestamp || 0) / 90) * 1000, value.data);
     } catch (err) {
