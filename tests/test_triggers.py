@@ -74,6 +74,10 @@ const input = { readyState: "open", bufferedAmount: 0,
                 send: (buf) => { sent = Buffer.from(buf); } };
 function changed() { return true; }
 function report() {}
+// A guest's device motion, which this suite is not about. Null is a guest
+// sending none, which is every guest on a machine with no gyroscope -- and it
+// is what keeps the frame the twenty bytes these assertions read.
+function gyroForFrame() { return null; }
 sendFrame(job.pad ? {
   buttons: Array.from({length: 17}, (_, i) =>
     ({ pressed: (job.padButtons || []).includes(i),

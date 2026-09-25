@@ -39,9 +39,15 @@ class FakePad(padlib.VirtualPad):
         self.last_seen = 0.0
         self.released = True
         self.writes = []
+        self.motions = []
 
-    def _write(self, events):
+    # motion as well as events: a pad carries a guest's device motion
+    # alongside the buttons, and this stub is what stands in for the device.
+    # Recorded rather than ignored, because a shared pad has a rule about it --
+    # attitude does not add up, so whoever is actually moving wins.
+    def _write(self, events, motion=None):
         self.writes.append(events)
+        self.motions.append(motion)
 
     @property
     def sent(self):
@@ -191,6 +197,44 @@ live.set_pad(bob, 0)
 check(bob.pad_index == 0 and ann.pad_index == 0,
       "both are on controller 1: Ann=%d Bob=%d" % (ann.pad_index, bob.pad_index))
 check(ann.pad is bob.pad, "and it is literally the same device")
+
+print("\nattitude does not add up, so whoever is moving wins")
+# Buttons are or-ed and axes take whichever is furthest from centre, both so
+# that somebody sitting still cannot cancel somebody playing. Motion cannot
+# work either way: two people are not both holding the phone, and averaging
+# two attitudes describes a position neither of them is in. So the same rule
+# in spirit -- the one actually turning.
+pad = FakePad()
+still = [2, 0, 0, 0, 0, 1000]          # a phone on a table: sensor noise
+turning = [900, -400, 60, 100, 0, 980]
+pad.apply(P.PadState(seq=1, motion=still), sender="a")
+pad.apply(P.PadState(seq=1, motion=turning), sender="b")
+check(pad.motions[-1] == turning,
+      "the hand that is moving is the one carried: %r" % (pad.motions[-1],))
+# And in the other arrival order, or this passes by luck.
+pad = FakePad()
+pad.apply(P.PadState(seq=1, motion=turning), sender="b")
+pad.apply(P.PadState(seq=1, motion=still), sender="a")
+check(pad.motions[-1] == turning,
+      "whichever order they arrive in: %r" % (pad.motions[-1],))
+
+print("\nand a sender with no motion does not erase one who has it")
+pad = FakePad()
+pad.apply(P.PadState(seq=1, motion=turning), sender="b")
+pad.apply(P.PadState(seq=1), sender="a")
+check(pad.motions[-1] == turning,
+      "somebody on a controller with no gyroscope joining a shared pad must "
+      "not blank the attitude of the person tilting a phone: %r"
+      % (pad.motions[-1],))
+
+print("\nwith nobody sending any, none is carried")
+pad = FakePad()
+pad.apply(P.PadState(seq=1), sender="a")
+pad.apply(P.PadState(seq=1), sender="b")
+check(pad.motions[-1] is None,
+      "None rather than zeros -- a pad held still reads as no rotation and "
+      "one gravity, so 'no sensor' has to be tellable from 'not moving': %r"
+      % (pad.motions[-1],))
 
 print("\nand the panel names everybody on it, not just the last one looked at")
 who = live.pad_state()["who"]
