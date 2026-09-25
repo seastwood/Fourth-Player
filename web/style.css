@@ -1017,6 +1017,26 @@ select.chip option { background: var(--bg2); color: var(--ink); }
   .touch {
     background: var(--bg);
   }
+  /* Zoomed in, the pad floats over the picture instead of sitting under it.
+   *
+   * Upright at 1x the pad belongs in the flow: a 16:9 picture on a tall phone
+   * is letterboxed, the space below it is free, and a thumb cannot reach the
+   * middle of the screen anyway. Zoomed there is no letterbox left -- every
+   * pixel under the pad is picture somebody has deliberately magnified, and a
+   * solid panel over the bottom third of it is the thing they zoomed in to
+   * see. The chips along the top already work this way, which is where the
+   * asking came from.
+   *
+   * Only the container's own background goes. Each key keeps its own, so the
+   * buttons stay readable over a bright scene rather than becoming outlines
+   * on top of a game. */
+  .stage.zoomed .touch {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: none;
+  }
   /* The same size as each other, and bigger than either was. The d-pad had
      been the smaller of the two for no reason worth keeping -- on the pad
      this copies they are a matched pair, and matching them is also what puts

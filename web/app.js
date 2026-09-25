@@ -3483,6 +3483,15 @@ function paintAfterZoom() {
   // done just above, inside the same guard. Without it, pinching and dragging
   // over the picture would move an element nobody can see while the picture
   // itself sat still.
+  //
+  // And whether the picture is zoomed at all, said on the stage so the layout
+  // can answer it. Upright, the on-screen pad sits below the picture in the
+  // ordinary flow -- which is right at 1x, where a 16:9 picture is letterboxed
+  // and the space below it is free. Zoomed in there is no letterbox and that
+  // space is picture somebody is trying to look at, so the pad floats over it
+  // the way the chips already do.
+  const stage = el("stage");
+  if (stage) stage.classList.toggle("zoomed", zoom > ZOOM_MIN);
   paintZoom();
 }
 
@@ -4153,7 +4162,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25n";
+const CLIENT_BUILD = "2026-09-25o";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
