@@ -404,6 +404,86 @@ function splitAnnexB(view) {
 
 /* The avcC box a decoder wants as its `description`, or null if this frame
    does not carry the parameter sets. */
+/* Annex-B again from units, each behind a four-byte start code. */
+function joinAnnexB(units) {
+  let size = 0;
+  for (const one of units) size += 4 + one.length;
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const one of units) {
+    out[at] = 0; out[at + 1] = 0; out[at + 2] = 0; out[at + 3] = 1;
+    at += 4;
+    out.set(one, at);
+    at += one.length;
+  }
+  return out;
+}
+
+/* One SPS and one PPS in a frame, not several.
+ *
+ * Measured on iOS Safari, which is where this was found: the keyframes this
+ * host sends arrive as `AUD SPS PPS SPS PPS IDR` -- the parameter sets twice.
+ * The encoder emits them with the IDR and h264parse's config-interval=-1 puts
+ * them in front of it as well, so both are present and the decoder is handed
+ * a set it has already been given inside the same access unit. It survives
+ * several of those and then fails on one, with EncodingError, which is a
+ * picture that works for a few seconds and goes black.
+ *
+ * The last copy of each is the one kept, so if the two ever disagree the newer
+ * wins -- and whether they disagreed is reported, because two *different* SPSs
+ * in one frame and two identical ones are different faults.
+ *
+ * Returns the frame unchanged when there is nothing repeated, which is every
+ * frame on a host that does not do this. */
+function tidyParameterSets(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let units;
+  try {
+    units = splitAnnexB(view);
+  } catch (_) {
+    return { data: bytes, dropped: 0, disagreed: false };
+  }
+  let sps = null, pps = null, dropped = 0, disagreed = false;
+  const same = (a, b) => {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+    return true;
+  };
+  const rest = [];
+  for (const unit of units) {
+    const kind = unit[0] & 0x1f;
+    if (kind === 7 || kind === 8) {
+      const held = kind === 7 ? sps : pps;
+      if (held) {
+        dropped += 1;
+        if (!same(held, unit)) disagreed = true;
+      }
+      if (kind === 7) sps = unit; else pps = unit;
+      continue;
+    }
+    rest.push(unit);
+  }
+  if (!dropped) return { data: bytes, dropped: 0, disagreed: false };
+  // Put the surviving pair back immediately before the first coded slice,
+  // which is where a decoder expects to meet them.
+  const out = [];
+  let placed = false;
+  for (const unit of rest) {
+    const kind = unit[0] & 0x1f;
+    if (!placed && (kind === 1 || kind === 5)) {
+      if (sps) out.push(sps);
+      if (pps) out.push(pps);
+      placed = true;
+    }
+    out.push(unit);
+  }
+  if (!placed) {
+    if (sps) out.push(sps);
+    if (pps) out.push(pps);
+  }
+  return { data: joinAnnexB(out), dropped, disagreed };
+}
+
 function avcDescription(bytes) {
   const units = splitAnnexB(new Uint8Array(bytes));
   const sps = [], pps = [];
@@ -869,6 +949,7 @@ function makePainter(canvas, say) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
                      toAnnexB, looksAnnexB, splitAnnexB, setSmoothing,
+                     joinAnnexB, tidyParameterSets,
                      avcDescription, toLengthPrefixed,
                      makePainter, PACE };
 }

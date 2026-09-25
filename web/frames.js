@@ -47,6 +47,8 @@ const state = {
   builtFor: "",
   lastFed: "",
   keysSeen: 0,
+  saidTidy: false,
+  saidDisagree: false,
   started: false,
   shape: "",
   waiting: [],
@@ -761,6 +763,28 @@ function take(type, timestamp, data) {
       say("the encoded frames are " + state.shape);
     }
     if (key) {
+      // One SPS and one PPS, not the two of each this host sends. Measured on
+      // iOS Safari: keyframes arrive as `AUD SPS PPS SPS PPS IDR` -- the
+      // encoder emits the parameter sets with the IDR and h264parse puts them
+      // in front of it too -- and the decoder survives several of those and
+      // then fails on one with EncodingError. Which from the sofa is a picture
+      // that runs for a few seconds and goes black, over and over.
+      const tidied = tidyParameterSets(bytes);
+      if (tidied.dropped) {
+        bytes = tidied.data;
+        if (!state.saidTidy) {
+          state.saidTidy = true;
+          say("this host sends its parameter sets twice in a keyframe ("
+              + tidied.dropped + " repeated"
+              + (tidied.disagreed ? ", and the copies disagree" : "")
+              + "); handing the decoder one of each");
+        }
+        if (tidied.disagreed && !state.saidDisagree) {
+          state.saidDisagree = true;
+          say("and the two copies of the parameter sets in one keyframe are "
+              + "not the same, which is worth knowing about");
+        }
+      }
       state.lastKey = bytes;
       state.keysSeen += 1;
       // Before it is handed over, not after it has failed.
