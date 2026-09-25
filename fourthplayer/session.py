@@ -1911,8 +1911,16 @@ class LiveSession:
             # connection is established and only its timers are frozen.
             alive = guest.peer is not None and getattr(
                 guest.peer, "ice_ok", False)
-            if alive and guest.socket is not None:
-                limit = HELD_SECONDS
+            if guest.socket is not None:
+                # Holding a socket open is always worth the ordinary deadline
+                # -- they are reconnecting, and their peer is gone while they
+                # do it. The long hold needs a peer as well: a connection that
+                # is established and a page whose timers are simply frozen,
+                # which is what being minimised looks like. Without that
+                # second condition a guest whose ICE had gone kept their seat
+                # for half an hour, and clearing exactly that is what this
+                # sweep is for.
+                limit = HELD_SECONDS if alive else seconds
             elif alive:
                 limit = seconds
             else:

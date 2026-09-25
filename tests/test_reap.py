@@ -50,15 +50,17 @@ sweep = SRC[SRC.index("def _reap_ghosts"):]
 sweep = sweep[:sweep.index("\n    # How many pointless")]
 
 print("the three limits are told apart")
-check("if alive and guest.socket is not None:" in sweep
-      and "limit = HELD_SECONDS" in sweep,
-      "a live peer AND a socket still open buys the long one")
-# Not the socket alone. Written that way first, it held a seat for half an hour
-# for a guest whose ICE had gone -- the network-switch case, and the one thing
-# this sweep exists to clear. A page that is merely minimised keeps both: its
-# connection is established and only its timers are frozen.
-check("if guest.socket is not None:\n" not in sweep,
-      "and the socket alone does not, because a dead connection can hold one")
+check("limit = HELD_SECONDS if alive else seconds" in sweep,
+      "a socket AND a live peer buys the long one")
+# The socket alone buys the ordinary deadline and no more. Written as the long
+# hold, it kept a seat for half an hour for a guest whose ICE had gone -- the
+# network-switch case, and the one thing this sweep exists to clear. But it
+# must still buy something: a guest part-way through reconnecting has no peer
+# at all while they do it, and cutting them at the closed-tab deadline takes
+# the seat from somebody who is coming straight back.
+check("else seconds" in sweep,
+      "and without one, the ordinary deadline rather than the short one -- a "
+      "guest mid-reconnect has no peer while they reconnect")
 check(re.search(r"alive = guest\.peer is not None and getattr\(\s*"
                 r"guest\.peer, \"ice_ok\", False\)", sweep) is not None,
       "a peer with ICE up is recognised as still connected")
