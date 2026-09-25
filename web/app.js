@@ -8917,6 +8917,29 @@ function paintSeats() {
   // which is the shape of a cache that is asked the wrong question.
   const signature = wanted + "|" + myPad + "|" + JSON.stringify(padSeats.who)
                   + "|" + JSON.stringify(padSeats.ports);
+  // Never while somebody is in it.
+  //
+  // Rebuilding a select whose native picker is open does not merely close it,
+  // which was already known here: on iOS it *commits* whatever was under the
+  // finger, and that fires change. The change asks the host for that seat, the
+  // host moves the guest and says so, saying so repaints this, and the repaint
+  // commits again -- so a guest who opened the picker was moved back and forth
+  // between two seats every few seconds, each move unplugging one controller
+  // and plugging in another. From the game's side that is two controllers
+  // appearing.
+  //
+  // Deferred rather than dropped: the list is redrawn the moment the picker is
+  // closed, so it is never left saying something out of date.
+  if (document.activeElement === pick) {
+    if (!pick.dataset.deferred) {
+      pick.dataset.deferred = "1";
+      pick.addEventListener("blur", () => {
+        delete pick.dataset.deferred;
+        paintSeats();
+      }, { once: true });
+    }
+    return;
+  }
   if (pick.dataset.signature !== signature) {
     pick.dataset.signature = signature;
     pick.innerHTML = "";
@@ -8990,7 +9013,12 @@ function seatsFrom(message) {
 
 el("pads-seat").addEventListener("change", (ev) => {
   const wanted = parseInt(ev.target.value, 10);
-  if (!isNaN(wanted)) send({ t: "usepad", pad: wanted });
+  if (isNaN(wanted)) return;
+  // The seat somebody is already on is not a move. Harmless to ask for, and
+  // the host would refuse it anyway -- but a request that cannot change
+  // anything is one more thing that can go round in a circle.
+  if (wanted === myPad) return;
+  send({ t: "usepad", pad: wanted });
 });
 
 /* Moving between the seats a game already has is instant. Asking for a seat it
