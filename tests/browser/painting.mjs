@@ -283,8 +283,13 @@ check(app.includes("if (paintsHere() && !painter) restartTheDrawing()"),
 // This one is polled, so the guard matters more here than anywhere: without
 // it, a page that had given up would ask the host to rebuild the media
 // connection on every stats tick.
-const restart = app.slice(app.indexOf("function restartTheDrawing"),
-                          app.indexOf("function restartTheDrawing") + 900);
+// To the end of the function rather than a fixed number of characters: the
+// guards moved past a 900-character window when the reason they exist was
+// written down above them, and a test that measures its subject in bytes
+// fails on the comment explaining it.
+const restartAt = app.indexOf("function restartTheDrawing");
+const restart = app.slice(restartAt,
+                          app.indexOf("\nfunction ", restartAt + 10));
 check(restart.includes("paintGaveUp"),
       "and it refuses once this page has given up, so a poll cannot become a "
       + "loop of renegotiations");

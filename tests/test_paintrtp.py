@@ -160,6 +160,28 @@ check(offer.index("paintMethod = wantedPaintMethod();")
 check("paintGaveUp = false;" in offer[:200],
       "and giving up is not what a new connection inherits")
 
+# And the same restore at the top of restartTheDrawing, which is the one that
+# unwedges minimise-and-return.
+#
+# paintsHere() reads paintMethod, and giveUpPainting sets it to "browser". So
+# once anything had given up, restarting the drawing hit that guard and did
+# nothing for ever -- and the restore in the offer path could not help,
+# because no offer ever arrives when this function is what would ask for one.
+# The drawing is put down on purpose while the page is hidden, so minimising
+# and coming back is the ordinary way in: reported as media track not
+# rebuilding itself on reopening, and not coming back without a reload.
+restart = app[app.index("function restartTheDrawing"):]
+restart = restart[:restart.index("\nfunction ", 10)]
+check("paintMethod = wantedPaintMethod();" in restart,
+      "restarting the drawing puts the mode back to the chosen one")
+check(restart.index("paintMethod = wantedPaintMethod();")
+      < restart.index("if (!paintsHere()"),
+      "before the guard that reads it, or the guard answers about the mode a "
+      "failure left behind rather than the one that was chosen")
+check("paintGaveUp" in restart,
+      "and giving up is still respected, so a polled caller cannot retry for "
+      "ever")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))

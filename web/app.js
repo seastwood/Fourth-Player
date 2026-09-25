@@ -4017,7 +4017,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25d";
+const CLIENT_BUILD = "2026-09-25e";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -10554,6 +10554,23 @@ function paintNextSpelling() {
 function restartTheDrawing() {
   stopPainting(null);
   paintRunFrom = Date.now();
+  /* What this viewer asked for, before anything asks whether it is on.
+   *
+   * paintMethod is the mode in force and giveUpPainting sets it to "browser";
+   * paintChoice is what was chosen and survives. paintsHere() below reads the
+   * mode -- so once anything had given up, restarting the drawing returned
+   * here and did nothing, for ever.
+   *
+   * That is a deadlock rather than a refusal: the restore that was supposed to
+   * fix this lives where a new offer arrives, and no offer ever arrives
+   * because this function is what would have asked for one. Minimising the
+   * page and coming back is the ordinary way into it -- the drawing is put
+   * down on purpose while hidden, and then could not be picked up again
+   * without reloading the page.
+   *
+   * paintGaveUp is left alone. It is reset by the callers that mean it, and
+   * this must not become a way for a polled caller to retry for ever. */
+  paintMethod = wantedPaintMethod();
   // The same guards startPainting keeps, checked before anything is asked of
   // the host: a page that has given up, or whose viewer has chosen the
   // browser, must not renegotiate -- least of all from the polled caller,
