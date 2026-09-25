@@ -404,6 +404,30 @@ function splitAnnexB(view) {
 
 /* The avcC box a decoder wants as its `description`, or null if this frame
    does not carry the parameter sets. */
+/* What kind of unit this is, for either codec.
+ *
+ * H.264 keeps the type in the low five bits of one byte. H.265 has a two-byte
+ * header and the type is six bits starting one bit up. Reading an H.265 stream
+ * with the H.264 rule is not approximately right, it is scrambled -- and it
+ * shipped that way: an H.265 IDR (type 19, first byte 0x26) reads as 6 under
+ * the H.264 rule, so `hasPicture` called every keyframe "not a picture" and
+ * held it back. The decoder was never given one and the screen stayed black,
+ * which is the blacking out coming back the moment this host chose H.265.
+ *
+ * Parameter sets differ as well: 7 and 8 in H.264, 32, 33 and 34 (VPS, SPS,
+ * PPS) in H.265. So does what counts as a picture: 1 to 5 against 0 to 31. */
+function nalKind(unit, hevc) {
+  return hevc ? (unit[0] >> 1) & 0x3f : unit[0] & 0x1f;
+}
+
+function nalIsParameterSet(kind, hevc) {
+  return hevc ? (kind >= 32 && kind <= 34) : (kind === 7 || kind === 8);
+}
+
+function nalIsPicture(kind, hevc) {
+  return hevc ? kind <= 31 : (kind >= 1 && kind <= 5);
+}
+
 /* Annex-B again from units, each behind a four-byte start code. */
 function joinAnnexB(units) {
   let size = 0;
@@ -435,7 +459,7 @@ function joinAnnexB(units) {
  *
  * Returns the frame unchanged when there is nothing repeated, which is every
  * frame on a host that does not do this. */
-function tidyParameterSets(bytes) {
+function tidyParameterSets(bytes, hevc) {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let units;
   try {
@@ -443,7 +467,11 @@ function tidyParameterSets(bytes) {
   } catch (_) {
     return { data: bytes, dropped: 0, disagreed: false, copies: null };
   }
-  let sps = null, pps = null, dropped = 0, disagreed = false, copies = null;
+  // Keyed by NAL type, because H.265 has three parameter sets rather than two
+  // and hard-coding a pair of variables for them is how the H.264 shape got
+  // baked in here in the first place.
+  const held = new Map();
+  let dropped = 0, disagreed = false, copies = null;
   const hex = (u) => Array.from(u)
     .map((b) => (b < 16 ? "0" : "") + b.toString(16)).join("");
   const same = (a, b) => {
@@ -453,12 +481,12 @@ function tidyParameterSets(bytes) {
   };
   const rest = [];
   for (const unit of units) {
-    const kind = unit[0] & 0x1f;
-    if (kind === 7 || kind === 8) {
-      const held = kind === 7 ? sps : pps;
-      if (held) {
+    const kind = nalKind(unit, hevc);
+    if (nalIsParameterSet(kind, hevc)) {
+      const before = held.get(kind);
+      if (before) {
         dropped += 1;
-        if (!same(held, unit)) {
+        if (!same(before, unit)) {
           disagreed = true;
           // Both copies, kept for the caller to report once. Which of them is
           // authoritative decides whether the decoder runs on the right
@@ -466,10 +494,10 @@ function tidyParameterSets(bytes) {
           // it is the difference between a clean picture and artefacts that
           // clear at every keyframe and come straight back.
           if (!copies) copies = [];
-          copies.push({ kind, first: hex(held), then: hex(unit) });
+          copies.push({ kind, first: hex(before), then: hex(unit) });
         }
       }
-      if (kind === 7) sps = unit; else pps = unit;
+      held.set(kind, unit);
       continue;
     }
     rest.push(unit);
@@ -477,21 +505,21 @@ function tidyParameterSets(bytes) {
   if (!dropped) return { data: bytes, dropped: 0, disagreed: false, copies: null };
   // Put the surviving pair back immediately before the first coded slice,
   // which is where a decoder expects to meet them.
+  // In ascending type order, which is VPS, SPS, PPS for H.265 and SPS, PPS for
+  // H.264 -- the order a decoder needs them in, since each refers back to the
+  // one before it.
+  const sets = Array.from(held.keys()).sort((a, b) => a - b)
+    .map((k) => held.get(k));
   const out = [];
   let placed = false;
   for (const unit of rest) {
-    const kind = unit[0] & 0x1f;
-    if (!placed && (kind === 1 || kind === 5)) {
-      if (sps) out.push(sps);
-      if (pps) out.push(pps);
+    if (!placed && nalIsPicture(nalKind(unit, hevc), hevc)) {
+      for (const one of sets) out.push(one);
       placed = true;
     }
     out.push(unit);
   }
-  if (!placed) {
-    if (sps) out.push(sps);
-    if (pps) out.push(pps);
-  }
+  if (!placed) for (const one of sets) out.push(one);
   return { data: joinAnnexB(out), dropped, disagreed, copies };
 }
 
@@ -508,7 +536,7 @@ function tidyParameterSets(bytes) {
  * of a slice, which only appear in profiles this never sees but count all the
  * same. Everything else -- parameter sets, delimiters, SEI, filler -- carries
  * no picture. */
-function hasPicture(bytes) {
+function hasPicture(bytes, hevc) {
   let units;
   try {
     units = splitAnnexB(
@@ -523,8 +551,7 @@ function hasPicture(bytes) {
   // kept is a single bad decode the decoder is built to survive.
   if (!units.length) return true;
   for (const unit of units) {
-    const kind = unit[0] & 0x1f;
-    if (kind >= 1 && kind <= 5) return true;
+    if (nalIsPicture(nalKind(unit, hevc), hevc)) return true;
   }
   return false;
 }
@@ -995,6 +1022,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
                      toAnnexB, looksAnnexB, splitAnnexB, setSmoothing,
                      joinAnnexB, tidyParameterSets, hasPicture,
+                     nalKind, nalIsPicture, nalIsParameterSet,
                      avcDescription, toLengthPrefixed,
                      makePainter, PACE };
 }

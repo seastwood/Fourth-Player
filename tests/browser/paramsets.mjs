@@ -143,5 +143,64 @@ check(hasPicture(new Uint8Array([1, 2, 3])) === true,
       + "wrongly dropped is a black screen, a frame wrongly kept is one bad "
       + "decode");
 
+/* H.265, which the first version of all this got silently and badly wrong.
+ *
+ * H.264 keeps the NAL type in the low five bits of one byte; H.265 has a
+ * two-byte header with a six-bit type one bit up. Reading an H.265 stream with
+ * the H.264 rule is not approximately right, it is scrambled, and it shipped:
+ *
+ *   IDR_W_RADL (19) -> 0x26 & 0x1f = 6   -> "not a picture", dropped
+ *   TRAIL_N (0)     -> 0x00 & 0x1f = 0   -> "not a picture", dropped
+ *   CRA (21)        -> 0x2a & 0x1f = 10  -> "not a picture", dropped
+ *   SPS (33)        -> 0x42 & 0x1f = 2   -> read as a coded slice
+ *   AUD (35)        -> 0x47 & 0x1f = 7   -> read as an SPS
+ *
+ * So whole classes of frame were thrown away and the parameter sets were
+ * reordered around an access unit delimiter mistaken for one. The host chose
+ * H.265 and the blacking out came straight back. */
+console.log("\nH.265 has a different header, and it is read as one");
+const { nalKind, nalIsPicture } = paint;
+const h265 = (type, ...tail) => [type << 1, 1, ...tail];
+const VPS = h265(32, 0xaa), HSPS = h265(33, 0xbb), HPPS = h265(34, 0xcc);
+const HSPS2 = h265(33, 0xdd);
+const HAUD = h265(35), HIDR = h265(19, 0x88), TRAIL_N = h265(0, 0x77);
+const CRA = h265(21, 0x66);
+
+for (const [name, unit, want] of [["IDR_W_RADL", HIDR, 19], ["TRAIL_N", TRAIL_N, 0],
+                                  ["CRA", CRA, 21], ["SPS", HSPS, 33],
+                                  ["AUD", HAUD, 35], ["VPS", VPS, 32]]) {
+  check(nalKind(new Uint8Array(unit), true) === want,
+        name + " reads as " + want + ", got "
+        + nalKind(new Uint8Array(unit), true));
+}
+
+console.log("\nand the frames the old rule threw away are pictures again");
+for (const [name, units] of [["an IDR", [HAUD, HIDR]],
+                             ["a CRA", [HAUD, CRA]],
+                             ["a non-reference trailing slice", [HAUD, TRAIL_N]]]) {
+  check(hasPicture(frame(units), true) === true, name + " is a picture");
+  // The point of the test: each of these was dropped before.
+  check(hasPicture(frame(units), false) === false,
+        "  and would have been dropped by the H.264 rule");
+}
+check(hasPicture(frame([VPS, HSPS, HPPS]), true) === false,
+      "H.265 parameter sets on their own are still not a picture");
+
+console.log("\nall three H.265 parameter sets are de-duplicated, in order");
+// Three, not two: hard-coding a pair of variables for SPS and PPS is how the
+// H.264 shape got baked in, so they are keyed by type now.
+got = tidyParameterSets(
+    frame([HAUD, VPS, HSPS, HPPS, VPS, HSPS2, HPPS, HIDR]), true);
+check(got.dropped === 3, "all three repeats dropped, got " + got.dropped);
+check(got.disagreed === true, "and the disagreeing SPS is reported");
+const after = splitAnnexB(new Uint8Array(got.data))
+  .map((u) => nalKind(u, true)).join(" ");
+check(after === "35 32 33 34 19",
+      "VPS then SPS then PPS then the picture -- each refers back to the one "
+      + "before it, so the order is not cosmetic. Got " + after);
+const cleanH = frame([HAUD, VPS, HSPS, HPPS, HIDR]);
+check(tidyParameterSets(cleanH, true).data === cleanH,
+      "and a clean H.265 frame is handed back untouched");
+
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

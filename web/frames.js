@@ -556,13 +556,27 @@ function decoded(frame) {
    which NAL units are in it. A parameter set arriving mid-stream is the thing
    worth seeing, because WebCodecs decoders are not obliged to accept a change
    of them in-band and Safari is not known to. */
+/* Whether this stream is H.265. The NAL header is laid out differently and
+   every reading of one below depends on knowing. */
+function isHevc() {
+  return /^(hvc1|hev1)/i.test(state.codec || "");
+}
+
 function describeFrame(bytes, key) {
   const kinds = [];
+  const hevc = isHevc();
   try {
     for (const unit of splitAnnexB(new Uint8Array(bytes))) {
-      const t = unit[0] & 0x1f;
-      kinds.push(t === 7 ? "SPS" : t === 8 ? "PPS" : t === 5 ? "IDR"
-                 : t === 1 ? "slice" : t === 6 ? "SEI" : "nal" + t);
+      const t = nalKind(unit, hevc);
+      if (hevc) {
+        kinds.push(t === 32 ? "VPS" : t === 33 ? "SPS" : t === 34 ? "PPS"
+                   : t === 35 ? "AUD" : (t === 39 || t === 40) ? "SEI"
+                   : (t >= 16 && t <= 21) ? "IRAP"
+                   : t <= 31 ? "slice" : "nal" + t);
+      } else {
+        kinds.push(t === 7 ? "SPS" : t === 8 ? "PPS" : t === 5 ? "IDR"
+                   : t === 1 ? "slice" : t === 6 ? "SEI" : "nal" + t);
+      }
     }
   } catch (_) { /* whatever it is, its size still says something */ }
   return (key ? "key" : "delta") + " " + (bytes && bytes.byteLength
@@ -575,11 +589,12 @@ function describeFrame(bytes, key) {
    so it says "the stream agrees" about a stream whose resolution or reference
    structure has changed underneath the decoder. */
 function keyFingerprint(bytes) {
+  const hevc = isHevc();
   try {
     const parts = [];
     for (const unit of splitAnnexB(new Uint8Array(bytes))) {
-      const t = unit[0] & 0x1f;
-      if (t !== 7 && t !== 8) continue;
+      const t = nalKind(unit, hevc);
+      if (!nalIsParameterSet(t, hevc)) continue;
       parts.push(t + ":" + Array.from(unit.slice(0, Math.min(unit.length, 12)))
         .map((b) => (b < 16 ? "0" : "") + b.toString(16)).join(""));
     }
@@ -792,7 +807,7 @@ function take(type, timestamp, data) {
       // in front of it too -- and the decoder survives several of those and
       // then fails on one with EncodingError. Which from the sofa is a picture
       // that runs for a few seconds and goes black, over and over.
-      const tidied = tidyParameterSets(bytes);
+      const tidied = tidyParameterSets(bytes, isHevc());
       if (tidied.dropped) {
         bytes = tidied.data;
         if (!state.saidTidy) {
@@ -840,7 +855,7 @@ function take(type, timestamp, data) {
     // built for -- and on this host they do differ, the two copies inside a
     // keyframe disagree -- that is exactly when a decoder has to be rebuilt,
     // and this is the earliest notice of it.
-    if (!hasPicture(bytes)) {
+    if (!hasPicture(bytes, isHevc())) {
       state.setsOnly += 1;
       if (state.setsOnly === 1) {
         say("this host sends parameter sets as frames of their own; they are "
