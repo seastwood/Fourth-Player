@@ -42,6 +42,9 @@ try {
   });
   await new Promise((r) => setTimeout(r, 300));
 
+  // `getBoundingClientRect` includes transforms, so videoBottom is where the
+  // picture is actually painted -- and videoBox is the layout box it was given,
+  // which must not move.
   const shape = () => page.evaluate(() => {
     const t = document.querySelector(".touch");
     const v = document.querySelector("video");
@@ -50,6 +53,8 @@ try {
       padTop: t.getBoundingClientRect().top,
       padVisible: !t.hidden && style.display !== "none",
       videoBottom: v.getBoundingClientRect().bottom,
+      videoBox: v.offsetHeight,
+      videoTopBox: v.offsetTop,
       position: style.position,
       background: style.backgroundColor,
       zoomed: document.getElementById("stage").classList.contains("zoomed"),
@@ -66,14 +71,22 @@ try {
         "so the picture stops where the pad starts (" + Math.round(flat.videoBottom)
         + " <= " + Math.round(flat.padTop) + ")");
 
-  console.log("\nzoomed in, it floats and the picture runs under it");
+  console.log("\nzoomed in, the picture runs under the pad and nothing moves");
   await page.evaluate(() => { zoom = 2.5; applyZoom(); });
   await new Promise((r) => setTimeout(r, 200));
   const big = await shape();
   check(big.zoomed, "the stage says it is zoomed");
   check(big.padVisible, "the pad is still there to be pressed");
-  check(big.position === "absolute",
-        "and out of the flow: " + big.position);
+  check(big.position === flat.position,
+        "the pad has NOT moved out of the flow: " + big.position);
+  // The fault this replaced. Floating the pad let the picture's box grow into
+  // the freed space, so a view somebody had lined up by dragging jumped to the
+  // middle of a taller box the moment they zoomed. Where the picture sits is
+  // theirs to decide.
+  check(big.videoBox === flat.videoBox && big.videoTopBox === flat.videoTopBox,
+        "and the picture's own box is untouched, so nothing jumps: "
+        + flat.videoBox + "x@" + flat.videoTopBox + " -> "
+        + big.videoBox + "x@" + big.videoTopBox);
   check(/rgba\(0, 0, 0, 0\)|transparent/.test(big.background),
         "with no background of its own: " + big.background);
   check(big.videoBottom > big.padTop + 1,
@@ -87,6 +100,8 @@ try {
   check(!back.zoomed, "the stage stops calling itself zoomed");
   check(back.videoBottom <= back.padTop + 1,
         "and the picture stops at the pad again");
+  check(back.videoBox === flat.videoBox,
+        "with the same box it started in");
 
   check(errors.length === 0, "no script errors: " + errors.join(" | "));
 } finally {

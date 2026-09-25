@@ -1027,14 +1027,19 @@ select.chip option { background: var(--bg2); color: var(--ink); }
    * see. The chips along the top already work this way, which is where the
    * asking came from.
    *
-   * Only the container's own background goes. Each key keeps its own, so the
-   * buttons stay readable over a bright scene rather than becoming outlines
-   * on top of a game. */
+   * ONLY the background. Nothing about the layout moves -- the pad keeps its
+   * place in the flow and the picture keeps exactly the box it had, because a
+   * scaled picture already paints outside its box and the solid panel was the
+   * only thing covering it. Floating the pad instead was tried and was the
+   * wrong fix twice over: the picture's box grew into the freed space, so a
+   * picture somebody had lined up by dragging jumped to the middle of the new
+   * box the instant they zoomed. Where the picture sits is theirs to decide by
+   * dragging and scrolling, and zooming must not take a view away and hand
+   * back a different one.
+   *
+   * Each key keeps its own background, so the buttons stay readable over a
+   * bright scene rather than becoming outlines on top of a game. */
   .stage.zoomed .touch {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
     background: none;
   }
   /* The same size as each other, and bigger than either was. The d-pad had

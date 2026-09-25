@@ -34,17 +34,24 @@ check(apply.includes('classList.toggle("zoomed"'),
       "from applyZoom, so every way of zooming says it and not just the "
       + "gesture that prompted this");
 
-console.log("\nand upright the pad floats once it is set");
-const portrait = css.slice(css.lastIndexOf("@media (orientation: portrait)"));
+console.log("\nand upright only the pad's background goes");
 const rule = css.slice(css.indexOf(".stage.zoomed .touch {"));
+const body = rule.slice(0, rule.indexOf("}") + 1);
 check(css.includes(".stage.zoomed .touch {"), "there is a rule for it");
-check(/position: absolute;/.test(rule.slice(0, 200)),
-      "it leaves the flow, so the picture takes the height back");
-check(/bottom: 0;/.test(rule.slice(0, 200)),
-      "and stays at the bottom, where the thumbs are");
-check(/background: none;/.test(rule.slice(0, 200)),
-      "with the panel's own background gone, which is what was hiding the "
-      + "picture");
+check(/background: none;/.test(body),
+      "the panel's own background goes, which is the only thing that was "
+      + "hiding the picture -- a scaled picture already paints outside its "
+      + "box");
+// The fault this replaced, and the reason the rule is this small. Floating
+// the pad let the picture's box grow into the freed space, so a view somebody
+// had lined up by dragging jumped to the middle of a taller box the instant
+// they zoomed. Reported as "the stream jumps down to the center of the phone
+// screen instead of staying in place".
+check(!/position:/.test(body),
+      "and nothing about the layout moves: the pad keeps its place in the "
+      + "flow");
+check(!/(bottom|top|left|right):/.test(body),
+      "nor is it repositioned by its edges");
 
 console.log("\nbut only its background, and only when zoomed");
 check(/\.touch \{\s*\n\s*background: var\(--bg\);\s*\n\s*\}/.test(css),
