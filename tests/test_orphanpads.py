@@ -23,6 +23,7 @@ def check(cond, msg):
 
 try:
     from fourthplayer.session import LiveSession
+    from fourthplayer.config import Config
     from fourthplayer import pads
 except Exception as exc:
     print("SKIPPED: cannot import the host here (%s)" % exc)
@@ -86,6 +87,11 @@ print("a seat nobody is on keeps its device for a moment, then loses it")
 # grace period -- long enough to cover leaving a stream and returning, which
 # is a thing people do constantly.
 session = LiveSession.__new__(LiveSession)
+# The config the janitor reads, and an invite it can ask which seats somebody
+# may still walk back into. Both real questions with real defaults; a stub
+# without them is a session that cannot be asked anything.
+session.cfg = Config()
+session.invite = None
 session.pads = Seats(4)
 session.guests = {1: Guest(1, 1)}
 session._unplug_orphans()
