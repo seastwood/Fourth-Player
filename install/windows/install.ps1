@@ -96,6 +96,13 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+# A task whose settings do not name a priority gets 7, and task priority 7 is
+# BELOW_NORMAL_PRIORITY_CLASS. That is how this host came to be scheduled
+# below every ordinary process on the machine -- including the game it is
+# streaming -- and to freeze whenever that game wanted the CPU. 4 is normal;
+# the host raises itself to above-normal once it is running, which also
+# repairs installs made before this line existed.
+$settings.Priority = 4
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Principal $principal -Settings $settings -Force | Out-Null

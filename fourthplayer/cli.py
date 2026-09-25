@@ -231,6 +231,12 @@ def main(argv=None):
     cfg = Config.load()
 
     if args.command == "serve":
+        # Before anything is built. A capture at 60 frames a second is
+        # soft-real-time work, and a scheduled task that does not name a
+        # priority gets BELOW_NORMAL -- which is how this host came to lose
+        # the CPU to whatever game it was streaming.
+        from . import winpriority
+        winpriority.apply()
         # A preset first, so the individual flags can still override parts of it.
         if args.preset:
             for key, value in PRESETS[args.preset].items():
