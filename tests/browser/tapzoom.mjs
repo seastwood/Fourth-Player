@@ -92,10 +92,9 @@ console.log("\nwhat the gesture does");
 // pointermove calls preventDefault to stop the page scrolling under a drag,
 // and that suppresses the click the browser would otherwise synthesise. So
 // the tap that should zoom back out could never arrive.
-const handler = src.slice(src.indexOf('video.addEventListener("pointerup"'),
+const handler = src.slice(src.indexOf("function pictureTapEnded"),
                           src.indexOf('let zoomedByTap'));
-check(/video\.addEventListener\("pointerup"/.test(
-        src.slice(src.indexOf('video.addEventListener("pointerup"') - 1)),
+check(/video\.addEventListener\("pointerup", pictureTapEnded\);/.test(src),
       "it listens on pointerup, which fires whether or not a click does");
 check(/if \(cursorDriving\(\)\) \{ lastPictureTap = null; return; \}/
         .test(handler),
@@ -159,23 +158,22 @@ console.log("\nand a tap the system took away still counts");
  * deliberate one. That is the whole of "it works if I double tap slowly": the
  * cancelled first tap was never recorded, so the second had nothing to pair
  * with. */
-const cancel = src.slice(src.indexOf('video.addEventListener("pointercancel"'));
-check(cancel.length > 0, "a cancelled pointer reaches the gesture at all");
-check(/lastPictureTap = \{ x: event\.clientX, y: event\.clientY,/
-        .test(cancel.slice(0, 900)),
-      "and is remembered, so the next honest tap can pair with it");
-check(!/zoomAbout/.test(cancel.slice(0, 900)),
-      "but does not zoom by itself -- a cancel may be the start of a system "
-      + "gesture, and zooming inside one is the page fighting the phone");
-check(/if \(others > 0\) return;/.test(cancel.slice(0, 900))
-      && /if \(dragged\)/.test(cancel.slice(0, 900))
-      && /if \(cursorDriving\(\)\)/.test(cancel.slice(0, 900)),
-      "under the same conditions as a real tap: one finger, not a drag, not "
-      + "driving the machine");
-check(src.indexOf('video.addEventListener("pointercancel", (event) => {')
-      < src.indexOf('video.addEventListener("pointercancel", letGoOfPicture)'),
-      "and before the handler that forgets the pointer, or `held` would "
+check(/video\.addEventListener\("pointercancel", pictureTapEnded\);/.test(src),
+      "and on pointercancel, which is the same tap ended a different way");
+// A pointer gets exactly one of the two, and which one is not the page's
+// business: iOS cancels a touch far more readily for a quick tap than a slow
+// deliberate one. They used to differ -- a cancel only *remembered* the tap
+// instead of completing the pair -- so a cancelled second tap did not zoom
+// and the record it left paired with whatever came next. Reported as zooming
+// out working well and zooming in being finicky, and as the picture flashing
+// in and out at the wrong moment.
+check(src.indexOf('video.addEventListener("pointerup", pictureTapEnded);')
+      < src.indexOf('video.addEventListener("pointerup", letGoOfPicture)'),
+      "both before the handler that forgets the pointer, or `held` would "
       + "already have lost the finger that is leaving");
+check(src.indexOf('video.addEventListener("pointercancel", pictureTapEnded);')
+      < src.indexOf('video.addEventListener("pointercancel", letGoOfPicture)'),
+      "for the cancelled one too");
 
 console.log("\nand a fast double tap is not rejected as a duplicate");
 check(F.MIN <= 20,

@@ -3100,7 +3100,20 @@ function isPictureDoubleTap(x, y, at, kind, last) {
  * The pointer kind is carried for the same reason the sticks carry it: iOS
  * sends a compatibility mouse event after a touch, and without this every
  * single tap would look like a pair. */
-video.addEventListener("pointerup", (event) => {
+/* One tap, however the browser chose to end it.
+ *
+ * A pointer gets exactly one of pointerup or pointercancel, and which one is
+ * not the page's business: iOS hands a touch to its own gesture recogniser
+ * and cancels it, far more readily for a quick tap than a slow deliberate
+ * one. So both must do the same thing here, and for a while only one of them
+ * did -- a cancel merely remembered the tap instead of completing the pair.
+ *
+ * That is exactly the reported shape. A cancelled *second* tap did not zoom,
+ * and the record it left behind then paired with whatever came next, so the
+ * picture jumped at the wrong moment. Zooming out was reliable and zooming in
+ * was finicky, because the gesture that zooms out starts from a picture
+ * somebody is already holding still and the one that zooms in does not. */
+function pictureTapEnded(event) {
   // Every finger *but this one*. This listener is registered before the one
   // that forgets the pointer -- letGoOfPicture, much further down -- so at
   // this moment `held` still contains the finger that is lifting. Asking for
@@ -3130,49 +3143,34 @@ video.addEventListener("pointerup", (event) => {
   /* Remembered for the next tap -- unless a live record of a different kind
    * of pointer is already sitting here.
    *
-   * This is why a double tap was hard to land, and neither threshold had
-   * anything to do with it. iOS follows a touch with a compatibility mouse
-   * event, which arrives here as an ordinary pointerup. It cannot pair with
-   * the touch before it, which is right and is what the kind check above is
-   * for -- but it used to overwrite it on the way past. So a real double tap
-   * arrived as touch, mouse, touch: the second touch was compared against the
-   * mouse event wedged in between, found to be a different kind, and refused.
-   *
-   * Every double tap failed that way, which from the outside looks exactly
-   * like a gesture that needs to be quicker and better aimed. It did not.
-   * A stale record is still replaced: somebody who put the phone down and
-   * picked up a mouse is not mid-gesture. */
+   * iOS follows a touch with a compatibility mouse event, which arrives at
+   * this same listener. It cannot pair with the touch before it, which is
+   * what the kind check above is for -- but it used to overwrite it on the
+   * way past. So a real double tap arrived as touch, mouse, touch, and the
+   * second touch was compared against the mouse event wedged in between and
+   * refused. Every double tap failed that way, which from the outside is
+   * indistinguishable from a gesture that needs to be quicker and better
+   * aimed. It did not. A stale record is still replaced: somebody who put the
+   * phone down and picked up a mouse is not mid-gesture. */
   if (lastPictureTap && (lastPictureTap.kind || "") !== kind
       && at - lastPictureTap.at <= TAP_ZOOM_MS) return;
   lastPictureTap = { x, y, at, kind };
-});
+}
 
-/* A touch the system took away is still a tap that happened.
+/* Watched on pointerup, not on click.
  *
- * iOS hands a pointer to its own gesture recogniser and sends pointercancel
- * instead of pointerup -- and it does that far more readily to a quick tap
- * than to a slow deliberate one, which is exactly the difference between a
- * double tap that zoomed and one that did nothing. The cancelled tap was
- * never recorded, so the tap after it had nothing to pair with.
+ * A click is not reliable here and the reason is in this file: while the
+ * picture is zoomed, every pointermove calls preventDefault to stop the page
+ * scrolling under a drag -- and that suppresses the click the browser would
+ * otherwise synthesise. So the tap that should zoom back *out* could never
+ * arrive, which is exactly half of "double tapping the video did nothing".
  *
- * Recorded, not acted on. A cancel may be the start of a system gesture, and
- * zooming in the middle of one would be the page fighting the phone; but the
- * next honest tap can pair with it, which is all this needs to do. The same
- * conditions as a real tap: one finger, not a drag, not driving the machine.
- *
- * Registered before letGoOfPicture below, like the pointerup handler, so
- * `held` still holds the finger that is leaving. */
-video.addEventListener("pointercancel", (event) => {
-  const others = held.size - (held.has(event.pointerId) ? 1 : 0);
-  if (others > 0) return;
-  if (dragged) { lastPictureTap = null; return; }
-  if (cursorDriving()) { lastPictureTap = null; return; }
-  const kind = event.pointerType || "";
-  if (lastPictureTap && (lastPictureTap.kind || "") !== kind
-      && Date.now() - lastPictureTap.at <= TAP_ZOOM_MS) return;
-  lastPictureTap = { x: event.clientX, y: event.clientY,
-                     at: Date.now(), kind };
-});
+ * pointerup fires either way. It also arrives after the move handlers, so
+ * `dragged` is already settled by the time this reads it: a thumb always
+ * moves a pixel or two, and deciding at pointerdown would call every drag a
+ * tap. */
+video.addEventListener("pointerup", pictureTapEnded);
+video.addEventListener("pointercancel", pictureTapEnded);
 
 /* Set when a double tap zoomed, so the click that follows it does not also
    toggle the hud. The two taps would otherwise toggle it twice and leave it
@@ -4051,7 +4049,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25f";
+const CLIENT_BUILD = "2026-09-25g";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -10246,6 +10244,13 @@ function giveTheVideoBack() {
 
 function stopPainting(why) {
   if (paintWatch) { clearTimeout(paintWatch); paintWatch = 0; }
+  // Anything still asking the browser about the connection being put down is
+  // asking about the wrong one, and must not be allowed to attach when the
+  // answer comes back. Clearing the flag matters just as much: while it stood,
+  // the next connection's one chance to attach a transform was refused as a
+  // start already in progress.
+  paintEra += 1;
+  paintStarting = false;
   // The next painter counts its own arrivals from zero, and the watchdog
   // compares against this. Left where it was, nothing could ever be greater
   // than it again, so a perfectly healthy restarted painter read as a
@@ -10631,6 +10636,26 @@ function tryAnotherSpelling(codec) {
   watchThePainting();
 }
 
+/* Which connection a start belongs to.
+ *
+ * startPainting awaits -- it asks the browser whether it can decode a codec
+ * rather than constructing one and hoping -- and stopPainting can happen
+ * while it is suspended. Without this the stale call woke up afterwards and
+ * attached its transform to whatever receiver was current by then, which on a
+ * renewal is one that has already begun delivering, and a transform attached
+ * to one of those is handed nothing for ever.
+ *
+ * Worse, `paintStarting` was still set while it slept, so the call made from
+ * the *new* connection's track handler -- the one moment a transform can be
+ * attached at all -- returned immediately and did nothing.
+ *
+ * Between them that is "media track works when I join and never again":
+ * a fresh join has no earlier call in flight, every renewal does. The host's
+ * log said it plainly and repeatedly -- "0 handed over by the transform,
+ * 0 fed to the decoder, 0 came out" with megabytes arriving on the
+ * connection. */
+let paintEra = 0;
+
 async function startPainting() {
   if (!paintsHere() || painter || paintStarting) return;
   if (paintGaveUp) return;          // already tried everything on this one
@@ -10665,6 +10690,7 @@ async function startPainting() {
   // pickCodec. It is a promise, and the watchdog calls this every couple of
   // seconds, so the flag is what stops four of them racing.
   paintStarting = true;
+  const era = paintEra;
   let codec = "";
   try {
     // Past the first attempt this is not a question for the browser any
@@ -10675,6 +10701,10 @@ async function startPainting() {
       ? (paintTried < all.length ? all[paintTried] : "")
       : await pickCodec(shape.mime, shape.fmtp);
   } finally { paintStarting = false; }
+  // The connection this belonged to has gone while the browser was answering,
+  // so this attempt is about a receiver nobody is reading any more. The new
+  // connection starts its own.
+  if (era !== paintEra) return;
   if (painter || !paintsHere()) return;            // changed while asking
   if (!codec) {
     // Two different cases and they must not be treated alike.

@@ -182,6 +182,40 @@ check("paintGaveUp" in restart,
       "and giving up is still respected, so a polled caller cannot retry for "
       "ever")
 
+# A start that belongs to a connection which has gone must not attach, and
+# must not block the one that replaces it.
+#
+# startPainting awaits -- it asks the browser whether it can decode a codec
+# rather than constructing one and hoping -- and stopPainting happens while it
+# is suspended. The stale call woke up afterwards and attached its transform
+# to whatever receiver was current, which on a renewal has already begun
+# delivering; and while it slept, paintStarting was still set, so the call
+# from the new connection's track handler -- the one moment a transform can be
+# attached at all -- returned immediately as "a start is already in progress".
+#
+# Between them: media track works on a fresh join and never again, because a
+# join has no earlier call in flight and every renewal does. The host's log
+# said it over and over -- "0 handed over by the transform, 0 fed to the
+# decoder, 0 came out" with megabytes arriving on the connection.
+check("let paintEra = 0;" in app,
+      "starts are stamped with the connection they belong to")
+start = app[app.index("async function startPainting"):]
+start = start[:start.index("\nfunction ", 10)]
+check("const era = paintEra;" in start,
+      "the stamp is taken before the browser is asked")
+check("if (era !== paintEra) return;" in start,
+      "and a start whose connection has gone does not attach")
+check(start.index("if (era !== paintEra) return;")
+      < start.index("if (painter || !paintsHere())"),
+      "checked before anything is built")
+stop = app[app.index("function stopPainting"):]
+stop = stop[:stop.index("\nfunction ", 10)]
+check("paintEra += 1;" in stop,
+      "putting the painter down ends that era")
+check("paintStarting = false;" in stop,
+      "and clears the in-progress flag, or the next connection's one chance "
+      "to attach a transform is refused as a start already under way")
+
 print()
 if fails:
     print("FAILURES: %d" % len(fails))
