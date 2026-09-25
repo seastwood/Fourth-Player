@@ -1885,8 +1885,29 @@ class LiveSession:
             # the fault the docstring above warns about -- ICE sitting at
             # `completed` for ever with nobody behind it -- and a socket does
             # not have it.
-            limit = (HELD_SECONDS if guest.socket is not None
-                     else min(seconds, LEFT_SECONDS))
+            #
+            # The short limit is for somebody who closed the tab, and it must
+            # not be applied to a peer that is plainly still connected. A
+            # guest switching to media-track drawing closes and reopens
+            # signalling as part of starting -- so the socket is briefly gone
+            # while their ICE is up and the host is still sending them the
+            # picture, and they were being hung up on three seconds into it.
+            # The transform was then handed nothing, and the page blamed its
+            # own decoder and fell back to WebRTC.
+            #
+            # ICE being up is not enough on its own to keep a seat for ever --
+            # webrtcbin sits at `completed` long after a guest has vanished,
+            # which is why has_media stopped trusting it -- but it is ample
+            # evidence that somebody has not closed a tab in the last eight
+            # seconds. So it buys the ordinary deadline, not an endless one.
+            alive = guest.peer is not None and getattr(
+                guest.peer, "ice_ok", False)
+            if guest.socket is not None:
+                limit = HELD_SECONDS
+            elif alive:
+                limit = seconds
+            else:
+                limit = min(seconds, LEFT_SECONDS)
             if now - guest.media_since > limit:
                 log.info("%s had no video for %.0fs; freeing the slot",
                          guest.label, now - guest.media_since)
