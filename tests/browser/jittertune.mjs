@@ -32,7 +32,11 @@ const build = new Function("said", "held", `
   let painter = null;
   let streamNow = { jitter_ms: 60 };
   const report = (t) => said.push(t);
-  const holdVideoBack = (ms) => held.push(ms);
+  // The controller records what it wants and then asks for it to be applied;
+  // what actually reaches the receiver depends on the mode, which is
+  // jitterlive's business rather than this one's.
+  let jitterFromHost = 0;
+  const holdBackAsNeeded = () => held.push(jitterFromHost);
   ${body}
   return {
     tune: (a, b, p) => tuneTheBuffer(a, b, p),

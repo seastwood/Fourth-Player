@@ -839,7 +839,8 @@ async function answer(message) {
       wholeStream = incoming;
     }
     if (video.srcObject !== show) video.srcObject = show;
-    holdVideoBack(message.jitter);
+    if (Number(message.jitter) >= 0) jitterFromHost = Number(message.jitter);
+    holdBackAsNeeded();
     startPlayback();
     // A receiver exists now, which is the first moment the frames can be
     // taken. Does nothing unless this viewer chose to draw them here.
@@ -968,7 +969,8 @@ async function answer(message) {
   // to be thrown away. It is started again when the new track arrives.
   stopPainting("");
   await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
-  holdVideoBack(message.jitter);
+  if (Number(message.jitter) >= 0) jitterFromHost = Number(message.jitter);
+  holdBackAsNeeded();
   // Which line the microphone may go out on, if the host offered one. Taken
   // before the answer is built: a track attached now is answered as sendonly
   // rather than inactive, which is the difference between a working
@@ -3674,7 +3676,11 @@ function tuneTheBuffer(picture, before, path) {
   jitterTarget = want;
   if (Math.abs(want - jitterSaidLast) < JITTER.DEADBAND_MS) return;
   jitterSaidLast = want;
-  holdVideoBack(want);
+  // Remembered rather than applied directly: in media-track mode the answer to
+  // a freeze is not to hold frames back longer, and this controller would
+  // otherwise climb on the very symptom the holding causes.
+  jitterFromHost = want;
+  holdBackAsNeeded();
   report("holding video back " + want + "ms now (was " + was + "): "
          + (froze > 0 ? froze + " freeze(s), " : "")
          + (share * 100).toFixed(2) + "% lost, jitter "
@@ -4138,9 +4144,47 @@ function sayTheRate(rate) {
  * are left as they are, which is what they did before. */
 let jitterWanted = 0;
 let jitterSaid = "";
+/* What the host configured, kept apart from what is actually applied.
+ *
+ * They differ in exactly one case, and it matters: a page drawing the picture
+ * itself off the media track does not want the browser holding frames at all.
+ * See holdBackAsNeeded. */
+let jitterFromHost = 0;
+
+/* Hold video back as this mode needs, rather than as the host asked.
+ *
+ * The host's number is for the browser's own decoder and its own playout
+ * clock. A page drawing from the media track has neither: the frames are taken
+ * off the receiver before any of that, paced by our own scheduler, which keeps
+ * its own reserve and widens it when the link is rough. Asking the browser to
+ * hold them first is two buffers in series, and the second one discards what
+ * the first one made late -- "too late to matter" in the drawing report.
+ *
+ * The reason to think this is the freeze: it was reported that joining with no
+ * sound gave a working picture, and that the picture began blacking out as
+ * soon as a refresh brought the sound back. Chrome aligns a video stream's
+ * playout to the audio it is being played with, and that alignment is applied
+ * by delaying video. With no audio there is nothing to align to and the frames
+ * come straight through; with audio -- and this session's audio is losing
+ * packets and inventing 2% of its samples, so its clock is being stretched --
+ * video is held to match, in bursts, with gaps of up to 294ms measured at the
+ * transform. Our pacer's reserve is 25ms.
+ *
+ * Zero is a hint like any other and a browser may clamp or ignore it, which is
+ * why holdVideoBack reads it back and says what happened. */
+function holdBackAsNeeded() {
+  // The condition is whether something is *actually* reading the receiver, not
+  // which mode is chosen: the hold has to come back the moment the browser is
+  // drawing again, including when this mode is abandoned half way through.
+  const takingFrames = Boolean(painter) && paintMethod === "rtp";
+  holdVideoBack(takingFrames ? 0 : jitterFromHost);
+}
 
 function holdVideoBack(ms) {
-  if (!(ms > 0)) return;
+  // >= 0, not > 0. Zero is a real instruction -- "as little as you can" -- and
+  // refusing it here is what left the browser holding frames back for a page
+  // that had already taken over the drawing.
+  if (!(ms >= 0)) return;
   jitterWanted = ms;
   if (!pc) return;
   let how = "";
@@ -9081,14 +9125,6 @@ function videoCodecNow() {
   return offered || lastCodec;
 }
 
-function videoReceiver() {
-  if (!pc || !pc.getReceivers) return null;
-  for (const receiver of pc.getReceivers()) {
-    if (receiver.track && receiver.track.kind === "video") return receiver;
-  }
-  return null;
-}
-
 /* Back to the browser's own element. Called on switching away, on a
    renegotiation, and on anything going wrong -- there has to be exactly one
    way back or a failed experiment is a black screen. */
@@ -9256,6 +9292,8 @@ function stopPainting(why) {
   // Before anything else that might fail: a host still sending keyframes on a
   // beat for a page that has stopped painting is spending bitrate on nobody.
   if (was) tellHostPainting(false, "");
+  // painter is already null above, so this puts the host's hold back.
+  holdBackAsNeeded();
   giveTheVideoBack();
   // Nothing to undo on the receiver and nothing to rebuild.
   //
@@ -9642,6 +9680,7 @@ async function startPainting() {
   paintAfterZoom();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
   tellHostPainting(true, paintMethod);
+  holdBackAsNeeded();
   watchThePainting();
   // If the worker gives up on its own -- a decoder that will not run, a
   // transform the browser refuses -- that is the same situation as nothing
@@ -9799,6 +9838,9 @@ function setPaintMethod(id) {
   paintMethod = wantedPaintMethod();
   savePaintMethod();
   paintPaintMethod();
+  // How much the browser should hold back depends on which mode this is, so
+  // it is re-decided here rather than only when the host mentions it.
+  holdBackAsNeeded();
   if (!paintsHere()) {
     stopPainting("WebRTC was chosen");
     return;
@@ -10480,7 +10522,10 @@ function paintStream(state) {
   // changed. Without this, raising it did nothing until the next
   // renegotiation -- so it looked like a setting that does not work, which
   // is a worse thing to have than one that is merely hard to tune.
-  if (state && Number(state.jitter_ms) > 0) holdVideoBack(Number(state.jitter_ms));
+  if (state && Number(state.jitter_ms) > 0) {
+    jitterFromHost = Number(state.jitter_ms);
+    holdBackAsNeeded();
+  }
   if (state && state.draw_with) hostPrefersDrawing(String(state.draw_with));
   const size = el("stream-size");
   if (size && Array.isArray(state.sizes)) {

@@ -19,12 +19,17 @@ const check = (cond, what) => {
 console.log("the setting reaches a connection that is already up");
 const paint = app.slice(app.indexOf("function paintStream(state)"),
                         app.indexOf("function paintStream(state)") + 900);
-check(paint.includes("holdVideoBack"),
+check(paint.includes("holdBackAsNeeded"),
       "paintStream applies it, which is where a changed setting arrives");
 
 console.log("and it is still applied when a connection is built");
-check(app.split("holdVideoBack(").length - 1 >= 4,
-      "every path that learns the number applies it");
+// Through holdBackAsNeeded now, not holdVideoBack directly: what to apply
+// depends on whether this page is taking the frames off the receiver itself,
+// and that decision belongs in one place rather than at four call sites.
+check(app.split("holdBackAsNeeded()").length - 1 >= 6,
+      "every path that learns the number, and every change of mode, applies it");
+check(app.split("holdVideoBack(").length - 1 === 2,
+      "and only holdBackAsNeeded calls it, so no path can skip that decision");
 
 console.log("the page says whether the browser took it");
 const hold = app.slice(app.indexOf("function holdVideoBack"),
@@ -50,6 +55,8 @@ const body = app.slice(app.indexOf("let jitterWanted = 0;"),
 const said = [];
 const harness = `
 let pc = null;
+let painter = null;
+let paintMethod = "browser";
 const report = (t) => said.push(t);
 ${body}
 `;
@@ -57,6 +64,9 @@ const run = new Function("said", harness + `
   return {
     set: (receivers) => { pc = { getReceivers: () => receivers }; },
     hold: (ms) => holdVideoBack(ms),
+    mode: (how, drawing) => { paintMethod = how; painter = drawing ? {} : null; },
+    fromHost: (ms) => { jitterFromHost = ms; },
+    asNeeded: () => holdBackAsNeeded(),
   };
 `)(said);
 
@@ -88,6 +98,65 @@ run.set(bare);
 run.hold(60);
 check(said.some((t) => t.includes("no control over it")),
       "a browser with neither says so: " + said[said.length - 1]);
+
+/* The reason any of this was touched.
+ *
+ * Reported from the sofa: joining with no sound gave a working picture, and a
+ * refresh that brought the sound back brought the blacking out back with it.
+ * Chrome aligns a video stream's playout to the audio it is played with, and
+ * does it by delaying video -- so a page drawing from the media track was
+ * handed its frames in bursts, hundreds of milliseconds apart, and its own
+ * pacer discarded them as too late. Two buffers in series, the second throwing
+ * away what the first made late. */
+console.log("\na page drawing from the media track wants no hold at all");
+said.length = 0;
+const track = [{ track: { kind: "video" }, jitterBufferTarget: 999 }];
+run.set(track);
+run.fromHost(60);
+run.mode("rtp", true);
+run.asNeeded();
+check(track[0].jitterBufferTarget === 0,
+      "zero is applied, not the host's 60ms, got " + track[0].jitterBufferTarget);
+check(said.some((t) => t.includes("0ms via")),
+      "and said, so a browser that ignores it can be told apart from one that "
+      + "took it: " + said[said.length - 1]);
+
+console.log("\nbut only while it is really reading the receiver");
+const chosen = [{ track: { kind: "video" }, jitterBufferTarget: 0 }];
+run.set(chosen);
+run.fromHost(60);
+// The mode is chosen and nothing is painting yet -- between the track arriving
+// and the decoder being built, and for ever if it never is.
+run.mode("rtp", false);
+run.asNeeded();
+check(chosen[0].jitterBufferTarget === 60,
+      "the host's hold stands until something is actually taking the frames, "
+      + "got " + chosen[0].jitterBufferTarget);
+
+console.log("\nand the hold comes back when the browser draws again");
+const back = [{ track: { kind: "video" }, jitterBufferTarget: 0 }];
+run.set(back);
+run.fromHost(60);
+run.mode("rtp", true);
+run.asNeeded();
+run.mode("browser", false);
+run.asNeeded();
+check(back[0].jitterBufferTarget === 60,
+      "giving up on this mode must not leave the browser drawing with no "
+      + "buffer at all, got " + back[0].jitterBufferTarget);
+
+console.log("\nthe data-channel modes are not affected");
+// They take frames off a data channel, so the media line's playout is the
+// browser's business exactly as it always was.
+for (const how of ["here", "flat"]) {
+  const dc = [{ track: { kind: "video" }, jitterBufferTarget: 0 }];
+  run.set(dc);
+  run.fromHost(60);
+  run.mode(how, true);
+  run.asNeeded();
+  check(dc[0].jitterBufferTarget === 60,
+        how + " keeps the host's hold, got " + dc[0].jitterBufferTarget);
+}
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
