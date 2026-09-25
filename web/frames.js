@@ -40,6 +40,13 @@ const state = {
   lastKey: null,
   builtAt: 0,
   latency: false,
+  // For naming the frame that killed a decoder. A decoder that dies after two
+  // hundred good frames is dying *on* something, and which frame it was --
+  // and whether that frame's parameter sets match the ones the decoder was
+  // built for -- is the whole question.
+  builtFor: "",
+  lastFed: "",
+  keysSeen: 0,
   started: false,
   shape: "",
   waiting: [],
@@ -540,6 +547,41 @@ function decoded(frame) {
  * A decoder that dies after a minute of clean output is a different fault from
  * one that never configures, and those want opposite next moves. So the
  * message says which of the two happened, and against what. */
+/* One frame, in the terms that matter to a decoder: its type, its size, and
+   which NAL units are in it. A parameter set arriving mid-stream is the thing
+   worth seeing, because WebCodecs decoders are not obliged to accept a change
+   of them in-band and Safari is not known to. */
+function describeFrame(bytes, key) {
+  const kinds = [];
+  try {
+    for (const unit of splitAnnexB(new Uint8Array(bytes))) {
+      const t = unit[0] & 0x1f;
+      kinds.push(t === 7 ? "SPS" : t === 8 ? "PPS" : t === 5 ? "IDR"
+                 : t === 1 ? "slice" : t === 6 ? "SEI" : "nal" + t);
+    }
+  } catch (_) { /* whatever it is, its size still says something */ }
+  return (key ? "key" : "delta") + " " + (bytes && bytes.byteLength
+                                          ? bytes.byteLength : "?") + "B ["
+         + kinds.join(" ") + "]";
+}
+
+/* The parameter sets as bytes, for comparing one keyframe's against another's.
+   exactCodec only compares profile, constraints and level -- three bytes --
+   so it says "the stream agrees" about a stream whose resolution or reference
+   structure has changed underneath the decoder. */
+function keyFingerprint(bytes) {
+  try {
+    const parts = [];
+    for (const unit of splitAnnexB(new Uint8Array(bytes))) {
+      const t = unit[0] & 0x1f;
+      if (t !== 7 && t !== 8) continue;
+      parts.push(t + ":" + Array.from(unit.slice(0, Math.min(unit.length, 12)))
+        .map((b) => (b < 16 ? "0" : "") + b.toString(16)).join(""));
+    }
+    return parts.join(",");
+  } catch (_) { return ""; }
+}
+
 function whyItStopped(err) {
   const bits = [(err && err.message) || "no reason given"];
   if (err && err.name && err.name !== "Error") bits.push("(" + err.name + ")");
@@ -559,6 +601,18 @@ function whyItStopped(err) {
                                    : "but the stream now says " + real);
   }
   if (state.shape) bits.push("last shape " + state.shape);
+  bits.push(state.keysSeen + " keyframe(s) seen");
+  if (state.lastFed) bits.push("died on " + state.lastFed);
+  // The question the three-byte comparison above cannot answer.
+  if (state.lastKey) {
+    const now = keyFingerprint(state.lastKey);
+    if (state.builtFor && now && now !== state.builtFor) {
+      bits.push("PARAMETER SETS CHANGED since this decoder was built ("
+                + state.builtFor + " -> " + now + ")");
+    } else if (state.builtFor && now) {
+      bits.push("parameter sets unchanged");
+    }
+  }
   return bits.join("; ");
 }
 
@@ -575,6 +629,7 @@ function buildDecoder(codec, description, latency) {
   // fact that separates "never worked" from "was working and died".
   state.builtAt = performance.now();
   state.latency = Boolean(latency);
+  state.builtFor = state.lastKey ? keyFingerprint(state.lastKey) : "";
   const decoder = new VideoDecoder({
     output: decoded,
     error: (err) => {
@@ -672,7 +727,7 @@ function take(type, timestamp, data) {
       state.shape = shaped.shape;
       say("the encoded frames are " + state.shape);
     }
-    if (key) state.lastKey = bytes;
+    if (key) { state.lastKey = bytes; state.keysSeen += 1; }
     if (state.feedAs === "avcc") bytes = toLengthPrefixed(bytes);
   } catch (_) { /* hand it over as it came */ }
   // A saturated decoder is not helped by more. Keyframes always go in:
@@ -682,6 +737,7 @@ function take(type, timestamp, data) {
     return;
   }
   try {
+    state.lastFed = describeFrame(bytes, key);
     decoder.decode(new EncodedVideoChunk({
       type: key ? "key" : "delta", timestamp, data: bytes,
     }));
