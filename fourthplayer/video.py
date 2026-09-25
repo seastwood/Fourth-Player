@@ -2889,26 +2889,52 @@ class Stage:
                      "%d uneven (a frame should be %.1fms)"
                      % (stamps[len(stamps) // 2] * 1000, stamps[-1] * 1000,
                         ragged, nominal * 1000))
-        # A rate that does not match the timestamps is not untidy, it is
-        # wrong. Every frame is stamped one frame-interval after the last, so
-        # producing 64 a second while claiming 60 describes 1.06 seconds of
-        # video for every second that really passes -- and whoever is watching
-        # it falls further behind for as long as it goes on, in hitches.
-        # Nothing about the picture looks wrong on this end.
+        # Two different faults, and this used to report them as one.
+        #
+        # A timeline that does not advance at the rate real time does is
+        # wrong, not untidy: whoever is watching falls further behind for as
+        # long as it goes on, in hitches, and nothing about the picture looks
+        # wrong from this end.
+        #
+        # But that is not what "fewer frames arrived than were asked for"
+        # means. Where nothing is putting timestamps back on a grid, a frame
+        # that arrives late is *stamped* late, and a capture managing 53 of a
+        # requested 60 describes exactly as much time as really passed. It is
+        # a capture that cannot keep up, which is a different complaint with a
+        # different answer -- fewer pixels or fewer frames, not a pacing
+        # setting.
+        #
+        # Reporting the second as the first cost a whole diagnosis: the log
+        # said "the timeline runs 12% fast than real time" about a host whose
+        # timeline was tracking real time to within a median of 0.1ms, and it
+        # was believed, twice, because it is stated so confidently. The two
+        # measurements needed to tell them apart were already being taken --
+        # `gaps` is when frames really arrived and `stamps` is what they claim
+        # -- and were never compared.
         rate = len(gaps) / total if total else 0
         asked = max(1, int(self.cfg.fps))
-        if rate and abs(rate - asked) / asked > 0.02:
+        stamped = sum(stamps)
+        drift = ((stamped - total) / total) if (stamps and total) else 0.0
+        if abs(drift) > 0.02:
+            self._off_time = getattr(self, "_off_time", 0) + 1
+            if self._off_time in (1, 10, 100):
+                log.warning("the timeline runs %.0f%% %s than real time -- %.2fs "
+                            "of timestamps for %.2fs that really passed -- which "
+                            "a guest sees as a stutter. %s",
+                            abs(drift) * 100, "slow" if drift < 0 else "fast",
+                            stamped, total,
+                            "Turn 'Stamp frames when they arrive' on."
+                            if not getattr(self.cfg, "true_time", False)
+                            else "Something downstream is re-stamping them.")
+        elif rate and abs(rate - asked) / asked > 0.02:
             self._off_rate = getattr(self, "_off_rate", 0) + 1
             if self._off_rate in (1, 10, 100):
-                log.warning("the capture is producing %.1f frames a second "
-                            "while every one of them is stamped as %d -- the "
-                            "timeline runs %.0f%% %s than real time, which a "
-                            "guest sees as a stutter. %s",
-                            rate, asked, abs(rate - asked) / asked * 100,
-                            "slow" if rate > asked else "fast",
-                            "Turn 'Even out the frame rate' on."
-                            if not getattr(self.cfg, "pace_frames", True)
-                            else "Something is overriding the pacing.")
+                log.warning("the capture is managing %.1f frames a second of "
+                            "the %d asked for, and stamping them honestly, so "
+                            "the picture is a real %.0f%% slower rather than "
+                            "wrongly timed. Fewer pixels or a lower frame rate "
+                            "is what fixes that; the timestamps are fine.",
+                            rate, asked, (1 - rate / asked) * 100)
         log.info("%s%s", said, self._grab_report())
 
     def _forward(self, sink, kind):
