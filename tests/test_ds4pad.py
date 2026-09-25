@@ -467,21 +467,26 @@ check(pad.raw is not None, "a report went out")
 # The offset, which is the point: a DualShock keeps its first gyro word at
 # byte 12. ctypes' aligned struct puts it at 14, and writing there fed the
 # real gyro X a battery level of zero for ever.
-check(pad.raw[12:14] == bytes([0x1e, 0xff]),
+check(pad.raw[12:14] == bytes([0xec, 0x00]),
       "the first gyro word is at byte 12, not 14: %s"
       % pad.raw[12:14].hex(" "))
-check(pad.raw[14:16] != bytes([0x1e, 0xff]),
+check(pad.raw[14:16] != bytes([0xec, 0x00]),
       "and is not also sitting where the aligned struct would have put it")
-# Pitch and roll trade places on the way out, because a controller is held
-# face up and a phone in portrait is held face toward you -- ninety degrees
-# apart, so the phone's screen-normal is the controller's vertical. Sent
-# straight through, the vertical aim was driven by the wrong wrist.
-check(pad.extended[0] == [-226, 236, -877],
-      "pitch and roll are swapped and yaw is not: wire (pitch -877, yaw 236, "
-      "roll -226) leaves as (%r)" % (pad.extended[0],))
-check(virtual.UInput.GYRO_ORDER == (2, 1, 0),
+# The rotations are permuted on the way out. A controller is held face up and
+# a phone in portrait face toward you, so the frames differ -- and which wrist
+# should steer is a preference on top of that. Both were settled by watching a
+# game, in two goes: straight through gave the vertical to the wrong wrist,
+# and swapping pitch and roll alone left the horizontal on turning the phone
+# like a door rather than twisting it.
+check(pad.extended[0] == [236, -226, -877],
+      "the pad receives (yaw, roll, pitch): wire (pitch -877, yaw 236, roll "
+      "-226) leaves as (%r)" % (pad.extended[0],))
+check(virtual.UInput.GYRO_ORDER == (1, 2, 0),
       "with the order named rather than buried in the packing, since it was "
       "found by watching a game and may need finding again")
+check(sorted(virtual.UInput.GYRO_ORDER) == [0, 1, 2],
+      "and it is a permutation -- every rotation goes somewhere and none goes "
+      "twice, which a hand-edited tuple can quietly stop being")
 check(pad.extended[1] == [0, 0, 8192],
       "and acceleration, scaled into the pad's units: %r" % (pad.extended[1],))
 check(pad.battery == 0xFF,

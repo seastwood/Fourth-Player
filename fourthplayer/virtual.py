@@ -397,16 +397,26 @@ except ImportError:
         # corresponds to the controller's vertical and its screen-vertical to
         # the controller's front-to-back.
         #
-        # Which means pitch and roll trade places, and yaw does not move. Sent
-        # straight through, the effect from the sofa was precise and
-        # confusing: "rolling the phone left and right moves it up and down,
-        # tilting left and right moves it left and right" -- the horizontal
-        # right, the vertical driven by the wrong wrist.
+        # Arrived at in two steps, each from watching a game, because the
+        # posture a pad is held in is written down nowhere:
         #
-        # Determined by watching a game rather than from a datasheet, which is
-        # the only honest way: the posture a pad is held in is not written
-        # down anywhere. Indices into the wire's (pitch, yaw, roll).
-        GYRO_ORDER = (2, 1, 0)
+        #   straight through -- "rolling the phone left and right moves it up
+        #     and down, tilting left and right moves it left and right": the
+        #     horizontal right, the vertical driven by the wrong wrist.
+        #   pitch and roll swapped -- "up and down correct now, but left right
+        #     is still tilt when it should be roll".
+        #
+        # So the pad's three words want (yaw, roll, pitch). Vertical aim comes
+        # from tipping the phone's top away and back, and horizontal from
+        # twisting it in its own plane -- which is the wrist a phone invites,
+        # and not the one a controller does. Turning the whole phone like a
+        # door, which is a controller's yaw, steers nothing.
+        #
+        # Part frame conversion and part preference, and the two cannot be
+        # separated from here: which wrist should steer is the guest's to say,
+        # and this is what was asked for. Indices into the wire's
+        # (pitch, yaw, roll).
+        GYRO_ORDER = (1, 2, 0)
         # A DS4's report timestamp counts in units of about 5.33 microseconds
         # and wraps at 16 bits. Games that integrate rotation into an aim use
         # it as their clock, so a report with a frozen timestamp is a report
