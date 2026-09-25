@@ -4926,24 +4926,41 @@ function stopGyro() {
  * cleared rather than left to prompt on every load for ever. */
 let gyroArmed = false;
 
+/* Which events iOS will accept a motion request from.
+ *
+ * Not pointerdown, which is what this used to listen for and which failed
+ * every time: "Requesting device motion access requires a user gesture to
+ * prompt", sixteen armings and sixteen refusals. A tap on the switch worked,
+ * because a checkbox produces a click -- so click is what to wait for.
+ *
+ * touchend as well, because a page that calls preventDefault on a touch (this
+ * one does, on the sticks and the on-screen buttons) suppresses the click
+ * that would otherwise follow it. Between them they cover a tap anywhere. */
+const GYRO_GESTURES = ["click", "touchend", "keydown"];
+
 function armGyroGesture() {
   if (gyroArmed) return;
   gyroArmed = true;
-  const once = async () => {
-    window.removeEventListener("pointerdown", once, true);
-    window.removeEventListener("keydown", once, true);
-    window.removeEventListener("touchend", once, true);
+  const off = () => {
+    for (const name of GYRO_GESTURES) {
+      window.removeEventListener(name, once, true);
+    }
     gyroArmed = false;
-    await setGyro(true);
-    paintGyro();
   };
-  // Capture, and three kinds of gesture, because the picture and the on-screen
-  // pad both swallow events on their way through. touchend as well as
-  // pointerdown: older Safari counts the end of a touch as the gesture and not
-  // the beginning of it.
-  window.addEventListener("pointerdown", once, true);
-  window.addEventListener("keydown", once, true);
-  window.addEventListener("touchend", once, true);
+  const once = async () => {
+    // Asked for from inside the gesture, which is the whole point -- so
+    // nothing may be awaited before it.
+    const became = await setGyro(true);
+    paintGyro();
+    // Only disarmed once it has actually worked. Letting go on the first
+    // attempt meant one refused gesture spent the arming and the next tap did
+    // nothing at all, so a page that could have recovered on the second tap
+    // never got the chance.
+    if (became) off();
+  };
+  for (const name of GYRO_GESTURES) {
+    window.addEventListener(name, once, true);
+  }
   report("motion is on for this device; it will come back on your first tap");
 }
 

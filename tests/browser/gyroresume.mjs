@@ -71,10 +71,15 @@ console.log("\na call refused because it was not a gesture waits for one");
 p = page({ throws: true });
 await p.resumeGyro();
 check(p.on() === false, "not on yet");
-check(p.state.gestures.includes("pointerdown")
+check(p.state.gestures.includes("click")
       && p.state.gestures.includes("touchend"),
       "the next tap anywhere is armed, so nobody hunts for the switch: "
       + p.state.gestures);
+// Not pointerdown. iOS refuses a motion request made from one -- measured,
+// sixteen armings and sixteen "requires a user gesture to prompt" -- while a
+// tap on the switch worked, because a checkbox produces a click.
+check(!p.state.gestures.includes("pointerdown"),
+      "and not pointerdown, which iOS does not accept: " + p.state.gestures);
 check(p.state.stored === "1",
       "and the preference is kept -- this was never a refusal");
 check(p.state.said.some((t) => /first tap/.test(t)),
@@ -121,6 +126,17 @@ check(watch.indexOf("dataset.wired = \"1\"")
       > watch.indexOf("resumeGyro()"),
       "and the early path comes first, so wiring is what happens once rather "
       + "than resuming");
+
+console.log("\na refused gesture does not spend the arming");
+// It did. The listeners came off before the request was made, so one refusal
+// left the page unarmed and the next tap did nothing at all -- which is a
+// page that could have recovered on the second tap never getting the chance.
+const arm = app.slice(app.indexOf("function armGyroGesture()"),
+                      app.indexOf("async function resumeGyro()"));
+check(/if \(became\) off\(\)/.test(arm),
+      "the listeners come off only when it actually worked");
+check(arm.indexOf("await setGyro(true)") < arm.indexOf("off()"),
+      "which is after the asking, not before it");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
