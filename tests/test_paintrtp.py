@@ -92,6 +92,44 @@ check("wholeStream = incoming" in track,
       "with the whole stream kept, so switching back to the browser drawing "
       "it does not hand the element a stream with no picture in it")
 
+print("\n-- and a restart gets a receiver that has not begun, not this one --")
+# The same rule, in the second place it applies, found the hard way.
+#
+# The initial attach was fixed above. Restarting was not: a decoder that had
+# been working and stopped was rebuilt in place, the transform re-attached to
+# the receiver it had been reading, and that attach *succeeds* and then
+# delivers nothing for ever. The host's log across one session: the beat armed
+# ten times and "0 handed over by the transform ... canvas none".
+#
+# From the chair: "it streams the video, then black, then streams video, then
+# black. it does that a few times until it reverts to webrtc" -- the first
+# attempt works because the track has just arrived, and every restart after it
+# is dead.
+restart = app[app.index("function restartTheDrawing"):]
+restart = restart[:restart.index("\nfunction ", 10)]
+check('paintMethod !== "rtp"' in restart,
+      "the restart distinguishes the mode: only rtp cannot restart in place")
+check("renewSoon(" in restart,
+      "and asks for a fresh media connection instead of a fresh decoder")
+check("true" in restart[restart.index("renewSoon("):],
+      "forcing it, because the connection is perfectly healthy -- it is only "
+      "this page's way in to the frames that is spent")
+check("startPainting()" in restart,
+      "while the data-channel modes still simply start again, which is right "
+      "for them: they read a channel, not a receiver")
+
+print("\n-- and nothing restarts in place behind its back --")
+gone = app[app.index("painter.whenGone("):]
+gone = gone[:gone.index("askHostForKeyframe();")]
+check("restartTheDrawing()" in gone,
+      "the recovery path goes through it")
+check("startPainting();" not in gone,
+      "and does not also start one in place, which is the bug itself")
+spelling = app[app.index("function tryAnotherSpelling"):]
+spelling = spelling[:spelling.index("\nasync function ")]
+check("restartTheDrawing()" in spelling,
+      "so does trying another spelling with no painter left")
+
 print("\n-- the reason is recorded where the condition is --")
 check("datachannel event arrives after a track event" in start
       or "after a track event" in start,

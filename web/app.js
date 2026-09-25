@@ -9541,8 +9541,44 @@ function paintNextSpelling() {
  * retry read "0 fed to the decoder" while megabytes arrived, so the second
  * and third attempts could not have worked whatever was wrong with the
  * first. Only the decoder is rebuilt. */
+/* Start the drawing again after it had been working and stopped.
+ *
+ * In the data-channel modes that is simply a new decoder reading the same
+ * channel, and starting one in place is right.
+ *
+ * In media-track mode it cannot be. An encoded transform may only be attached
+ * to a receiver that has not yet delivered a frame -- "later" is measured in
+ * frames, not seconds; see the comment on the attach in paint.js -- and by the
+ * time the drawing has stopped, this receiver has been delivering for as long
+ * as the picture worked. Re-attaching then *succeeds*, reports that it
+ * succeeded, and hands over nothing for ever. In the host's log that is
+ * "0 handed over by the transform ... canvas none"; from the chair it is a
+ * black picture.
+ *
+ * Which is the cycle that was reported -- "it streams the video, then black,
+ * then streams video, then black. it does that a few times until it reverts to
+ * webrtc". The first attempt works because the track has just arrived; every
+ * restart after it is dead on arrival, and after PAINT_RECOVERIES of them the
+ * page hands the picture back. The host saw ten starts in one session.
+ *
+ * So this mode asks for a fresh media connection instead. The new track
+ * arriving starts the drawing on a receiver that has not begun, which is the
+ * one path known to work -- because it is the path the first attempt takes. */
+function restartTheDrawing() {
+  stopPainting(null);
+  if (paintMethod !== "rtp") {
+    startPainting();
+    return;
+  }
+  report("asking for a fresh video connection: these frames can only be taken "
+         + "off a receiver that has not started delivering yet");
+  // force, because the connection is up and carrying the picture perfectly
+  // well -- it is only this page's way in to the frames that is spent.
+  renewSoon(0, true);
+}
+
 function tryAnotherSpelling(codec) {
-  if (!painter) { startPainting(); return; }
+  if (!painter) { restartTheDrawing(); return; }
   if (!painter.useCodec(codec)) {
     stopPainting("no decoder would start");
     return;
@@ -9722,8 +9758,7 @@ async function startPainting() {
       paintRecoveries += 1;
       report("the drawing stopped after working; starting it again ("
              + paintRecoveries + " of " + PAINT_RECOVERIES + ")");
-      stopPainting(null);
-      startPainting();
+      restartTheDrawing();
       return;
     }
     const more = paintNextSpelling();
