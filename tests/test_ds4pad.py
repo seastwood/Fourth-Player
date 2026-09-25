@@ -436,11 +436,16 @@ ui, pad = a_pad("ds4")
 # 10 deg/s is 160 on the wire, and a DS4's gyroscope reads about sixteen
 # counts per degree per second, so that is 160 there too -- a coincidence,
 # which is why the scale is a named 1.0 rather than an absent multiply.
+#
+# Pitch, which is the wire's first rotation and the pad's third: see
+# GYRO_ORDER. Asserted where it lands rather than where it started, so this
+# says something about the scaling and nothing about the order -- the order
+# has its own check below.
 ui.motion([160, 0, 0, 0, 0, 1000])
 ui.syn()
 check(pad.extended is not None, "an extended report is what carries it")
 gyro, accel = pad.extended
-check(gyro[0] == 160, "10 deg/s stays 160, got %r" % (gyro[0],))
+check(gyro[2] == 160, "10 deg/s stays 160, got %r" % (gyro[2],))
 # One gravity is 1000 on the wire and about 8192 on a DS4.
 check(accel[2] == 8192, "1 g becomes 8192, got %r" % (accel[2],))
 
@@ -459,11 +464,24 @@ ui, pad = a_pad("ds4")
 ui.motion([-877, 236, -226, 0, 0, 1000])
 ui.syn()
 check(pad.raw is not None, "a report went out")
-check(pad.raw[12:14] == bytes([0x93, 0xfc]),
-      "gyro X sits at byte 12, where a DualShock keeps it: %s"
+# The offset, which is the point: a DualShock keeps its first gyro word at
+# byte 12. ctypes' aligned struct puts it at 14, and writing there fed the
+# real gyro X a battery level of zero for ever.
+check(pad.raw[12:14] == bytes([0x1e, 0xff]),
+      "the first gyro word is at byte 12, not 14: %s"
       % pad.raw[12:14].hex(" "))
-check(pad.extended[0] == [-877, 236, -226],
-      "so all three rotations arrive, in order: %r" % (pad.extended[0],))
+check(pad.raw[14:16] != bytes([0x1e, 0xff]),
+      "and is not also sitting where the aligned struct would have put it")
+# Pitch and roll trade places on the way out, because a controller is held
+# face up and a phone in portrait is held face toward you -- ninety degrees
+# apart, so the phone's screen-normal is the controller's vertical. Sent
+# straight through, the vertical aim was driven by the wrong wrist.
+check(pad.extended[0] == [-226, 236, -877],
+      "pitch and roll are swapped and yaw is not: wire (pitch -877, yaw 236, "
+      "roll -226) leaves as (%r)" % (pad.extended[0],))
+check(virtual.UInput.GYRO_ORDER == (2, 1, 0),
+      "with the order named rather than buried in the packing, since it was "
+      "found by watching a game and may need finding again")
 check(pad.extended[1] == [0, 0, 8192],
       "and acceleration, scaled into the pad's units: %r" % (pad.extended[1],))
 check(pad.battery == 0xFF,

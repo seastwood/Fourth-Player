@@ -384,6 +384,29 @@ except ImportError:
         # about which way is down.
         GYRO_SCALE = 1.0
         ACCEL_SCALE = 8.192
+
+        # Which of the DualShock's three gyro words each of the wire's
+        # rotations belongs in.
+        #
+        # The wire carries them in the *screen's* frame: pitch about the
+        # screen's horizontal axis, yaw about its vertical one, roll about its
+        # normal. A DualShock's are in its own body's frame -- and the two are
+        # not held the same way. A controller lies face up in the hands; a
+        # phone in portrait is held face toward you. That is ninety degrees
+        # apart about the horizontal axis, so the phone's screen-normal
+        # corresponds to the controller's vertical and its screen-vertical to
+        # the controller's front-to-back.
+        #
+        # Which means pitch and roll trade places, and yaw does not move. Sent
+        # straight through, the effect from the sofa was precise and
+        # confusing: "rolling the phone left and right moves it up and down,
+        # tilting left and right moves it left and right" -- the horizontal
+        # right, the vertical driven by the wrong wrist.
+        #
+        # Determined by watching a game rather than from a datasheet, which is
+        # the only honest way: the posture a pad is held in is not written
+        # down anywhere. Indices into the wire's (pitch, yaw, roll).
+        GYRO_ORDER = (2, 1, 0)
         # A DS4's report timestamp counts in units of about 5.33 microseconds
         # and wraps at 16 bits. Games that integrate rotation into an aim use
         # it as their clock, so a report with a frozen timestamp is a report
@@ -464,7 +487,15 @@ except ImportError:
                 # or an overlay that shows it has no reason to be told this
                 # pad is dying.
                 0xFF,
-                gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2])
+                gyro[self.GYRO_ORDER[0]], gyro[self.GYRO_ORDER[1]],
+                gyro[self.GYRO_ORDER[2]],
+                # The accelerometer is left in the order it arrived. Nothing
+                # visible reads it yet -- it says which way is down, which
+                # matters to a game that draws a tilting object and to nothing
+                # else here -- so permuting it to match would be a guess with
+                # no way to check it. Worth revisiting the day something uses
+                # it.
+                accel[0], accel[1], accel[2])
             # Into the union's byte view, which is the same memory as the
             # struct and the only way to put these where the wire wants them.
             ctypes.memmove(report.ReportBuffer, packed, len(packed))
