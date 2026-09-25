@@ -22,8 +22,14 @@ const check = (c, m) => { console.log((c ? "  ok   " : "  FAIL ") + m); if (!c) 
 // The capture-phase listener sends the notch to the host; the page's own wheel
 // listener zooms the picture. preventDefault does not stop the second from
 // running, so a single scroll did both at once.
-const guard = app.slice(app.indexOf('video.addEventListener("wheel", (event) => {\n    if (!deskHeld'),
-                        app.indexOf("contextmenu"));
+// From the listener to the next "contextmenu" AFTER it, not the first one in
+// the file. It used to be the first, and a contextmenu listener added
+// elsewhere -- the corner button's right-click, further up -- inverted the
+// slice and emptied it, so three checks about the wheel failed with nothing
+// about the wheel having changed.
+const wheelAt = app.indexOf(
+  'video.addEventListener("wheel", (event) => {\n    if (!deskHeld');
+const guard = app.slice(wheelAt, app.indexOf("contextmenu", wheelAt));
 check(/if \(event\.ctrlKey\) return;/.test(guard),
       "a trackpad pinch is let through to the zoom, not sent to the host");
 check(/event\.stopPropagation\(\);/.test(guard),

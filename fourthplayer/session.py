@@ -1902,9 +1902,16 @@ class LiveSession:
             # which is why has_media stopped trusting it -- but it is ample
             # evidence that somebody has not closed a tab in the last eight
             # seconds. So it buys the ordinary deadline, not an endless one.
+            # A live peer is the evidence of presence; the socket only
+            # extends it. Written the other way round first -- socket open
+            # meant the long hold whatever the peer said -- and that held a
+            # seat for half an hour for a guest whose ICE had gone, which is
+            # the network-switch case and the one thing this sweep exists to
+            # clear. A page that is merely minimised keeps both: its
+            # connection is established and only its timers are frozen.
             alive = guest.peer is not None and getattr(
                 guest.peer, "ice_ok", False)
-            if guest.socket is not None:
+            if alive and guest.socket is not None:
                 limit = HELD_SECONDS
             elif alive:
                 limit = seconds
