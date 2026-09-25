@@ -484,6 +484,40 @@ function tidyParameterSets(bytes) {
   return { data: joinAnnexB(out), dropped, disagreed };
 }
 
+/* Whether a frame contains a coded picture at all.
+ *
+ * Measured, and it is what a decoder dies on: frames arrive carrying nothing
+ * but `SPS PPS` -- forty bytes, no coded slice -- delivered as delta frames.
+ * The host sends its parameter sets as their own access unit and WebRTC's
+ * depacketizer hands that over like any other frame, so a chunk with no
+ * picture in it went to the decoder, which answered EncodingError. A picture
+ * that had been running for several seconds went black, over and over.
+ *
+ * NAL 1 is a non-IDR slice and NAL 5 an IDR slice; 2 to 4 are the partitions
+ * of a slice, which only appear in profiles this never sees but count all the
+ * same. Everything else -- parameter sets, delimiters, SEI, filler -- carries
+ * no picture. */
+function hasPicture(bytes) {
+  let units;
+  try {
+    units = splitAnnexB(
+        bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+  } catch (_) {
+    return true;            // unreadable: hand it over rather than drop it
+  }
+  // Nothing parsed is not the same as nothing in it. splitAnnexB answers with
+  // an empty list for bytes it finds no start code in, and that is the one
+  // case where guessing wrong is expensive in only one direction: a frame
+  // wrongly dropped is a black screen until the next keyframe, a frame wrongly
+  // kept is a single bad decode the decoder is built to survive.
+  if (!units.length) return true;
+  for (const unit of units) {
+    const kind = unit[0] & 0x1f;
+    if (kind >= 1 && kind <= 5) return true;
+  }
+  return false;
+}
+
 function avcDescription(bytes) {
   const units = splitAnnexB(new Uint8Array(bytes));
   const sps = [], pps = [];
@@ -949,7 +983,7 @@ function makePainter(canvas, say) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { makePacer, codecCandidates, pickCodec,
                      toAnnexB, looksAnnexB, splitAnnexB, setSmoothing,
-                     joinAnnexB, tidyParameterSets,
+                     joinAnnexB, tidyParameterSets, hasPicture,
                      avcDescription, toLengthPrefixed,
                      makePainter, PACE };
 }

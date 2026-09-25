@@ -101,5 +101,32 @@ const back = splitAnnexB(new Uint8Array(got.data));
 assert.deepEqual(Array.from(back[back.length - 1]), IDR);
 check(true, "the IDR's bytes come back exactly as they went in");
 
+/* The other half, and the one that was actually killing it.
+ *
+ *   died on delta 40B [SPS PPS]
+ *
+ * Forty bytes: the parameter sets as an access unit of their own, with no
+ * coded slice, delivered as a delta frame. Fed to a decoder that is a chunk
+ * with no picture in it, and the answer is EncodingError -- which took out a
+ * decoder that had been running cleanly for four hundred frames. */
+console.log("\nwhether a frame carries a picture at all");
+const { hasPicture } = paint;
+check(hasPicture(frame([AUD, SPS, PPS, IDR])) === true, "an IDR is a picture");
+check(hasPicture(frame([AUD, SLICE])) === true, "a plain slice is a picture");
+check(hasPicture(frame([SPS, PPS])) === false,
+      "parameter sets on their own are not -- this is the 40-byte frame");
+check(hasPicture(frame([AUD, SPS, PPS])) === false,
+      "nor with a delimiter in front of them");
+check(hasPicture(frame([AUD, SEI])) === false, "nor is an SEI on its own");
+check(hasPicture(frame([AUD])) === false, "nor a delimiter alone");
+// Data-partitioned slices are NAL 2 to 4. They do not appear in the profiles
+// this host sends, and counting them costs nothing next to dropping a picture.
+check(hasPicture(frame([[0x42, 0x11]])) === true,
+      "a slice data partition counts as a picture");
+check(hasPicture(new Uint8Array([1, 2, 3])) === true,
+      "and something unreadable is handed over rather than dropped: a frame "
+      + "wrongly dropped is a black screen, a frame wrongly kept is one bad "
+      + "decode");
+
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

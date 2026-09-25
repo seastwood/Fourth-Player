@@ -49,6 +49,7 @@ const state = {
   keysSeen: 0,
   saidTidy: false,
   saidDisagree: false,
+  setsOnly: 0,
   started: false,
   shape: "",
   waiting: [],
@@ -604,6 +605,9 @@ function whyItStopped(err) {
   }
   if (state.shape) bits.push("last shape " + state.shape);
   bits.push(state.keysSeen + " keyframe(s) seen");
+  if (state.setsOnly) {
+    bits.push(state.setsOnly + " parameter-set-only frame(s) held back");
+  }
   if (state.lastFed) bits.push("died on " + state.lastFed);
   // The question the three-byte comparison above cannot answer.
   if (state.lastKey) {
@@ -741,6 +745,11 @@ function rebuildFor(annexb) {
   }
   state.codec = codec;
   state.builtFor = want;
+  // A decoder built a moment ago has nothing to decode against, so it waits
+  // for a keyframe rather than being fed deltas that refer to pictures the
+  // previous decoder had.
+  state.started = false;
+  try { self.postMessage({ ask: "key" }); } catch (_) {}
   say("the stream's parameter sets changed, so the decoder was built again "
       + "for them (" + codec + ")");
   return true;
@@ -796,6 +805,33 @@ function take(type, timestamp, data) {
         close();
         return;
       }
+    }
+    // Parameter sets on their own are not a frame.
+    //
+    // This host sends them as their own access unit, and WebRTC's depacketizer
+    // hands that over like any other frame: forty bytes of `SPS PPS`, typed as
+    // a delta. Fed to a decoder it is a chunk with no picture in it, and the
+    // answer is EncodingError -- which took out a decoder that had been
+    // running cleanly for several hundred frames, again and again.
+    //
+    // They are not thrown away. If they differ from the ones this decoder was
+    // built for -- and on this host they do differ, the two copies inside a
+    // keyframe disagree -- that is exactly when a decoder has to be rebuilt,
+    // and this is the earliest notice of it.
+    if (!hasPicture(bytes)) {
+      state.setsOnly += 1;
+      if (state.setsOnly === 1) {
+        say("this host sends parameter sets as frames of their own; they are "
+            + "not pictures and are not handed to the decoder");
+      }
+      if (!rebuildFor(bytes) && !nextRung()) {
+        self.postMessage({
+          failed: "the stream's parameter sets changed and no decoder would "
+                  + "take the new ones",
+        });
+        close();
+      }
+      return;
     }
     if (state.feedAs === "avcc") bytes = toLengthPrefixed(bytes);
   } catch (_) { /* hand it over as it came */ }
