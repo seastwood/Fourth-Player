@@ -2106,8 +2106,11 @@ class Stage:
                      "out every %.0fs as well as on request",
                      peer_id, how or "picture channel", PAINT_KEYFRAME_SECONDS)
             # One now. A decoder that has just been built has nothing at all,
-            # and waiting a beat for it is the black screen this is for.
-            self.worker.submit(self.force_keyframe)
+            # and waiting a beat for it is the black screen this is for. Even
+            # here, not if one has only just gone out: a guest whose page is
+            # restarting the drawing has usually just asked for one.
+            if self._paint_beat_is_needed():
+                self.worker.submit(self.force_keyframe)
             self._arm_paint_keyframes()
         elif not on and peer_id in drawing:
             drawing.discard(peer_id)
@@ -2144,8 +2147,9 @@ class Stage:
             return
         # Straight to force_keyframe, not through request_keyframe: this is
         # not a guest asking and must not spend from the bucket that guests
-        # ask out of.
-        self.worker.submit(self.force_keyframe)
+        # ask out of. Skipped entirely when one has just gone out anyway.
+        if self._paint_beat_is_needed():
+            self.worker.submit(self.force_keyframe)
         self._arm_paint_keyframes()
 
     def idle_if_empty(self):
@@ -2344,7 +2348,22 @@ class Stage:
         self._keyframe_tokens -= 1.0
         self.worker.submit(self.force_keyframe)
 
+    def _paint_beat_is_needed(self, now=None):
+        """Whether the beat has anything to add right now.
+
+        A keyframe that went out a moment ago on request serves the beat's
+        purpose exactly as well as one the beat sent, and at 2560x1600 an IDR
+        is a large burst. On the link this was found on the browser was already
+        asking five times a second, so the beat was adding a burst to a
+        connection that was failing *from* congestion -- making the thing it
+        exists to repair more likely.
+        """
+        now = time.monotonic() if now is None else now
+        last = getattr(self, "_keyframe_sent", 0.0)
+        return (now - last) >= PAINT_KEYFRAME_SECONDS
+
     def force_keyframe(self):
+        self._keyframe_sent = time.monotonic()
         # The encoder is taken off this Stage by stop(), and a keyframe may
         # already be queued on the worker when that happens -- a guest asking
         # for one at the moment a recapture begins is not unusual.

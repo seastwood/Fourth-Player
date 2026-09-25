@@ -173,6 +173,25 @@ try:
     check(stage._keyframe_tokens == float(video.KEYFRAME_BURST),
           "none of which is charged to the guests' bucket, got %r"
           % stage._keyframe_tokens)
+    print("\n   -- and it does not double up on one just sent --")
+    # At 2560x1600 an IDR is a large burst, and on the link this was found on
+    # the browser was already asking for keyframes five times a second. A beat
+    # that adds one anyway is making a connection that is failing *from*
+    # congestion worse, to repair congestion damage.
+    stage._keyframe_sent = time.monotonic()
+    check(stage._paint_beat_is_needed() is False,
+          "a keyframe sent a moment ago leaves the beat nothing to add")
+    before = len(stage.worker.jobs)
+    stage._paint_keyframe()
+    check(len(stage.worker.jobs) == before,
+          "so the beat sends none, got %d more"
+          % (len(stage.worker.jobs) - before))
+    check(stage._paint_timer is not None,
+          "but it stays armed, so it resumes when the asking stops")
+    stage._keyframe_sent = time.monotonic() - video.PAINT_KEYFRAME_SECONDS - 1
+    check(stage._paint_beat_is_needed() is True,
+          "and once nothing has gone out for a beat, it is needed again")
+
     sofar = len(stage.worker.jobs)
     stage.drawing_own("slot0", False)
     check(stage._paint_timer is None, "the beat stops when painting stops")
