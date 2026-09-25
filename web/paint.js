@@ -441,9 +441,11 @@ function tidyParameterSets(bytes) {
   try {
     units = splitAnnexB(view);
   } catch (_) {
-    return { data: bytes, dropped: 0, disagreed: false };
+    return { data: bytes, dropped: 0, disagreed: false, copies: null };
   }
-  let sps = null, pps = null, dropped = 0, disagreed = false;
+  let sps = null, pps = null, dropped = 0, disagreed = false, copies = null;
+  const hex = (u) => Array.from(u)
+    .map((b) => (b < 16 ? "0" : "") + b.toString(16)).join("");
   const same = (a, b) => {
     if (!a || !b || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
@@ -456,14 +458,23 @@ function tidyParameterSets(bytes) {
       const held = kind === 7 ? sps : pps;
       if (held) {
         dropped += 1;
-        if (!same(held, unit)) disagreed = true;
+        if (!same(held, unit)) {
+          disagreed = true;
+          // Both copies, kept for the caller to report once. Which of them is
+          // authoritative decides whether the decoder runs on the right
+          // parameters or stale ones, and that is not guessable from here --
+          // it is the difference between a clean picture and artefacts that
+          // clear at every keyframe and come straight back.
+          if (!copies) copies = [];
+          copies.push({ kind, first: hex(held), then: hex(unit) });
+        }
       }
       if (kind === 7) sps = unit; else pps = unit;
       continue;
     }
     rest.push(unit);
   }
-  if (!dropped) return { data: bytes, dropped: 0, disagreed: false };
+  if (!dropped) return { data: bytes, dropped: 0, disagreed: false, copies: null };
   // Put the surviving pair back immediately before the first coded slice,
   // which is where a decoder expects to meet them.
   const out = [];
@@ -481,7 +492,7 @@ function tidyParameterSets(bytes) {
     if (sps) out.push(sps);
     if (pps) out.push(pps);
   }
-  return { data: joinAnnexB(out), dropped, disagreed };
+  return { data: joinAnnexB(out), dropped, disagreed, copies };
 }
 
 /* Whether a frame contains a coded picture at all.

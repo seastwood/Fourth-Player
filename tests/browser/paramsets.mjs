@@ -109,6 +109,21 @@ check(true, "the IDR's bytes come back exactly as they went in");
  * coded slice, delivered as a delta frame. Fed to a decoder that is a chunk
  * with no picture in it, and the answer is EncodingError -- which took out a
  * decoder that had been running cleanly for four hundred frames. */
+console.log("\nboth differing copies are reported, in full");
+// Which copy is authoritative is not decidable from inside the page, and the
+// wrong choice is artefacts that clear at every keyframe and come back. So the
+// bytes of both are handed out rather than only the fact that they differed.
+got = tidyParameterSets(frame([AUD, SPS, PPS, SPS_OTHER, PPS, IDR]));
+check(Array.isArray(got.copies) && got.copies.length === 1,
+      "one disagreeing pair is reported, got "
+      + (got.copies ? got.copies.length : got.copies));
+check(got.copies[0].kind === 7, "named by NAL type, got " + got.copies[0].kind);
+check(got.copies[0].first === "6742c033aabb"
+      && got.copies[0].then === "6742c033aacc",
+      "with both copies as hex, got " + JSON.stringify(got.copies[0]));
+check(tidyParameterSets(frame([AUD, SPS, PPS, SPS, PPS, IDR])).copies === null,
+      "and identical copies report nothing, so the line means something");
+
 console.log("\nwhether a frame carries a picture at all");
 const { hasPicture } = paint;
 check(hasPicture(frame([AUD, SPS, PPS, IDR])) === true, "an IDR is a picture");

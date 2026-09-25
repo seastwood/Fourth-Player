@@ -790,8 +790,16 @@ function take(type, timestamp, data) {
         }
         if (tidied.disagreed && !state.saidDisagree) {
           state.saidDisagree = true;
-          say("and the two copies of the parameter sets in one keyframe are "
-              + "not the same, which is worth knowing about");
+          // Both copies in full. They are tens of bytes, and which one is
+          // authoritative decides whether the decoder runs on the right
+          // parameters or stale ones -- which is a clean picture against
+          // artefacts that clear at each keyframe and come straight back. It
+          // is not guessable from inside the page; the bytes say it.
+          for (const one of (tidied.copies || [])) {
+            say("the two copies of NAL " + one.kind + " in one keyframe differ:"
+                + " first " + one.first + " then " + one.then
+                + " (the later one is being kept)");
+          }
         }
       }
       state.lastKey = bytes;
