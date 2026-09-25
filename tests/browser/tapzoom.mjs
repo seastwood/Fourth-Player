@@ -153,6 +153,38 @@ const slop = Number((/const PAN_SLOP = (\d+);/.exec(src) || [])[1]);
 check(slop > 0 && slop <= 20,
       "and it forgives a thumb, not a nudge: " + slop + " pixels");
 
+console.log("\nand a tap the system took away still counts");
+/* iOS hands a pointer to its own gesture recogniser and sends pointercancel
+ * instead of pointerup -- far more readily for a quick tap than a slow
+ * deliberate one. That is the whole of "it works if I double tap slowly": the
+ * cancelled first tap was never recorded, so the second had nothing to pair
+ * with. */
+const cancel = src.slice(src.indexOf('video.addEventListener("pointercancel"'));
+check(cancel.length > 0, "a cancelled pointer reaches the gesture at all");
+check(/lastPictureTap = \{ x: event\.clientX, y: event\.clientY,/
+        .test(cancel.slice(0, 900)),
+      "and is remembered, so the next honest tap can pair with it");
+check(!/zoomAbout/.test(cancel.slice(0, 900)),
+      "but does not zoom by itself -- a cancel may be the start of a system "
+      + "gesture, and zooming inside one is the page fighting the phone");
+check(/if \(others > 0\) return;/.test(cancel.slice(0, 900))
+      && /if \(dragged\)/.test(cancel.slice(0, 900))
+      && /if \(cursorDriving\(\)\)/.test(cancel.slice(0, 900)),
+      "under the same conditions as a real tap: one finger, not a drag, not "
+      + "driving the machine");
+check(src.indexOf('video.addEventListener("pointercancel", (event) => {')
+      < src.indexOf('video.addEventListener("pointercancel", letGoOfPicture)'),
+      "and before the handler that forgets the pointer, or `held` would "
+      + "already have lost the finger that is leaving");
+
+console.log("\nand a fast double tap is not rejected as a duplicate");
+check(F.MIN <= 20,
+      "the minimum gap is low: " + F.MIN + "ms -- the pointer-kind check "
+      + "keeps out iOS's compatibility mouse event now, so this only has to "
+      + "reject the same pointer reported twice");
+check(tap(100, 100, 1000 + 60, first) === true, "60ms apart is a double tap");
+check(tap(100, 100, 1000 + 25, first) === true, "and so is 25ms");
+
 console.log("\nthe thresholds stayed generous");
 check(F.MS >= 600, "asked for twice, so there is real time: " + F.MS + "ms");
 check(F.SLOP >= 120, "and real room: " + F.SLOP + " pixels");

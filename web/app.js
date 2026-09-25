@@ -3059,7 +3059,14 @@ function hudButtonShowing() {
  * pixels is under half a fingertip on a phone -- far less than the distance
  * between two things anybody would pick out of a television. */
 const TAP_ZOOM_MS = 600;
-const TAP_ZOOM_MIN_MS = 40;
+/* Low, because it is no longer the thing keeping duplicates out.
+ *
+ * It was 40ms, guarding against iOS's compatibility mouse event arriving as
+ * a second tap. The pointer-kind check above does that properly now -- a
+ * mouse event cannot pair with a touch whatever the gap -- so this only has
+ * to reject the same pointer reported twice, and it was rejecting genuinely
+ * fast taps along with it. */
+const TAP_ZOOM_MIN_MS = 16;
 const TAP_ZOOM_SLOP = 130;
 // Where a double tap zooms to. Far enough in to read a corner of a television
 // at arm's length, short of ZOOM_MAX so there is somewhere left to pinch to.
@@ -3138,6 +3145,33 @@ video.addEventListener("pointerup", (event) => {
   if (lastPictureTap && (lastPictureTap.kind || "") !== kind
       && at - lastPictureTap.at <= TAP_ZOOM_MS) return;
   lastPictureTap = { x, y, at, kind };
+});
+
+/* A touch the system took away is still a tap that happened.
+ *
+ * iOS hands a pointer to its own gesture recogniser and sends pointercancel
+ * instead of pointerup -- and it does that far more readily to a quick tap
+ * than to a slow deliberate one, which is exactly the difference between a
+ * double tap that zoomed and one that did nothing. The cancelled tap was
+ * never recorded, so the tap after it had nothing to pair with.
+ *
+ * Recorded, not acted on. A cancel may be the start of a system gesture, and
+ * zooming in the middle of one would be the page fighting the phone; but the
+ * next honest tap can pair with it, which is all this needs to do. The same
+ * conditions as a real tap: one finger, not a drag, not driving the machine.
+ *
+ * Registered before letGoOfPicture below, like the pointerup handler, so
+ * `held` still holds the finger that is leaving. */
+video.addEventListener("pointercancel", (event) => {
+  const others = held.size - (held.has(event.pointerId) ? 1 : 0);
+  if (others > 0) return;
+  if (dragged) { lastPictureTap = null; return; }
+  if (cursorDriving()) { lastPictureTap = null; return; }
+  const kind = event.pointerType || "";
+  if (lastPictureTap && (lastPictureTap.kind || "") !== kind
+      && Date.now() - lastPictureTap.at <= TAP_ZOOM_MS) return;
+  lastPictureTap = { x: event.clientX, y: event.clientY,
+                     at: Date.now(), kind };
 });
 
 /* Set when a double tap zoomed, so the click that follows it does not also
@@ -4017,7 +4051,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25e";
+const CLIENT_BUILD = "2026-09-25f";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
