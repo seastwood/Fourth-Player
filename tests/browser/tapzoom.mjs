@@ -152,6 +152,36 @@ const slop = Number((/const PAN_SLOP = (\d+);/.exec(src) || [])[1]);
 check(slop > 0 && slop <= 20,
       "and it forgives a thumb, not a nudge: " + slop + " pixels");
 
+console.log("\nand a finger the browser never finished is forgotten");
+/* `held` is emptied by pointerup and pointercancel, and on iOS a touch
+ * sometimes produces neither. One phantom wedges every gesture after it, in
+ * two ways at once: it counts as another finger still down, and it stops
+ * held.size ever being 1 at pointerdown, which is the only place `dragged` is
+ * cleared. Both refusals showed up in the host's log within minutes of asking
+ * the gesture to say why it had refused a tap:
+ *
+ *     a tap on the picture was not counted: 1 other finger(s) still down
+ *     a tap on the picture was not counted: it moved, so it was a drag
+ *
+ * And it explains the asymmetry that had gone unexplained: while the picture
+ * is zoomed the pan branch runs on every move and keeps the state fresh, so a
+ * phantom heals itself and zooming OUT is flawless; at 1x nothing runs, the
+ * phantom stays, and zooming IN barely works. */
+check(/const FINGER_STALE_MS = (\d+);/.test(src),
+      "there is an age at which a finger is assumed gone");
+check(/function forgetStaleFingers\(now\)/.test(src),
+      "and one place that forgets them");
+check(/held\.set\(event\.pointerId, \{ x: event\.clientX, y: event\.clientY,\s*\n\s*at: event\.timeStamp \}\);/
+        .test(src),
+      "every finger is stamped when it lands");
+check(/const now = \{ x: event\.clientX, y: event\.clientY, at: event\.timeStamp \};/
+        .test(src),
+      "and re-stamped as it moves, so a finger really resting is never "
+      + "mistaken for a phantom");
+check((src.match(/forgetStaleFingers\(event\.timeStamp\)/g) || []).length >= 2,
+      "pruned at pointerdown and again in the tap itself, which is the one "
+      + "that was being refused");
+
 console.log("\nand it says which guard refused a tap");
 /* Because every cheap explanation for "zooming out is reliable and zooming in
  * is finicky" has been checked and ruled out: the thresholds, iOS's

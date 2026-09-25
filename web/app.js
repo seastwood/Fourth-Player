@@ -3138,6 +3138,10 @@ function pictureTapEnded(event) {
   // held.size alone therefore answered "one" for every single tap and
   // returned, which is why nothing zoomed in. Counting the others is right
   // whichever order the listeners end up in.
+  // A finger the browser never finished is not a finger. Pruned here as well
+  // as at pointerdown, because this runs first for the very tap that would
+  // otherwise be refused on account of a phantom.
+  forgetStaleFingers(event.timeStamp);
   const others = held.size - (held.has(event.pointerId) ? 1 : 0);
   if (others > 0) {                     // still a finger down somewhere
     tapRefused(others + " other finger(s) still down");
@@ -3500,6 +3504,33 @@ function zoomAbout(next, clientX, clientY) {
 const held = new Map();
 let pinchGap = 0, pinchAt = null;
 
+/* How long a finger may go unheard of before it is treated as gone.
+ *
+ * `held` is emptied by pointerup and pointercancel, and on iOS a touch
+ * sometimes produces neither -- the pointer is simply never mentioned again.
+ * One of those is enough to wedge every gesture that follows it, in two ways
+ * at once: it counts as another finger still down, and it stops `held.size`
+ * ever being 1 at pointerdown, which is the only place `dragged` is cleared.
+ * So afterwards every single tap was refused, half of them as "another finger
+ * is down" and half as "it moved, so it was a drag".
+ *
+ * That is exactly the asymmetry that was reported for months and that I could
+ * not explain: zooming *out* works flawlessly and zooming *in* barely works.
+ * While the picture is zoomed the pan branch runs on every move and keeps the
+ * state fresh, so a phantom heals itself; at 1x nothing runs and it stays.
+ * Both halves showed up in the log the moment the gesture was asked to say
+ * why it had refused a tap.
+ *
+ * Generous, because a finger really resting on the glass refreshes this on
+ * every move and a motionless one is not driving anything anyway. */
+const FINGER_STALE_MS = 4000;
+
+function forgetStaleFingers(now) {
+  for (const [id, was] of held) {
+    if (now - (was.at || 0) > FINGER_STALE_MS) held.delete(id);
+  }
+}
+
 /* Telling a pinch from a two-finger drag.
  *
  * Every two-finger move used to zoom by the ratio of the finger gap, and pan
@@ -3602,7 +3633,11 @@ video.addEventListener("pointerdown", (event) => {
     // Preventing the default here is what stops the focus moving at all.
     if (deskKeyboardUp()) event.preventDefault();
   }
-  held.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  // Before this one is counted, so a finger the browser never finished does
+  // not make a first touch look like a second.
+  forgetStaleFingers(event.timeStamp);
+  held.set(event.pointerId, { x: event.clientX, y: event.clientY,
+                              at: event.timeStamp });
   if (held.size === 2) {
     const [a, b] = Array.from(held.values());
     pinchGap = gapBetween(a, b);
@@ -3627,7 +3662,7 @@ video.addEventListener("pointerdown", (event) => {
 video.addEventListener("pointermove", (event) => {
   const was = held.get(event.pointerId);
   if (!was) return;
-  const now = { x: event.clientX, y: event.clientY };
+  const now = { x: event.clientX, y: event.clientY, at: event.timeStamp };
   held.set(event.pointerId, now);
   if (held.size >= 2) {
     const [a, b] = Array.from(held.values());
@@ -4092,7 +4127,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25h";
+const CLIENT_BUILD = "2026-09-25i";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
