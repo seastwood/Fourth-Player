@@ -1742,6 +1742,22 @@ function savedStrength() {
 
 let hapticStrength = savedStrength();
 
+/* A press that did two things at once, felt as two.
+ *
+ * Pressing a stick in happens on the same touch that starts steering, so both
+ * want saying and they arrive in the same instant. Calling buzz() twice there
+ * does not work: on an iPhone there is no vibrate at all and the feeling is
+ * made by tapping a switch, which needs a gap between taps to register -- so
+ * the second was being swallowed and the click felt like any other touch.
+ *
+ * Spaced by the same gap the strength setting uses for its own repeats, so a
+ * stick click feels like a firmer press rather than like a different device.
+ * Silent when haptics are off, because buzz() is. */
+function buzzAgain() {
+  if (!hapticsOn) return;
+  setTimeout(buzz, SWITCH_GAP_MS);
+}
+
 function buzz(ms) {
   if (!hapticsOn) return;
   if (ms === undefined) ms = BUZZ_MS[hapticStrength] || BUZZ_MS[DEFAULT_STRENGTH];
@@ -2105,7 +2121,9 @@ function wireSticks() {
         stickClicked[event.pointerId] = bit;
         setBit(bit, true);
         well.classList.add("clicked");
-        buzz();                     // said twice, because it did two things
+        // The touch already buzzed. This is the second half of "it did two
+        // things", and it has to be spaced or it is not felt at all.
+        buzzAgain();
       }
       moveStick(well, event);
     });

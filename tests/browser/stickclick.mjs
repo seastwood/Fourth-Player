@@ -122,5 +122,25 @@ check(release.includes("stickClicked"),
       "letting go of everything lets go of this too: a held L3 outliving that "
       + "is a character stuck crouching with nothing to explain it");
 
+console.log("\nand it is felt, like every other button");
+// A stick click happens on the same touch that starts steering, so both want
+// saying and they arrive in the same instant. Calling buzz() twice there does
+// not work: an iPhone has no vibrate and the feeling is made by tapping a
+// switch, which needs a gap between taps -- so the second was swallowed and
+// pressing the stick in felt like any other touch.
+const again = src.slice(src.indexOf("function buzzAgain()"),
+                        src.indexOf("function buzz(ms)"));
+check(/if \(!hapticsOn\) return;/.test(again),
+      "it honours the haptics switch, like buzz does");
+check(/setTimeout\(buzz, SWITCH_GAP_MS\)/.test(again),
+      "and is spaced by the same gap the strength setting uses for its own "
+      + "repeats, so a click feels like a firmer press rather than a "
+      + "different device");
+const press = src.slice(src.indexOf("const bit = STICK_CLICK_BIT[id]"),
+                        src.indexOf("moveStick(well, event);\n    });"));
+check(/buzzAgain\(\);/.test(press), "the click asks for it");
+check(press.indexOf("buzzAgain()") > press.indexOf("setBit(bit, true)"),
+      "only once it really clicked, so an ordinary touch still buzzes once");
+
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);
