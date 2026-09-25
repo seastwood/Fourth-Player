@@ -4762,6 +4762,40 @@ function gyroNeedsAsking() {
     && typeof DeviceMotionEvent.requestPermission === "function";
 }
 
+/* What the sensor is actually reporting, per axis, so a fault can be named
+ * rather than reasoned about.
+ *
+ * "Gyro works left and right but not up and down" cannot be answered from
+ * this end by reading the code: nothing in the conversion treats the two
+ * differently, so the asymmetry is either in which component the device is
+ * reporting or in which one the game reads. The only way to tell those apart
+ * is to see the six numbers while somebody tilts.
+ *
+ * The peak of each since the last report, not the latest: a sample taken on a
+ * timer catches a still hand nine times out of ten. */
+const MOTION_REPORT_MS = 4000;
+let motionPeak = null;
+let motionSaidAt = 0;
+
+function watchMotionValues(values) {
+  if (!motionPeak) motionPeak = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < 6; i++) {
+    if (Math.abs(values[i]) > Math.abs(motionPeak[i])) motionPeak[i] = values[i];
+  }
+  const now = Date.now();
+  if (!motionSaidAt) { motionSaidAt = now; return; }
+  if (now - motionSaidAt < MOTION_REPORT_MS) return;
+  motionSaidAt = now;
+  const deg = (v) => (v / FPFrame.GYRO_PER_DEG_SEC).toFixed(0);
+  const g = (v) => (v / FPFrame.ACCEL_PER_G).toFixed(2);
+  report("motion, biggest since the last line: turning x " + deg(motionPeak[0])
+         + " y " + deg(motionPeak[1]) + " z " + deg(motionPeak[2])
+         + " deg/s; gravity x " + g(motionPeak[3]) + " y " + g(motionPeak[4])
+         + " z " + g(motionPeak[5]) + "; screen at "
+         + FPFrame.screenAngle() + " degrees");
+  motionPeak = [0, 0, 0, 0, 0, 0];
+}
+
 function onDeviceMotion(event) {
   // Rotation is the one that matters and the one a browser may withhold: a
   // device with an accelerometer and no gyroscope reports acceleration and
@@ -4769,6 +4803,7 @@ function onDeviceMotion(event) {
   // -- it is what says which way is down -- so this does not refuse it.
   gyroLatest = FPFrame.motionSample(event.rotationRate,
                                     event.accelerationIncludingGravity);
+  watchMotionValues(gyroLatest);
   if (!gyroSaid) {
     gyroSaid = true;
     report("this device is sending motion"
@@ -4792,6 +4827,8 @@ function stopGyro() {
   // when somebody switched this off.
   gyroLatest = null;
   gyroSaid = false;
+  motionPeak = null;
+  motionSaidAt = 0;
 }
 
 /* Turning it on, from a tap. Returns what it became, so the control can show
