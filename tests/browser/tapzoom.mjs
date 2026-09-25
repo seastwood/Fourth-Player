@@ -26,13 +26,15 @@ const check = (cond, what) => {
   if (!cond) bad += 1;
 };
 
+// Just the rule, not the listener that uses it: the listener touches the DOM
+// and this runs in node.
 const body = src.slice(src.indexOf("const TAP_ZOOM_MS"),
-                       src.indexOf('el("screen").addEventListener'));
+                       src.indexOf("/* Watched on pointerup"));
 const F = new Function(body + `; return {
   isPictureDoubleTap, MS: TAP_ZOOM_MS, MIN: TAP_ZOOM_MIN_MS,
   SLOP: TAP_ZOOM_SLOP, TO: TAP_ZOOM_TO };`)();
-const tap = (x, y, at, last) => F.isPictureDoubleTap(x, y, at, last);
-const first = { x: 100, y: 100, at: 1000 };
+const tap = (x, y, at, last) => F.isPictureDoubleTap(x, y, at, "touch", last);
+const first = { x: 100, y: 100, at: 1000, kind: "touch" };
 
 console.log("two quick taps in the same place");
 check(tap(100, 100, 1000 + 150, first) === true, "are a double tap");
@@ -62,11 +64,33 @@ check(tap(100 + F.SLOP + 1, 100, 1000 + 150, first) === false,
 check(tap(100, 100 + F.SLOP, 1000 + 150, first) === true,
       "and it is a radius rather than one axis");
 
+console.log("\nand one press arriving twice is not a gesture either");
+// iOS sends a compatibility mouse event after a touch. Without this every
+// single tap on the picture would look like a pair -- the same fault the
+// on-screen sticks had.
+check(F.isPictureDoubleTap(100, 100, 1000 + 150, "mouse", first) === false,
+      "a mouse event after a touch is not the second half of it");
+check(F.isPictureDoubleTap(100, 100, 1000 + 150, "touch", first) === true,
+      "while a real second touch is");
+
 console.log("\nwhat the gesture does");
-const handler = src.slice(src.indexOf('el("screen").addEventListener'),
-                          src.indexOf('el("screen").addEventListener') + 1800);
-check(/!cursorDriving\(\) && isPictureDoubleTap/.test(handler),
+// Watched on pointerup rather than click: while the picture is zoomed, every
+// pointermove calls preventDefault to stop the page scrolling under a drag,
+// and that suppresses the click the browser would otherwise synthesise. So
+// the tap that should zoom back out could never arrive.
+const handler = src.slice(src.indexOf('video.addEventListener("pointerup"'),
+                          src.indexOf('let zoomedByTap'));
+check(/video\.addEventListener\("pointerup"/.test(
+        src.slice(src.indexOf('video.addEventListener("pointerup"') - 1)),
+      "it listens on pointerup, which fires whether or not a click does");
+check(/if \(cursorDriving\(\)\) \{ lastPictureTap = null; return; \}/
+        .test(handler),
       "nothing happens while the keyboard or pointer is live");
+check(/if \(dragged\) \{ lastPictureTap = null; return; \}/.test(handler),
+      "and a drag is not a tap -- pointerup arrives after the move handlers, "
+      + "so `dragged` is settled by the time this reads it");
+check(/if \(held\.size\) return;/.test(handler),
+      "nor is letting go of one of two fingers");
 check(/zoom > ZOOM_MIN\) zoomAbout\(ZOOM_MIN/.test(handler),
       "zoomed in, a double tap goes all the way back out");
 check(/else zoomAbout\(TAP_ZOOM_TO, x, y\)/.test(handler),
@@ -76,17 +100,13 @@ check(F.TO > 1 && F.TO < 4,
 check(/lastPictureTap = null;\s*\/\/ spent/.test(handler),
       "and the pair is spent, so three taps are one zoom and not two");
 
-console.log("\na drag is not a tap");
-check(/if \(dragged\) \{ dragged = false; lastPictureTap = null; return; \}/
-      .test(handler),
-      "dragging the picture clears the pairing too -- otherwise letting go "
-      + "after a drag would pair with the tap that started it");
-
-console.log("\nand the hud is left as it was found");
-// The first tap toggled it and the second toggles it back, so returning early
-// on the zoom is what stops the picture being left with it inside out.
-check(/back where it started/.test(handler),
-      "which is written down, because it is only true by arithmetic");
+console.log("\nand the hud is not toggled by the tap that zoomed");
+const click = src.slice(src.indexOf('el("screen").addEventListener("click"'));
+check(/if \(zoomedByTap\) \{ zoomedByTap = false; return; \}/
+        .test(click.slice(0, 600)),
+      "the click that follows a zooming tap is spent on the zoom");
+check(/zoomedByTap = true;/.test(handler),
+      "which the gesture says by setting it");
 
 console.log(bad ? `\n${bad} FAILED` : "\nall ok");
 process.exit(bad ? 1 : 0);

@@ -2975,33 +2975,68 @@ const TAP_ZOOM_SLOP = 44;
 const TAP_ZOOM_TO = 2.5;
 let lastPictureTap = null;
 
-function isPictureDoubleTap(x, y, at, last) {
+function isPictureDoubleTap(x, y, at, kind, last) {
   if (!last) return false;
+  // One press arriving twice is not two presses: iOS sends a compatibility
+  // mouse event after a touch, and a finger that left the glass and came back
+  // would report the same kind of pointer as the first tap.
+  if ((kind || "") !== (last.kind || "")) return false;
   const gap = at - last.at;
   if (gap < TAP_ZOOM_MIN_MS || gap > TAP_ZOOM_MS) return false;
   return Math.hypot(x - last.x, y - last.y) <= TAP_ZOOM_SLOP;
 }
 
-el("screen").addEventListener("click", (event) => {
-  // A drag that ends over the picture is not a tap on it. Browsers do not
-  // agree about whether a click follows a pointer that moved, so this is
-  // decided here rather than hoped for.
-  if (dragged) { dragged = false; lastPictureTap = null; return; }
+/* Watched on pointerup, not on click.
+ *
+ * A click is not reliable here and the reason is in this file: while the
+ * picture is zoomed, every pointermove calls preventDefault to stop the page
+ * scrolling under a drag -- and that suppresses the click the browser would
+ * otherwise synthesise. So the tap that should zoom back *out* could never
+ * arrive, which is exactly half of "double tapping the video did nothing".
+ *
+ * pointerup fires either way. It also arrives after the move handlers, so
+ * `dragged` is already settled by the time this reads it: a thumb always
+ * moves a pixel or two, and deciding at pointerdown would call every drag a
+ * tap.
+ *
+ * The pointer kind is carried for the same reason the sticks carry it: iOS
+ * sends a compatibility mouse event after a touch, and without this every
+ * single tap would look like a pair. */
+video.addEventListener("pointerup", (event) => {
+  if (held.size) return;                // still a finger down somewhere
+  if (dragged) { lastPictureTap = null; return; }
+  // Driving the machine: a double tap here is a double *click* being sent,
+  // and swallowing it would take away the gesture that opens everything on a
+  // desktop.
+  if (cursorDriving()) { lastPictureTap = null; return; }
   const at = Date.now();
   const x = event.clientX, y = event.clientY;
-  if (!cursorDriving() && isPictureDoubleTap(x, y, at, lastPictureTap)) {
+  const kind = event.pointerType || "";
+  if (isPictureDoubleTap(x, y, at, kind, lastPictureTap)) {
     lastPictureTap = null;              // spent: three taps are not two
     // Zoomed, so this one puts it back. Out rather than further in: getting
     // back to the whole picture is the thing somebody wants in a hurry, and
     // pinching is there for the in-between.
     if (zoom > ZOOM_MIN) zoomAbout(ZOOM_MIN, x, y);
     else zoomAbout(TAP_ZOOM_TO, x, y);
-    // The hud toggled on the first of these two taps and again on this one,
-    // so it is back where it started and nothing more is owed. Returning here
-    // is what stops the second tap leaving it inside out.
+    zoomedByTap = true;
     return;
   }
-  lastPictureTap = { x, y, at };
+  lastPictureTap = { x, y, at, kind };
+});
+
+/* Set when a double tap zoomed, so the click that follows it does not also
+   toggle the hud. The two taps would otherwise toggle it twice and leave it
+   where it started -- which is harmless but flickers, and is not harmless at
+   all where only the second tap produces a click. */
+let zoomedByTap = false;
+
+el("screen").addEventListener("click", () => {
+  // A drag that ends over the picture is not a tap on it. Browsers do not
+  // agree about whether a click follows a pointer that moved, so this is
+  // decided here rather than hoped for.
+  if (dragged) { dragged = false; return; }
+  if (zoomedByTap) { zoomedByTap = false; return; }
   if (hudButtonShowing()) return;
   toggleHud();
 });
