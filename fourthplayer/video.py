@@ -1554,7 +1554,35 @@ class Stage:
             f"max-buffers=8 drop=true "
             f"frames. ! queue max-size-buffers=0 max-size-bytes=0 "
             f"max-size-time=0 "
-            f"! {payloader} pt=96 config-interval=-1 aggregate-mode=zero-latency "
+            # config-interval=0 on the payloader, deliberately, while the
+            # parser above keeps -1.
+            #
+            # The parser already puts SPS and PPS into the bitstream in front
+            # of every keyframe, so they reach a guest as part of the keyframe
+            # itself and a mid-session joiner is covered. Asking the payloader
+            # to add them as well sends them *twice*, and it sends its own
+            # cached copy from the caps rather than the encoder's -- so the two
+            # disagree. Measured on the guest's page:
+            #
+            #   the two copies of NAL 7 in one keyframe differ:
+            #   first  6742c033...0000ea6042
+            #   then   6742c033...0000ea6046d0442324
+            #
+            # Same profile, level and timing; the encoder's copy carries HRD
+            # and bitstream-restriction fields the cached one lacks.
+            #
+            # And when the payloader inserts them they arrive as their own
+            # access unit -- a forty-byte "frame" of `SPS PPS` with no coded
+            # slice in it. A browser's own decoder shrugs that off. A page
+            # drawing the picture itself is handed it as a frame, and a chunk
+            # with no picture in it is what killed its decoder every few
+            # seconds: streaming, black, streaming, black, then a fall back
+            # to WebRTC.
+            #
+            # The page defends itself against both now, because it has to cope
+            # with hosts it does not control. This is the same fault fixed
+            # where it starts, for every client rather than one.
+            f"! {payloader} pt=96 config-interval=0 aggregate-mode=zero-latency "
             f"mtu={cfg.rtp_mtu} "
             f"! application/x-rtp,media=video,encoding-name={encoding},"
             f"payload=96,clock-rate=90000 "
