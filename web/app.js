@@ -9376,6 +9376,7 @@ function watchTheTab() {
     startPainting();
   });
 }
+let saidBrowser = false;            // the user agent, said once
 let paintTried = 0;                 // which spelling of the codec is next
 let paintGaveUp = false;            // this connection could not, but the
                                     // choice is still the choice
@@ -9715,6 +9716,18 @@ async function startPainting() {
   fitPainted();
   paintAfterZoom();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
+  // Once per page, and only when this mode is used: which browser this is was
+  // missing from the host's log entirely, and three rounds of diagnosis were
+  // spent inferring it from which APIs it turned out not to have.
+  if (!saidBrowser) {
+    saidBrowser = true;
+    try {
+      report("this browser: " + String(navigator.userAgent || "unknown")
+             + (typeof VideoDecoder === "undefined" ? " (no VideoDecoder)" : "")
+             + (typeof RTCRtpScriptTransform === "undefined"
+                ? " (no encoded transform)" : ""));
+    } catch (_) { /* nothing worth failing a picture over */ }
+  }
   tellHostPainting(true, paintMethod);
   holdBackAsNeeded();
   watchThePainting();

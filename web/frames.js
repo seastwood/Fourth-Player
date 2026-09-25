@@ -38,6 +38,8 @@ const state = {
   codec: "",
   feedAs: "annexb",
   lastKey: null,
+  builtAt: 0,
+  latency: false,
   started: false,
   shape: "",
   waiting: [],
@@ -527,6 +529,39 @@ function decoded(frame) {
   if (!state.timer) pump();
 }
 
+/* Why the decoder stopped, in enough detail to tell the candidates apart.
+ *
+ * "Decoder failure" on its own is unactionable. It was reported three times
+ * over while three different explanations were guessed at from the outside,
+ * and every fact that would have separated them was sitting here: whether it
+ * had ever worked, for how long, which spelling and bitstream shape were in
+ * force, and what the stream's own parameter sets say it is.
+ *
+ * A decoder that dies after a minute of clean output is a different fault from
+ * one that never configures, and those want opposite next moves. So the
+ * message says which of the two happened, and against what. */
+function whyItStopped(err) {
+  const bits = [(err && err.message) || "no reason given"];
+  if (err && err.name && err.name !== "Error") bits.push("(" + err.name + ")");
+  bits.push(state.out + " frame(s) decoded, " + state.fed + " fed");
+  if (state.builtAt) {
+    bits.push("ran " + Math.round((performance.now() - state.builtAt) / 1000) + "s");
+  }
+  bits.push("as " + (state.codec || "?") + ", " + state.feedAs
+            + (state.latency ? ", latency hint asked for" : ", no latency hint"));
+  // What the stream says it is, rather than what it was configured as. A
+  // resolution change mid-session rewrites the parameter sets, and a decoder
+  // configured for the old ones is exactly how a working picture dies.
+  const description = describeKey();
+  if (description) {
+    const real = exactCodec(description);
+    bits.push(real === state.codec ? "the stream agrees"
+                                   : "but the stream now says " + real);
+  }
+  if (state.shape) bits.push("last shape " + state.shape);
+  return bits.join("; ");
+}
+
 function buildDecoder(codec, description, latency) {
   const config = { codec };
   if (description) config.description = description;
@@ -536,14 +571,15 @@ function buildDecoder(codec, description, latency) {
   // be tidy -- but it is not worth failing over, so it is one of the rungs
   // below rather than a fixed part of every attempt.
   if (latency) config.optimizeForLatency = true;
+  // Kept so a failure can say how long this decoder lasted, which is the one
+  // fact that separates "never worked" from "was working and died".
+  state.builtAt = performance.now();
+  state.latency = Boolean(latency);
   const decoder = new VideoDecoder({
     output: decoded,
     error: (err) => {
       if (nextRung()) return;
-      self.postMessage({
-        failed: "the decoder stopped: "
-                + ((err && err.message) || "no reason given"),
-      });
+      self.postMessage({ failed: "the decoder stopped: " + whyItStopped(err) });
       close();
     },
   });
