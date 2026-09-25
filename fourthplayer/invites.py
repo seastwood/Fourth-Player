@@ -427,6 +427,19 @@ class Session:
                 return guest
         raise UnknownGuest("not a guest of this session")
 
+    def claimed_slots(self, now):
+        """Seats nobody is on that somebody may still walk back into.
+
+        A claim is what `release` leaves behind, and it is the difference
+        between an empty seat worth keeping a controller plugged into and one
+        that is simply abandoned. Expired claims are not returned -- they are
+        not cleaned up here, because reclaim() is where that belongs and a
+        reader should not have to wonder whether asking a question changed
+        anything.
+        """
+        return {slot for slot, when in self._claims.values()
+                if now - when <= CLAIM_SECONDS}
+
     def release(self, slot, now=None):
         """Give a slot back, but remember who had it.
 

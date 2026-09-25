@@ -1886,6 +1886,19 @@ class LiveSession:
         if self.pads is None:
             return
         taken = {g.pad_index for g in self.guests.values()}
+        # Seats somebody may still walk back into. A guest who left has a claim
+        # on their old seat; a guest who came back into a *different* seat does
+        # not, and the one they abandoned is an orphan however busy the
+        # television is.
+        #
+        # Without this the game hold below kept every empty seat's controller,
+        # including that one -- so moving seats left two devices plugged in,
+        # which is a second controller appearing in the game for one person.
+        try:
+            coming_back = (self.invite.claimed_slots(self._now())
+                           if self.invite is not None else set())
+        except Exception:
+            coming_back = set()
         # After a grace period, not the instant somebody stands up. Unplugging
         # is something the far side notices and does not always undo: an
         # emulator binds a game's motion controls to a particular device, and
@@ -1896,7 +1909,8 @@ class LiveSession:
         for index, pad in self.pads.unplug_idle(
                 taken,
                 after=padlib.LINGER_SECONDS if not after else max(0, int(after)),
-                hold=self._a_game_is_up()):
+                hold=self._a_game_is_up(),
+                keep=coming_back):
             # A controller that is made and unmade over and over is not a
             # tidy-up, it is a fight: something keeps asking for a seat
             # nobody is sitting on, and this keeps taking it away. Seen

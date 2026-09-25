@@ -148,6 +148,45 @@ check(seat.unplug_idle({0}, hold=True) == [],
       "somebody sitting on it, with a game running: nothing happens")
 check(seat.pads[0] is not None, "and they keep their device")
 
+print("\n-- but a seat nobody can come back to is not held --")
+# The fault this fixes: a guest left seat 0, came back into seat 1, and seat
+# 0's controller stayed plugged in because a game was running. One person,
+# two controllers in the game.
+#
+# A game holds a seat only for somebody who may still walk back into it --
+# which the invite knows, because leaving leaves a claim behind and coming
+# back somewhere else does not.
+clock[0] = 0.0
+seat = seats(count=2, now=lambda: clock[0])
+seat.pads[0], seat.pads[1] = FakePad("one"), FakePad("two")
+# Sitting in seat 1; seat 0 abandoned, with no claim on it. No clock is
+# advanced at all: the grace period is for somebody who might come back, and
+# this is a seat whose guest is demonstrably elsewhere -- taking another seat
+# is what consumed the claim. Waiting it out would be half an hour of one
+# person holding two controllers.
+gone = seat.unplug_idle({1}, hold=True, keep=set())
+check([i for i, _p in gone] == [0],
+      "the abandoned seat goes at once, game or no game: %r" % (gone,))
+check(seat.pads[1] is not None, "and the one being sat on is untouched")
+
+print("\n-- while a seat somebody may return to is held --")
+clock[0] = 0.0
+seat = seats(count=2, now=lambda: clock[0])
+seat.pads[0], seat.pads[1] = FakePad("one"), FakePad("two")
+clock[0] = pads.LINGER_SECONDS * 3
+check(seat.unplug_idle({1}, hold=True, keep={0}) == [],
+      "a claim on seat 0 keeps its controller while the game runs")
+
+print("\n-- and with no claims tracked at all, a game holds everything --")
+# Which is what this did before there was anything better to ask, and is what
+# the callers that pass no `keep` still get.
+clock[0] = 0.0
+seat = seats(count=2, now=lambda: clock[0])
+seat.pads[0] = FakePad("one")
+clock[0] = pads.LINGER_SECONDS * 3
+check(seat.unplug_idle(set(), hold=True) == [],
+      "no keep given, so nothing is unplugged")
+
 print("\n-- and a guest leaving does not unplug anything --")
 # The fault that made every other guard here pointless. The janitor grew a
 # timeout and a hold-while-a-game-is-running, and the path taken when somebody

@@ -665,7 +665,8 @@ class PadSet:
         pad.close()
         return True
 
-    def unplug_idle(self, taken, after=LINGER_SECONDS, now=None, hold=False):
+    def unplug_idle(self, taken, after=LINGER_SECONDS, now=None, hold=False,
+                    keep=None):
         """Unplug pads for seats nobody has been on for `after` seconds.
 
         `taken` is the set of seat indices somebody is sitting on. Returns the
@@ -682,25 +683,39 @@ class PadSet:
         instead of the remains of one that expired while they were gone.
         """
         stamp = self._now() if now is None else now
-        if hold:
-            # A game is running, so nothing is unplugged at all -- and every
-            # empty seat's clock is started again from now, so the grace
-            # period begins when the game *ends* rather than when somebody
-            # walked away from it. Stepping out for half an hour in the middle
-            # of a game and coming back to a controller the emulator has
-            # forgotten is not a tidy-up, it is an interruption.
-            for index, _pad in list(self.live()):
-                if index not in taken:
-                    self._empty_at[index] = stamp
-            return []
+        # `keep` is which seats somebody may still walk back into. None means
+        # the caller is not tracking that, and then a game holds every empty
+        # seat -- which is what this did before there was anything better to
+        # ask.
+        protected = None if keep is None else set(keep)
         gone = []
         for index, _pad in list(self.live()):
             if index in taken:
                 self._empty_at.pop(index, None)
                 continue
-            since = self._empty_at.setdefault(index, stamp)
-            if stamp - since < after:
+            # A game is running and this is a seat its guest may return to, so
+            # nothing is unplugged and the clock starts again from now: the
+            # grace period begins when the game *ends* rather than when
+            # somebody walked away from it.
+            #
+            # Per seat, not for all of them at once. A guest who came back into
+            # a different seat has abandoned the one they left, and holding
+            # that one's controller means one person with two controllers in
+            # the game -- which is exactly what happened.
+            may_return = protected is None or index in protected
+            if hold and may_return:
+                self._empty_at[index] = stamp
                 continue
+            if may_return:
+                since = self._empty_at.setdefault(index, stamp)
+                if stamp - since < after:
+                    continue
+            # Otherwise there is nothing to wait for. The grace period exists
+            # for somebody who might come back, and a seat with no claim on it
+            # is one whose guest is demonstrably elsewhere -- they took another
+            # seat, which is what consumed the claim. Waiting half an hour to
+            # unplug that one is half an hour of somebody having two
+            # controllers in the game.
             pad = self.pads[index]
             if self.release(index):
                 self._empty_at.pop(index, None)
