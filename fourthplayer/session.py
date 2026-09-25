@@ -1553,10 +1553,27 @@ class LiveSession:
         # permission that arrives with a chair is not one anybody granted.
         self.forget_driver_if(slot)
         self.detach_peer(guest)
-        # Unplug their controller. A seat nobody is sitting in takes a player
-        # port away from whoever is actually holding something.
+        # Let go of everything they were holding, but leave the device where
+        # it is.
+        #
+        # This used to unplug it outright, which is why none of the grace
+        # period worked: the janitor grew a timeout and a hold-while-playing,
+        # and this path walked straight past both. The log said so plainly --
+        # pads plugged in five times in eight minutes with not one unplug
+        # recorded, because only the janitor logs them.
+        #
+        # An empty seat does still take a player port, and that is still worth
+        # fixing; it is the janitor's job, with the delay and the check for a
+        # game in front that this path had neither of.
         if self.pads is not None and 0 <= guest.pad_index < len(self.pads):
-            self.pads.release(guest.pad_index)
+            held = self.pads.existing(guest.pad_index)
+            if held is not None:
+                # A guest who leaves mid-press must not leave a direction held
+                # down in somebody's game.
+                try:
+                    held.release_all()
+                except OSError:
+                    pass
         if self.invite is not None:
             self.invite.release(slot, now=self._now())
             self.save()

@@ -646,6 +646,15 @@ class PadSet:
         pad = self.pads[index]
         if pad is None:
             return False
+        # Said here, by the thing that actually does it, rather than by each
+        # caller.
+        #
+        # Only the janitor used to say anything, so a path that unplugged
+        # without going through it was invisible -- and one did: a guest
+        # leaving. The log read "plugged in" five times in eight minutes with
+        # not one unplug beside them, which looks like a pad being created for
+        # no reason rather than a pad being destroyed for a bad one.
+        log.info("unplugged %s (seat %d)", self.names[index], index)
         self.pads[index] = None
         # Let go before unplugging: a pad removed mid-press otherwise leaves
         # the emulator holding whatever it held.

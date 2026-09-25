@@ -148,6 +148,26 @@ check(seat.unplug_idle({0}, hold=True) == [],
       "somebody sitting on it, with a game running: nothing happens")
 check(seat.pads[0] is not None, "and they keep their device")
 
+print("\n-- and a guest leaving does not unplug anything --")
+# The fault that made every other guard here pointless. The janitor grew a
+# timeout and a hold-while-a-game-is-running, and the path taken when somebody
+# actually leaves walked straight past both and unplugged the device outright.
+# Read from the source, because reaching drop() needs a whole session.
+import re                                                     # noqa: E402
+src = open(os.path.join(ROOT, "fourthplayer", "session.py"),
+           encoding="utf-8").read()
+leave = src[src.index("# Let go of everything they were holding"):]
+leave = leave[:leave.index("if self.invite is not None")]
+check("release_all" in leave,
+      "what they were holding is let go of, or a direction stays down in "
+      "somebody's game")
+check(".release(" not in leave,
+      "but the device is not unplugged: that is the janitor's job, with the "
+      "delay and the game check this path had neither of")
+check("existing(" in leave,
+      "and it asks for the device that exists rather than for one -- asking "
+      "for one makes one, which is a controller plugged in on the way out")
+
 print("\n-- seats are independent --")
 clock[0] = 0.0
 seat = seats(now=lambda: clock[0])
