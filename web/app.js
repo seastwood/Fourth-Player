@@ -7186,7 +7186,17 @@ function deskListen() {
       event.preventDefault();
       // Held, not tapped: the hold has already opened the pointer menu and
       // this is the release that follows it.
-      if (swapHeld) { swapHeld = false; return; }
+      //
+      // Stopped here rather than merely ignored. A click on the document puts
+      // the menu away -- which is right for a tap anywhere else, and wrong for
+      // the one that just opened it: the menu appeared and vanished in the
+      // same gesture, which from the outside is a flash and nothing to choose
+      // from.
+      if (swapHeld) {
+        swapHeld = false;
+        event.stopPropagation();
+        return;
+      }
       // Whichever one is not in front. deskPaintKeys draws the same decision,
       // so the button does what it looks like it does.
       const padUp = !el("touch").hidden;
@@ -9642,7 +9652,16 @@ if (el("cursor-menu")) {
 }
 
 // Anywhere else closes it, the same way the bar itself behaves.
-document.addEventListener("click", () => cursorMenuOpen(false));
+/* A tap anywhere else puts the pointer menu away.
+ *
+ * Not one inside it -- that is somebody choosing, and the menu's own handler
+ * closes it afterwards -- and not the release of the hold that opened it,
+ * which the bar stops before it reaches here. */
+document.addEventListener("click", (event) => {
+  const menu = el("cursor-menu");
+  if (menu && !menu.hidden && menu.contains(event.target)) return;
+  cursorMenuOpen(false);
+});
 
 paintCursorMode();
 
