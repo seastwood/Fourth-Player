@@ -58,23 +58,69 @@ KINDS = {
 DEFAULT_KIND = "xbox360"
 
 
-# How a phone's rotations reach the pad, as indices into (pitch, yaw, roll).
+# How a phone's rotations reach the pad: which of the wire's three each of the
+# pad's takes, and whether it is negated.
 #
-# Only the three cyclic orders are offered, because only those are rotations:
-# swapping two axes is a mirror, and no object can be held that way. Written
-# as names here because "1,2,0" in a config file says nothing to anybody.
-GYRO_ORDERS = {
-    "pitch,yaw,roll": (0, 1, 2),
-    "yaw,roll,pitch": (1, 2, 0),
-    "roll,pitch,yaw": (2, 0, 1),
-}
-DEFAULT_GYRO_ORDER = "yaw,roll,pitch"
+# Signs matter and leaving them out was a real mistake. The rotation that
+# actually makes a phone *be* a controller needs one. A DualShock's axes are x
+# to the right, y up out of its face, z forward; a phone in portrait has x
+# right, y up the screen, z out toward you. Tip the phone ninety degrees about
+# x -- which is what turning a face-toward-you screen into a face-up pad takes
+# -- and the pad's x is the phone's pitch, the pad's y is the phone's roll,
+# and the pad's z is the phone's yaw *negated*.
+#
+# Excluding signs left only plain permutations, and the answer is not one, so
+# every one of them was wrong in a way that moved whichever axis was not being
+# looked at.
+#
+# What is allowed is any signed permutation whose determinant is +1 -- which
+# is exactly the set of rotations. A determinant of -1 is a mirror: it looks
+# like a fix for one axis and quietly disturbs another, which cost several
+# rounds of asking somebody to tilt a phone and say what moved.
+AXIS_NAMES = ("pitch", "yaw", "roll")
+DEFAULT_GYRO_ORDER = "pitch,roll,-yaw"
+
+
+def _determinant(spec):
+    """Of the 3x3 the spec describes. +1 is a rotation, -1 a mirror."""
+    rows = [[0, 0, 0] for _ in range(3)]
+    for at, (index, sign) in enumerate(spec):
+        rows[at][index] = sign
+    a, b, c = rows
+    return (a[0] * (b[1] * c[2] - b[2] * c[1])
+            - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]))
+
+
+def parse_gyro_order(name):
+    """"pitch,roll,-yaw" -> ((0, 1), (2, 1), (1, -1)), or None.
+
+    None rather than an exception, and never a half-read one: a name that
+    cannot be understood leaves the caller to fall back whole.
+    """
+    parts = [p.strip().lower() for p in str(name or "").split(",")]
+    if len(parts) != 3:
+        return None
+    spec = []
+    for part in parts:
+        sign = 1
+        if part.startswith("-"):
+            sign, part = -1, part[1:].strip()
+        elif part.startswith("+"):
+            part = part[1:].strip()
+        if part not in AXIS_NAMES:
+            return None
+        spec.append((AXIS_NAMES.index(part), sign))
+    if len({index for index, _sign in spec}) != 3:
+        return None                      # an axis used twice, another dropped
+    if _determinant(spec) != 1:
+        return None                      # a mirror, not a posture
+    return tuple(spec)
 
 
 def gyro_order(name):
-    """The named order, or the default. Never an error, for the usual reason."""
-    key = str(name or "").strip().lower().replace(" ", "")
-    return GYRO_ORDERS.get(key, GYRO_ORDERS[DEFAULT_GYRO_ORDER])
+    """The named order, or the default. Never an error."""
+    return parse_gyro_order(name) or parse_gyro_order(DEFAULT_GYRO_ORDER)
 
 
 def kind_or_default(kind):

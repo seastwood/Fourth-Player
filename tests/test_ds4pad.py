@@ -445,7 +445,7 @@ ui.motion([160, 0, 0, 0, 0, 1000])
 ui.syn()
 check(pad.extended is not None, "an extended report is what carries it")
 gyro, accel = pad.extended
-check(gyro[2] == 160, "10 deg/s stays 160, got %r" % (gyro[2],))
+check(gyro[0] == 160, "10 deg/s stays 160, got %r" % (gyro[0],))
 # One gravity is 1000 on the wire and about 8192 on a DS4. On the wire's z,
 # which GYRO_ORDER moves to the pad's y -- gravity rides the same rotation as
 # the rotation does.
@@ -469,10 +469,10 @@ check(pad.raw is not None, "a report went out")
 # The offset, which is the point: a DualShock keeps its first gyro word at
 # byte 12. ctypes' aligned struct puts it at 14, and writing there fed the
 # real gyro X a battery level of zero for ever.
-check(pad.raw[12:14] == bytes([0xec, 0x00]),
+check(pad.raw[12:14] == bytes([0x93, 0xfc]),
       "the first gyro word is at byte 12, not 14: %s"
       % pad.raw[12:14].hex(" "))
-check(pad.raw[14:16] != bytes([0xec, 0x00]),
+check(pad.raw[14:16] != bytes([0x93, 0xfc]),
       "and is not also sitting where the aligned struct would have put it")
 # The rotations are permuted on the way out. A controller is held face up and
 # a phone in portrait face toward you, so the frames differ -- and which wrist
@@ -480,15 +480,14 @@ check(pad.raw[14:16] != bytes([0xec, 0x00]),
 # game, in two goes: straight through gave the vertical to the wrong wrist,
 # and swapping pitch and roll alone left the horizontal on turning the phone
 # like a door rather than twisting it.
-check(pad.extended[0] == [236, -226, -877],
-      "the pad receives (yaw, roll, pitch): wire (pitch -877, yaw 236, roll "
-      "-226) leaves as (%r)" % (pad.extended[0],))
-check(virtual.UInput.GYRO_ORDER == (1, 2, 0),
-      "with the order named rather than buried in the packing, since it was "
-      "found by watching a game and may need finding again")
-check(sorted(virtual.UInput.GYRO_ORDER) == [0, 1, 2],
-      "and it is a permutation -- every rotation goes somewhere and none goes "
-      "twice, which a hand-edited tuple can quietly stop being")
+# The pad takes the phone's pitch, its roll, and its yaw negated -- the
+# rotation that turns a screen held toward you into a pad held face up.
+check(pad.extended[0] == [-877, -226, -236],
+      "wire (pitch -877, yaw 236, roll -226) leaves as pitch, roll, -yaw: %r"
+      % (pad.extended[0],))
+check(pads._determinant(virtual.UInput.GYRO_ORDER) == 1,
+      "and it is a rotation, not a mirror: a mirror looks like a fix for one "
+      "axis and quietly disturbs another, which cost several rounds")
 # Gravity is permuted with the rotation, because the two describe one object.
 # One gravity on the wire's z leaves on the pad's y, since GYRO_ORDER puts the
 # wire's third component second.
@@ -496,15 +495,13 @@ check(pad.extended[1] == [0, 8192, 0],
       "gravity rides the same rotation as the gyro, scaled into the pad's "
       "units: %r" % (pad.extended[1],))
 
-# And the order has to be a rotation rather than any old permutation: swapping
-# two axes is a mirror, and nothing can be held that way. Only the cyclic ones
-# are postures.
-order = virtual.UInput.GYRO_ORDER
-cyclic = [(0, 1, 2), (1, 2, 0), (2, 0, 1)]
-check(tuple(order) in cyclic,
-      "the order is one a real object could be in -- a swap of two axes flips "
-      "handedness, which is why fixing the horizontal that way kept "
-      "disturbing the vertical. Got %r" % (order,))
+# The order has to be a rotation. Insisting on *cyclic* orders was the
+# previous version of this check and it was too strict: it excluded the right
+# answer, which is a swap of two axes with one of them negated. A determinant
+# of +1 is the real test -- it admits every rotation and no mirror.
+check(pads._determinant(virtual.UInput.GYRO_ORDER) == 1,
+      "the order is a posture something can be held in: %r"
+      % (virtual.UInput.GYRO_ORDER,))
 check(pad.battery == 0xFF,
       "with a charge that does not read as flat: %r" % (pad.battery,))
 # The struct's own fields must now disagree, or the padding is not being
@@ -521,27 +518,47 @@ print("\n-- and the order can be set, but only to a posture --")
 # preference about which wrist steers, and the only instrument for either is
 # somebody playing a game. Three goes at guessing it from this end each moved
 # the wrong axis, so it is settable.
-check(sorted(pads.GYRO_ORDERS.values()) == [(0, 1, 2), (1, 2, 0), (2, 0, 1)],
-      "the three on offer are the cyclic ones, which are the rotations: %r"
-      % (sorted(pads.GYRO_ORDERS.values()),))
-check(pads.gyro_order("roll,pitch,yaw") == (2, 0, 1), "a name is honoured")
-check(pads.gyro_order("Roll, Pitch, Yaw") == (2, 0, 1),
-      "spelled loosely, still honoured")
-for bad in ("", None, "sideways", "pitch,roll,yaw", 7):
-    check(pads.gyro_order(bad) == pads.GYRO_ORDERS[pads.DEFAULT_GYRO_ORDER],
-          "%r falls back rather than raising" % (bad,))
-# "pitch,roll,yaw" above is the trap: a real-looking name that is a swap of
-# two axes, which is a mirror rather than a posture. It must not be offered.
-check("pitch,roll,yaw" not in pads.GYRO_ORDERS,
-      "and a mirror is not one of the names, however plausible it reads")
+check(pads.parse_gyro_order("pitch,yaw,roll") == ((0, 1), (1, 1), (2, 1)),
+      "straight through reads as itself")
+check(pads.parse_gyro_order("pitch,roll,-yaw") == ((0, 1), (2, 1), (1, -1)),
+      "and a negated axis is part of the name, because the rotation that "
+      "makes a phone be a controller needs one")
+check(pads.parse_gyro_order("Pitch, Roll, -Yaw") == ((0, 1), (2, 1), (1, -1)),
+      "spelled loosely, still read")
+# The trap, and the reason a determinant is checked rather than a list of
+# allowed shuffles: this reads perfectly plausible and is a mirror.
+check(pads.parse_gyro_order("pitch,roll,yaw") is None,
+      "a swap of two axes with no sign is refused -- it is a mirror, and "
+      "nothing can be held that way")
+for bad in ("", None, "sideways", "pitch,pitch,roll", "pitch,roll", 7):
+    check(pads.parse_gyro_order(bad) is None, "%r is not an order" % (bad,))
+    check(pads.gyro_order(bad) == pads.parse_gyro_order(pads.DEFAULT_GYRO_ORDER),
+          "and falls back whole rather than half-read: %r" % (bad,))
 
 ui, pad = a_pad("ds4")
-check(ui.gyro_order((2, 0, 1)) is True, "the device takes a rotation")
-check(ui.GYRO_ORDER == (2, 0, 1), "and uses it")
-check(ui.gyro_order((2, 1, 0)) is False,
-      "and refuses a mirror rather than quietly accepting it")
-check(ui.GYRO_ORDER == (2, 0, 1), "keeping what it had")
+check(ui.gyro_order(((2, 1), (0, 1), (1, 1))) is True,
+      "the device takes a rotation")
+check(ui.GYRO_ORDER == ((2, 1), (0, 1), (1, 1)), "and uses it")
+check(ui.gyro_order(((0, 1), (0, 1), (1, 1))) is False,
+      "and refuses one that uses an axis twice")
 check(ui.gyro_order("nonsense") is False, "and refuses nonsense")
+check(ui.GYRO_ORDER == ((2, 1), (0, 1), (1, 1)), "keeping what it had")
+
+print("\n-- a negated axis is negated, and does not wrap --")
+ui, pad = a_pad("ds4")
+ui.gyro_order(((0, 1), (1, 1), (2, -1)))
+ui.motion([100, 200, 300, 0, 0, 0])
+ui.syn()
+check(pad.extended[0] == [100, 200, -300],
+      "the third is negated: %r" % (pad.extended[0],))
+# Negating the bottom of an int16 lands one past the top, and struct would
+# refuse to pack it -- a controller that stops dead exactly when somebody
+# moves it hardest.
+ui.motion([0, 0, -32768, 0, 0, 0])
+ui.syn()
+check(pad.extended[0][2] == 32767,
+      "and the very bottom clamps rather than overflowing: %r"
+      % (pad.extended[0][2],))
 
 print("\n-- the buttons and sticks still land where they were --")
 ui, pad = a_pad("ds4")

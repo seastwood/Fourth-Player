@@ -314,9 +314,9 @@ class Config:
     # here: a machine whose games are all two-dimensional has no use for it,
     # and a guest waving a phone about should not be steering anything.
     guest_motion: bool = True
-    # Which way round a phone's rotations reach the controller, named as the
-    # order the pad receives them in: "pitch,yaw,roll", "yaw,roll,pitch" or
-    # "roll,pitch,yaw".
+    # Which way round a phone's rotations reach the controller, named as what
+    # the pad's three axes should take: "pitch,roll,-yaw" is the default, and
+    # any axis may be negated with a leading minus.
     #
     # Settable because it cannot be worked out from the host. It is part frame
     # conversion -- a controller is held face up and a phone in portrait face
@@ -324,10 +324,12 @@ class Config:
     # the only instrument for either is somebody playing a game and saying
     # what moved.
     #
-    # Only those three, because only those are rotations. Swapping two axes is
-    # a mirror and nothing can be held that way, which is the trap worth
-    # naming: it looks like a fix for one axis and quietly disturbs another.
-    guest_gyro_order: str = "yaw,roll,pitch"
+    # Anything whose determinant is +1 is allowed, which is exactly the set of
+    # rotations. A plain swap of two axes has determinant -1: it is a mirror,
+    # nothing can be held that way, and it looks like a fix for one axis while
+    # quietly disturbing another. Insisting on unsigned orders was worse still
+    # -- it excluded the right answer, which needs a negation.
+    guest_gyro_order: str = "pitch,roll,-yaw"
     guest_input_needs_a_game: bool = True
     # Matched against the focused window's class and name, lowercased. A
     # blocklist, and deliberately: the failure an allowlist produces is a

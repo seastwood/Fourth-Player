@@ -401,42 +401,21 @@ except ImportError:
         # corresponds to the controller's vertical and its screen-vertical to
         # the controller's front-to-back.
         #
-        # Arrived at in two steps, each from watching a game, because the
-        # posture a pad is held in is written down nowhere:
+        # Which of the wire's rotations each of the pad's takes, and whether
+        # it is negated. See pads.parse_gyro_order for why signs are part of
+        # it and why a determinant of +1 is insisted on.
         #
-        #   straight through -- "rolling the phone left and right moves it up
-        #     and down, tilting left and right moves it left and right": the
-        #     horizontal right, the vertical driven by the wrong wrist.
-        #   pitch and roll swapped -- "up and down correct now, but left right
-        #     is still tilt when it should be roll".
+        # The default is the rotation that makes a phone be a controller: a
+        # DualShock's axes are x right, y up out of its face, z forward; a
+        # phone in portrait has x right, y up the screen, z out toward you.
+        # Tip it ninety degrees about x -- what turning a face-toward-you
+        # screen into a face-up pad takes -- and the pad's x is the phone's
+        # pitch, its y the phone's roll, its z the phone's yaw negated.
         #
-        # So the pad's three words want (yaw, roll, pitch). Vertical aim comes
-        # from tipping the phone's top away and back, and horizontal from
-        # twisting it in its own plane -- which is the wrist a phone invites,
-        # and not the one a controller does. Turning the whole phone like a
-        # door, which is a controller's yaw, steers nothing.
-        #
-        # Part frame conversion and part preference, and the two cannot be
-        # separated from here: which wrist should steer is the guest's to say.
-        #
-        # Two things learned the hard way while arriving at it, both of which
-        # made the second attempt worse rather than better:
-        #
-        # The accelerometer must be permuted the same way. A game works out
-        # which way is up from gravity and reads rotation relative to it, so a
-        # rotation in one frame and a gravity in another do not describe any
-        # posture at all -- and then changing the order moves *both* axes
-        # unpredictably instead of the one being aimed at.
-        #
-        # And the order has to be a rotation, not merely a permutation.
-        # Swapping two axes, as (2, 1, 0) does, flips handedness: it is a
-        # mirror, and nothing can be held that way. Only the cyclic orders --
-        # (0, 1, 2), (1, 2, 0), (2, 0, 1) -- are postures, optionally with
-        # signs flipped. That is why "fix the horizontal by swapping two" kept
-        # disturbing the vertical.
-        #
-        # Indices into the wire's (pitch, yaw, roll).
-        GYRO_ORDER = (1, 2, 0)
+        # Which is also what was asked for, in the end: the vertical from
+        # tipping the phone's top away and back, the horizontal from twisting
+        # it in its own plane.
+        GYRO_ORDER = ((0, 1), (2, 1), (1, -1))
         # A DS4's report timestamp counts in units of about 5.33 microseconds
         # and wraps at 16 bits. Games that integrate rotation into an aim use
         # it as their clock, so a report with a frozen timestamp is a report
@@ -458,13 +437,12 @@ except ImportError:
             like a fix for one axis and quietly disturbs another.
             """
             try:
-                want = tuple(int(v) for v in order)
+                want = tuple((int(i), int(sign)) for i, sign in order)
             except (TypeError, ValueError):
                 return False
-            if want not in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):
-                log.warning("%r is not a posture anything can be held in "
-                            "(only 0,1,2 / 1,2,0 / 2,0,1 are); keeping %r",
-                            order, self.GYRO_ORDER)
+            seen = {i for i, _s in want}
+            if len(want) != 3 or seen != {0, 1, 2} \
+                    or any(s not in (1, -1) for _i, s in want):
                 return False
             self.GYRO_ORDER = want
             return True
@@ -517,6 +495,17 @@ except ImportError:
         # whole point.
         REPORT = struct.Struct("<BBBBHBBBHBhhhhhh")
 
+        def _turn(self, three):
+            """One sensor's three values, in the pad's frame.
+
+            Clamped after the sign, because negating -32768 lands one past the
+            top of an int16 and the struct would refuse to pack it -- which
+            would be a controller that stops dead at exactly the moment
+            somebody moves it hardest.
+            """
+            return [max(-32768, min(32767, sign * three[index]))
+                    for index, sign in self.GYRO_ORDER]
+
         def _send_extended(self):
             """The whole DS4 report, motion included.
 
@@ -543,15 +532,13 @@ except ImportError:
                 # or an overlay that shows it has no reason to be told this
                 # pad is dying.
                 0xFF,
-                gyro[self.GYRO_ORDER[0]], gyro[self.GYRO_ORDER[1]],
-                gyro[self.GYRO_ORDER[2]],
+                *self._turn(gyro),
                 # The same rotation, because the two sensors describe one
                 # object. Left alone, the gravity said the phone was upright
                 # while the rotation said it had been turned on its side, and
                 # a game reconciling those aims somewhere neither of them
                 # pointed.
-                accel[self.GYRO_ORDER[0]], accel[self.GYRO_ORDER[1]],
-                accel[self.GYRO_ORDER[2]])
+                *self._turn(accel))
             # Into the union's byte view, which is the same memory as the
             # struct and the only way to put these where the wire wants them.
             ctypes.memmove(report.ReportBuffer, packed, len(packed))
