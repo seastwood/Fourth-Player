@@ -133,4 +133,31 @@ check(/\.desk-bar \{[^}]*position: relative/.test(css),
       "anchored to the bar, or an absolutely positioned list lands somewhere "
       + "else entirely");
 
+console.log("\nand the gesture that opens it cannot also close it");
+/* Reported twice. The first fix stopped the click that ends the hold, which
+ * was enough on a desktop and not on a phone: iOS also sends compatibility
+ * mouse events after a touch, and treats a long press as a system gesture it
+ * may cancel the pointer for. Chasing those one at a time is how the menu
+ * came to be fixed on one machine and still flashing on another.
+ *
+ * So the rule is over time instead, where it does not depend on which events
+ * a browser sends: a menu that has only just opened is still opening. */
+check(/const CURSOR_MENU_SETTLE = (\d+);/.test(app),
+      "there is a settling window after it opens");
+const settle = Number((/const CURSOR_MENU_SETTLE = (\d+);/.exec(app) || [])[1]);
+check(settle >= 250 && settle <= 800,
+      "long enough to outlast the gesture, short enough not to feel stuck: "
+      + settle + "ms");
+const open = app.slice(app.indexOf("function cursorMenuOpen"));
+check(/if \(!yes && !force && cursorMenuAt\s*\n?\s*&& Date\.now\(\) - cursorMenuAt < CURSOR_MENU_SETTLE\) return;/
+        .test(open.slice(0, 700)),
+      "and a close inside it is refused, whoever asked for it");
+check(/cursorMenuAt = yes \? Date\.now\(\) : 0;/.test(open.slice(0, 700)),
+      "measured from the moment it opened");
+check(/cursorMenuOpen\(false, true\)/.test(app),
+      "except choosing an entry, which is a decision rather than a leftover");
+check(app.indexOf("cursorMenuOpen(false, true)")
+        > app.indexOf('el("cursor-menu").addEventListener'),
+      "and that is the menu's own handler doing it");
+
 process.exit(fails ? 1 : 0);

@@ -2976,9 +2976,9 @@ function hudButtonShowing() {
  * second is still plainly one gesture rather than two thoughts, and ninety
  * pixels is under half a fingertip on a phone -- far less than the distance
  * between two things anybody would pick out of a television. */
-const TAP_ZOOM_MS = 500;
+const TAP_ZOOM_MS = 600;
 const TAP_ZOOM_MIN_MS = 40;
-const TAP_ZOOM_SLOP = 90;
+const TAP_ZOOM_SLOP = 130;
 // Where a double tap zooms to. Far enough in to read a corner of a television
 // at arm's length, short of ZOOM_MAX so there is somewhere left to pinch to.
 const TAP_ZOOM_TO = 2.5;
@@ -3038,6 +3038,23 @@ video.addEventListener("pointerup", (event) => {
     zoomedByTap = true;
     return;
   }
+  /* Remembered for the next tap -- unless a live record of a different kind
+   * of pointer is already sitting here.
+   *
+   * This is why a double tap was hard to land, and neither threshold had
+   * anything to do with it. iOS follows a touch with a compatibility mouse
+   * event, which arrives here as an ordinary pointerup. It cannot pair with
+   * the touch before it, which is right and is what the kind check above is
+   * for -- but it used to overwrite it on the way past. So a real double tap
+   * arrived as touch, mouse, touch: the second touch was compared against the
+   * mouse event wedged in between, found to be a different kind, and refused.
+   *
+   * Every double tap failed that way, which from the outside looks exactly
+   * like a gesture that needs to be quicker and better aimed. It did not.
+   * A stale record is still replaced: somebody who put the phone down and
+   * picked up a mouse is not mid-gesture. */
+  if (lastPictureTap && (lastPictureTap.kind || "") !== kind
+      && at - lastPictureTap.at <= TAP_ZOOM_MS) return;
   lastPictureTap = { x, y, at, kind };
 });
 
@@ -3092,6 +3109,11 @@ function streamSize() {
 
 const ZOOM_MIN = 1, ZOOM_MAX = 4;
 let zoom = 1, panX = 0, panY = 0, dragged = false;
+// How far one finger has pushed the picture about, and how far it may travel
+// while still being a tap. Small: this only has to forgive a thumb resting on
+// glass, not a deliberate nudge.
+let panMoved = 0;
+const PAN_SLOP = 12;
 
 /* The picture inside the element, in screen pixels, before any zoom.
  *
@@ -3438,6 +3460,7 @@ video.addEventListener("pointerdown", (event) => {
     // a click after it -- which is every drag on a touchscreen -- left the
     // flag set and swallowed the next honest tap.
     dragged = false;
+    panMoved = 0;
     // Captured so a drag that wanders over the hud, or off the screen
     // entirely, keeps moving the picture instead of stopping dead.
     try { video.setPointerCapture(event.pointerId); } catch (_) {}
@@ -3525,7 +3548,15 @@ video.addEventListener("pointermove", (event) => {
     panX += now.x - was.x;
     panY += now.y - was.y;
     applyZoom();
-    dragged = true;
+    // Moved far enough to have meant it. A thumb resting on glass wanders a
+    // pixel or two, and calling that a drag threw the tap away *and* wiped
+    // the one before it -- so a double tap could not be landed at all while
+    // the picture was zoomed, which is half of this gesture.
+    //
+    // The picture still follows the finger from the first pixel. Only the
+    // question "was that a tap" waits for an answer.
+    panMoved += Math.hypot(now.x - was.x, now.y - was.y);
+    if (panMoved >= PAN_SLOP) dragged = true;
     event.preventDefault();
   }
 });
@@ -6623,6 +6654,21 @@ function wireSwapHold(bar) {
     }, SWAP_HOLD_MS);
   };
   const stop = () => { clearTimeout(swapHoldTimer); swapHoldTimer = 0; };
+  /* The same menu, by the gesture a desktop already uses for "the other
+   * things this does".
+   *
+   * Press-and-hold works with a mouse too and is left alone, but nobody holds
+   * a left button down on a laptop to find a menu -- they right-click, get
+   * the browser's own menu over the picture, and conclude there is nothing
+   * there. `swapHeld` is deliberately not set: a right-click fires no click
+   * for it to swallow, and setting it would leave a trap for the next honest
+   * tap on the button. */
+  button.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    stop();
+    buzz();
+    cursorMenuOpen(true);
+  });
   button.addEventListener("pointerdown", start);
   button.addEventListener("pointerup", stop);
   button.addEventListener("pointercancel", stop);
@@ -9625,9 +9671,31 @@ el("pads-buzz").addEventListener("change", (event) => {
  * A tap opens the list, the current choice is marked, and picking one both
  * sets it and switches to the cursor -- so one gesture does the obvious thing
  * and nothing happens that was not asked for. */
-function cursorMenuOpen(yes) {
+/* How long the menu refuses to be shut after it opens, and when it opened.
+ *
+ * Because the gesture that opens it cannot also close it, and on iOS there
+ * is more than one way for it to try. The release of the hold arrives as a
+ * click, which the bar stops; it also arrives as a compatibility mouse event,
+ * and a long press is a system gesture there which can cancel the pointer
+ * out from under all of it. Each of those was a separate thing to stop, and
+ * stopping them one at a time is how this was reported fixed on a desktop and
+ * still flashing on a phone.
+ *
+ * So the rule is written once, over time, where it is true by definition
+ * rather than true of the events one browser happens to send: a menu that
+ * appeared a quarter of a second ago is still appearing, and nothing that is
+ * part of the same gesture gets to take it away. Choosing an entry passes
+ * `force` and is honoured immediately -- that is the one close which is
+ * somebody's decision rather than a leftover. */
+const CURSOR_MENU_SETTLE = 400;
+let cursorMenuAt = 0;
+
+function cursorMenuOpen(yes, force) {
   const menu = el("cursor-menu");
   if (!menu) return;
+  if (!yes && !force && cursorMenuAt
+      && Date.now() - cursorMenuAt < CURSOR_MENU_SETTLE) return;
+  cursorMenuAt = yes ? Date.now() : 0;
   menu.hidden = !yes;
   // The button that opens it is the one in the corner now, and it is opened by
   // holding rather than tapping -- so it is not a disclosure control and does
@@ -9645,7 +9713,7 @@ if (el("cursor-menu")) {
     event.preventDefault();
     event.stopPropagation();
     setCursorMode(pick.dataset.cursor);
-    cursorMenuOpen(false);
+    cursorMenuOpen(false, true);
     // Picking how the cursor moves is asking for the cursor.
     deskChoose("cursor");
   }, true);

@@ -131,6 +131,14 @@ try {
         + "more than it was worth");
 
   // Tapping the picture puts it away again.
+  //
+  // After the settling window, which is the only reason this waits. The menu
+  // refuses to be shut for a moment after it opens, because on iOS the
+  // release of the hold that opened it arrives by several routes at once and
+  // each of them was closing it -- the menu appeared and vanished in one
+  // gesture. Nothing here reaches for the picture a fifth of a second after
+  // letting go of a button; the script can, so the script waits.
+  await new Promise((r) => setTimeout(r, 450));
   await page.tap("#screen");
   await new Promise((r) => setTimeout(r, 250));
   check(await page.evaluate(() => document.getElementById("cursor-menu").hidden),

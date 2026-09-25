@@ -120,6 +120,43 @@ check(F.TO > 1 && F.TO < 4,
 check(/lastPictureTap = null;\s*\/\/ spent/.test(handler),
       "and the pair is spent, so three taps are one zoom and not two");
 
+console.log("\nand a compatibility mouse event does not break the pair");
+/* The fault that made this gesture feel like it needed to be quicker and
+ * better aimed, when neither was true.
+ *
+ * iOS follows a touch with a compatibility mouse event. It cannot be the
+ * second half of a touch -- checked above -- but it used to be written into
+ * `lastPictureTap` on its way past, so a real double tap arrived as touch,
+ * mouse, touch and the second touch was compared against the mouse. Every
+ * double tap failed. Read as a rule over the record rather than by tapping a
+ * phone, because tapping a phone is how it went unfound. */
+check(/if \(lastPictureTap && \(lastPictureTap\.kind \|\| ""\) !== kind/
+        .test(handler),
+      "an event of another kind does not overwrite a live record");
+check(/&& at - lastPictureTap\.at <= TAP_ZOOM_MS\) return;/.test(handler),
+      "though a stale one is replaced -- a phone put down and a mouse picked "
+      + "up is not one gesture");
+
+console.log("\nand a thumb resting on glass is still a tap");
+/* The other half. While the picture is zoomed, one finger pans it, and that
+ * branch called any movement at all a drag -- which discarded the tap and
+ * wiped the one before it, so a double tap could not be landed while zoomed
+ * at all. */
+const pan = src.slice(src.indexOf("  if (zoom > ZOOM_MIN) {\n    panX"));
+check(/panMoved \+= Math\.hypot/.test(pan.slice(0, 900)),
+      "how far the finger pushed the picture is measured");
+check(/if \(panMoved >= PAN_SLOP\) dragged = true;/.test(pan.slice(0, 900)),
+      "and only past a threshold is it a drag rather than a wobble");
+check(/panMoved = 0;/.test(src.slice(src.indexOf("dragged = false;\n    panMoved"))),
+      "reset when a new finger lands, so one drag does not spoil the next tap");
+const slop = Number((/const PAN_SLOP = (\d+);/.exec(src) || [])[1]);
+check(slop > 0 && slop <= 20,
+      "and it forgives a thumb, not a nudge: " + slop + " pixels");
+
+console.log("\nthe thresholds stayed generous");
+check(F.MS >= 600, "asked for twice, so there is real time: " + F.MS + "ms");
+check(F.SLOP >= 120, "and real room: " + F.SLOP + " pixels");
+
 console.log("\nand the hud is not toggled by the tap that zoomed");
 const click = src.slice(src.indexOf('el("screen").addEventListener("click"'));
 check(/if \(zoomedByTap\) \{ zoomedByTap = false; return; \}/
