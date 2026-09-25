@@ -75,6 +75,23 @@ check("never detached" in paint or "permanently stops" in paint,
       "with the one-way nature of it written down, because a retry cannot "
       "undo it")
 
+print("\n-- and the element is never given the track it must not start --")
+# Handing a track to a sink starts the receiver, and a transform attached to a
+# started receiver delivers nothing. It was being started by the track handler
+# itself, two lines before the transform went on: srcObject and play() on a
+# stream containing the video track. The transform then attached, said so, and
+# was handed nothing for ever -- "0 handed over by the transform".
+check('paintMethod === "rtp"' in track,
+      "the track handler knows about the mode")
+check("getAudioTracks" in track,
+      "and gives the element the sound only, because the element is what "
+      "plays it")
+check(track.index("show = new MediaStream(sound)") < track.index("startPlayback()"),
+      "the swap happens before play(), not after")
+check("wholeStream = incoming" in track,
+      "with the whole stream kept, so switching back to the browser drawing "
+      "it does not hand the element a stream with no picture in it")
+
 print("\n-- the reason is recorded where the condition is --")
 check("datachannel event arrives after a track event" in start
       or "after a track event" in start,

@@ -811,7 +811,34 @@ async function answer(message) {
   const incoming = new MediaStream();
   pc.addEventListener("track", (event) => {
     incoming.addTrack(event.track);
-    if (video.srcObject !== incoming) video.srcObject = incoming;
+    // In media-track mode the element must never be given the video track.
+    //
+    // Handing a track to a sink is what starts a receiver, and a transform
+    // attached to a receiver that has started delivers nothing -- which this
+    // file has found out three separate times. It was being started here, two
+    // lines before the transform went on, by this very handler: srcObject and
+    // play() on a stream containing the video track. The transform then
+    // attached successfully, said so, and was handed nothing for ever.
+    //
+    // So that mode gets the sound and nothing else, and the picture is taken
+    // off the receiver instead. The audio has to keep flowing through the
+    // element: it is what plays it.
+    const takeOffTheTrack = paintMethod === "rtp";
+    let show = incoming;
+    if (takeOffTheTrack) {
+      let sound = [];
+      try {
+        sound = incoming.getAudioTracks ? incoming.getAudioTracks() : [];
+      } catch (_) {}
+      show = new MediaStream(sound);
+      // What to put back if this viewer switches to letting the browser
+      // draw. keepAudioOnly() takes this as "already done" and leaves the
+      // element alone, and giveTheVideoBack() restores the whole stream --
+      // without it, going back to the browser would hand the element a
+      // stream with no picture in it.
+      wholeStream = incoming;
+    }
+    if (video.srcObject !== show) video.srcObject = show;
     holdVideoBack(message.jitter);
     startPlayback();
     // A receiver exists now, which is the first moment the frames can be
