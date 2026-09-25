@@ -762,6 +762,33 @@ _host_codecs = None
 KEYFRAME_MIN_GAP = 2.0
 KEYFRAME_BURST = 3
 
+# How often to send a keyframe nobody asked for, while a guest is decoding the
+# picture itself.
+#
+# The encoder is deliberately set to send no periodic keyframes at all -- see
+# KEYFRAME_FALLBACK_SECONDS, where that earned itself the pulsing it fixed.
+# That is right for a browser watching the media line in the ordinary way: it
+# notices its own gaps and sends a PLI, and the picture comes back.
+#
+# It is wrong for a guest drawing its own picture. The decoder is ours, in a
+# worker, and the browser has no idea whether what it handed over decoded --
+# so nothing generates a PLI, and the only way back is the page noticing and
+# asking over the websocket. Rate-limit that ask, as it must be rate-limited,
+# and a guest losing frames steadily is a guest that is refused most of the
+# time: measured on the Windows host, eight refusals for every nine asks.
+#
+# What that looks like from the sofa is the report this comes from -- "it
+# streams the video, then black, then streams video, then black. it does that
+# a few times until it reverts to webrtc". Each black is a wait for a keyframe
+# that was refused.
+#
+# So while anybody is drawing their own picture, keyframes go out on a beat as
+# well as on request, and the black is bounded by this number instead of by
+# how lucky the asking was. It costs bitrate and it costs the evenness that
+# the infinite GOP bought -- but only for as long as somebody is in this mode,
+# and a picture that pulses is worth having over one that stops.
+PAINT_KEYFRAME_SECONDS = 2.0
+
 # Video is the first feed a guest is given, so it is the first transceiver.
 VIDEO_TRANSCEIVER = 0
 
@@ -1137,6 +1164,11 @@ class Stage:
     # paused pipeline.
     _idle_timer = None
     _attaching = 0
+    # Who is decoding the picture themselves, and the beat that keeps them
+    # supplied with keyframes. A set built on first use rather than in
+    # __init__, for the same __new__ reason as the two above.
+    _drawing = None
+    _paint_timer = None
 
     def __init__(self, cfg, loop, codec=None):
         init()
@@ -1903,6 +1935,7 @@ class Stage:
         # immediate and ends that cost even if the rest hangs -- by name,
         # because which elements they are depends on the machine.
         self._cancel_idle()
+        self._cancel_paint_keyframes()
         for name in ("capture", "sound"):
             element = self.pipeline.get_by_name(name)
             if element is not None:
@@ -2062,6 +2095,59 @@ class Stage:
         self._idle_timer = timer
         timer.start()
 
+    def drawing_own(self, peer_id, on, how=""):
+        """A guest has started, or stopped, decoding the picture itself."""
+        drawing = self._drawing
+        if drawing is None:
+            drawing = self._drawing = set()
+        if on and peer_id not in drawing:
+            drawing.add(peer_id)
+            log.info("peer %s is drawing its own picture (%s), so keyframes go "
+                     "out every %.0fs as well as on request",
+                     peer_id, how or "picture channel", PAINT_KEYFRAME_SECONDS)
+            # One now. A decoder that has just been built has nothing at all,
+            # and waiting a beat for it is the black screen this is for.
+            self.worker.submit(self.force_keyframe)
+            self._arm_paint_keyframes()
+        elif not on and peer_id in drawing:
+            drawing.discard(peer_id)
+            log.info("peer %s has stopped drawing its own picture", peer_id)
+            if not drawing:
+                log.info("nobody is drawing their own picture now, so the "
+                         "keyframe beat stops")
+                self._cancel_paint_keyframes()
+
+    def _cancel_paint_keyframes(self):
+        timer, self._paint_timer = self._paint_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _arm_paint_keyframes(self):
+        """The next keyframe on the beat, if anybody still wants one."""
+        self._cancel_paint_keyframes()
+        if not self._drawing:
+            return
+        timer = threading.Timer(PAINT_KEYFRAME_SECONDS, self._paint_keyframe)
+        timer.daemon = True
+        self._paint_timer = timer
+        timer.start()
+
+    def _paint_keyframe(self):
+        """One keyframe on the beat, then arm the next.
+
+        Re-armed at the end rather than by a repeating timer so that a Stage
+        that has been stopped, or whose last painting guest has gone, stops
+        asking: the condition is re-read every time round.
+        """
+        self._paint_timer = None
+        if not self._drawing:
+            return
+        # Straight to force_keyframe, not through request_keyframe: this is
+        # not a guest asking and must not spend from the bucket that guests
+        # ask out of.
+        self.worker.submit(self.force_keyframe)
+        self._arm_paint_keyframes()
+
     def idle_if_empty(self):
         """Take the capture to PAUSED, unless somebody turned up meanwhile.
 
@@ -2173,6 +2259,10 @@ class Stage:
                         "one; leaving the current peer where it is", peer_id)
             return None
         peer = self.peers.pop(peer_id, None)
+        if peer is not None:
+            # A guest who left is no longer waiting for keyframes, whether it
+            # said so or was simply closed.
+            self.drawing_own(peer_id, False)
         if peer is not None and not self.watchers():
             # The last guest just left. Nothing is stopped yet -- a reload is
             # back within milliseconds, and IDLE_AFTER is what tells the two
@@ -2200,7 +2290,7 @@ class Stage:
         self._keyframe_filled = time.monotonic()
         self._keyframes_refused = 0
 
-    def request_keyframe(self, who="", now=None):
+    def request_keyframe(self, who="", now=None, starting=False):
         """A guest has lost the picture and wants a fresh start.
 
         Rate-limited, because the encoder is shared: four guests on a bad
@@ -2222,21 +2312,35 @@ class Stage:
             self._keyframe_tokens
             + (now - self._keyframe_filled) / KEYFRAME_MIN_GAP)
         self._keyframe_filled = now
-        if self._keyframe_tokens < 1.0:
+        # A decoder that has never had a keyframe is not repairing sustained
+        # loss: it has nothing at all, and on a host sending keyframes only
+        # when asked there is no other way for it to ever start. Refusing that
+        # is not throttling recovery, it is refusing to begin -- and the page
+        # bounds itself to three such asks before giving up, so answering them
+        # cannot become a storm.
+        #
+        # Found with the media-track mode: the decoder was built, asked, was
+        # refused eight times out of nine, and never started.
+        if self._keyframe_tokens < 1.0 and not starting:
             # Refused, and counted. A storm used to be invisible from here:
             # the log only ever recorded the requests that were granted, so a
             # host spending half its bitrate on recovery looked like a host
             # handing out the occasional keyframe.
             self._keyframes_refused += 1
             return
+        why = ("has no keyframe to start from" if starting
+               else "asked for a keyframe after losing the picture")
         if self._keyframes_refused:
-            log.info("peer %s asked for a keyframe after losing the picture "
-                     "(and %d request(s) were refused since the last one; "
-                     "guests are losing the picture faster than sending "
-                     "keyframes can fix)", who, self._keyframes_refused)
+            log.info("peer %s %s (and %d request(s) were refused since the "
+                     "last one; guests are losing the picture faster than "
+                     "sending keyframes can fix)",
+                     who, why, self._keyframes_refused)
             self._keyframes_refused = 0
         else:
-            log.info("peer %s asked for a keyframe after losing the picture", who)
+            log.info("peer %s %s", who, why)
+        # Spent even when it was over the limit, so a run of starting asks
+        # still costs what it costs and shows up as a deficit afterwards
+        # rather than being free.
         self._keyframe_tokens -= 1.0
         self.worker.submit(self.force_keyframe)
 
@@ -3168,6 +3272,11 @@ class Peer:
         self._reported_seq = None
         log.info("peer %s: %s sending whole frames down the picture channel",
                  self.id, "started" if want else "stopped")
+        # The same fact the websocket "painting" message carries, from the mode
+        # that has a picture channel to say it on. Both modes need the keyframe
+        # beat, for the same reason: the decoder is in a worker and the browser
+        # cannot tell anyone it failed.
+        self.stage.drawing_own(self.id, want, "picture channel")
         if want:
             self.stage.apply_ceiling()
             log.info("peer %s: forcing a keyframe, because a decoder that has "

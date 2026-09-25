@@ -418,8 +418,25 @@ class Server:
                     # very long time. Rate-limited exactly like a PLI is,
                     # because it costs everybody in the session a keyframe.
                     if self.session is not None and self.session.stage:
+                        # "starting" means the page has frames and no keyframe
+                        # among them, so its decoder has nothing to begin
+                        # with. That is not the case the limit is for.
                         self.session.stage.request_keyframe(
-                            "%s (drawing its own)" % guest.label)
+                            "%s (drawing its own)" % guest.label,
+                            starting=bool(message.get("starting")))
+                elif kind == "painting" and guest is not None:
+                    # The page says whether it is decoding the picture itself.
+                    #
+                    # The host used to learn this only from the picture data
+                    # channel, which the media-track mode never opens -- so in
+                    # that mode it did not know, and went on sending no
+                    # periodic keyframes to a decoder that could only recover
+                    # by asking. One signal covers both modes.
+                    if self.session is not None and self.session.stage:
+                        self.session.stage.drawing_own(
+                            "slot%s" % guest.slot,
+                            bool(message.get("on")),
+                            str(message.get("how", ""))[:32])
                 elif kind == "renew" and guest is not None:
                     # Their network changed under them. Everything negotiated
                     # before refers to addresses that no longer exist.

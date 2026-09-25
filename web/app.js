@@ -9253,6 +9253,9 @@ function stopPainting(why) {
   lastDrawn = 0;
   const was = Boolean(painter);
   if (painter) { painter.stop(); painter = null; }
+  // Before anything else that might fail: a host still sending keyframes on a
+  // beat for a page that has stopped painting is spending bitrate on nobody.
+  if (was) tellHostPainting(false, "");
   giveTheVideoBack();
   // Nothing to undo on the receiver and nothing to rebuild.
   //
@@ -9638,6 +9641,7 @@ async function startPainting() {
   fitPainted();
   paintAfterZoom();
   report("drawing the picture here, " + codec + ", pacing it ourselves");
+  tellHostPainting(true, paintMethod);
   watchThePainting();
   // If the worker gives up on its own -- a decoder that will not run, a
   // transform the browser refuses -- that is the same situation as nothing
@@ -9694,10 +9698,32 @@ async function startPainting() {
   askHostForKeyframe();
 }
 
+/* Say whether this page is decoding the picture itself.
+ *
+ * The host cannot work this out. In the data-channel mode it learns it when
+ * the picture channel opens; in the media-track mode nothing opens, the stream
+ * looks exactly like an ordinary WebRTC guest watching the media line, and the
+ * host went on sending no periodic keyframes to a decoder whose only way to
+ * recover was to ask and be refused. */
+function tellHostPainting(on, how) {
+  try {
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ t: "painting", on: !!on, how: how || "" }));
+    }
+  } catch (_) { /* the host falls back to asking, as it did before */ }
+}
+
 function askHostForKeyframe() {
   try {
     if (socket && socket.readyState === 1) {
-      socket.send(JSON.stringify({ t: "keyframe" }));
+      // Say whether this decoder has anything at all. Frames arriving with no
+      // keyframe among them is a decoder that cannot start, which is not what
+      // the host's rate limit is protecting against -- and on a host sending
+      // keyframes only when asked, being refused means never starting.
+      const starting = !!(painter && painter.waitingForKey
+                          && painter.waitingForKey()
+                          && painter.painted && !painter.painted());
+      socket.send(JSON.stringify({ t: "keyframe", starting: starting }));
     }
   } catch (_) { /* it will come with the next one */ }
 }

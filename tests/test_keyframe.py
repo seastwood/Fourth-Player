@@ -125,7 +125,87 @@ check(allowed * 15.0 / (10.0 * 30.0) <= 0.40,
       "which is at most 40%% of the frame budget at 30fps: %.0f%%"
       % (allowed * 15.0 / (10.0 * 30.0) * 100))
 
-print("the event a browser's request arrives as is the one being watched for")
+print("a decoder that has nothing yet is not made to wait for a token")
+# The failure this was written for. The host was on "keyframes: only when a
+# guest asks", the page's decoder had frames and no keyframe among them, and
+# the bucket was empty -- so the one request that could have started it was
+# refused, eight times out of nine. There is no other way for that decoder to
+# begin, and the page bounds itself to three such asks, so it cannot storm.
+stage = FakeStage()
+stage._keyframe_tokens = 0.0
+stage.request_keyframe("slot0", now=time.monotonic())
+check(stage.forced == 0, "an ordinary request on an empty bucket is refused")
+check(stage._keyframes_refused == 1, "and counted")
+stage.request_keyframe("slot0", now=time.monotonic(), starting=True)
+check(stage.forced == 1,
+      "but one from a decoder with nothing to start from is answered")
+check(stage._keyframes_refused == 0,
+      "and the refusals since are reported rather than silently dropped")
+check(stage._keyframe_tokens < 0,
+      "it is still charged for, so a run of them shows as a deficit rather "
+      "than being free, got %r" % stage._keyframe_tokens)
+
+print("\nwhile a guest draws its own picture, keyframes go out unasked")
+# The other half, and the one the user actually saw: painted() latches, so
+# after the first successful paint every later recovery went back through the
+# bucket -- picture, black, picture, black, give up.
+was = video.PAINT_KEYFRAME_SECONDS
+video.PAINT_KEYFRAME_SECONDS = 0.05
+try:
+    stage = video.Stage.__new__(video.Stage)
+    stage.worker = FakeWorker()
+    stage._reset_keyframe_limit()
+    check(stage._drawing is None and stage._paint_timer is None,
+          "a Stage nobody is painting on has no beat running")
+    stage.drawing_own("slot0", True, "rtp")
+    check(len(stage.worker.jobs) == 1,
+          "starting to paint forces one at once -- a new decoder has nothing")
+    for _ in range(40):
+        if len(stage.worker.jobs) >= 3:
+            break
+        time.sleep(0.02)
+    check(len(stage.worker.jobs) >= 3,
+          "and then they keep coming on a beat, got %d"
+          % len(stage.worker.jobs))
+    check(stage._keyframe_tokens == float(video.KEYFRAME_BURST),
+          "none of which is charged to the guests' bucket, got %r"
+          % stage._keyframe_tokens)
+    sofar = len(stage.worker.jobs)
+    stage.drawing_own("slot0", False)
+    check(stage._paint_timer is None, "the beat stops when painting stops")
+    time.sleep(0.2)
+    check(len(stage.worker.jobs) == sofar,
+          "and really stops, got %d more" % (len(stage.worker.jobs) - sofar))
+
+    print("\nand it lasts as long as the last guest who wants it")
+    stage = video.Stage.__new__(video.Stage)
+    stage.worker = FakeWorker()
+    stage._reset_keyframe_limit()
+    stage.drawing_own("slot0", True, "rtp")
+    stage.drawing_own("slot1", True, "picture channel")
+    stage.drawing_own("slot0", False)
+    check(stage._paint_timer is not None,
+          "one of two stopping leaves the beat running for the other")
+    stage.drawing_own("slot1", False)
+    check(stage._paint_timer is None, "the last one stops it")
+    check(stage.drawing_own("slot1", False) is None
+          and stage._paint_timer is None,
+          "and saying so twice is not an error")
+finally:
+    video.PAINT_KEYFRAME_SECONDS = was
+
+print("\nboth modes reach it, and a guest who leaves stops being counted")
+import inspect                                              # noqa: E402
+check("drawing_own" in inspect.getsource(video.Stage.take_peer),
+      "take_peer takes a departed guest off the beat -- a browser that is "
+      "closed rather than switched back says nothing on its way out")
+check("_cancel_paint_keyframes" in inspect.getsource(video.Stage.stop),
+      "and stop() calls it off: a pipeline going to NULL has no encoder")
+check("drawing_own" in inspect.getsource(video.Peer._on_picture_asked),
+      "the picture-channel mode reports through the same door, so the beat is "
+      "not something only the media-track mode gets")
+
+print("\nthe event a browser's request arrives as is the one being watched for")
 # Built the same way webrtcbin builds it, so a rename upstream fails here
 # rather than silently going back to two seconds of black.
 gi.require_version("GstVideo", "1.0")
