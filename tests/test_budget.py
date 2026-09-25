@@ -84,7 +84,7 @@ print()
 print("a storm is visible in the log rather than silent")
 check("_keyframes_refused" in source,
       "refused requests are counted, not dropped on the floor")
-check(re.search(r"refused.*(since the last|guests are losing)", source),
+check(re.search(r"refused.*(since the last|guests are losing)", source, re.S),
       "and said out loud, so a host spending its bitrate on recovery looks "
       "like one")
 
