@@ -583,9 +583,9 @@ class PadSet:
             return False
         self.kinds[index] = want
         if self.pads[index] is not None:
-            log.info("seat %d becomes a %s; unplugging the old pad so the new "
+            log.info("%s becomes a %s; unplugging the old pad so the new "
                      "identity is the one anything sees",
-                     index + 1, KINDS[want]["label"])
+                     self.names[index], KINDS[want]["label"])
             self.release(index)
         return True
 
@@ -622,7 +622,14 @@ class PadSet:
                     for f in traceback.extract_stack()[-5:-1])
             except Exception:
                 pad.made_by = ""
-            log.info("plugged in %s (seat %d)", self.names[index], index)
+            # By name alone. The name already carries a number and it is the
+            # one everybody else uses: the picker, the panel, RetroArch's
+            # profiles. Printing the array index beside it put two different
+            # numbers for the same controller in one sentence -- "Fourth
+            # Player 1 (seat 0)" -- and reading that as two controllers, one
+            # of which the page would not offer, is the only sensible thing to
+            # do with it.
+            log.info("plugged in %s", self.names[index])
         return pad
 
     def existing(self, index):
@@ -654,7 +661,7 @@ class PadSet:
         # leaving. The log read "plugged in" five times in eight minutes with
         # not one unplug beside them, which looks like a pad being created for
         # no reason rather than a pad being destroyed for a bad one.
-        log.info("unplugged %s (seat %d)", self.names[index], index)
+        log.info("unplugged %s", self.names[index])
         self.pads[index] = None
         # Let go before unplugging: a pad removed mid-press otherwise leaves
         # the emulator holding whatever it held.

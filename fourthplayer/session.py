@@ -1656,7 +1656,11 @@ class LiveSession:
             # Nobody swapped into the seat they left, so nobody is in it --
             # and an empty seat must not keep a player port to itself.
             self.pads.release(was)
-            log.info("%s moved from pad %d to pad %d", guest.label, was, index)
+            # By name, like everything else that mentions a controller. The
+            # index is zero-based and every name a person sees is not, so the
+            # two together read as different controllers.
+            log.info("%s moved from %s to %s", guest.label,
+                     self.pads.name_for(was), self.pads.name_for(index))
         self.publish_pad_names()
         self.notify({"t": "pads", **self.pad_state()})
         self.publish_people()
@@ -1928,11 +1932,11 @@ class LiveSession:
                 # moment anybody restarts the service to look at it, so
                 # the evidence has to be collected while it is happening.
                 log.warning(
-                    "controller %d has been unplugged %d times for having "
-                    "nobody on it, and something keeps making it again -- "
-                    "to a game this looks like a controller connecting and "
-                    "disconnecting over and over. Last made by: %s",
-                    index, self._orphan_unplugs,
+                    "%s has been unplugged %d times for having nobody on it, "
+                    "and something keeps making it again -- to a game this "
+                    "looks like a controller connecting and disconnecting "
+                    "over and over. Last made by: %s",
+                    self.pads.name_for(index), self._orphan_unplugs,
                     getattr(pad, "made_by", "") or "(unrecorded)")
             log.info("unplugged %s: nobody is sitting on it",
                      self.pads.name_for(index))
