@@ -3083,6 +3083,30 @@ class Peer:
         # current. Five hundred is theirs and is the number that matters --
         # a hundred and fifty was tried here and the stall stayed at a full
         # second, which is the thing to check rather than assume.
+        #
+        # 2026-09-24: the obvious next idea does not work, so do not spend a
+        # day on it. If the stall is SCTP's minimum retransmission timeout,
+        # lower the floor -- usrsctp has
+        # usrsctp_sysctl_set_sctp_rto_min_default() for exactly this. It
+        # cannot be reached. usrsctp is linked *statically* into
+        # libgstsctp-1.0.so.0 and exports none of its symbols:
+        #
+        #     nm -D --defined-only libgstsctp-1.0.so.0 | grep -c usrsctp   ->  0
+        #
+        # and sctpenc's own properties are three: remote-sctp-port,
+        # sctp-association-id, use-sock-stream. There is no knob, and none
+        # can be reached from this process. Changing it means rebuilding the
+        # plugin, on every machine, for ever.
+        #
+        # And the freeze on this host is not only a lost packet. sctpenc says
+        # "Could not write to resource", and the picture channel is reported
+        # hundreds of kilobytes behind -- 671581 bytes in one case. That is
+        # the send buffer full, which is a throughput limit rather than a
+        # retransmission: 1440p60 at twenty-odd megabits is more than usrsctp
+        # will pass, whatever the timeouts say. Which is why dropping the
+        # bitrate helps, and why the honest fix is the media line beside this
+        # one -- RTP over UDP, with the loss recovery a media stack already
+        # has -- and WebCodecs used only to decode what arrives on it.
         video_options = Gst.Structure.new_from_string(
             "options, ordered=(boolean)true, max-packet-lifetime=(int)500")
         self.frame_channel = self.webrtc.emit("create-data-channel", "picture",
