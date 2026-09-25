@@ -110,6 +110,20 @@ check('if command == "motionaccel":' in SERVER
 check('"motion_accel":' in SERVER and '"gyro_order":' in SERVER,
       "and reports them, so the page can show what is in force")
 
+print("\nand the orders it offers are all ones it accepts")
+# The set of answers is small and not obvious, so the page offers them rather
+# than leaving somebody to type into the dark. Every one has to be valid or
+# the list is a trap: an odd number of negations is a mirror, and the page
+# would be suggesting something the host refuses.
+sys.path.insert(0, ROOT)
+from fourthplayer import pads as padlib
+block = HTML[HTML.index('<datalist id="gyro-orders">'):HTML.index("</datalist>")]
+offered = re.findall(r'value="([^"]+)"', block)
+check(len(offered) >= 8, "there are several, got %d" % len(offered))
+refused = [n for n in offered if padlib.parse_gyro_order(n) is None]
+check(not refused, "and the host accepts every one: %s" % (refused or "all"))
+check(len(set(offered)) == len(offered), "with no duplicates")
+
 print("\nand a motion order that cannot be used is refused, not swapped")
 # Silently falling back was worse than an error: an order that is refused is
 # almost always a mirror -- "invert one axis" always is -- and the default is

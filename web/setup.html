@@ -133,7 +133,23 @@
           <option value="device">the device (real tilt)</option>
           <option value="off">nothing</option>
         </select></label>
-        <label title="Which way round a phone's rotations reach the controller, named as what the pad's three axes should take. Each of pitch, yaw and roll exactly once, any of them negated with a leading minus. The whole thing has to be a rotation: negating a single axis is a mirror, which no way of holding a phone produces, so to flip one axis negate two or reorder. There is no way to work this out from here — the only instrument is somebody playing a game and saying what moved.">Motion axes <input id="set-gyro-order" style="width:11rem" placeholder="pitch,roll,-yaw"></label>
+        <label title="Which way round a phone's rotations reach the controller, named as what the pad's three axes should take. Each of pitch, yaw and roll exactly once, any of them negated with a leading minus. The whole thing has to be a rotation: negating a single axis is a mirror, which no way of holding a phone produces, so to flip one axis negate two or reorder. There is no way to work this out from here — the only instrument is somebody playing a game and saying what moved.">Motion axes <input id="set-gyro-order" list="gyro-orders" style="width:11rem" placeholder="pitch,roll,-yaw"></label>
+        <!-- Offered rather than left to be typed, because the set of answers
+             is small and not obvious. Each of pitch, yaw and roll appears once
+             and the negations come in pairs: an odd number of them is a
+             mirror, which no way of holding a phone produces. So for any one
+             ordering there are exactly four, and finding the right one is four
+             tries rather than an open question. -->
+        <datalist id="gyro-orders">
+          <option value="pitch,roll,-yaw"></option>
+          <option value="-pitch,-roll,-yaw"></option>
+          <option value="-pitch,roll,yaw"></option>
+          <option value="pitch,-roll,yaw"></option>
+          <option value="roll,pitch,yaw"></option>
+          <option value="-roll,-pitch,yaw"></option>
+          <option value="-roll,pitch,-yaw"></option>
+          <option value="roll,-pitch,-yaw"></option>
+        </datalist>
       </div>
       <div class="row"><button class="go" data-do="apply-access">Apply</button></div>
     </div>
