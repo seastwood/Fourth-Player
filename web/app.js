@@ -777,13 +777,20 @@ function padKindFrom(kinds, now) {
   // control the moment it was used.
   const offered = Array.isArray(kinds) ? kinds.filter(Boolean) : padKindOffered;
   if (Array.isArray(kinds)) padKindOffered = offered;
-  if (offered) {
-    // One choice is not a choice. A host that can only make one kind of pad
-    // should not show a dropdown that cannot be changed.
-    if (offered.length < 2) { row.hidden = true; return; }
-    row.hidden = false;
+  if (!offered) {
+    // Nothing to build from, so ask. The list used to arrive once with the
+    // welcome, which meant any path that did not carry it -- a resume, a
+    // reconnect, or signing in after joining -- left this control invisible
+    // for the rest of the session. Asking is cheap and changes nothing on the
+    // host; sending no kind is a read.
+    askHostPadKinds();
+    return;
   }
-  if (offered && box.dataset.built !== offered.join(",")) {
+  // One choice is not a choice. A host that can only make one kind of pad
+  // should not show a dropdown that cannot be changed.
+  if (offered.length < 2) { row.hidden = true; return; }
+  row.hidden = false;
+  if (box.dataset.built !== offered.join(",")) {
     box.innerHTML = "";
     for (const kind of offered) {
       const option = document.createElement("option");
@@ -797,6 +804,23 @@ function padKindFrom(kinds, now) {
     padKindNow = now;
     if (document.activeElement !== box) box.value = now;
   }
+}
+
+/* Ask the host what kinds it can make. Throttled, because this is reached
+   from paintAccount and that runs on every change to the panel -- and a page
+   that cannot be told (no account, no socket yet) would otherwise ask on each
+   one. */
+let padKindAskedAt = 0;
+
+function askHostPadKinds() {
+  const now = Date.now();
+  if (now - padKindAskedAt < 2000) return;
+  try {
+    if (socket && socket.readyState === 1) {
+      padKindAskedAt = now;
+      socket.send(JSON.stringify({ t: "padkind" }));
+    }
+  } catch (_) { /* the next paint asks again */ }
 }
 
 function tellHostPadKind(kind) {

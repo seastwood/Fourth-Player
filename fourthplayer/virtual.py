@@ -24,7 +24,9 @@ device happily and XInput reports four, so a Windows host can seat four guests
 at most -- and every controller physically plugged into it takes one of the
 same four. Measured; see tools/winspike/README.md. Linux has no such ceiling.
 """
+import ctypes
 import logging
+import struct
 import sys
 import time
 
@@ -407,37 +409,65 @@ except ImportError:
             self._dirty = True
             return True
 
+        # The DS4 report, laid out by hand because the struct cannot be trusted.
+        #
+        # ViGEm declares its report structs packed -- they describe bytes on a
+        # wire, and a HID report has no padding in it. vgamepad's ctypes
+        # translation leaves `_pack_` unset, so ctypes aligns them: DS4_REPORT
+        # measures 10 bytes where its content is 9, and DS4_SUB_REPORT_EX gains
+        # a phantom byte at offset 9 and another at 13.
+        #
+        # Writing through the named fields therefore lands every field after
+        # the triggers one or two bytes late. Measured from the bytes actually
+        # sent:
+        #
+        #   wTimestamp -> the battery level and gyro X's low byte
+        #   wGyroX     -> the real gyro Y
+        #   wGyroY     -> the real gyro Z
+        #   wGyroZ     -> the real accelerometer X
+        #
+        # So the real gyro X -- pitch, which is up and down -- was being fed a
+        # battery level of zero and a padding byte, for ever. Reported as
+        # "only getting x axis gyro, nothing in the y axis", and it was:
+        # rotation appeared on axes the game was not reading for vertical aim
+        # and never on the one it was.
+        #
+        # Format: four stick bytes, the button word, the special byte, two
+        # trigger bytes, the timestamp word, the battery byte, then three gyro
+        # and three accelerometer words. "<" means no alignment, which is the
+        # whole point.
+        REPORT = struct.Struct("<BBBBHBBBHBhhhhhh")
+
         def _send_extended(self):
             """The whole DS4 report, motion included.
 
             vgamepad's ordinary update() sends the short report, which has no
-            room for a gyroscope. The extended one does, and its fields are
-            named -- wGyroX and the rest -- so none of this is byte arithmetic
-            over a buffer whose layout could shift under it.
+            room for a gyroscope. The extended one does -- but its fields are
+            at the wrong offsets, so the bytes are packed here instead. See
+            REPORT above for what that cost before it was found.
             """
             import vgamepad.win.vigem_commons as commons
             report = commons.DS4_REPORT_EX()
             short = self._pad.report
-            # Field by field from the report vgamepad has been filling, by
-            # name. The extended struct begins with the same fields, and
-            # copying them by name rather than by memcpy means a layout that
-            # ever differs fails loudly instead of sending nonsense.
-            for name, _type in type(short)._fields_:
-                if name.startswith("_"):
-                    continue
-                try:
-                    setattr(report.Report, name, getattr(short, name))
-                except (AttributeError, TypeError):
-                    pass
-            gyro, accel = self._motion
-            report.Report.wGyroX, report.Report.wGyroY, report.Report.wGyroZ = gyro
-            report.Report.wAccelX, report.Report.wAccelY, report.Report.wAccelZ = accel
             now = time.monotonic()
             if self._motion_at:
                 self._ticks = (self._ticks
                                + int((now - self._motion_at) / self.TICK_SECONDS)) & 0xFFFF
             self._motion_at = now
-            report.Report.wTimestamp = self._ticks
+            gyro, accel = self._motion
+            packed = self.REPORT.pack(
+                short.bThumbLX, short.bThumbLY, short.bThumbRX, short.bThumbRY,
+                short.wButtons, short.bSpecial,
+                short.bTriggerL, short.bTriggerR,
+                self._ticks,
+                # A real pad reports a charge. Zero reads as flat, and a game
+                # or an overlay that shows it has no reason to be told this
+                # pad is dying.
+                0xFF,
+                gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2])
+            # Into the union's byte view, which is the same memory as the
+            # struct and the only way to put these where the wire wants them.
+            ctypes.memmove(report.ReportBuffer, packed, len(packed))
             # Said once, with the bytes, because everything above this point
             # can be right and the report still be wrong -- and from the game's
             # side a gyroscope that does nothing looks the same either way.
@@ -446,13 +476,16 @@ except ImportError:
             if not getattr(self, "_said_report", False):
                 self._said_report = True
                 try:
-                    raw = bytes(bytearray(report.ReportBuffer)[:26])
+                    raw = bytes(bytearray(report.ReportBuffer)[:24])
+                    # Read back out of the bytes, not out of the struct's
+                    # fields: the fields are at the offsets that were wrong in
+                    # the first place, so reporting through them would have
+                    # agreed with the bug.
+                    back = self.REPORT.unpack(raw)
                     log.info("DS4 extended report: gyro %d %d %d accel %d %d %d"
-                             " stamp %d; first 26 bytes %s",
-                             report.Report.wGyroX, report.Report.wGyroY,
-                             report.Report.wGyroZ, report.Report.wAccelX,
-                             report.Report.wAccelY, report.Report.wAccelZ,
-                             report.Report.wTimestamp, raw.hex(" "))
+                             " stamp %d; 24 bytes %s",
+                             back[10], back[11], back[12], back[13], back[14],
+                             back[15], back[8], raw.hex(" "))
                 except Exception:
                     log.info("DS4 extended report built, but its bytes could "
                              "not be read back", exc_info=True)

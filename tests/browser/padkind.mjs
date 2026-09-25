@@ -50,7 +50,7 @@ function page(allowed = true) {
 }
 
 console.log("the host names the kinds, so the page carries no list of its own");
-let { nodes, run } = page();
+let { nodes, sent, run } = page();
 run.padKindFrom(["xbox360", "ds4"], "xbox360");
 check(nodes["pads-kind-row"].hidden === false, "two kinds shows the control");
 check(nodes["pads-kind"].kids.length === 2,
@@ -95,8 +95,25 @@ check(nodes["pads-kind-row"].hidden === false
       && nodes["pads-kind"].kids.length === 2,
       "a later call with no list keeps the one it was given");
 
+console.log("\nand with no list at all it asks, rather than staying hidden");
+// The reported fault: the list arrived once with the welcome, so a resume, a
+// reconnect or signing in after joining left the control invisible for the
+// rest of the session. Asking is cheap and sending no kind is a read.
+({ nodes, sent, run } = page(true));
+run.padKindFrom(null, "ds4");
+check(sent.length === 1 && sent[0].t === "padkind"
+      && sent[0].kind === undefined,
+      "it asks, with no kind -- which the host treats as a question: "
+      + JSON.stringify(sent));
+check(nodes["pads-kind-row"].hidden === true,
+      "and stays hidden until the answer comes, rather than showing an empty "
+      + "dropdown");
+run.padKindFrom(["xbox360", "ds4"], "ds4");
+check(nodes["pads-kind-row"].hidden === false
+      && nodes["pads-kind"].value === "ds4",
+      "then appears, set to what the host said");
+
 console.log("\nchoosing tells the host, once");
-let sent;
 ({ nodes, sent, run } = page());
 run.padKindFrom(["xbox360", "ds4"], "xbox360");
 run.tellHostPadKind("ds4");

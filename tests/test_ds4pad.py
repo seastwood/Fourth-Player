@@ -26,6 +26,7 @@ game responds, and up is down.
 """
 import ctypes
 import importlib
+import struct
 import importlib.util
 import os
 import time
@@ -137,6 +138,16 @@ class _ShortReport(ctypes.Structure):
                 ("wButtons", ctypes.c_ushort), ("bSpecial", ctypes.c_ubyte),
                 ("bTriggerL", ctypes.c_ubyte), ("bTriggerR", ctypes.c_ubyte)]
 
+    def __init__(self):
+        super().__init__()
+        # Centred, as vgamepad's own default report is. Zero is both sticks
+        # held hard up and left, which is what a motion-only frame would have
+        # sent if this started there.
+        self.bThumbLX = self.bThumbLY = 0x80
+        self.bThumbRX = self.bThumbRY = 0x80
+        # Neutral d-pad, which is 8 in the low nibble and not 0.
+        self.wButtons = 8
+
 
 class _SubReportEx(ctypes.Structure):
     """As much of ViGEm's extended report as this checks, at its real offsets.
@@ -158,8 +169,24 @@ class _SubReportEx(ctypes.Structure):
                 ("wAccelY", ctypes.c_short), ("wAccelZ", ctypes.c_short)]
 
 
-class _ReportEx(ctypes.Structure):
-    _fields_ = [("Report", _SubReportEx)]
+class _ReportEx(ctypes.Union):
+    """A union, exactly as ViGEm declares it -- and with vgamepad's bug in it.
+
+    `Report` is the ctypes-*aligned* struct above, which is what vgamepad
+    hands out and which has phantom padding at offsets 9 and 13 that a HID
+    report does not have. `ReportBuffer` is the same memory seen as bytes.
+
+    Keeping the aligned struct here rather than quietly fixing it is the point:
+    the code under test has to write the right bytes *despite* it, and a stub
+    that was packed would pass whether or not it did.
+    """
+
+    _fields_ = [("Report", _SubReportEx),
+                ("ReportBuffer", ctypes.c_ubyte * 63)]
+
+
+# The real thing, which has no padding because it describes bytes on a wire.
+PACKED = struct.Struct("<BBBBHBBBHBhhhhhh")
 
 
 class FakeCommons:
@@ -184,11 +211,26 @@ class Recorder:
         self.updates = 0
         self.extended = None
         self.stamps = []
+        self.raw = None
+        self.sticks = None
+        self.buttonword = None
+        self.battery = None
         self.report = _ShortReport()
 
-    def press_button(self, button): self.down.add(button)
+    # vgamepad's own calls write into self.report and update() sends it. The
+    # first version of this stub only recorded them, so the repacking read
+    # zeros -- and the suite would have blessed a report with the sticks hard
+    # up and left in it. A stand-in narrower than the real object is the
+    # commonest way a test here passes for the wrong reason.
+    _BITS = {name: 1 << i for i, name in enumerate(DS4_BUTTONS)}
 
-    def release_button(self, button): self.down.discard(button)
+    def press_button(self, button):
+        self.down.add(button)
+        self.report.wButtons |= self._BITS.get(button, 0)
+
+    def release_button(self, button):
+        self.down.discard(button)
+        self.report.wButtons &= ~self._BITS.get(button, 0) & 0xFFFF
 
     def press_special_button(self, special_button):
         self.special.add(special_button)
@@ -196,13 +238,21 @@ class Recorder:
     def release_special_button(self, special_button):
         self.special.discard(special_button)
 
-    def left_joystick(self, x_value, y_value): self.left = (x_value, y_value)
+    def left_joystick(self, x_value, y_value):
+        self.left = (x_value, y_value)
+        self.report.bThumbLX, self.report.bThumbLY = x_value, y_value
 
-    def right_joystick(self, x_value, y_value): self.right = (x_value, y_value)
+    def right_joystick(self, x_value, y_value):
+        self.right = (x_value, y_value)
+        self.report.bThumbRX, self.report.bThumbRY = x_value, y_value
 
-    def left_trigger(self, value): self.triggers["l"] = value
+    def left_trigger(self, value):
+        self.triggers["l"] = value
+        self.report.bTriggerL = value
 
-    def right_trigger(self, value): self.triggers["r"] = value
+    def right_trigger(self, value):
+        self.triggers["r"] = value
+        self.report.bTriggerR = value
 
     def directional_pad(self, direction): self.dpad = direction
 
@@ -213,11 +263,18 @@ class Recorder:
     def update(self): self.updates += 1
 
     def update_extended_report(self, report):
-        self.extended = ([report.Report.wGyroX, report.Report.wGyroY,
-                          report.Report.wGyroZ],
-                         [report.Report.wAccelX, report.Report.wAccelY,
-                          report.Report.wAccelZ])
-        self.stamps.append(report.Report.wTimestamp)
+        # Read out of the bytes at the offsets a DualShock really uses, not out
+        # of the aligned struct's fields. Reading the fields would agree with
+        # the bug this exists to catch.
+        raw = bytes(bytearray(report.ReportBuffer)[:PACKED.size])
+        got = PACKED.unpack(raw)
+        self.extended = ([got[10], got[11], got[12]],
+                         [got[13], got[14], got[15]])
+        self.stamps.append(got[8])
+        self.sticks = got[0:4]
+        self.buttonword = got[4]
+        self.battery = got[9]
+        self.raw = raw
 
     def reset(self): self.__init__()
 
@@ -386,6 +443,52 @@ gyro, accel = pad.extended
 check(gyro[0] == 160, "10 deg/s stays 160, got %r" % (gyro[0],))
 # One gravity is 1000 on the wire and about 8192 on a DS4.
 check(accel[2] == 8192, "1 g becomes 8192, got %r" % (accel[2],))
+
+print("\n-- at the offsets a DualShock really uses, not the aligned ones --")
+# The fault this replaced. ViGEm declares its report structs packed -- they
+# describe bytes on a wire -- and vgamepad's ctypes translation leaves _pack_
+# unset, so ctypes inserts a byte at offset 9 and another at 13. Writing
+# through the named fields put the timestamp over the battery and gyro X's low
+# byte, pitch on the real gyro Y, yaw on gyro Z, and roll into the
+# accelerometer. The real gyro X -- up and down -- received a battery level of
+# zero and a padding byte, for ever.
+ui, pad = a_pad("ds4")
+# Wire units in: sixteenths of a degree per second, thousandths of gravity.
+# Rotation passes through unscaled and acceleration is multiplied by 8.192,
+# so one gravity on z is 8192.
+ui.motion([-877, 236, -226, 0, 0, 1000])
+ui.syn()
+check(pad.raw is not None, "a report went out")
+check(pad.raw[12:14] == bytes([0x93, 0xfc]),
+      "gyro X sits at byte 12, where a DualShock keeps it: %s"
+      % pad.raw[12:14].hex(" "))
+check(pad.extended[0] == [-877, 236, -226],
+      "so all three rotations arrive, in order: %r" % (pad.extended[0],))
+check(pad.extended[1] == [0, 0, 8192],
+      "and acceleration, scaled into the pad's units: %r" % (pad.extended[1],))
+check(pad.battery == 0xFF,
+      "with a charge that does not read as flat: %r" % (pad.battery,))
+# The struct's own fields must now disagree, or the padding is not being
+# stepped over and this test is passing for the wrong reason.
+aligned = _ReportEx()
+ctypes.memmove(aligned.ReportBuffer, pad.raw, len(pad.raw))
+check(aligned.Report.wGyroX != -877,
+      "and reading it back through the aligned fields gives the wrong answer "
+      "(%d), which is what proves the padding is being stepped over rather "
+      "than the stub being packed" % aligned.Report.wGyroX)
+
+print("\n-- the buttons and sticks still land where they were --")
+ui, pad = a_pad("ds4")
+ui.write(e.EV_ABS, e.ABS_X, 32767)
+ui.write(e.EV_KEY, e.BTN_A, 1)
+ui.motion([0, 0, 0, 0, 0, 1000])
+ui.syn()
+check(pad.sticks[0] == 255,
+      "a stick pushed right is 255 in the first byte: %r" % (pad.sticks[0],))
+check(pad.sticks[1] == 128, "and the other axis stays centred")
+check(pad.buttonword != 0,
+      "with the button word carried too, not lost to the repacking: %#x"
+      % pad.buttonword)
 
 print("\n-- and a report with motion says time is passing --")
 # A game integrating rotation into an aim uses the report timestamp as its

@@ -528,11 +528,24 @@ class Server:
             self.session.touch_presence(guest)
 
         if kind == "padkind":
-            now = self.session.set_pad_kind_default(message.get("kind"),
-                                                    by=guest)
+            want = message.get("kind")
+            if not want:
+                # Asking, not setting. The page needs the list of kinds to draw
+                # the control at all, and that list arrived once with the
+                # welcome -- so any path that did not carry it (a resume, a
+                # reconnect, an account signing in later) left the control
+                # invisible. Reported as it "not reliably appearing", which is
+                # exactly what a one-shot answer does. Now it can be asked
+                # for, and nothing is changed by the asking.
+                await outbox.put({"t": "padkind", "kinds": sorted(padlib.KINDS),
+                                  "kind": self.session.pad_kind_for(guest)})
+                return
+            now = self.session.set_pad_kind_default(want, by=guest)
             # Everybody, not just whoever asked: it is one setting and every
-            # page showing it is now showing the old answer.
-            self.session.notify({"t": "padkind", "kind": now})
+            # page showing it is now showing the old answer. With the list, so
+            # a page that has lost it gets it back without asking.
+            self.session.notify({"t": "padkind", "kind": now,
+                                 "kinds": sorted(padlib.KINDS)})
             return
         if kind == "stream":
             try:
