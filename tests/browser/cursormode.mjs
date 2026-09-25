@@ -98,8 +98,11 @@ check(/Math\.max\(0, Math\.min\(1, cursorU \+ du\)\)/.test(move),
  * and therefore whether the pointer can leave the edge of the picture. It
  * was reported, fairly, as not making sense. */
 const markup = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
-const menu = markup.slice(markup.indexOf('id="cursor-menu"'),
-                          markup.indexOf('id="desk-kb"'));
+// To the menu's own closing tag, not to whatever happens to come after it in
+// the file. It used to end at id="desk-kb", which no longer exists -- indexOf
+// then answered -1 and the slice worked by accident.
+const menuAt = markup.indexOf('id="cursor-menu"');
+const menu = markup.slice(menuAt, markup.indexOf("</div>", menuAt));
 check(!menu.includes("Point where I touch"),
       "the old name is gone");
 check(/data-cursor="absolute">\s*<strong>Trackpad<\/strong>/.test(menu),

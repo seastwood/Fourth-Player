@@ -71,7 +71,7 @@ try {
   await wait(2500);
 
   const before = await page.evaluate(() => ({
-    kb: document.getElementById("desk-kb").hidden,
+    kb: document.getElementById("desk-swap").hidden,
     row: document.getElementById("desk-keys").hidden,
   }));
   check(before.kb, "no keyboard button before anybody holds the desk");
@@ -81,7 +81,7 @@ try {
   await wait(2000);
   const holding = await page.evaluate(() => ({
     held: deskHeld,
-    kb: document.getElementById("desk-kb").hidden,
+    kb: document.getElementById("desk-swap").hidden,
     row: document.getElementById("desk-keys").hidden,
   }));
   check(holding.held, "the desk is taken");
@@ -89,10 +89,10 @@ try {
   check(holding.row, "and the key row waits until the keyboard is actually up");
 
   const raised = await page.evaluate(() => {
-    document.getElementById("desk-kb").click();
+    document.getElementById("desk-swap").click();
     return { up: deskKeyboardUp(),
              row: document.getElementById("desk-keys").hidden,
-             on: document.getElementById("desk-kb").classList.contains("is-on") };
+             on: document.getElementById("desk-swap").classList.contains("is-on") };
   });
   check(raised.up, "tapping it focuses the field, which is what raises a keyboard");
   check(!raised.row, "the key row comes up with it");
@@ -150,7 +150,7 @@ try {
   await wait(1500);
   const gone = await page.evaluate(() => ({
     held: deskHeld,
-    kb: document.getElementById("desk-kb").hidden,
+    kb: document.getElementById("desk-swap").hidden,
     up: deskKeyboardUp(),
     mods: deskMods.size,
   }));

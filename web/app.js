@@ -6374,7 +6374,7 @@ function setCursorMode(mode) {
 }
 
 function paintCursorMode() {
-  const button = el("desk-cursor");
+  const button = el("desk-swap");
   const relative = cursorMode === "relative";
   if (button) {
     button.classList.toggle("is-relative", relative);
@@ -6586,6 +6586,50 @@ function deskModTap(code) {
 /* The three buttons are one choice with three positions, not three switches.
    The controller and the cursor cannot both have the finger: with the pad
    showing, a drag pans the picture, and that is the state to come back to. */
+/* Holding the one button to reach the pointer.
+ *
+ * The pointer used to have a button of its own in the corner. It is something
+ * somebody reaches for occasionally -- to close a window, to click something
+ * a controller cannot -- and a permanent button over a thumbstick was more
+ * than it was worth.
+ *
+ * A hold rather than a second tap, because a second tap is already taken: the
+ * button swaps between the controller and the keyboard and has to keep doing
+ * that instantly.
+ *
+ * The menu is what opens, not the pointer itself. Turning the pointer on
+ * without saying which kind it is was the old fault here -- the setting was
+ * invisible until somebody found it by accident -- and picking one from the
+ * menu turns it on, so the hold and the choice are one gesture. */
+const SWAP_HOLD_MS = 450;
+let swapHoldTimer = 0;
+let swapHeld = false;
+
+function wireSwapHold(bar) {
+  const button = bar.querySelector("#desk-swap");
+  if (!button || button.dataset.held) return;
+  button.dataset.held = "1";
+  const start = (event) => {
+    // The primary button only: a right-click has its own meaning and a
+    // context menu is not a hold.
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    swapHeld = false;
+    clearTimeout(swapHoldTimer);
+    swapHoldTimer = setTimeout(() => {
+      swapHoldTimer = 0;
+      swapHeld = true;
+      buzz();                 // it did something; say so before it is seen
+      cursorMenuOpen(true);
+    }, SWAP_HOLD_MS);
+  };
+  const stop = () => { clearTimeout(swapHoldTimer); swapHoldTimer = 0; };
+  button.addEventListener("pointerdown", start);
+  button.addEventListener("pointerup", stop);
+  button.addEventListener("pointercancel", stop);
+  // A finger that slides off the button was not holding it.
+  button.addEventListener("pointerleave", stop);
+}
+
 function deskChoose(what) {
   // The controller is not a desk control and never asks for one. Showing and
   // hiding the on-screen pad is something anybody may do to their own screen,
@@ -6629,18 +6673,17 @@ function deskChoose(what) {
   deskPaintKeys();
 }
 
-/* Open and shut. Collapsed it is one button in the corner; open, the three
-   sit to its left. Anywhere else on the page shuts it again, which is the
-   only way it can be certain not to be in the way of a game. */
+/* There is nothing left to open.
+ *
+ * This used to expand three buttons out of a fourth. Now the corner holds one
+ * button that does the commonest thing and holds the rest behind a press, so
+ * the only thing "closed" can still mean is putting the pointer menu away.
+ *
+ * Kept as a function because several places call it to tidy up -- a tap
+ * elsewhere, a guest leaving, the picture going away -- and every one of them
+ * means the same thing by it. */
 function deskOpen(yes) {
-  const bar = el("desk-bar");
-  if (!bar) return;
-  bar.classList.toggle("is-open", yes);
-  const more = el("desk-more");
-  if (more) {
-    more.setAttribute("aria-expanded", yes ? "true" : "false");
-    more.setAttribute("aria-label", yes ? "Fewer controls" : "More controls");
-  }
+  if (!yes) cursorMenuOpen(false);
 }
 
 /* Put the controller away while the desk has the finger, and bring back
@@ -6697,27 +6740,32 @@ function deskPaintKeys() {
     // viewport, and would otherwise float over the join screen.
     bar.hidden = !may("desk") || stage.hidden;
   }
-  const kb = el("desk-kb");
-  if (kb) {
-    kb.classList.toggle("is-on", up);
-    kb.setAttribute("aria-label", up ? "Hide the keyboard" : "Show the keyboard");
-  }
-  const cur = el("desk-cursor");
-  if (cur) {
-    cur.classList.toggle("is-on", cursorOn);
-    cur.setAttribute("aria-label", cursorOn ? "Stop using the mouse"
-                                            : "Use the mouse");
-  }
-  const pad = el("desk-pad");
-  // Lit when the controller is actually on screen, which is what this button
-  // now says. It used to be lit for "not the cursor and not the keyboard",
-  // which is a different thing and was wrong the moment somebody turned the
-  // pad off from the picker instead.
-  if (pad) {
-    const showing = !el("touch").hidden;
-    pad.classList.toggle("is-on", showing);
-    pad.setAttribute("aria-label",
-                     showing ? "Hide the controller" : "Show the controller");
+  // One button, drawing whatever it would do.
+  //
+  // The controller is up, so it offers the keyboard. The keyboard is up, so it
+  // offers the controller. Neither is up -- the pointer has the screen, or
+  // nothing does -- so it offers the controller, which is what somebody
+  // reaches for far more often.
+  //
+  // What it draws and what it says have to agree, and both have to be what
+  // *happens*, because there is nothing else left to read: the three labelled
+  // buttons that used to explain themselves are gone.
+  const swap = el("desk-swap");
+  if (swap) {
+    const padUp = !el("touch").hidden;
+    const offer = padUp && !up ? "keyboard" : "pad";
+    for (const [name, on] of [["kb", offer === "keyboard"],
+                              ["pad", offer === "pad" && !cursorOn],
+                              ["cursor", offer === "pad" && cursorOn]]) {
+      const icon = swap.querySelector(".desk-swap-" + name);
+      if (icon) icon.hidden = !on;
+    }
+    swap.setAttribute("aria-label", offer === "keyboard"
+                      ? "Show the keyboard"
+                      : "Show the controller");
+    // Lit while something of the desk's is in use, which is the one thing the
+    // old three said between them that this could otherwise not.
+    swap.classList.toggle("is-on", up || cursorOn);
   }
   const dock = el("desk-dock");
   if (dock) {
@@ -7134,15 +7182,17 @@ function deskListen() {
   if (bar) {
     bar.addEventListener("click", (event) => {
       const button = event.target.closest("button");
-      if (!button) return;
+      if (!button || button.id !== "desk-swap") return;
       event.preventDefault();
-      if (button.id === "desk-more") {
-        deskOpen(!bar.classList.contains("is-open"));
-        return;
-      }
-      deskChoose(button.id === "desk-pad" ? "pad"
-                 : button.id === "desk-cursor" ? "cursor" : "keyboard");
+      // Held, not tapped: the hold has already opened the pointer menu and
+      // this is the release that follows it.
+      if (swapHeld) { swapHeld = false; return; }
+      // Whichever one is not in front. deskPaintKeys draws the same decision,
+      // so the button does what it looks like it does.
+      const padUp = !el("touch").hidden;
+      deskChoose(padUp && !deskWantKeyboard ? "keyboard" : "pad");
     });
+    wireSwapHold(bar);
   }
   const field = el("desk-input");
   if (field) {
@@ -9569,19 +9619,13 @@ function cursorMenuOpen(yes) {
   const menu = el("cursor-menu");
   if (!menu) return;
   menu.hidden = !yes;
-  const button = el("desk-cursor");
-  if (button) button.setAttribute("aria-expanded", yes ? "true" : "false");
+  // The button that opens it is the one in the corner now, and it is opened by
+  // holding rather than tapping -- so it is not a disclosure control and does
+  // not claim to be one. aria-expanded on a button whose tap does something
+  // else entirely would be a lie to anybody reading the page aloud.
+  const button = el("desk-swap");
+  if (button) button.setAttribute("aria-haspopup", "menu");
   if (yes) paintCursorMode();
-}
-
-if (el("desk-cursor")) {
-  el("desk-cursor").addEventListener("click", (event) => {
-    // The list, rather than the mode. Choosing from it is what turns the
-    // cursor on, below.
-    event.preventDefault();
-    event.stopPropagation();
-    cursorMenuOpen(el("cursor-menu") && el("cursor-menu").hidden);
-  }, true);
 }
 
 if (el("cursor-menu")) {

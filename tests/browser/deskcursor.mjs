@@ -74,21 +74,29 @@ try {
 
   const bar = await page.evaluate(() => ({
     shown: !document.getElementById("desk-bar").hidden,
-    order: Array.from(document.querySelectorAll("#desk-bar button")).map((b) => b.id),
+    // Direct children: the pointer menu lives in the bar and has buttons of
+    // its own, which are not buttons in the corner.
+    order: Array.from(document.getElementById("desk-bar").children)
+      .filter((n) => n.tagName === "BUTTON").map((b) => b.id),
     held: deskHeld,
   }));
   check(bar.shown, "an account that holds desk is offered the bar at once");
   check(!bar.held, "before it has taken anything");
-  check(bar.order.join(",") === "desk-pad,desk-cursor,desk-kb",
-        "controller, cursor, keyboard, in that order: " + bar.order.join(","));
+  check(bar.order.join(",") === "desk-swap",
+        "one button, not three: " + bar.order.join(","));
 
-  // Pressing cursor asks for the desk and then does what was asked.
-  await page.evaluate(() => document.getElementById("desk-cursor").click());
+  // Choosing a pointer from the menu asks for the desk and then does what was
+  // asked. The menu is reached by holding the button; opening it directly here
+  // is what a hold does and this suite is about the pointer, not the gesture.
+  await page.evaluate(() => {
+    cursorMenuOpen(true);
+    document.querySelector('#cursor-menu [data-cursor="absolute"]').click();
+  });
   await wait(2500);
   const on = await page.evaluate(() => ({
     held: deskHeld, cursor: cursorOn, driving: cursorDriving(),
     pad: document.getElementById("touch").hidden,
-    lit: document.getElementById("desk-cursor").classList.contains("is-on"),
+    lit: document.getElementById("desk-swap").classList.contains("is-on"),
   }));
   check(on.held, "one press takes the desk");
   check(on.cursor && on.driving, "and turns the cursor on, in the same press");
@@ -217,8 +225,16 @@ try {
         + flicked.justAfter.toFixed(3) + " -> " + flicked.drifted.toFixed(3));
   check(flicked.stopped, "a finger back on the glass stops it dead");
 
-  // The controller button takes it all back.
-  await page.evaluate(() => document.getElementById("desk-pad").click());
+  // The one button takes it all back: with the pointer up and no keyboard,
+  // what it offers is the controller.
+  await page.evaluate(() => {
+    const b = document.getElementById("desk-swap");
+    b.dispatchEvent(new PointerEvent("pointerdown",
+                                     { bubbles: true, pointerType: "touch" }));
+    b.dispatchEvent(new PointerEvent("pointerup",
+                                     { bubbles: true, pointerType: "touch" }));
+    b.click();
+  });
   await wait(600);
   const back = await page.evaluate(() => ({
     cursor: cursorOn, driving: cursorDriving(),

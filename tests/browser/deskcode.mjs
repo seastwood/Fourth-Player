@@ -69,7 +69,12 @@ console.log("after reload:", JSON.stringify(state));
 
 await p.evaluate(() => { deskOpen(true); });
 await wait(200);
-await p.tap("#desk-cursor");
+// The pointer is reached by holding the one button now; this suite is about
+// the code prompt, so the menu is opened the way a hold opens it.
+await p.evaluate(() => {
+  cursorMenuOpen(true);
+  document.querySelector('#cursor-menu [data-cursor="absolute"]').click();
+});
 await wait(2500);
 const seen = await p.evaluate(() => {
   const look = (n) => { const e = document.getElementById(n);

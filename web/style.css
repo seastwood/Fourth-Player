@@ -2734,18 +2734,19 @@ input.name {
 }
 .desk-bar button.is-on { border-color: var(--accent); color: var(--accent); }
 
-/* Collapsed, only the toggle is there, in the corner. The rest open out to
-   its left. Three buttons standing over a thumbstick is three too many, and
-   the on-screen controller is the thing most likely to be underneath. */
-.desk-bar:not(.is-open) .desk-more-only { display: none; }
-.desk-bar.is-open #desk-more svg { transform: rotate(180deg); }
-#desk-more svg { transition: transform .18s ease; }
-/* Quieter than the rest while it is the only thing showing, so it sits over a
-   game without asking for attention. It comes back to full strength when it
-   is touched or opened -- something you are using should not be faint. */
-.desk-bar:not(.is-open) #desk-more { opacity: .55; }
-.desk-bar:not(.is-open) #desk-more:active,
-.desk-bar:not(.is-open) #desk-more:focus-visible { opacity: 1; }
+/* One button in the corner, and nothing to open.
+   Three buttons standing over a thumbstick was three too many, and the
+   on-screen controller is the thing most likely to be underneath -- so there
+   is one, it offers whichever of the two you are not using, and the pointer is
+   reached by holding it.
+
+   Quiet while nothing of the desk's is in use, so it sits over a game without
+   asking for attention, and at full strength the moment it is touched or
+   something it controls is live. */
+#desk-swap { opacity: .55; }
+#desk-swap.is-on,
+#desk-swap:active,
+#desk-swap:focus-visible { opacity: 1; }
 .desk-bar svg {
   width: 1.5rem;
   height: 1.5rem;
@@ -2917,11 +2918,11 @@ input.name {
 
 /* The cursor button while it is in trackpad mode.
  *
- * One button with two meanings needs to say which it is in without a word:
- * the tap still chooses the cursor, and a press and hold changes how the
- * cursor moves. Marked rather than relabelled, because the label is an icon
- * and the strip is already three buttons wide on a phone. */
-.desk-more-only.is-relative {
+ * One button with several meanings needs to say which it is in without a
+ * word: the tap swaps the controller and the keyboard, and a press and hold
+ * opens the pointer. Marked rather than relabelled, because the label is an
+ * icon and there is no room for a sentence over a game. */
+#desk-swap.is-relative {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
