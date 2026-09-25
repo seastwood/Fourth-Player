@@ -72,6 +72,28 @@ TEARDOWN_TIMEOUT = 10 * Gst.SECOND if hasattr(Gst, "SECOND") else 10_000_000_000
 # pausing between the two would add a state change to every reload.
 IDLE_AFTER = 30.0
 
+# And off by default, because PAUSED is not reliably reversible.
+#
+# The saving is real and large -- 47% of a core to nothing, measured on the
+# console -- and it was shipped on the strength of a round trip tested in
+# isolation: ximagesrc into vah264enc on Linux, nvd3d11h265enc and wasapi2src
+# on Windows, all of which paused and resumed happily. The real pipeline is
+# not those. On Windows the very next guest to join got:
+#
+#     pipeline is paused; putting it back to PLAYING
+#     pipeline would not return to PLAYING (paused)
+#     timed out attaching a peer for seth; freeing the slot
+#
+# d3d11screencapturesrc does not come back, and the one thing that could not
+# be tested over ssh -- a screen capture needs a desktop session, and ssh
+# lands in session 0 -- is the one thing that was wrong. So nobody could
+# connect at all, which is a far worse fault than an idle encoder.
+#
+# Kept, switched off, and opt-in while it is worth another attempt: the fix is
+# not a longer timeout but a different idle strategy, because a source that
+# will not resume will not resume.
+IDLE_CAPTURE = os.environ.get("FOURTH_PLAYER_IDLE_CAPTURE") == "1"
+
 _initialised = False
 
 
@@ -2031,6 +2053,8 @@ class Stage:
 
     def _arm_idle(self):
         """Pause the capture in a little while, if nobody has arrived by then."""
+        if not IDLE_CAPTURE:
+            return
         self._cancel_idle()
         timer = threading.Timer(IDLE_AFTER,
                                 lambda: self.worker.submit(self.idle_if_empty))
