@@ -11,7 +11,44 @@
   const FRAME_BYTES = 20;
   const VERSION = 1;
   const FLAG_RELEASE_ALL = 0x01;
+  /* Motion, as six more signed 16-bit values after the axes: gyro x, y, z then
+     accelerometer x, y, z. A flag and a longer frame rather than a new
+     VERSION -- see the same note in protocol.py -- so a frame without it is
+     byte-for-byte what it always was. */
+  const FLAG_MOTION = 0x02;
+  const MOTION_BYTES = FRAME_BYTES + 12;
   const BUTTON_COUNT = 17;
+
+  /* The wire's units, which are neither end's own.
+     A browser reports rotation in degrees per second and acceleration in
+     m/s^2; a DualShock reports raw sensor counts. Sixteenths of a degree per
+     second fits +/-2048 deg/s in an int16, and thousandths of gravity fits
+     +/-32 g -- both far past what a hand does, both exact at the resolution
+     anybody can feel. */
+  const GYRO_PER_DEG_SEC = 16;
+  const ACCEL_PER_G = 1000;
+  const GRAVITY = 9.80665;
+
+  /* One motion sample from what a browser hands over, in wire units.
+     `rotation` is a DeviceMotionEvent.rotationRate (deg/s) and `accel` an
+     accelerationIncludingGravity (m/s^2) -- including gravity, deliberately:
+     it is what tells a game which way is down, and a DualShock's
+     accelerometer reads gravity too. */
+  function motionSample(rotation, accel) {
+    const g = (v) => clampShort(Math.round((v || 0) * GYRO_PER_DEG_SEC));
+    const a = (v) => clampShort(Math.round((v || 0) / GRAVITY * ACCEL_PER_G));
+    return [
+      // beta/gamma/alpha is x/y/z: beta is pitch about the device's x axis,
+      // gamma roll about y, alpha yaw about z. Naming them in that order here
+      // is the whole translation, and getting it wrong is a stick that turns
+      // the wrong way for a reason nothing in a log would show.
+      g(rotation && rotation.beta), g(rotation && rotation.gamma),
+      g(rotation && rotation.alpha),
+      a(accel && accel.x), a(accel && accel.y), a(accel && accel.z),
+    ];
+  }
+
+  const clampShort = (v) => Math.max(-32768, Math.min(32767, v | 0));
 
   /* Eight-way direction from an offset within the d-pad, normalised so the
    * edge of the pad is 1. Kept here, away from the DOM, because it is the part
@@ -55,26 +92,36 @@
     return { buttons, axes };
   }
 
-  function buildRaw(buttons, axes, seq, releaseAll) {
-    const buffer = new ArrayBuffer(FRAME_BYTES);
-    const view = new DataView(buffer);
-
+  function buildRaw(buttons, axes, seq, releaseAll, motion) {
     if (releaseAll) {
       buttons = 0;
       axes = [0, 0, 0, 0, 0, 0];
+      // Released means released. A frame that lets go of everything carries
+      // no attitude either: the guest has gone, and the last thing they were
+      // pointing at is not where anything should be left aiming.
+      motion = null;
     }
+    const long = Boolean(motion);
+    const buffer = new ArrayBuffer(long ? MOTION_BYTES : FRAME_BYTES);
+    const view = new DataView(buffer);
 
     view.setUint8(0, VERSION);
-    view.setUint8(1, releaseAll ? FLAG_RELEASE_ALL : 0);
+    view.setUint8(1, (releaseAll ? FLAG_RELEASE_ALL : 0)
+                     | (long ? FLAG_MOTION : 0));
     view.setUint16(2, seq & 0xffff, true);
     view.setUint32(4, buttons >>> 0, true);
     for (let i = 0; i < 6; i++) view.setInt16(8 + i * 2, axes[i] || 0, true);
+    if (long) {
+      for (let i = 0; i < 6; i++) {
+        view.setInt16(FRAME_BYTES + i * 2, clampShort(motion[i] || 0), true);
+      }
+    }
     return buffer;
   }
 
-  function buildFrame(pad, seq, releaseAll) {
+  function buildFrame(pad, seq, releaseAll, motion) {
     const state = padState(releaseAll ? null : pad);
-    return buildRaw(state.buttons, state.axes, seq, releaseAll);
+    return buildRaw(state.buttons, state.axes, seq, releaseAll, motion);
   }
 
   // toAxis is exported because the on-screen sticks produce their own -1..1
@@ -87,7 +134,9 @@
   const TRIGGER_FULL = 32767;
 
   const api = { buildFrame, buildRaw, padState, direction, toAxis, TRIGGER_FULL,
-                DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT };
+                DEADZONE, FRAME_BYTES, VERSION, FLAG_RELEASE_ALL, BUTTON_COUNT,
+                motionSample, MOTION_BYTES, FLAG_MOTION,
+                GYRO_PER_DEG_SEC, ACCEL_PER_G, GRAVITY };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.FPFrame = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
