@@ -78,6 +78,18 @@ function paintCanvas() { return null; }
 const video = { offsetWidth: 0, offsetHeight: 0,
                 videoWidth: 2560, videoHeight: 1440, style: {} };
 function fitPainted() {}
+/* applyZoom says on the stage whether the picture is zoomed, so that the
+   upright layout can let a zoomed picture show behind the on-screen pad. It
+   is a class on an element and nothing here reads it, but the lifted function
+   calls el() and a missing stub is a ReferenceError rather than a failed
+   check -- which reads as the whole suite crashing. */
+const stageClasses = new Set();
+function el(id) {
+  if (id !== "stage") return null;
+  return { classList: { toggle(name, on) {
+    if (on) stageClasses.add(name); else stageClasses.delete(name);
+  } } };
+}
 
 /* Where the pointer actually lands on the glass, and where the picture's own
    edges end up, for a guest at (u, v) on a screen of a given shape.
@@ -131,15 +143,24 @@ process.stdout.write(JSON.stringify({
   slid: (ask.slid || []).map(([size, seen, level]) => panRoom(size, seen, level, true)),
   pans: ask.pans.map(([pan, towards, ratio]) => panTowards(pan, towards, ratio)),
   places: (ask.places || []).map(place),
+  // Whether the stage ends up marked as zoomed, for the zoom levels asked
+  // about. The upright layout lets a zoomed picture show behind the on-screen
+  // pad, and this is the signal it reads.
+  zoomed: (ask.zooms || []).map((level) => {
+    stageClasses.clear();
+    place({ box: [390, 530], u: 0.5, v: 0.5, zoom: level });
+    return stageClasses.has("zoomed");
+  }),
 }));
 """
 
 
-def run(rooms, pans, slid=(), places=()):
+def run(rooms, pans, slid=(), places=(), zooms=()):
     done = subprocess.run([node, "-e", HARNESS],
                           input=json.dumps({"rooms": rooms, "pans": pans,
                                             "slid": list(slid),
-                                            "places": list(places)}),
+                                            "places": list(places),
+                                            "zooms": list(zooms)}),
                           capture_output=True, text=True)
     if done.returncode != 0:
         raise AssertionError(done.stderr[:500])
@@ -361,6 +382,17 @@ for name, selector in (("the chips", ".hud"), ("the on-screen pad", ".touch"),
 check((layer(".browser") or 0) > (layer(".hud") or 0)
       and (layer(".pads") or 0) > (layer(".hud") or 0),
       "and a panel that replaces the picture is above the chips too")
+
+# And whether the stage is marked as zoomed, which is what lets the upright
+# layout show a zoomed picture behind the on-screen pad. Set in applyZoom
+# rather than in any one gesture, because the slider, a pinch, a double tap and
+# a zoom restored on reconnect all arrive through it.
+marks = run([], [], zooms=[1, 1.0001, 1.5, 2.5])["zoomed"]
+check(marks[0] is False, "at rest the stage is not marked zoomed")
+check(marks[1] is False,
+      "nor a hair above it -- applyZoom snaps that back to exactly 1")
+check(marks[2] is True and marks[3] is True,
+      "and it is marked at any real zoom: %s" % marks[2:])
 
 print(("FAILED: %d" % len(fails)) if fails else "test_zoom: all ok")
 sys.exit(1 if fails else 0)
