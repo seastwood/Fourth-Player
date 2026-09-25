@@ -114,6 +114,27 @@ print("\nthe same token keeps working, so a second drop is no worse")
 s.release(slot_a, now=20)
 check(s.reclaim(ga, now=21) == slot_a, "reclaimed twice with the one token")
 
+print("\nbut their own stale entry is not somebody else")
+# A reconnect can easily outrun the tidying of the entry it just left. The
+# seat then looks taken, the guest is sent to the next free one, and that seat
+# plugs in a controller of its own -- two gamepads from one browser, and being
+# made to set yourself to player two to carry on a single-player game.
+#
+# Seen on the Windows host as slot 1, then slot 0, then slot 1 again, with
+# "Fourth Player 1" plugged in six seconds after "Fourth Player 2" was freed.
+s, tok, pin = fresh(slots=2)
+slot_a, ga = s.join(tok, pin, now=1, address="a")
+s.release(slot_a, now=10)
+back = s.reclaim(ga, now=11)
+check(back == slot_a, "they are back in their own seat")
+# Now reclaim again WITHOUT releasing: the entry from a moment ago is still
+# sitting there, holding their own digest.
+s._claims[I._digest(ga)] = (slot_a, 12)
+check(s.reclaim(ga, now=13) == slot_a,
+      "and a second reclaim over their own live entry takes the same seat "
+      "rather than being sent to a new one")
+check(s.free_slot() != slot_a, "which is still theirs afterwards")
+
 print("\nif somebody else took the slot, they get another")
 s, tok, pin = fresh(slots=2)
 slot_a, ga = s.join(tok, pin, now=1, address="a")
