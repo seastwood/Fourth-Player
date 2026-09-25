@@ -330,6 +330,26 @@ class Config:
     # quietly disturbing another. Insisting on unsigned orders was worse still
     # -- it excluded the right answer, which needs a negation.
     guest_gyro_order: str = "pitch,roll,-yaw"
+    # What the accelerometer half of a motion pad reports: "steady", "device"
+    # or "off".
+    #
+    # A phone's accelerometer answers a different question from its gyroscope,
+    # and a game that fuses the two cares which. Rotation rate does not depend
+    # on which way is down; gravity is nothing but which way is down. A Switch
+    # emulator uses the second to stop the first drifting -- so the same flick
+    # of the wrist resolved differently sitting up and lying on one side, with
+    # the screen in portrait both times and the gyroscope reporting the same
+    # numbers. Reported as "x and y get messed up based on the way I am
+    # sitting or laying".
+    #
+    # "steady" sends a constant, as though the pad were held level: the fusion
+    # still has something to level against and does not drift, but that
+    # something no longer moves when the player does. It is the default
+    # because aiming is what motion is used for here, and aiming wants a fixed
+    # reference rather than an honest one. "device" is the phone's real
+    # reading, which is what a game wanting genuine tilt needs. "off" sends
+    # nothing.
+    guest_motion_accel: str = "steady"
     # How long a seat keeps its controller after its guest leaves, in seconds.
     #
     # Nothing is unplugged at all while a game is in front, so this is what

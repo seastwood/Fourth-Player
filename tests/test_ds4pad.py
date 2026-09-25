@@ -337,12 +337,21 @@ sys.modules["vgamepad.win.vigem_commons"] = FakeCommons
 from fourthplayer.codes import ecodes as e                    # noqa: E402
 
 
-def a_pad(kind):
+def a_pad(kind, accel="device"):
+    """A pad, reporting the phone's own accelerometer unless told otherwise.
+
+    "device" rather than the default here on purpose. Most of this file is
+    about the wire format and the axis order, and both are clearest with the
+    accelerometer passing straight through. What the default actually is, and
+    why, is its own question -- see test_motionaccel.py, and the section at the
+    end of this file.
+    """
     spec = pads.KINDS[kind]
     FakeVgamepad.made = []
     ui = virtual.UInput(pads.capabilities(True), name="test",
                         vendor=spec["vendor"], product=spec["product"],
                         version=spec["version"], bustype=0x0003)
+    ui.accel_way = accel
     return ui, ui._pad
 
 
@@ -609,6 +618,36 @@ ui.write(e.EV_KEY, e.BTN_A, 1)
 ui.syn()
 check(pad.updates == 1 and pad.extended is None,
       "update(), not update_extended_report()")
+
+print("\n-- and which accelerometer it is, is a choice --")
+# A phone's accelerometer answers a different question from its gyroscope, and
+# a game that fuses the two cares. Rotation rate does not depend on which way
+# is down; gravity is nothing but which way is down. A Switch emulator uses the
+# second to stop the first drifting, so the same flick of the wrist resolved
+# differently sitting up and lying on one side -- with the screen in portrait
+# both times and the gyroscope reporting identically. Reported as the gyro
+# being wrong, and it is not the gyro.
+ui, pad = a_pad("ds4", accel="steady")
+ui.motion([160, 0, 0, 500, 500, 500])       # the phone, tilted every which way
+ui.syn()
+check(pad.extended[0] == [160, 0, 0] or pad.extended[0] != [0, 0, 0],
+      "the gyroscope still says exactly what the phone said")
+check(pad.extended[1] == list(virtual.UInput.ACCEL_STEADY),
+      "while the accelerometer says the same thing whatever the phone is "
+      "doing: %r" % (pad.extended[1],))
+
+ui, pad = a_pad("ds4", accel="off")
+ui.motion([160, 0, 0, 500, 500, 500])
+ui.syn()
+check(pad.extended[1] == [0, 0, 0],
+      "and off is off, got %r" % (pad.extended[1],))
+
+ui, pad = a_pad("ds4", accel="device")
+ui.motion([160, 0, 0, 0, 0, 1000])
+ui.syn()
+check(pad.extended[1] == [0, 8192, 0],
+      "while device is the phone's own, turned and scaled as before: %r"
+      % (pad.extended[1],))
 
 print("\n-- and nothing reaches the game until syn --")
 ui, pad = a_pad("ds4")

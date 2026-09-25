@@ -609,7 +609,9 @@ class LiveSession:
                                   motion=getattr(self.cfg, "guest_motion", True),
                                   order=padlib.gyro_order(
                                       getattr(self.cfg, "guest_gyro_order",
-                                              None)))
+                                              None)),
+                                  accel=getattr(self.cfg,
+                                                "guest_motion_accel", None))
         # Tell RetroArch what these pads are before anything can read them,
         # or it guesses and the guest's A button ends up somewhere else.
         # The same answer the pads were built with, or RetroArch binds by

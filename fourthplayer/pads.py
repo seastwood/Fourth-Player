@@ -304,7 +304,7 @@ class VirtualPad:
     motion = True
 
     def __init__(self, name, now=None, guide=True, kind=DEFAULT_KIND,
-                 motion=True, order=None):
+                 motion=True, order=None, accel=None):
         self.name = name
         self.guide = guide
         self.motion = motion
@@ -321,6 +321,14 @@ class VirtualPad:
                 self._ui.gyro_order(order)
             except AttributeError:
                 pass                 # a device with no motion to order
+        # And which accelerometer it reports: the phone's own, a steady one,
+        # or none. Set the same way and for the same reason.
+        if accel:
+            try:
+                if accel in getattr(self._ui, "ACCEL_WAYS", ()):
+                    self._ui.accel_way = accel
+            except AttributeError:
+                pass                 # a device with no accelerometer to set
         self._last = {}
         # Per sender, not per pad. One counter was enough while a pad had one
         # guest; several on one pad interleave their counters, and each
@@ -511,7 +519,7 @@ class PadSet:
     """
 
     def __init__(self, count, label="Fourth Player", now=None, guide=True,
-                 kind=DEFAULT_KIND, motion=True, order=None):
+                 kind=DEFAULT_KIND, motion=True, order=None, accel=None):
         self._now = now or time.monotonic
         self._label = label
         # What a seat's pad declares itself to be. A default for the session;
@@ -520,6 +528,7 @@ class PadSet:
         self._kind = kind_or_default(kind)
         self._motion = bool(motion)
         self._order = order
+        self._accel = accel
         # Whether these pads have a guide button at all. See capabilities():
         # it is the Steam button and RetroArch's menu button, and a guest has
         # no business opening either.
@@ -599,7 +608,8 @@ class PadSet:
         if pad is None:
             pad = VirtualPad(self.names[index], now=self._now,
                              guide=self._guide, kind=self.kinds[index],
-                             motion=self._motion, order=self._order)
+                             motion=self._motion, order=self._order,
+                             accel=self._accel)
             self.pads[index] = pad
             # Said, because a controller appearing is not free: Steam
             # re-enumerates when one does and may hand a running game to it.

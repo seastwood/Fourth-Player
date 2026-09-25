@@ -389,6 +389,34 @@ except ImportError:
         GYRO_SCALE = 1.0
         ACCEL_SCALE = 8.192
 
+        # What the accelerometer half of the report says.
+        #
+        #   "device"  what the phone actually reads, gravity and all.
+        #   "steady"  a constant, as though the pad were held level.
+        #   "off"     nothing at all.
+        #
+        # This exists because a phone's accelerometer answers a different
+        # question from its gyroscope, and a game that fuses the two cares.
+        # Rotation rate does not depend on which way is down; gravity is
+        # nothing but which way is down. A Switch emulator uses the second to
+        # stop the first drifting -- so the same flick of the wrist resolved
+        # differently sitting up and lying on one side, with the screen still
+        # in portrait both times and the gyroscope reporting identically.
+        # Reported exactly that way: "x and y get messed up based on the way
+        # I am sitting or laying".
+        #
+        # "steady" is the default because aiming is what this is for, and
+        # aiming wants a fixed reference rather than an honest one. The
+        # fusion still has something to level against, so it does not drift,
+        # but that something no longer moves when the player does. Games that
+        # genuinely want tilt -- pouring, balancing, steering by leaning --
+        # want "device", and can have it.
+        ACCEL_WAYS = ("steady", "device", "off")
+        # Straight down in the pad's own frame, at rest. One g, in the units
+        # above, on the axis a DualShock reads as down.
+        ACCEL_STEADY = (0, -8192, 0)
+        accel_way = "steady"
+
         # Which of the DualShock's three gyro words each of the wire's
         # rotations belongs in.
         #
@@ -538,7 +566,13 @@ except ImportError:
                 # while the rotation said it had been turned on its side, and
                 # a game reconciling those aims somewhere neither of them
                 # pointed.
-                *self._turn(accel))
+                #
+                # Which accelerometer it is, though, is a choice -- see
+                # ACCEL_WAYS. A steady one is not turned here: it is already
+                # in the pad's frame and has no device orientation to correct.
+                *(self._turn(accel) if self.accel_way == "device"
+                  else self.ACCEL_STEADY if self.accel_way == "steady"
+                  else (0, 0, 0)))
             # Into the union's byte view, which is the same memory as the
             # struct and the only way to put these where the wire wants them.
             ctypes.memmove(report.ReportBuffer, packed, len(packed))
