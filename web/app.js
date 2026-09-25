@@ -2963,13 +2963,22 @@ function hudButtonShowing() {
  * and near enough to each other in space to be the same gesture rather than
  * two deliberate taps in different places.
  */
-const TAP_ZOOM_MS = 320;
+/* Generous, and more generous than the sticks.
+ *
+ * These began as the stick gesture's numbers and that was the wrong place to
+ * copy from. A stick is a small well with a thumb already resting on it, so
+ * both taps land within a few pixels and quickly. Tapping a picture is a
+ * different motion: the hand travels, the second tap lands where the first
+ * one felt like it did rather than where it was, and somebody looking at what
+ * they want to zoom into is not hurrying.
+ *
+ * Reported as needing to be too quick and too precise, and it was. Half a
+ * second is still plainly one gesture rather than two thoughts, and ninety
+ * pixels is under half a fingertip on a phone -- far less than the distance
+ * between two things anybody would pick out of a television. */
+const TAP_ZOOM_MS = 500;
 const TAP_ZOOM_MIN_MS = 40;
-// How far apart two taps may be and still be one gesture, in CSS pixels. A
-// thumb does not land twice in exactly the same place, and on a picture this
-// small a generous slop is still far less than the distance between the two
-// things anybody would zoom at.
-const TAP_ZOOM_SLOP = 44;
+const TAP_ZOOM_SLOP = 90;
 // Where a double tap zooms to. Far enough in to read a corner of a television
 // at arm's length, short of ZOOM_MAX so there is somewhere left to pinch to.
 const TAP_ZOOM_TO = 2.5;

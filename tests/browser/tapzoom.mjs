@@ -55,6 +55,20 @@ check(tap(100, 100, 1000 + 10, first) === false,
 check(tap(100, 100, 1000 + F.MIN + 1, first) === true,
       "while just past the minimum is real");
 
+console.log("\nand it is forgiving, which is the point");
+// The first version used the on-screen sticks' numbers, and that was the
+// wrong place to copy from: a stick is a small well with a thumb already on
+// it, so both taps land close and fast. Tapping a picture is a different
+// motion, and somebody choosing what to zoom into is not hurrying.
+check(F.MS >= 450,
+      "there is time to think between the taps: " + F.MS + "ms");
+check(F.SLOP >= 80,
+      "and room for a hand that travels: " + F.SLOP + " pixels");
+check(tap(100, 100, 1000 + 420, first) === true,
+      "a slow double tap still counts");
+check(tap(100 + 70, 100 + 40, 1000 + 300, first) === true,
+      "and one where the second lands a thumb's width away");
+
 console.log("\nthe slop is generous but bounded");
 // A thumb does not land twice in the same place; two things worth zooming at
 // are much further apart than this.
