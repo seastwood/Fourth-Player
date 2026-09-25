@@ -73,6 +73,23 @@ class Seats:
         return self.devices.pop(index, None) is not None
 
 
+class Invite:
+    """Which seats somebody may still walk back into.
+
+    Leaving leaves a claim behind; coming back into a different seat consumes
+    it. That is the difference between an empty seat worth keeping a
+    controller plugged into and one that is simply abandoned, and the janitor
+    asks about it -- so a stub that cannot answer makes every empty seat look
+    abandoned.
+    """
+
+    def __init__(self, claimed=()):
+        self.claimed = set(claimed)
+
+    def claimed_slots(self, now):
+        return set(self.claimed)
+
+
 class Guest:
     def __init__(self, slot, pad_index):
         self.slot = slot
@@ -92,10 +109,13 @@ session = LiveSession.__new__(LiveSession)
 # which seats somebody may still walk back into, and whether guest input is
 # being withheld -- which is how it knows a game is in front.
 session.cfg = Config()
-session.invite = None
 session.input_held = True          # no game up, so nothing is held for one
+# Everybody left their seat and may come back to it, which is what a claim
+# means. Without one an empty seat is not waited for at all -- see below.
+session.invite = Invite({0, 2, 3})
 session.pads = Seats(4)
 session.guests = {1: Guest(1, 1)}
+session._now = lambda: session.pads.clock[0]
 session._unplug_orphans()
 check(sorted(session.pads.devices) == [0, 1, 2, 3],
       "nothing goes immediately: %r" % sorted(session.pads.devices))
