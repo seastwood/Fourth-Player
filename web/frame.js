@@ -82,28 +82,26 @@
      accelerometer reads gravity too.
 
      `angle` is how far the screen is turned; see toScreenFrame. */
-  /* Whether to rotate the browser's readings into the screen's frame.
+  /* Whether to rotate the browser's readings into the screen's frame. On.
    *
-   * Off, and the reasoning is worth keeping because it is not obvious.
+   * It was off, on the strength of this reasoning: "with the rotation
+   * applied, portrait was correct and landscape had x and y swapped, which is
+   * the signature of rotating something already rotated". The observation was
+   * real. The conclusion did not follow, and the giveaway is that turning it
+   * off produced *the same symptom*: portrait correct, landscape swapped,
+   * reported in those words. A switch whose two positions have the same
+   * effect is not the thing being measured -- the axis order on the host was,
+   * and it has since been worked out by playing: roll,-pitch,-yaw.
    *
-   * The specification says DeviceMotionEvent reports about the *device's*
-   * axes, which would need rotating. What was measured says otherwise: with
-   * the rotation applied, portrait was correct and landscape had x and y
-   * swapped -- and that is the signature of rotating something that was
-   * already rotated. In portrait the angle is zero and the correction is the
-   * identity, so it cannot do harm there; in landscape it is a right angle
-   * and it is the whole error.
-   *
-   * So this browser is handing over screen-relative values and they are used
-   * as they come. Kept as a switch rather than deleted because the next
-   * browser may not: a phone where portrait and landscape disagree in this
-   * exact way wants this turned back on.
+   * In portrait the angle is zero and this correction is the identity, so it
+   * cannot touch an order somebody has just confirmed in portrait. Landscape
+   * is the only case it changes, which is the case that is wrong.
    *
    * Note what this is *not* for. A physical controller's own gyroscope
    * reports in the controller's frame and is already what a game expects --
    * it must not come through here at all. This function exists for a phone
    * being waved about, and only for that. */
-  const ROTATE_TO_SCREEN = false;
+  const ROTATE_TO_SCREEN = true;
 
   function motionSample(rotation, accel, angle) {
     const g = (v) => clampShort(Math.round((v || 0) * GYRO_PER_DEG_SEC));
