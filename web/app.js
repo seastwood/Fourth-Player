@@ -4162,7 +4162,7 @@ el("link").addEventListener("click", async () => {
    out with every report, so the host log says which page is actually running
    rather than which one was deployed -- a browser holding an old one looks
    exactly like a fix that did not work. */
-const CLIENT_BUILD = "2026-09-25o";
+const CLIENT_BUILD = "2026-09-30a";
 
 const STALL_LIMIT_MS = 6000;
 /* How long a connection that says it is up has to produce a single video byte
@@ -5201,12 +5201,143 @@ function gyroWanted() {
 /* Whether this browser has motion to give at all. Not the same question as
    whether it will hand it over -- iOS has it and refuses until asked. */
 function gyroPossible() {
-  return typeof DeviceMotionEvent !== "undefined";
+  return typeof DeviceMotionEvent !== "undefined" || hidMotionPossible();
 }
 
-/* Whether the asking has to happen, which is an iOS thing and nowhere else. */
+/* ---- a controller's own gyroscope, over raw HID ----
+ *
+ * The Gamepad API carries buttons and axes and nothing else -- on every
+ * browser, for every pad -- so a controller with a six-axis IMU inside it is,
+ * to an ordinary page, a controller with no IMU. On a laptop that is the whole
+ * story: the machine has no sensors of its own either, so a guest holding a
+ * Switch Pro had no motion at all and nothing in the page was dropping it.
+ *
+ * WebHID is the only way in, and it is Chromium's alone: Safari and Firefox
+ * have not implemented it and say so by not defining navigator.hid. The page
+ * says that out loud rather than offering a switch that cannot work.
+ *
+ * The protocol lives in switchpad.js. This is the part that needs a gesture,
+ * a permission prompt and the page's own state. */
+function hidMotionPossible() {
+  return typeof navigator !== "undefined" && !!navigator.hid
+    && typeof FPSwitch !== "undefined";
+}
+
+let hidPad = null;                  // the open device, or null
+let hidCounter = 0;                 // the subcommand counter, four bits
+let hidSaid = false;                // the pad was named once
+
+/* Ask the pad for motion, and keep asking.
+ *
+ * A Switch pad says nothing about rotation until it is told twice -- once to
+ * turn the IMU on, once to send the report with room for it -- and it can
+ * refuse both while it is still settling after the connection opens. Sent
+ * again a few times rather than assumed: the cost of a redundant subcommand is
+ * nothing, and the cost of a lost one is a pad that looks connected and never
+ * reports. */
+async function hidAskForMotion(device) {
+  for (let go = 0; go < 4; go += 1) {
+    try {
+      hidCounter = (hidCounter + 1) & 0x0f;
+      await device.sendReport(FPSwitch.SUBCOMMAND_REPORT,
+                              FPSwitch.enableMotion(hidCounter));
+      hidCounter = (hidCounter + 1) & 0x0f;
+      await device.sendReport(FPSwitch.SUBCOMMAND_REPORT,
+                              FPSwitch.sendFullReports(hidCounter));
+    } catch (err) {
+      report("the controller would not take a motion request: "
+             + ((err && err.message) || "no reason given"));
+      return false;
+    }
+    if (gyroLatest) return true;        // it is already answering
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return true;                          // asked; whether it answers is its own
+}
+
+function onHidReport(event) {
+  if (!FPSwitch.hasMotion(event.reportId)) return;
+  const samples = FPSwitch.readMotion(event.reportId, event.data);
+  if (!samples.length) return;
+  // The newest of the three. The wire carries one attitude per frame, and a
+  // game handed three in a row would turn three times as far as the hand did.
+  const last = samples[samples.length - 1];
+  gyroLatest = FPFrame.motionSample(last.rotationRate,
+                                    last.accelerationIncludingGravity);
+  watchMotionValues(gyroLatest);
+  if (!gyroSaid) {
+    gyroSaid = true;
+    report("this controller is sending motion");
+  }
+}
+
+/* Open a Switch pad somebody has just chosen. Needs a gesture: WebHID will
+   not show its chooser without one, and the failure is indistinguishable from
+   a refusal. */
+async function hidOpenPad() {
+  if (!hidMotionPossible()) return false;
+  if (hidPad && hidPad.opened) return true;
+  let chosen = [];
+  try {
+    // Already granted, from a previous visit. Asked for first, so a guest who
+    // has done this once is never shown the chooser again.
+    const known = await navigator.hid.getDevices();
+    chosen = known.filter((d) => FPSwitch.padName(d.vendorId, d.productId));
+    if (!chosen.length) {
+      chosen = await navigator.hid.requestDevice({
+        filters: Object.keys(FPSwitch.PRODUCTS).map((id) => ({
+          vendorId: FPSwitch.NINTENDO, productId: Number(id) })),
+      });
+    }
+  } catch (err) {
+    report("the controller chooser would not open: "
+           + ((err && err.message) || "no reason given")
+           + " — it can only be asked for by tapping the switch");
+    return false;
+  }
+  const device = chosen && chosen[0];
+  if (!device) {
+    report("no controller was chosen, so there is no motion to read");
+    return false;
+  }
+  try {
+    if (!device.opened) await device.open();
+  } catch (err) {
+    report("the controller would not open: "
+           + ((err && err.message) || "no reason given")
+           + " — another program may already have it");
+    return false;
+  }
+  hidPad = device;
+  device.addEventListener("inputreport", onHidReport);
+  if (!hidSaid) {
+    hidSaid = true;
+    report("reading motion from " + FPSwitch.padName(device.vendorId,
+                                                     device.productId)
+           + " over HID, because the gamepad API carries no motion at all");
+  }
+  await hidAskForMotion(device);
+  return true;
+}
+
+function hidClosePad() {
+  if (!hidPad) return;
+  try { hidPad.removeEventListener("inputreport", onHidReport); } catch (_) {}
+  // Left open rather than closed. Closing it hands the pad back to its simple
+  // report mode and the next open has to do the whole handshake again; the
+  // listener coming off is enough to stop reading, and nothing else on the
+  // page wants the device.
+  hidPad = null;
+}
+
+/* Whether the asking has to happen, which is an iOS thing and nowhere else.
+ *
+ * Asks about DeviceMotionEvent itself, not about gyroPossible(): that is true
+ * on a machine whose only motion comes from a controller over HID, where
+ * DeviceMotionEvent is not defined at all and reaching through it for
+ * requestPermission is a ReferenceError rather than a false. */
 function gyroNeedsAsking() {
-  return gyroPossible()
+  return typeof DeviceMotionEvent !== "undefined"
     && typeof DeviceMotionEvent.requestPermission === "function";
 }
 
@@ -5267,9 +5398,15 @@ function onDeviceMotion(event) {
 }
 
 function startGyro() {
-  if (gyroListening || !gyroPossible()) return;
+  if (gyroListening) return;
   gyroListening = true;
-  window.addEventListener("devicemotion", onDeviceMotion);
+  if (typeof DeviceMotionEvent !== "undefined") {
+    window.addEventListener("devicemotion", onDeviceMotion);
+  }
+  // And a controller's own, where the device has none -- or alongside, because
+  // whichever is actually moving is the one that writes gyroLatest, and a
+  // laptop sitting still writes nothing.
+  if (hidMotionPossible()) hidOpenPad();
 }
 
 function stopGyro() {
@@ -5277,6 +5414,7 @@ function stopGyro() {
     window.removeEventListener("devicemotion", onDeviceMotion);
     gyroListening = false;
   }
+  hidClosePad();
   // Cleared, not left at its last value. A stale attitude is worse than none:
   // the host would go on telling a game the pad is tilted exactly as it was
   // when somebody switched this off.
@@ -5386,7 +5524,9 @@ async function setGyro(want) {
     return false;
   }
   if (!gyroPossible()) {
-    report("this browser has no motion sensor to read");
+    report("this browser has no motion sensor to read, and no way to read a "
+           + "controller's either: WebHID is Chromium's alone, so Safari and "
+           + "Firefox cannot reach a pad's gyroscope at all");
     return false;
   }
   if (gyroNeedsAsking()) {

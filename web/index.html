@@ -1312,6 +1312,10 @@
        tabindex="-1"></label>
 
 <script src="/static/frame.js"></script>
+<!-- A Switch pad's gyroscope, over raw HID. Before app.js, which uses it.
+     Separate because the protocol is bytes in and numbers out, and that half is
+     worth testing without a controller plugged in. -->
+<script src="/static/switchpad.js"></script>
 <script src="/static/paint.js"></script>
 <script src="/static/app.js"></script>
 </body>
